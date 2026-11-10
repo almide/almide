@@ -14,9 +14,12 @@ pub mod err_text;
 /// source (this crate's err_text.rs, so the table stays one copy) and the
 /// call the rendered program makes, `rt_string___err_text` — the v0
 /// oracle's `almide_rt_string___err_text` expression.
+/// Keep its support items private to the shim: a fan program flattens the
+/// runtime into the user crate and may already contain the runtime's escaper.
 pub const ERR_TEXT_NATIVE_SHIM: &str = concat!(
+    "mod __almd_errtext_shim {\n",
     include_str!("err_text.rs"),
-    "\nfn rt_string___err_text(s: &str) -> AlmideString { AlmideString::from(almide_rt_errtext_escape(s)) }"
+    "\n}\nfn rt_string___err_text(s: &str) -> AlmideString { AlmideString::from(__almd_errtext_shim::almide_rt_errtext_escape(s)) }"
 );
 pub mod json_limits;
 pub mod native_stack_guard;

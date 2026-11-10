@@ -186,6 +186,38 @@ fn group_by_then_len_counts_without_building_the_groups() {
     assert!(main_body(&rust).contains("almide_rt_list_group_by("), "a non-counting map.map lost its groups");
 }
 
+/// The verified native render counts the same chain in one pass
+/// (`native_group_count`). What the program prints is the two-step form's
+/// answer: keys in first-seen order, a String and an Int key, an empty list,
+/// a source list read again afterwards, and — refused by the rule — a
+/// callback that is more than the group's length.
+#[test]
+fn a_counted_group_by_prints_what_the_two_steps_print() {
+    let src = "fn show[K](m: Map[K, Int]) -> String =\n\
+        \x20 map.to_list(m) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\")\n\n\
+        fn tally(xs: List[String]) -> Int = {\n\
+        \x20 let c = list.group_by(xs, (w) => w) |> map.map((g) => list.len(g))\n\
+        \x20 map.len(c) * 100 + list.len(xs)\n\
+        }\n\n\
+        effect fn main() -> Unit = {\n\
+        \x20 let ws = [\"b\", \"a\", \"b\", \"c\", \"a\", \"b\"]\n\
+        \x20 let nothing: List[String] = []\n\
+        \x20 println(show(list.group_by(ws, (w) => w) |> map.map((g) => list.len(g))))\n\
+        \x20 println(show(list.group_by([\"aa\", \"b\", \"cc\", \"d\", \"e\"], (w) => string.len(w)) |> map.map((g) => list.len(g))))\n\
+        \x20 println(show(list.group_by(ws, (w) => w) |> map.map((g) => list.len(g) * 10)))\n\
+        \x20 println(show(list.group_by(nothing, (w) => w) |> map.map((g) => list.len(g))))\n\
+        \x20 println(int.to_string(tally(ws) + list.len(ws)))\n\
+        }\n";
+    let (_dir, path) = write("counted.almd", src);
+    let out = Command::new(almide()).arg("run").arg(&path).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "b=3,a=2,c=1\n2=2,1=3\nb=30,a=20,c=10\n\n312\n",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// `a` is read once (moved), `b` twice (borrowed, then moved), `c` twice.
 const MAP_OWNED: &str = "effect fn main() -> Unit = {\n  let a = [\"x\": 1, \"y\": 2]\n  let b = map.map(a, (v) => v * 10)\n  let c = map.map(b, (v) => v + 1)\n  println(\"${map.values(b)} ${map.values(c)} ${map.keys(c)}\")\n}\n";
 
@@ -240,4 +272,50 @@ fn the_string_key_probe_reads_no_variable_length_tail_and_no_side_array() {
     // The probe expression, not the bare constant name: a quoted `"ALMIDE_…"`
     // literal reads as an environment switch to scripts/check-env-switches.sh.
     assert!(find.contains("s & ALMIDE_MAP_SLOT_TAG == tag"), "a probe no longer rejects a slot on its tag:\n{find}");
+}
+
+/// The verified native render fuses the same update into one `map.upsert`
+/// (`native_map_upsert`), whose `init` runs on every call. What the program
+/// prints is the two-step form's answer for the fused shapes — wrapping Int
+/// arithmetic, Float arithmetic, a present key kept in place — and for the
+/// ones the rule refuses: an Int `/` whose default would divide by zero does
+/// not abort while the key is present.
+#[test]
+fn a_fused_update_prints_what_the_two_steps_print() {
+    let src = "fn show(m: Map[String, Int]) -> String =\n\
+        \x20 map.to_list(m) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\")\n\n\
+        effect fn main() -> Unit = {\n\
+        \x20 let step = 2\n\
+        \x20 var a: Map[String, Int] = [:]\n\
+        \x20 var b: Map[String, Int] = [:]\n\
+        \x20 var c: Map[String, Int] = [:]\n\
+        \x20 var h: Map[String, Int] = [\"b\": 9223372036854775807]\n\
+        \x20 var f: Map[Int, Float] = [:]\n\
+        \x20 for w in [\"b\", \"a\", \"b\", \"c\", \"a\", \"b\"] {\n\
+        \x20   a[w] = (map.get(a, w) ?? 0) + 1\n\
+        \x20   b[w] = step * (map.get(b, w) ?? 1) - 1\n\
+        \x20   c[w] = 100 / ((map.get(c, w) ?? 4) + 1)\n\
+        \x20   h[w] = (map.get(h, w) ?? 0) + 1\n\
+        \x20 }\n\
+        \x20 for n in [3, 1, 3, 2, 3] {\n\
+        \x20   f[n] = -(map.get(f, n) ?? 1.5) * 2.0 / 4.0\n\
+        \x20 }\n\
+        \x20 println(show(a))\n\
+        \x20 println(show(b))\n\
+        \x20 println(show(c))\n\
+        \x20 println(show(h))\n\
+        \x20 println(map.to_list(f) |> list.map(((k, v)) => \"${k}=${v}\") |> list.join(\",\"))\n\
+        \x20 var z: Map[String, Int] = [\"k\": 4]\n\
+        \x20 let k = \"k\"\n\
+        \x20 z[k] = 8 / (map.get(z, k) ?? 0)\n\
+        \x20 println(show(z))\n\
+        }\n";
+    let (_dir, path) = write("fused.almd", src);
+    let out = Command::new(almide()).arg("run").arg(&path).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "b=3,a=2,c=1\nb=1,a=1,c=1\nb=20,a=4,c=20\nb=-9223372036854775806,a=2,c=1\n3=-0.1875,1=-0.75,2=-0.75\nk=2\n",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

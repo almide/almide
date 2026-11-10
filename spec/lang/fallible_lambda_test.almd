@@ -88,4 +88,26 @@ test "L7+L8: explicit fallible slots compose" {
 test "L9: test-block lambda bang stays unwrap, map stays map" {
   let r = ["1", "2"] |> list.map((x) => int.parse(x)!)
   assert_eq(r, [1, 2])
+  let options = [3, 4] |> list.map((x) => list.get([x], 0)!)
+  assert_eq(options, [3, 4])
+}
+
+test "a failing mapped unwrap reports the error text" {
+  testing.assert_aborts(
+    "invalid digit found in string",
+    () => {
+      let r = ["x"] |> list.map((x) => int.parse(x)!)
+      assert_eq(r, [0])
+    },
+  )
+}
+
+test "a failing mapped option unwrap reports none" {
+  testing.assert_aborts(
+    "none",
+    () => {
+      let r = [1] |> list.map((x) => list.get([x], 9)!)
+      assert_eq(r, [0])
+    },
+  )
 }

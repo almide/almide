@@ -1,0 +1,13 @@
+// #4277 drill: a release of the frame below is moved before the variable's
+// last use in the emitter while its recorded event stays — the ownership
+// witness is unchanged and accepted, and the event still matches its one
+// call; only the order in the shipped bytes shows the read after the free.
+fn total() -> Int = {
+  let early_freed = [1, 2, 3, 4, 5, 6, 7]
+  let b = [4, 5]
+  list.len(early_freed) + list.len(b)
+}
+
+effect fn main() -> Unit = {
+  println("${total()}")
+}

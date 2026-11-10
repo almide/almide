@@ -348,6 +348,9 @@ impl LowerCtx {
     /// realization of that same single `d`.
     pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr, ty: &Ty) -> CallArg {
         if repr.is_heap() {
+            // Keep the frontend's declared type on computed argument blocks,
+            // including nested containers whose raw slots have one pointer lane.
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(ty));
             self.live_heap_handles.push(dst);
             self.seed_call_arg_heap_drop_route(dst, ty);
             // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.string(s))`) drops via the

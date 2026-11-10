@@ -120,4 +120,7 @@ fn runtime_crate_deps_per_module() {
     assert_eq!(names("fn f() { almide_rt_http_get(x) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
     assert_eq!(names("fn f() { almide_rt_sse_anthropic_messages(x); almide_rt_http_get(y) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
     assert!(names("fn f() { almide_rt_list_len(x) }").is_empty());
+    assert_eq!(names("fn tls() { rustls /* comment */ :: ClientConfig::builder(); }"),
+        ["rustls", "webpki-roots", "rustls-native-certs"]);
+    assert!(names("fn f() { let rustls = 1; let s = \"rustls::ClientConfig\"; /* rustls::Error */ }").is_empty());
 }

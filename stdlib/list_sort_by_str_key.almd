@@ -96,6 +96,7 @@ fn __sbs_msort(bvh: Int, bkh: Int, tvh: Int, tkh: Int, n: Int) -> Int = {
   }
 }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
@@ -127,6 +128,7 @@ fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) ->
     __sbsr_init(bh, sh, kh, f, n, i + 1)
   }
 
+@specializes("list.sort_by")
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)

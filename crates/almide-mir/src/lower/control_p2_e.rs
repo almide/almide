@@ -49,6 +49,7 @@ impl LowerCtx {
         &mut self,
         subject_value: Option<ValueId>,
         arms: &[IrMatchArm],
+        subject: &IrExpr,
     ) -> bool {
         use crate::PrimKind;
         // A HEAP-Ok `Result[String, String]` (cap-as-tag, Ok binds a heap String) vs the scalar
@@ -61,6 +62,12 @@ impl LowerCtx {
         if !two_unguarded_arms(arms) {
             return false;
         }
+        // The error carrier can retain a changed buffer alongside its message.
+        // Bind that checked tuple as a borrowed payload before destructuring it,
+        // just as the value-position Result match does.
+        let expanded = crate::lower::owned_tco_slots()
+            .then(|| desugar_tuple_payload_arms(subject, arms)).flatten();
+        let arms = expanded.as_deref().unwrap_or(arms);
         let ((ok_body, ok_bind), (err_body, err_bind)) =
             match self.parse_result_match_arms(arms, subj, str_result) {
                 Some(slots) => slots,
@@ -90,13 +97,16 @@ impl LowerCtx {
         // Exactly ONE arm runs (the unit-if discipline): outer-var reassignments
         // inside an arm mutate the stable local IN PLACE — see `unit_arm_depth`.
         self.unit_arm_depth += 1;
-        if self.lower_branch_arm(None, err_body).is_err() {
+        if let Err(e) = self.lower_branch_arm(None, err_body) {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[result-stmt] err arm declined: {e:?}"));
             self.unit_arm_depth -= 1;
             return rollback(self);
         }
         self.ops.push(Op::Else { val: None });
         self.bind_result_ok_payload(h, ok_bind, str_result);
-        let ok_ok = self.lower_branch_arm(None, ok_body).is_ok();
+        let ok_ok = self.lower_branch_arm(None, ok_body).map_err(|e| {
+            crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[result-stmt] ok arm declined: {e:?}")); e
+        }).is_ok();
         self.unit_arm_depth -= 1;
         if !ok_ok {
             return rollback(self);
@@ -120,10 +130,10 @@ impl LowerCtx {
         str_result: bool,
     ) -> Option<(
         (&'a IrExpr, Option<(VarId, Ty)>),
-        (&'a IrExpr, Option<(VarId, bool)>),
+        (&'a IrExpr, Option<(VarId, bool, Ty)>),
     )> {
         let mut ok: Option<(&IrExpr, Option<(VarId, Ty)>)> = None;
-        let mut err: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut err: Option<(&IrExpr, Option<(VarId, bool, Ty)>)> = None;
         for arm in arms {
             match &arm.pattern {
                 IrPattern::Ok { inner } => {
@@ -181,20 +191,22 @@ impl LowerCtx {
         &self,
         subj: ValueId,
         inner: &IrPattern,
-    ) -> Result<Option<(VarId, bool)>, ()> {
+    ) -> Result<Option<(VarId, bool, Ty)>, ()> {
         match inner {
             IrPattern::Bind { var, ty }
                 if is_heap_ty(ty)
                     && (self.value_drops.get(&subj).is_some_and(|d| d.flat_elems)
                         || self.value_drops.get(&subj).is_some_and(|d| d.value_result_list)
                         || self.value_drops.get(&subj).is_some_and(|d| d.value_result)
+                        || self.value_drops.get(&subj).is_some_and(|d| d.str_int_result || d.value_int_result
+                            || d.list_str_int_result || d.list_value_int_result || d.list_str_result)
                         || self
                             .value_drops
                             .get(&subj)
                             .and_then(|d| d.named_route.as_ref())
                             .is_some_and(|h| h.starts_with("res_"))) =>
             {
-                Ok(Some((*var, true)))
+                Ok(Some((*var, true, ty.clone())))
             }
             // A SCALAR err of a scalar-scalar Result (`Result[Int, Int]`, #3058):
             // `materialize_result_err_scalar` stores the payload by value in slot 0,
@@ -203,7 +215,7 @@ impl LowerCtx {
                 if !is_heap_ty(ty)
                     && self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultScalar) =>
             {
-                Ok(Some((*var, false)))
+                Ok(Some((*var, false, ty.clone())))
             }
             IrPattern::Wildcard => Ok(None),
             _ => Err(()),
@@ -211,15 +223,16 @@ impl LowerCtx {
     }
 
     /// THEN (tag != 0 = Err): the message is the BORROWED slot-0 handle.
-    fn bind_result_err_payload(&mut self, h: ValueId, err_bind: Option<(VarId, bool)>) {
+    fn bind_result_err_payload(&mut self, h: ValueId, err_bind: Option<(VarId, bool, Ty)>) {
         use crate::PrimKind;
         match err_bind {
-            Some((bind_var, true)) => {
+            Some((bind_var, true, bind_ty)) => {
                 let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
                 self.value_of.insert(bind_var, payload);
                 self.param_values.insert(payload);
+                self.seed_faithful_read_shape(payload, &bind_ty);
             }
-            Some((bind_var, false)) => {
+            Some((bind_var, false, _)) => {
                 let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
                 self.value_of.insert(bind_var, payload);
             }
@@ -233,6 +246,7 @@ impl LowerCtx {
     fn bind_result_ok_payload(&mut self, h: ValueId, ok_bind: Option<(VarId, Ty)>, str_result: bool) {
         use crate::PrimKind;
         let Some((bind_var, bind_ty)) = ok_bind else { return };
+        if self.bind_native_unit_payload(bind_var, &bind_ty) { return; }
         if str_result {
             let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
             self.value_of.insert(bind_var, payload);
@@ -244,6 +258,7 @@ impl LowerCtx {
             // Some-bind path does, so the INNER match BRANCHES on
             // its tag instead of hitting the (walled) linearization.
             self.seed_nested_option_result_bind_payload(payload, &bind_ty);
+            self.seed_faithful_read_shape(payload, &bind_ty);
         } else {
             let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
             self.value_of.insert(bind_var, payload);
@@ -341,7 +356,7 @@ impl LowerCtx {
         let parsed_arms = self.parse_variant_match_arms(arms, subj, is_option, is_result);
         let ((then_body, then_bind), (else_body, else_bind)) = match parsed_arms {
             Some(slots) => slots,
-            None => return rollback(self),
+            None => { crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[value-match] payload declined {:?}, drop {:?}", subject.ty, self.value_drops.get(&subj))); return rollback(self); },
         };
         let has_heap_bind = is_heap_payload_bind(&then_bind) || is_heap_payload_bind(&else_bind);
         let route = match self.variant_match_route(
@@ -435,6 +450,7 @@ impl LowerCtx {
     fn bind_variant_payload(&mut self, h: ValueId, bind: Option<(VarId, bool, Ty)>) {
         use crate::PrimKind;
         let Some((bind_var, is_heap, bind_ty)) = bind else { return };
+        if self.bind_native_unit_payload(bind_var, &bind_ty) { return; }
         let payload = if is_heap {
             self.load_at_offset(h, 12, PrimKind::LoadHandle)
         } else {
@@ -442,6 +458,7 @@ impl LowerCtx {
         };
         self.value_of.insert(bind_var, payload);
         if is_heap {
+            self.aggregate_blocks.insert(payload, crate::render_native_rec::block_key(&bind_ty));
             self.param_values.insert(payload);
             // NESTED VARIANT PAYLOAD: `ok(m)` / `some(m)` where m is itself an Option/Result
             // (`Result[Option[record], String]` — the `read_message()!` monadic-desugar Ok arm
@@ -461,6 +478,16 @@ impl LowerCtx {
                 self.closure_values.insert(payload);
             }
         }
+    }
+
+    fn bind_native_unit_payload(&mut self, var: VarId, ty: &Ty) -> bool {
+        if !crate::lower::owned_tco_slots() || *ty != Ty::Unit { return false; }
+        // Unit has no stored value to read. In particular, reading the Ok
+        // scalar slot before its tag guard would inspect an Err payload.
+        let value = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: value, value: 0 });
+        self.value_of.insert(var, value);
+        true
     }
 
     /// Lower BOTH match arms inside the already-open `IfThen` with BRANCH
@@ -488,11 +515,11 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<()> {
         let (then_body, else_body) = bodies;
-        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<ValueId> {
+        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<Option<ValueId>> {
             if heap_res {
-                s.lower_heap_result_arm(body, result_ty)
+                s.lower_heap_result_branch(body, result_ty)
             } else {
-                s.lower_scalar_arm(body)
+                s.lower_scalar_arm(body).map(Some)
             }
         };
         let pv_snapshot = self.param_values.clone();
@@ -506,12 +533,13 @@ impl LowerCtx {
             .filter(|h| !self.live_heap_handles.contains(h))
             .collect();
         let else_marker_at = self.ops.len();
-        self.ops.push(Op::Else { val: Some(then_val) });
+        self.ops.push(Op::Else { val: then_val });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot.clone();
         self.materialized_aggregates = ma_snapshot;
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = lower_arm(self, else_body)?;
+        if then_val.is_none() && else_val.is_none() { return None; }
         let consumed_by_else: Vec<ValueId> = lhh_snapshot
             .iter()
             .copied()
@@ -530,7 +558,7 @@ impl LowerCtx {
                 self.ops.insert(else_marker_at, op); // the THEN arm releases what ELSE moved out
             }
         }
-        self.ops.push(Op::EndIf { val: Some(else_val) });
+        self.ops.push(Op::EndIf { val: else_val });
         Some(())
     }
 
@@ -582,6 +610,7 @@ impl LowerCtx {
                                 .is_some_and(|h| {
                                     h.starts_with("resrec:")
                                         || h.starts_with("optrec:")
+                                        || (crate::lower::owned_tco_slots() && matches!(h.as_str(), "list_int_str" | "list_lenlist"))
                                         // A rich-variant Err payload needing recursive drop
                                         // (`res_<V>`, `try_lower_result_err_variant_ctor`) — the
                                         // Err bind is a BORROW of the @12 variant handle, freed

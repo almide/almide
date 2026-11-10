@@ -194,15 +194,22 @@ fn a_literal_spelled_like_a_metered_prim_does_not_fail_the_native_test_harness()
 /// regions are rendered by the trust spine and linked in (#3669) — while the
 /// literal twin above takes the plain fallback. A region that is itself
 /// outside the v1 subset is still refused, never run unmetered.
+///
+/// The whole-program wall is the `Handle`-returning extern: the plain
+/// `@extern` renders natively now, a raw-pointer one does not yet (#4641).
 #[test]
 fn a_real_metered_prim_takes_the_metered_route_on_the_native_fallback() {
     const SPLICE_NOTE: &str = "its regions rendered by the trust spine";
     let program = r#"@extern(rs, "std::cmp", "max")
 fn my_max(a: Int, b: Int) -> Int
 
+@extern(rust, "std::ptr", "null_mut")
+fn no_handle() -> Handle = _
+
 fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)
 
 effect fn main() -> Unit = {
+  let _ = no_handle()
   println(int.to_string(my_max(1, 2)))
   let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1
   println(int.to_string(r))
@@ -217,9 +224,9 @@ effect fn main() -> Unit = {
     assert!(!log(&out).contains(SPLICE_NOTE), "a literal took the metered route:\n{}", log(&out));
 
     let walled = program
-        // `list.sort_by` with a key closure: the native render now covers
-        // `string.split`, which this twin used to name.
-        .replace("fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)", "fn heavy(n: Int) -> Int = list.len(list.sort_by([\"a\", \"bb\", \"c\"], (s) => string.len(s))) + n")
+        // `list.chunk`: the native render now covers `string.split` and
+        // `list.sort_by`, which this twin used to name.
+        .replace("fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)", "fn heavy(n: Int) -> Int = list.len(list.chunk([\"a\", \"bb\", \"c\"], 1)) + n")
         .replace("heavy(10) }", "heavy(52) }");
     // #3673: a region outside the v1 subset is metered by the standard
     // codegen itself — never run unmetered, and no longer refused.
@@ -227,12 +234,16 @@ effect fn main() -> Unit = {
     assert!(out.status.success(), "a region outside the v1 subset was refused:\n{}", log(&out));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "2\n55\n");
     assert!(log(&out).contains("its regions metered by the standard codegen"), "{}", log(&out));
-    assert!(log(&out).contains("list.sort_by"), "{}", log(&out));
+    assert!(log(&out).contains("list.chunk"), "{}", log(&out));
 
-    let test = "// wasm:skip\nfn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)\n\ntest \"a\" {\n  let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1\n  assert_eq(r, 55)\n}\n";
+    // The native test harness renders on the trust spine only — there is no
+    // fallback to splice into — so its metered route is the render itself:
+    // the budget is honoured (the second test runs out) and nothing is
+    // built by the standard codegen.
+    let test = "// wasm:skip\nfn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)\n\ntest \"a\" {\n  let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1\n  assert_eq(r, 55)\n}\n\ntest \"b\" {\n  let r = fan.bounded(compute.ns(3)) { heavy(1000) } ?? -1\n  assert_eq(r, -1)\n}\n";
     let out = almide_verbose("main_test.almd", test, &["test"]);
     assert!(out.status.success(), "a metered test failed on the native harness:\n{}", log(&out));
-    assert!(log(&out).contains(SPLICE_NOTE), "the metered test did not take the splice route:\n{}", log(&out));
+    assert!(!log(&out).contains("the standard codegen"), "the metered test left the trust spine:\n{}", log(&out));
 }
 
 // ── #3486.2: a literal spelled like a runtime module or type ─────────────

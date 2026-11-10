@@ -1,0 +1,15 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4006): a string
+// list literal in call-argument position whose elements are read again after
+// the call, so each slot holds a copy of a string that lives on.
+fn main() -> Unit = {
+  let a = "alpha-" + int.to_string(7)
+  let b = "beta-" + int.to_string(9)
+  var i = 0
+  var acc = 0
+  while i < 100000 {
+    let g = list.get([a, b], i % 3) ?? "none"
+    acc = acc + string.len(g) + string.len(a) + string.len(b)
+    i = i + 1
+  }
+  println("${acc}")
+}

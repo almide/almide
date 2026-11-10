@@ -1,0 +1,360 @@
+Int8 interp: -128
+Int8 interp_mid: <-128|-128>
+Int8 concat: s=-128.
+Int8 list: [-128, -128]
+Int8 record: RecInt8 { v: -128, n: 1 }
+Int8 anon_record: { k: 1, u: -128 }
+Int8 generic_record: Box { v: -128 }
+Int8 option: some(-128)
+Int8 result_ok: ok(-128)
+Int8 result_err: err(-128)
+Int8 map_key: [-128: 1]
+Int8 map_value: ["k": -128]
+Int8 set: set.from_list([-128])
+Int8 variant_tuple: TupInt8(-128, -128)
+Int8 variant_record: FldInt8 { v: -128 }
+Int8 generic_variant: One(-128)
+Int8 recursive_generic: Node(Node(Leaf, -128), -128)
+Int8 nested: some([(-128, RecInt8 { v: -128, n: 2 })])
+Int8 interp: 127
+Int8 interp_mid: <127|127>
+Int8 concat: s=127.
+Int8 list: [127, 127]
+Int8 record: RecInt8 { v: 127, n: 1 }
+Int8 anon_record: { k: 1, u: 127 }
+Int8 generic_record: Box { v: 127 }
+Int8 option: some(127)
+Int8 result_ok: ok(127)
+Int8 result_err: err(127)
+Int8 map_key: [127: 1]
+Int8 map_value: ["k": 127]
+Int8 set: set.from_list([127])
+Int8 variant_tuple: TupInt8(127, 127)
+Int8 variant_record: FldInt8 { v: 127 }
+Int8 generic_variant: One(127)
+Int8 recursive_generic: Node(Node(Leaf, 127), 127)
+Int8 nested: some([(127, RecInt8 { v: 127, n: 2 })])
+Int16 interp: -32768
+Int16 interp_mid: <-32768|-32768>
+Int16 concat: s=-32768.
+Int16 list: [-32768, -32768]
+Int16 record: RecInt16 { v: -32768, n: 1 }
+Int16 anon_record: { k: 1, u: -32768 }
+Int16 generic_record: Box { v: -32768 }
+Int16 option: some(-32768)
+Int16 result_ok: ok(-32768)
+Int16 result_err: err(-32768)
+Int16 map_key: [-32768: 1]
+Int16 map_value: ["k": -32768]
+Int16 set: set.from_list([-32768])
+Int16 variant_tuple: TupInt16(-32768, -32768)
+Int16 variant_record: FldInt16 { v: -32768 }
+Int16 generic_variant: One(-32768)
+Int16 recursive_generic: Node(Node(Leaf, -32768), -32768)
+Int16 nested: some([(-32768, RecInt16 { v: -32768, n: 2 })])
+Int16 interp: 32767
+Int16 interp_mid: <32767|32767>
+Int16 concat: s=32767.
+Int16 list: [32767, 32767]
+Int16 record: RecInt16 { v: 32767, n: 1 }
+Int16 anon_record: { k: 1, u: 32767 }
+Int16 generic_record: Box { v: 32767 }
+Int16 option: some(32767)
+Int16 result_ok: ok(32767)
+Int16 result_err: err(32767)
+Int16 map_key: [32767: 1]
+Int16 map_value: ["k": 32767]
+Int16 set: set.from_list([32767])
+Int16 variant_tuple: TupInt16(32767, 32767)
+Int16 variant_record: FldInt16 { v: 32767 }
+Int16 generic_variant: One(32767)
+Int16 recursive_generic: Node(Node(Leaf, 32767), 32767)
+Int16 nested: some([(32767, RecInt16 { v: 32767, n: 2 })])
+Int32 interp: -2147483648
+Int32 interp_mid: <-2147483648|-2147483648>
+Int32 concat: s=-2147483648.
+Int32 list: [-2147483648, -2147483648]
+Int32 record: RecInt32 { v: -2147483648, n: 1 }
+Int32 anon_record: { k: 1, u: -2147483648 }
+Int32 generic_record: Box { v: -2147483648 }
+Int32 option: some(-2147483648)
+Int32 result_ok: ok(-2147483648)
+Int32 result_err: err(-2147483648)
+Int32 map_key: [-2147483648: 1]
+Int32 map_value: ["k": -2147483648]
+Int32 set: set.from_list([-2147483648])
+Int32 variant_tuple: TupInt32(-2147483648, -2147483648)
+Int32 variant_record: FldInt32 { v: -2147483648 }
+Int32 generic_variant: One(-2147483648)
+Int32 recursive_generic: Node(Node(Leaf, -2147483648), -2147483648)
+Int32 nested: some([(-2147483648, RecInt32 { v: -2147483648, n: 2 })])
+Int32 interp: 2147483647
+Int32 interp_mid: <2147483647|2147483647>
+Int32 concat: s=2147483647.
+Int32 list: [2147483647, 2147483647]
+Int32 record: RecInt32 { v: 2147483647, n: 1 }
+Int32 anon_record: { k: 1, u: 2147483647 }
+Int32 generic_record: Box { v: 2147483647 }
+Int32 option: some(2147483647)
+Int32 result_ok: ok(2147483647)
+Int32 result_err: err(2147483647)
+Int32 map_key: [2147483647: 1]
+Int32 map_value: ["k": 2147483647]
+Int32 set: set.from_list([2147483647])
+Int32 variant_tuple: TupInt32(2147483647, 2147483647)
+Int32 variant_record: FldInt32 { v: 2147483647 }
+Int32 generic_variant: One(2147483647)
+Int32 recursive_generic: Node(Node(Leaf, 2147483647), 2147483647)
+Int32 nested: some([(2147483647, RecInt32 { v: 2147483647, n: 2 })])
+UInt8 interp: 0
+UInt8 interp_mid: <0|0>
+UInt8 concat: s=0.
+UInt8 list: [0, 0]
+UInt8 record: RecUInt8 { v: 0, n: 1 }
+UInt8 anon_record: { k: 1, u: 0 }
+UInt8 generic_record: Box { v: 0 }
+UInt8 option: some(0)
+UInt8 result_ok: ok(0)
+UInt8 result_err: err(0)
+UInt8 map_key: [0: 1]
+UInt8 map_value: ["k": 0]
+UInt8 set: set.from_list([0])
+UInt8 variant_tuple: TupUInt8(0, 0)
+UInt8 variant_record: FldUInt8 { v: 0 }
+UInt8 generic_variant: One(0)
+UInt8 recursive_generic: Node(Node(Leaf, 0), 0)
+UInt8 nested: some([(0, RecUInt8 { v: 0, n: 2 })])
+UInt8 interp: 255
+UInt8 interp_mid: <255|255>
+UInt8 concat: s=255.
+UInt8 list: [255, 255]
+UInt8 record: RecUInt8 { v: 255, n: 1 }
+UInt8 anon_record: { k: 1, u: 255 }
+UInt8 generic_record: Box { v: 255 }
+UInt8 option: some(255)
+UInt8 result_ok: ok(255)
+UInt8 result_err: err(255)
+UInt8 map_key: [255: 1]
+UInt8 map_value: ["k": 255]
+UInt8 set: set.from_list([255])
+UInt8 variant_tuple: TupUInt8(255, 255)
+UInt8 variant_record: FldUInt8 { v: 255 }
+UInt8 generic_variant: One(255)
+UInt8 recursive_generic: Node(Node(Leaf, 255), 255)
+UInt8 nested: some([(255, RecUInt8 { v: 255, n: 2 })])
+UInt16 interp: 0
+UInt16 interp_mid: <0|0>
+UInt16 concat: s=0.
+UInt16 list: [0, 0]
+UInt16 record: RecUInt16 { v: 0, n: 1 }
+UInt16 anon_record: { k: 1, u: 0 }
+UInt16 generic_record: Box { v: 0 }
+UInt16 option: some(0)
+UInt16 result_ok: ok(0)
+UInt16 result_err: err(0)
+UInt16 map_key: [0: 1]
+UInt16 map_value: ["k": 0]
+UInt16 set: set.from_list([0])
+UInt16 variant_tuple: TupUInt16(0, 0)
+UInt16 variant_record: FldUInt16 { v: 0 }
+UInt16 generic_variant: One(0)
+UInt16 recursive_generic: Node(Node(Leaf, 0), 0)
+UInt16 nested: some([(0, RecUInt16 { v: 0, n: 2 })])
+UInt16 interp: 65535
+UInt16 interp_mid: <65535|65535>
+UInt16 concat: s=65535.
+UInt16 list: [65535, 65535]
+UInt16 record: RecUInt16 { v: 65535, n: 1 }
+UInt16 anon_record: { k: 1, u: 65535 }
+UInt16 generic_record: Box { v: 65535 }
+UInt16 option: some(65535)
+UInt16 result_ok: ok(65535)
+UInt16 result_err: err(65535)
+UInt16 map_key: [65535: 1]
+UInt16 map_value: ["k": 65535]
+UInt16 set: set.from_list([65535])
+UInt16 variant_tuple: TupUInt16(65535, 65535)
+UInt16 variant_record: FldUInt16 { v: 65535 }
+UInt16 generic_variant: One(65535)
+UInt16 recursive_generic: Node(Node(Leaf, 65535), 65535)
+UInt16 nested: some([(65535, RecUInt16 { v: 65535, n: 2 })])
+UInt32 interp: 0
+UInt32 interp_mid: <0|0>
+UInt32 concat: s=0.
+UInt32 list: [0, 0]
+UInt32 record: RecUInt32 { v: 0, n: 1 }
+UInt32 anon_record: { k: 1, u: 0 }
+UInt32 generic_record: Box { v: 0 }
+UInt32 option: some(0)
+UInt32 result_ok: ok(0)
+UInt32 result_err: err(0)
+UInt32 map_key: [0: 1]
+UInt32 map_value: ["k": 0]
+UInt32 set: set.from_list([0])
+UInt32 variant_tuple: TupUInt32(0, 0)
+UInt32 variant_record: FldUInt32 { v: 0 }
+UInt32 generic_variant: One(0)
+UInt32 recursive_generic: Node(Node(Leaf, 0), 0)
+UInt32 nested: some([(0, RecUInt32 { v: 0, n: 2 })])
+UInt32 interp: 4294967295
+UInt32 interp_mid: <4294967295|4294967295>
+UInt32 concat: s=4294967295.
+UInt32 list: [4294967295, 4294967295]
+UInt32 record: RecUInt32 { v: 4294967295, n: 1 }
+UInt32 anon_record: { k: 1, u: 4294967295 }
+UInt32 generic_record: Box { v: 4294967295 }
+UInt32 option: some(4294967295)
+UInt32 result_ok: ok(4294967295)
+UInt32 result_err: err(4294967295)
+UInt32 map_key: [4294967295: 1]
+UInt32 map_value: ["k": 4294967295]
+UInt32 set: set.from_list([4294967295])
+UInt32 variant_tuple: TupUInt32(4294967295, 4294967295)
+UInt32 variant_record: FldUInt32 { v: 4294967295 }
+UInt32 generic_variant: One(4294967295)
+UInt32 recursive_generic: Node(Node(Leaf, 4294967295), 4294967295)
+UInt32 nested: some([(4294967295, RecUInt32 { v: 4294967295, n: 2 })])
+UInt64 interp: 0
+UInt64 interp_mid: <0|0>
+UInt64 concat: s=0.
+UInt64 list: [0, 0]
+UInt64 record: RecUInt64 { v: 0, n: 1 }
+UInt64 anon_record: { k: 1, u: 0 }
+UInt64 generic_record: Box { v: 0 }
+UInt64 option: some(0)
+UInt64 result_ok: ok(0)
+UInt64 result_err: err(0)
+UInt64 map_key: [0: 1]
+UInt64 map_value: ["k": 0]
+UInt64 set: set.from_list([0])
+UInt64 variant_tuple: TupUInt64(0, 0)
+UInt64 variant_record: FldUInt64 { v: 0 }
+UInt64 generic_variant: One(0)
+UInt64 recursive_generic: Node(Node(Leaf, 0), 0)
+UInt64 nested: some([(0, RecUInt64 { v: 0, n: 2 })])
+UInt64 interp: 9223372036854775807
+UInt64 interp_mid: <9223372036854775807|9223372036854775807>
+UInt64 concat: s=9223372036854775807.
+UInt64 list: [9223372036854775807, 9223372036854775807]
+UInt64 record: RecUInt64 { v: 9223372036854775807, n: 1 }
+UInt64 anon_record: { k: 1, u: 9223372036854775807 }
+UInt64 generic_record: Box { v: 9223372036854775807 }
+UInt64 option: some(9223372036854775807)
+UInt64 result_ok: ok(9223372036854775807)
+UInt64 result_err: err(9223372036854775807)
+UInt64 map_key: [9223372036854775807: 1]
+UInt64 map_value: ["k": 9223372036854775807]
+UInt64 set: set.from_list([9223372036854775807])
+UInt64 variant_tuple: TupUInt64(9223372036854775807, 9223372036854775807)
+UInt64 variant_record: FldUInt64 { v: 9223372036854775807 }
+UInt64 generic_variant: One(9223372036854775807)
+UInt64 recursive_generic: Node(Node(Leaf, 9223372036854775807), 9223372036854775807)
+UInt64 nested: some([(9223372036854775807, RecUInt64 { v: 9223372036854775807, n: 2 })])
+UInt64 interp: 9223372036854775808
+UInt64 interp_mid: <9223372036854775808|9223372036854775808>
+UInt64 concat: s=9223372036854775808.
+UInt64 list: [9223372036854775808, 9223372036854775808]
+UInt64 record: RecUInt64 { v: 9223372036854775808, n: 1 }
+UInt64 anon_record: { k: 1, u: 9223372036854775808 }
+UInt64 generic_record: Box { v: 9223372036854775808 }
+UInt64 option: some(9223372036854775808)
+UInt64 result_ok: ok(9223372036854775808)
+UInt64 result_err: err(9223372036854775808)
+UInt64 map_key: [9223372036854775808: 1]
+UInt64 map_value: ["k": 9223372036854775808]
+UInt64 set: set.from_list([9223372036854775808])
+UInt64 variant_tuple: TupUInt64(9223372036854775808, 9223372036854775808)
+UInt64 variant_record: FldUInt64 { v: 9223372036854775808 }
+UInt64 generic_variant: One(9223372036854775808)
+UInt64 recursive_generic: Node(Node(Leaf, 9223372036854775808), 9223372036854775808)
+UInt64 nested: some([(9223372036854775808, RecUInt64 { v: 9223372036854775808, n: 2 })])
+UInt64 interp: 18446744073709551615
+UInt64 interp_mid: <18446744073709551615|18446744073709551615>
+UInt64 concat: s=18446744073709551615.
+UInt64 list: [18446744073709551615, 18446744073709551615]
+UInt64 record: RecUInt64 { v: 18446744073709551615, n: 1 }
+UInt64 anon_record: { k: 1, u: 18446744073709551615 }
+UInt64 generic_record: Box { v: 18446744073709551615 }
+UInt64 option: some(18446744073709551615)
+UInt64 result_ok: ok(18446744073709551615)
+UInt64 result_err: err(18446744073709551615)
+UInt64 map_key: [18446744073709551615: 1]
+UInt64 map_value: ["k": 18446744073709551615]
+UInt64 set: set.from_list([18446744073709551615])
+UInt64 variant_tuple: TupUInt64(18446744073709551615, 18446744073709551615)
+UInt64 variant_record: FldUInt64 { v: 18446744073709551615 }
+UInt64 generic_variant: One(18446744073709551615)
+UInt64 recursive_generic: Node(Node(Leaf, 18446744073709551615), 18446744073709551615)
+UInt64 nested: some([(18446744073709551615, RecUInt64 { v: 18446744073709551615, n: 2 })])
+Float32 interp: 0.1
+Float32 interp_mid: <0.1|0.1>
+Float32 concat: s=0.1.
+Float32 list: [0.1, 0.1]
+Float32 record: RecFloat32 { v: 0.1, n: 1 }
+Float32 anon_record: { k: 1, u: 0.1 }
+Float32 generic_record: Box { v: 0.1 }
+Float32 option: some(0.1)
+Float32 result_ok: ok(0.1)
+Float32 result_err: err(0.1)
+Float32 map_key: [0.1: 1]
+Float32 map_value: ["k": 0.1]
+Float32 set: set.from_list([0.1])
+Float32 variant_tuple: TupFloat32(0.1, 0.1)
+Float32 variant_record: FldFloat32 { v: 0.1 }
+Float32 generic_variant: One(0.1)
+Float32 recursive_generic: Node(Node(Leaf, 0.1), 0.1)
+Float32 nested: some([(0.1, RecFloat32 { v: 0.1, n: 2 })])
+Float32 interp: 2
+Float32 interp_mid: <2|2>
+Float32 concat: s=2.0.
+Float32 list: [2, 2]
+Float32 record: RecFloat32 { v: 2, n: 1 }
+Float32 anon_record: { k: 1, u: 2 }
+Float32 generic_record: Box { v: 2 }
+Float32 option: some(2)
+Float32 result_ok: ok(2)
+Float32 result_err: err(2)
+Float32 map_key: [2: 1]
+Float32 map_value: ["k": 2]
+Float32 set: set.from_list([2])
+Float32 variant_tuple: TupFloat32(2, 2)
+Float32 variant_record: FldFloat32 { v: 2 }
+Float32 generic_variant: One(2)
+Float32 recursive_generic: Node(Node(Leaf, 2), 2)
+Float32 nested: some([(2, RecFloat32 { v: 2, n: 2 })])
+Float32 interp: -123.456
+Float32 interp_mid: <-123.456|-123.456>
+Float32 concat: s=-123.456.
+Float32 list: [-123.456, -123.456]
+Float32 record: RecFloat32 { v: -123.456, n: 1 }
+Float32 anon_record: { k: 1, u: -123.456 }
+Float32 generic_record: Box { v: -123.456 }
+Float32 option: some(-123.456)
+Float32 result_ok: ok(-123.456)
+Float32 result_err: err(-123.456)
+Float32 map_key: [-123.456: 1]
+Float32 map_value: ["k": -123.456]
+Float32 set: set.from_list([-123.456])
+Float32 variant_tuple: TupFloat32(-123.456, -123.456)
+Float32 variant_record: FldFloat32 { v: -123.456 }
+Float32 generic_variant: One(-123.456)
+Float32 recursive_generic: Node(Node(Leaf, -123.456), -123.456)
+Float32 nested: some([(-123.456, RecFloat32 { v: -123.456, n: 2 })])
+main_line_int8: 127
+127
+main_line_int16: 32767
+32767
+main_line_int32: 2147483647
+2147483647
+main_line_uint8: 255
+255
+main_line_uint16: 65535
+65535
+main_line_uint32: 4294967295
+4294967295
+main_line_uint64: 18446744073709551615
+18446744073709551615
+main_line_float32: -123.456
+-123.456
+shared box: Box { v: 18446744073709551615 } Box { v: -1 } Box { v: -2 } Box { v: 18446744073709551615 }
+shared tree: Node(Leaf, 0.1) Node(Leaf, 0.30000000000000004) Node(Leaf, 0.1) Node(Leaf, 0.3)

@@ -139,6 +139,28 @@ fn __eq_bool(a: List[Bool], b: List[Bool]) -> Bool = _
 @intrinsic("almide_rt_list_eq_str")
 fn __eq_str(a: List[String], b: List[String]) -> Bool = _
 
+// `a == b` of two lists by element equality, for any element type: the cell a
+// self-hosted body over a list of String-bearing containers specializes
+// (`List[List[String]]`, `List[String?]`), so the element type is the type
+// argument instead of a name suffix. A Float specialization is refused by the
+// native route: its runtime generic would compare a Float list's bits.
+@intrinsic("almide_rt_list_eq_any")
+fn __eq_any[A](a: List[A], b: List[A]) -> Bool = _
+
+// Structural equality at the same declared boundary for nested containers.
+// Float elements retain IEEE equality, including signed zero and NaN.
+@intrinsic("almide_rt_list_eq_list_int")
+fn __eq_list_int(a: List[List[Int]], b: List[List[Int]]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_list_float")
+fn __eq_list_float(a: List[List[Float]], b: List[List[Float]]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_opt_int")
+fn __eq_opt_int(a: List[Int?], b: List[Int?]) -> Bool = _
+
+@intrinsic("almide_rt_list_eq_res_int")
+fn __eq_res_int(a: List[Result[Int, String]], b: List[Result[Int, String]]) -> Bool = _
+
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _
@@ -214,6 +236,21 @@ fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
 @consume(xs)
 fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
+// Native declaration for the Float-key self-hosted specializations. Keep the
+// callback result typed: the wasm bodies carry its f64 bits in an Int lane.
+@intrinsic("almide_rt_list_sort_by_float")
+@consume(xs)
+fn __sort_by_float[A](xs: List[A], f: (A) -> Float) -> List[A] = _
+
+@intrinsic("almide_rt_list_sort_float")
+fn __sort_float(xs: List[Float]) -> List[Float] = _
+
+@intrinsic("almide_rt_list_min_float")
+fn __min_float(xs: List[Float]) -> Float? = _
+
+@intrinsic("almide_rt_list_max_float")
+fn __max_float(xs: List[Float]) -> Float? = _
+
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
 @reuse(xs)
@@ -238,6 +275,13 @@ fn reduce[A](xs: List[A], f: (A, A) -> A) -> A? = _
 @intrinsic("almide_rt_list_group_by")
 @consume(xs)
 fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
+
+// Key f(x) -> how many elements carry it; keys in first-seen order. The
+// native render's spelling of `group_by` followed by `map.map` to each
+// group's length (`native_group_count.rs`): no group list is built.
+@intrinsic("almide_rt_list_group_count")
+@consume(xs)
+fn __group_count[A, B](xs: List[A], f: (A) -> B) -> Map[B, Int] = _
 
 /// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
@@ -1153,19 +1197,23 @@ fn __pick_with_fallible[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E], want: 
   var stop = false
   for x in xs {
     if stop then ()
-    else match best {
-      some(b) => match cmp(x, b) {
-        ok(c) => if c * want > 0 then {
-          best = some(x)
-        } else (),
-        err(e) => {
-          failed = some(e)
-          stop = true
+    else {
+      // Decide inside the match, assign after it: an arm that replaced
+      // `best` while it still views the old one would have to keep both.
+      let take = match best {
+        some(b) => match cmp(x, b) {
+          ok(c) => c * want > 0,
+          err(e) => {
+            failed = some(e)
+            stop = true
+            false
+          },
         },
-      },
-      none => {
+        none => true,
+      }
+      if take then {
         best = some(x)
-      },
+      } else ()
     }
   }
   match failed {

@@ -200,13 +200,17 @@ impl Emitter<'_> {
                 settle = Some(m.clone());
             }
             self.moves = BlockMoves { temp: movable_temp(stmts, tail, i), move_in: MoveIn::joined(site, &outer) };
+            // #4611: range facts follow the list's straight line (int_range.rs).
+            self.ranges_enter_stmt(s);
             lower(self, s)?;
+            self.ranges_leave_stmt(s);
             self.moves = BlockMoves::default();
             if settle.as_ref().is_some_and(|m| m.last == i) {
                 self.settle_subject(settle.take().and_then(|m| m.subject));
             }
         }
         self.moves.move_in = outer;
+        self.ranges_leave_list(stmts);
         Ok(())
     }
 

@@ -1,0 +1,16 @@
+// v1-vs-v0 shape bench: an effect fn typed `Never` that raises (its result
+// type renders as `Infallible`), called after some work (#4006).
+effect fn fail() -> Never = {
+  let x: Result[Unit, String] = err("stopped")
+  x!
+  panic("unreachable")
+}
+
+effect fn main() -> Unit = {
+  var acc = 0
+  for i in 0..<20000 {
+    acc = acc + i % 7
+  }
+  println("before ${acc}")
+  fail()!
+}

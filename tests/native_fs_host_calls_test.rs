@@ -49,7 +49,7 @@ fn every_named_call_is_an_fs_host_op_the_floor_serves_and_every_served_one_is_na
         let row = row.unwrap_or_else(|| panic!("{sym} is the symbol of no fs host op"));
         let call = format!("fs.{}", row.func);
         assert!(
-            almide_mir::native_floor::refusal(&call).is_none(),
+            almide_mir::native_floor::has_native_host_route(&call),
             "{sym} is named but `{call}` is not on the native floor: {:?}",
             almide_mir::native_floor::refusal(&call)
         );
@@ -58,8 +58,26 @@ fn every_named_call_is_an_fs_host_op_the_floor_serves_and_every_served_one_is_na
     // would refuse it, so the row and the floor cannot drift apart).
     for o in HOST_OPS.iter().filter(|o| o.module == "fs") {
         let call = format!("fs.{}", o.func);
-        if almide_mir::native_floor::refusal(&call).is_none() {
+        if almide_mir::native_floor::has_native_host_route(&call) {
             assert!(NATIVE_FS_HOST_CALLS.contains(&o.symbol), "`{call}` is on the floor but {} is not named", o.symbol);
         }
     }
+}
+
+#[test]
+fn named_host_boundary_accepts_optional_bytes_and_rejects_unknown_ids() {
+    use almide_verify::{check, Property, NATIVE_FS_HOST_CALLS};
+    let id = NATIVE_FS_HOST_CALLS.iter()
+        .position(|name| *name == "almide_rt_fs_read_bytes_if_exists").unwrap();
+    assert!(check(Property::NativeCalls, format!("||| {id}\nid").as_bytes()));
+    for unknown in [NATIVE_FS_HOST_CALLS.len(), usize::MAX] {
+        assert!(!check(Property::NativeCalls, format!("||| {unknown}\nid").as_bytes()));
+    }
+    // A named host is no exemption from the caller's ownership obligations.
+    assert!(!check(Property::NativeCalls, format!("||| {id}\nidd").as_bytes()));
+    // Keep the saved poison outside the admitted set when that set grows.
+    let poison = include_str!("../proofs/poisoned-certs/native-calls/4006-host-outside-set.cert");
+    let host = poison.lines().next().unwrap().strip_prefix("|||").unwrap();
+    assert_eq!(host.parse::<usize>().unwrap(), NATIVE_FS_HOST_CALLS.len());
+    assert!(!check(Property::NativeCalls, poison.as_bytes()));
 }

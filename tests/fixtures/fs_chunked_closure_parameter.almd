@@ -1,0 +1,12 @@
+import fs
+effect fn fold(p: String, score: (String) -> Int) -> Result[List[Int], String] = fs.fold_lines_chunked(p, 2, 0, (acc, line) => { println(line); acc + score(line) })
+effect fn main() -> Unit = {
+ let d = fs.create_temp_dir("sendfree")!
+ let p = d + "/lines"
+ fs.write_text(p, "a\nbb\nccc")!
+ let prefix = "saved"
+ let score = (line: String) => string.len(prefix) + string.len(line)
+ let parts = fold(p, score)!
+ println("${parts}")
+ fs.remove_all(d)!
+}

@@ -1,0 +1,13 @@
+text=err(fs.read_text("<TMP>"): Is a directory (os error 21))
+lines=err(fs.read_lines("<TMP>"): Is a directory (os error 21))
+bytes=err(fs.read_bytes("<TMP>"): Is a directory (os error 21))
+text_if=err(fs.read_text_if_exists("<TMP>"): Is a directory (os error 21))
+lines_if=err(fs.read_lines_if_exists("<TMP>"): Is a directory (os error 21))
+bytes_if=err(fs.read_bytes_if_exists("<TMP>"): Is a directory (os error 21))
+file=ok(hi
+)
+file_if=ok(hi
+)
+empty=ok(0)
+missing_if=ok(<none>)
+missing=err(fs.read_text("<TMP>/nope.txt"): No such file or directory (os error 2))

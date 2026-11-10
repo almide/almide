@@ -15,7 +15,22 @@
 // any wall-clock rule. The abort names the FIRST one, byte-identically on both targets.
 effect fn boom(tag: String) -> Result[Int, String] = err("fail:" + tag)
 
+// The implicit effect ABI must carry its Result across the same arm boundary.
+effect fn implicit_value(n: Int) -> Int = if n < 0 then err("implicit:${n}") else ok(n)
+
+effect fn implicit_pair(left: Int, right: Int) -> Result[Int, String] = {
+  let (a, b) = fan {
+    implicit_value(left)
+    implicit_value(right)
+  }
+  ok(a + b)
+}
+
 effect fn main() -> Unit = {
+  let good: Result[Int, String] = implicit_pair(2, 3)
+  let first: Result[Int, String] = implicit_pair(-1, -2)
+  let second: Result[Int, String] = implicit_pair(1, -2)
+  println("implicit good=${good == ok(5)} first=${first == err("implicit:-1")} second=${second == err("implicit:-2")}")
   let (a, b) = fan {
     boom("first")
     boom("second")

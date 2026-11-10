@@ -17,6 +17,7 @@ fn __rs_rand(min: Int, max: Int) -> Int = {
   if span <= 0 then min else min + (rpos % span)
 }
 
+@specializes("random.shuffle")
 fn random_shuffle(xs: List[Int]) -> List[Int] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -31,6 +32,7 @@ fn random_shuffle(xs: List[Int]) -> List[Int] = {
   ys
 }
 
+@specializes("random.shuffle")
 fn random_shuffle_str(xs: List[String]) -> List[String] = {
   var ys = xs
   var i = list.len(ys) - 1
@@ -50,6 +52,7 @@ fn random_shuffle_str(xs: List[String]) -> List[String] = {
 // WITHIN the COW copy. A slot swap never changes what any element owns, so it
 // is element-type-agnostic: no pair get/set twins needed, the source list
 // untouched (v0's returns-a-new-list contract, same as the variants above).
+@specializes("random.shuffle")
 fn random_shuffle_pair(xs: List[(String, String)]) -> List[(String, String)] = {
   var ys = xs
   var i = list.len(ys) - 1

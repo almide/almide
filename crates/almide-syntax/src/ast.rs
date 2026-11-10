@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use crate::intern::Sym;
 
+#[path = "ast_json.rs"]
+mod json;
+
 // Almide AST types — mirrors src/ast.ts
 
 /// Unique expression identifier. Eliminates span-collision bugs in type lookups.
@@ -196,7 +199,7 @@ pub enum StringPart {
     Expr { expr: Box<Expr> },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Expr {
     #[serde(skip)]
     pub id: ExprId,

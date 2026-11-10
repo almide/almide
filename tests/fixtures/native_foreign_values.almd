@@ -1,0 +1,30 @@
+// Native externs and their portable bodies must retain the same observations.
+// Heap arguments remain usable after the foreign boundary returns a new value.
+@extern(rust, "std::cmp", "min")
+fn host_min(a: Int, b: Int) -> Int = if a < b then a else b
+
+@extern(rs, "std::string::String", "from")
+fn host_string(s: String) -> String = s
+
+@extern(rust, "std::convert", "identity")
+fn host_tuple(t: (Int, String)) -> (Int, String) = t
+
+@extern(rust, "std::convert", "identity")
+fn host_option(v: Option[String]) -> Option[String] = v
+
+@extern(rust, "std::convert", "identity")
+fn host_result(v: Result[String, String]) -> Result[String, String] = v
+
+effect fn main() -> Unit = {
+  println("${host_min(9, -2)}")
+  let text = "héllo"
+  println(host_string(text))
+  println(text)
+  let pair = (7, "tuple")
+  println("${host_tuple(pair)}")
+  println("${pair}")
+  println(host_option(some("yes")) ?? "absent")
+  println(host_option(none) ?? "absent")
+  println(match host_result(ok("ok")) { ok(s) => s, err(e) => e })
+  println(match host_result(err("err")) { ok(s) => s, err(e) => e })
+}

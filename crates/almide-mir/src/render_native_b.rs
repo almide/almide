@@ -13,57 +13,6 @@ pub(crate) struct OpSink<'a> {
     pub used_shims: &'a mut Vec<&'static str>,
 }
 
-/// `Op::CallIndirect` — dispatch through the arity's `__almd_ci_*` table.
-fn render_call_indirect(
-    dst: &Option<ValueId>,
-    table_idx: &ValueId,
-    args: &[CallArg],
-    result: &Option<Repr>,
-    sink: OpSink<'_>,
-) -> Result<(), LowerError> {
-    let OpSink { tys, out, indent, used_shims: _ } = sink;
-    macro_rules! line {
-        ($($arg:tt)*) => {{
-            for _ in 0..indent { out.push_str("    "); }
-            writeln!(out, $($arg)*).unwrap();
-        }};
-    }
-    let Some((CallArg::Handle(env), rest)) = args.split_first() else {
-        return Err(wall("native: CallIndirect without a leading env arg"));
-    };
-    let et = *tys
-        .get(env)
-        .ok_or_else(|| wall("native: CallIndirect env untyped"))?;
-    if !et.is_veccy() {
-        return Err(wall("native: CallIndirect env is not a closure block"));
-    }
-    let env_code = if et == NTy::Vec { format!("&{}", var(*env)) } else { var(*env) };
-    let mut rendered = vec![var(*table_idx), env_code];
-    for a in rest {
-        let (code, got) = call_arg(a, tys)?;
-        if got != NTy::I64 {
-            return Err(wall(
-                "native: CallIndirect non-scalar user arg — outside the closures slab",
-            ));
-        }
-        rendered.push(code);
-    }
-    let call = format!("__almd_ci_{}({})", rest.len(), rendered.join(", "));
-    match (dst, result) {
-        (Some(d), Some(Repr::Scalar { .. })) => {
-            tys.insert(*d, NTy::I64);
-            line!("let mut {}: i64 = {call};", var(*d));
-        }
-        (None, _) => line!("{call};"),
-        _ => {
-            return Err(wall(
-                "native: CallIndirect heap result — outside the closures slab",
-            ))
-        }
-    }
-    Ok(())
-}
-
 /// `Op::ListGetScalar` — bounds-checked element load via the `almide_idx_get` shim.
 fn render_list_get_scalar(
     dst: &ValueId,
@@ -125,7 +74,7 @@ fn render_list_set_scalar(
     let slot = crate::render_native_bounds::Slot { base: *list, idx: Some(*idx), k: 0 };
     crate::render_native_bounds::check(slot);
     crate::render_native_bounds::store(slot);
-    line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), var(*val));
+    line!("almide_idx_set(&mut {}, {}, {});", var(*list), var(*idx), scalar_bits(*val, tys)?);
     Ok(())
 }
 
@@ -144,29 +93,22 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
-    let rhs = match t {
-        NTy::I64 | NTy::F64 => var(*src),
-        NTy::Str => format!("{}.clone()", var(*src)),
-        NTy::StrRef => format!("AlmideString::from({})", var(*src)),
-        NTy::Vec => format!("{}.clone()", var(*src)),
-        NTy::VecRef => format!("{}.to_vec()", var(*src)),
-        NTy::Res => format!("{}.clone()", var(*src)),
-        NTy::VecStr => format!("{}.clone()", var(*src)),
-        NTy::VecStrRef => format!("{}.to_vec()", var(*src)),
-        NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(*src)),
-        NTy::Opt => var(*src),
-        NTy::ResStr => format!("{}.clone()", var(*src)),
-    };
-    let store_t = match t {
-        NTy::StrRef => NTy::Str,
-        NTy::VecRef => NTy::Vec,
-        NTy::VecStrRef => NTy::VecStr,
-        NTy::RecRef(i) => NTy::Rec(i),
-        other => other,
-    };
+    let rhs = end_if_copy_rhs(*src, t);
+    let store_t = crate::render_native::owned_nty(t);
     if let Some(prev) = tys.get(local) {
-        if *prev != store_t {
-            return Err(wall("native: SetLocal changes a value's type"));
+        if let Some(recode) = crate::native_value_repr::scalar_recode(&var(*src), t, *prev) {
+            line!("{} = {};", var(*local), recode);
+            return Ok(());
+        }
+        if *prev != store_t && !(crate::render_native::owned_nty(*prev) == *prev
+            && crate::native_value_repr::same_owned(*prev, store_t)) {
+            if crate::render_native::owned_nty(*prev) == *prev {
+                if let Some(copy) = crate::native_value_repr::tuple_copy(&var(*src), t, *prev) {
+                    line!("{} = {};", var(*local), copy);
+                    return Ok(());
+                }
+            }
+            return Err(wall(format!("native: SetLocal changes a value's type ({prev:?} <- {store_t:?})")));
         }
         line!("{} = {};", var(*local), rhs);
     } else {
@@ -205,12 +147,17 @@ pub(crate) struct NativeSink<'a, 'f> {
 fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), LowerError> {
     let NativeSink { user_fns, sigs, tys, out, indent, used_shims } = sink;
     let name = call.name;
+    if crate::native_hof::parallel_selected(name) {
+        return crate::native_hof::serve_or(wall("native: selected parallel map runtime adapter refused"),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
+    }
     if let Some(callee) = user_fns.get(name.as_str()) {
         // A closure argument of another signature than the linked body
         // declares is an argument kind it refuses (#4588): the call it
         // rendered is taken back.
         let marks = (out.len(), used_shims.len());
-        let rendered = render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims })
+        let rendered = crate::native_hof::check_result(&call, user_fns, sigs)
+            .and_then(|()| render_user_fn_call(call, callee, sigs, OpSink { tys: &mut *tys, out: &mut *out, indent, used_shims: &mut *used_shims }))
             .and_then(|()| crate::native_closure_decl::check(call, user_fns, (&mut *out, &mut *used_shims), marks));
         return match rendered {
             // A linked self-hosted body that refuses the call's argument
@@ -222,6 +169,10 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     if crate::native_hof::pruned(name) {
         return crate::native_hof::render_pruned(call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
     }
+    if crate::host_ops::host_op_for_call_name(name).is_some() && crate::native_hof::of(name).is_some() {
+        return crate::native_hof::serve_or(wall("native: declared host callback adapter refused"),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims });
+    }
     if name == "__str_concat" && render_concat_in_place(call, tys, out, indent) {
         Ok(())
     } else if let Some(shim_entry) = shim(name) {
@@ -232,6 +183,11 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
         render_list_concat(call, OpSink { tys, out, indent, used_shims })
     } else if let Some(floor) = protocol_instance_floor(&call, tys) {
         render_declared_floor_call(call, floor, OpSink { tys, out, indent, used_shims })
+    } else if crate::native_hof::declared_only(name) {
+        // A combinator with no linked body and no floor entry: the runtime
+        // body its declaration names serves it, as it does a refused link.
+        crate::native_hof::serve_or(wall(format!("native: the declared runtime body of `{name}` refused the call")),
+            call, user_fns, sigs, OpSink { tys, out, indent, used_shims })
     } else {
         Err(wall(format!(
             "native: call to `{name}` — not a lowered user fn and not in the \
@@ -260,6 +216,13 @@ fn render_user_fn_call(
         let (code, got) = call_arg(a, s.tys)?;
         let arg = if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
+        } else if matches!(want, NTy::Res | NTy::ResStr)
+            && got == want
+            && matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))
+        {
+            // A by-value Result param given the caller's dying Result: moved,
+            // where the copy would leave the caller one it never reads.
+            crate::render_native_move::take_expr(&code)
         } else {
             user_arg_in_declared_mode(name, want, code, got)?
         };
@@ -269,7 +232,8 @@ fn render_user_fn_call(
             None => arg,
         });
     }
-    let mut rendered = format!("{}({})", mangle(name), rendered_args.join(", "));
+    let head = crate::render_native_keyed::call_head(name, call.args, callee).unwrap_or_else(|| mangle(name));
+    let mut rendered = format!("{head}({})", rendered_args.join(", "));
     if callee_sig.and_then(|(_, r)| *r).is_some_and(|k| k.narrow_rust().is_some()) {
         rendered = format!("({rendered} as i64)");
     }
@@ -287,6 +251,7 @@ fn declared_param_want(
     p: &crate::MirParam,
 ) -> Result<NTy, LowerError> {
     Ok(match callee_sig.and_then(|(ps, _)| ps.get(i)) {
+        Some(NativeSigKind::Never) => NTy::Never,
         Some(NativeSigKind::I64 | NativeSigKind::Narrow { .. }) => NTy::I64,
         Some(NativeSigKind::Str) => NTy::StrRef,
         Some(NativeSigKind::ListI64) => NTy::VecRef,
@@ -308,14 +273,36 @@ fn declared_param_want(
 /// An argument handed to a MOVE param (#4006 class P): the caller's own value,
 /// moved (its `Consume` follows the call — `MirFunction::call_moves`).
 fn moved_arg(name: &str, want: NTy, code: String, got: NTy) -> Result<String, LowerError> {
-    let same = match (want, got) {
-        (NTy::Rec(i), NTy::Rec(j)) => i == j,
-        (w, g) => w == g,
-    };
-    if !same || matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
-        return Err(wall(format!("native: a borrowed or other-typed arg to a move param of `{name}`")));
+    let same = crate::native_value_repr::same_owned(want, got);
+    if matches!(got, NTy::StrRef | NTy::VecRef | NTy::VecStrRef | NTy::RecRef(_)) {
+        return Err(wall(format!("native: a borrowed or other-typed arg ({got:?}, wanted {want:?}) to a move param of `{name}`")));
     }
-    Ok(code)
+    if same { return Ok(code); }
+    // A checked structural argument may have a distinct generated Rust
+    // struct from the named parameter, including inside lists. Rebuild the
+    // declared value just as at a borrowed boundary. The MIR still consumes
+    // the caller's owned argument; this adapter adds no borrowed credit.
+    crate::native_value_repr::tuple_copy(&code, got, want)
+        .ok_or_else(|| wall(format!("native: an incompatible owned arg ({got:?}, wanted {want:?}) to a move param of `{name}`")))
+}
+
+#[cfg(test)]
+mod moved_structural_arg_tests {
+    use super::*;
+    #[test]
+    fn structural_move_rebuilds_owned_values_but_never_admits_a_borrow() {
+        use crate::render_native_rec::{install, RecDecl};
+        let decl = |name: &str, anonymous| RecDecl {
+            name: name.into(), fields: vec![NTy::Str],
+            record_labels: Some((anonymous, vec!["name".into()])),
+            ..Default::default()
+        };
+        let _guard = install(vec![decl("named", false), decl("structural", true), decl("other", false)]);
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::Rec(1)).is_ok());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::RecRef(1)).is_err());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::Rec(2)).is_err());
+        assert!(moved_arg("take", NTy::Rec(0), "v".into(), NTy::RecRef(0)).is_err());
+    }
 }
 
 fn user_arg_in_declared_mode(
@@ -339,10 +326,15 @@ fn user_arg_in_declared_mode(
             NTy::VecStrRef => Ok(code),
             _ => Err(wall(format!("native: non-string-list arg ({got:?}) to List[String] param of `{name}`"))),
         },
-        NTy::RecRef(i) | NTy::Rec(i) => match got {
-            NTy::Rec(j) if j == i => Ok(format!("&{code}")),
-            NTy::RecRef(j) if j == i => Ok(code),
-            _ => Err(wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
+        NTy::RecRef(_) | NTy::Rec(_) => match got {
+            g if crate::native_value_repr::same_owned(want, g) => {
+                Ok(if matches!(g, NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef) {
+                    code
+                } else { format!("&{code}") })
+            }
+            _ => crate::native_value_repr::tuple_copy(&code, got, want)
+                .map(|value| format!("&({value})"))
+                .ok_or_else(|| wall(format!("native: arg of another type ({got:?}) to a record param ({want:?}) of `{name}`"))),
         },
         NTy::ResStr | NTy::Res | NTy::Opt => carrier_arg_in_declared_mode(name, want, code, got),
         NTy::VecRef | NTy::Vec => {
@@ -427,6 +419,7 @@ fn bind_user_fn_result(
             // A heap result is FRESH OWNED (the callee moved it out).
             // Its KIND comes from the callee's declared return.
             let t = match callee_sig.and_then(|(_, r)| *r) {
+                Some(NativeSigKind::Never) => NTy::Never,
                 Some(NativeSigKind::ListI64) => NTy::Vec,
                 Some(NativeSigKind::ListStr) => NTy::VecStr,
                 Some(NativeSigKind::Rec(i)) => NTy::Rec(i),
@@ -474,10 +467,13 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     };
     let (a, at) = call_arg(a, tys)?;
     let (b, bt) = call_arg(b, tys)?;
-    let mismatch = || wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"));
+    let mismatch = || {
+        crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[concat] {a}: {at:?}, {b}: {bt:?}"));
+        wall(format!("native: `{name}` over operands outside the native lists ({at:?}, {bt:?})"))
+    };
     let (sa, ty) = crate::native_list_ops::as_slice(&a, at).ok_or_else(mismatch)?;
-    let (sb, ty_b) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
-    if ty != ty_b {
+    let (sb, _) = crate::native_list_ops::as_slice(&b, bt).ok_or_else(mismatch)?;
+    if !crate::native_value_repr::same_owned(at, bt) {
         return Err(mismatch());
     }
     let Some(d) = dst else {
@@ -493,18 +489,26 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     // right one). The right list's last use, when its elements own heap
     // (a `List[String]`, a list of lists — #4503's prepend `[x] + xss`):
     // move its elements over instead of cloning each one.
+    // Or the left list is a borrowed field or payload read whose carrier
+    // dies at the concatenation (`sc = { ...sc, funs: sc.funs + [..] }`,
+    // `set_moving_args`' taken args) and the right one an owned list of its
+    // own: grow that field's list itself, moved out of the carrier.
     if let [CallArg::Handle(l), CallArg::Handle(r)] = args.as_slice() {
-        if l != r && owned_list(at) && owned_list(bt) {
+        let taken = crate::render_native_move::taken_arg(*l);
+        if l != r && (owned_list(at) || taken.is_some()) && owned_list(bt) {
             let left = crate::render_native_move::moving_arg(*l);
             let right = crate::render_native_move::moving_arg(*r) && bt != NTy::Vec;
             if left || right {
-                let head = if left {
-                    format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a))
-                } else {
-                    format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})")
+                let head = match (left, taken) {
+                    (true, _) => format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a)),
+                    (false, Some(take)) => format!("let mut r: {ty} = {take}"),
+                    (false, None) => format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})"),
                 };
                 let tail = if right {
                     format!("r.extend({})", crate::render_native_move::take_expr(&b))
+                } else if bt == NTy::Vec && crate::render_native_move::is_stack_single(*r) {
+                    // `xs + [x]` on a dying `xs`: a push, not a slice copy.
+                    format!("r.push({b}[0])")
                 } else {
                     format!("r.extend_from_slice({sb})")
                 };
@@ -533,6 +537,13 @@ fn protocol_instance_floor(call: &NativeCall<'_>, tys: &BTreeMap<ValueId, NTy>) 
     crate::native_floor::declared(&crate::native_floor::protocol_instance(call.name, &kinds)?)
 }
 
+/// The payload kind of the generated Option a floor call binds, when the
+/// borrowing twin can lend it (a kind with a reference form).
+fn lent_payload(ret: Option<NTy>) -> Option<NTy> {
+    let p = crate::render_native_rec::option_payload(ret?.rec()?)?;
+    matches!(p, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr).then_some(p)
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -540,9 +551,14 @@ fn render_declared_floor_call(
 ) -> Result<(), LowerError> {
     let NativeCall { dst, name, args, .. } = call;
     let OpSink { tys, out, indent, used_shims } = s;
+    // The body only reads the Values it takes by value: lend them instead.
+    let floor = floor.by_ref.as_deref().unwrap_or(floor);
     let mut rendered: Vec<(String, NTy)> = args.iter().map(|a| call_arg(a, tys)).collect::<Result<_, _>>()?;
     let mut dying: Vec<bool> =
         args.iter().map(|a| matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v))).collect();
+    // A borrowed read whose carrier dies at the call: the call takes the
+    // payload, moved out, where its param (or its `@reuse` twin's) is by value.
+    take_dying_payloads(args, floor, &mut rendered, &mut dying);
     // A `mut b: Bytes` fn called for its result (the move-mode rewrite's
     // `c = bytes.append_u16_le(c, x)`): it edits the arg itself, which dies
     // here, and that buffer is the result.
@@ -564,6 +580,23 @@ fn render_declared_floor_call(
     };
     let dst_map = dst.and_then(crate::render_native_rec::declared_map);
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
+    // A result read only through borrows, from a Value the function borrows:
+    // the runtime's borrowing twin, no copy of the field (v0's decode path).
+    let by_ref = match (dst, &floor.borrow_twin) {
+        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
+            Some((twin.as_str(), items))
+        }
+        // An element Option whose list the function borrows: the element
+        // lent (`Option<&A>`), no copy of it (render_native_borrow_read).
+        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some() => {
+            Some((twin.as_str(), items))
+        }
+        _ => None,
+    };
+    let expr = match by_ref {
+        Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
+        None => expr,
+    };
     let (expr, ret) = match edited {
         Some((src, own)) => (
             format!("{{ let mut __edited: {t} = {src}; {expr}; __edited }}", t = crate::render_native_rec::owned_ty(own)),
@@ -571,9 +604,10 @@ fn render_declared_floor_call(
         ),
         None => (expr, ret),
     };
-    used_shims.push(crate::native_floor::FLOOR_HEADER);
-    match &floor.twin {
-        Some((_, twin, items)) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
+    used_shims.push(crate::native_floor::floor_header());
+    match (&floor.twin, by_ref) {
+        (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
+        (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
         _ => used_shims.extend(floor.items.iter().copied()),
     }
     for _ in 0..indent {
@@ -582,7 +616,16 @@ fn render_declared_floor_call(
     match (dst, ret) {
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
-            let ty_name = crate::render_native_rec::owned_ty(t);
+            let ty_name = match by_ref {
+                Some(_) if crate::render_native_borrow_read::borrowed_option(*d) => {
+                    format!("Option<&{}>", crate::render_native_rec::owned_ty(lent_payload(ret).expect("checked with the twin")))
+                }
+                Some(_) => format!(
+                    "Result<&{}, AlmideString>",
+                    crate::render_native_rec::owned_ty(NTy::Rec(crate::render_native_rec::value_index()))
+                ),
+                None => crate::render_native_rec::owned_ty(t),
+            };
             writeln!(out, "let mut {}: {} = {};", var(*d), ty_name, expr).expect("writing to a String cannot fail");
         }
         (None, _) => writeln!(out, "{expr};").expect("writing to a String cannot fail"),

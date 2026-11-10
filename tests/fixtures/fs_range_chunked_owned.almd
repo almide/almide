@@ -1,0 +1,20 @@
+import fs
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("native-ranges")!
+  let p = d + "/lines"
+  fs.write_text(p, "a\r\nbb\nccc")!
+  let prefix = "keep:"
+  let seed: List[String] = ["seed"]
+  let ranged = fs.fold_lines_range(p, 0, 5, seed, (acc, line) => acc + [prefix + line])!
+  println(list.join(ranged, "|"))
+  let parts = fs.fold_lines_chunked(p, 2, seed, (acc, line) => acc + [prefix + line])!
+  for part in parts { println(list.join(part, "|")) }
+  println(list.join(seed, "|"))
+  println(prefix)
+  let empty = fs.fold_lines_range(p, 0, 0, seed, (acc, line) => acc + [line])!
+  println(list.join(empty, "|"))
+  let all = fs.fold_lines_range(p, 0, 100, "", (acc, line) => acc + line + "/")!
+  println(all)
+  fs.remove_all(d)!
+}

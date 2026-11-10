@@ -186,7 +186,9 @@ impl LowerCtx {
     /// it, and the var still named it after the join: the else path read a value
     /// it never computed and the then path a freed block. Taken before the
     /// branch, the copy is the var on every path; the arm's write only
-    /// `MakeUnique`s it, and the scope end drops it once.
+    /// `MakeUnique`s it, and the scope end drops it once. Whole-value heap
+    /// assignments need the same slot: their drop-old must release an owned
+    /// reference even when the parameter is rebound only in one branch.
     pub(crate) fn precopy_branch_mutated_params(&mut self, body: &IrExpr) {
         for var in branch_place_targets(body) {
             let Some(&val) = self.value_of.get(&var) else { continue };
@@ -253,9 +255,10 @@ impl LowerCtx {
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
         self.precopy_borrowed_reassign_slots(body);
+        self.precopy_native_while_condition(cond);
 
         self.ops.push(Op::LoopStart);
-        let cond_v = match self.lower_scalar_value(cond) {
+        let cond_v = match self.lower_while_condition(cond) {
             Some(v) => v,
             None => {
                 self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
@@ -267,7 +270,12 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let ok = self.lower_while_body_stmts(body).is_ok();
+        let result = self.lower_while_body_stmts(body);
+        if let Err(error) = &result {
+            crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &self.fn_name,
+                || format!("WHILE body declined in {}: {error:?}", self.fn_name));
+        }
+        let ok = result.is_ok();
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
 
@@ -741,8 +749,8 @@ fn collect_field_mutator_roots(stmts: &[IrStmt]) -> Vec<(VarId, Ty)> {
     s.0
 }
 
-/// The targets of the index / field / map writes nested in an `if` or `match`
-/// arm of `body` (#3270), in first-occurrence order.
+/// The targets of assignments and place writes nested in an `if` or `match`
+/// arm of `body`, in first-occurrence order. The caller filters heap params.
 fn branch_place_targets(body: &IrExpr) -> Vec<VarId> {
     use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
     struct Scan {
@@ -753,7 +761,8 @@ fn branch_place_targets(body: &IrExpr) -> Vec<VarId> {
         fn visit_stmt(&mut self, stmt: &IrStmt) {
             if let IrStmtKind::IndexAssign { target, .. }
             | IrStmtKind::FieldAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. } = &stmt.kind
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::Assign { var: target, .. } = &stmt.kind
             {
                 if self.depth > 0 && !self.out.contains(target) {
                     self.out.push(*target);

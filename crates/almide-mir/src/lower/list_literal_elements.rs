@@ -295,7 +295,7 @@ impl LowerCtx {
         // A LAMBDA literal element: lift it to a fresh `__lambda_*` fn + closure block
         // via the SAME proven mechanism a call-argument lambda already uses (calls_p2.rs).
         if let IrExprKind::Lambda { params, body, .. } = &e_ref.kind {
-            if let Some(obj) = self.lift_lambda(params, body) {
+            if let Some(obj) = self.lift_lambda(params, body, elem_ty) {
                 return ListElemArm::Built(obj);
             }
             return ListElemArm::Decline;

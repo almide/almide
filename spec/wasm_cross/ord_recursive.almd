@@ -32,6 +32,26 @@ type Node: Ord = { tag: String, next: List[Leaf] }
 
 type Leaf: Ord = { back: List[Node], w: Int }
 
+// The inline cycle goes through Option, unlike the pointer-backed list
+// edges above. Reading and rebuilding the boxed field must preserve aliases.
+type Chain: Ord = { value: Int, next: Chain? }
+
+fn chain_sum(c: Chain) -> Int = c.value + match c.next {
+  some(n) => chain_sum(n),
+  none => 0,
+}
+
+fn replace_next(mut c: Chain, n: Chain?) -> Unit = {
+  c.next = n
+}
+
+type Branch: Ord = { value: Int, children: List[Branch?] }
+
+fn branch_sum(b: Branch) -> Int = b.value + (b.children |> list.map((c) => match c {
+  some(child) => branch_sum(child),
+  none => 0,
+}) |> list.fold(0, (a, n) => a + n))
+
 fn show(t: Tree) -> String = "${t.v}(${t.kids |> list.map((k) => show(k)) |> list.join(",")})"
 
 // The mutually recursive pair printed so the ORDER is visible: two nodes that
@@ -42,6 +62,26 @@ fn show_leaf(l: Leaf) -> String = "[${l.back |> list.map((n) => n.tag) |> list.j
 fn show_node(n: Node) -> String = "${n.tag}<${n.next |> list.map((l) => show_leaf(l)) |> list.join(",")}>"
 
 effect fn main() -> Unit = {
+  let branch: Branch = {
+    value: 1,
+    children: [
+      some({ value: 5, children: [none] }),
+      none
+    ],
+  }
+  let branch_alias = branch
+  println("branches=${branch_sum(branch)} alias=${branch_sum(branch_alias)}")
+  println("branch-sort=${list.sort([
+    branch,
+    { value: 2, children: [] }
+  ]) |> list.map((b) => branch_sum(b))}")
+  let end: Chain = { value: 3, next: none }
+  var head: Chain = { value: 1, next: some(end) }
+  let saved = head
+  replace_next(head, some({ value: 8, next: none }))
+  println("chain=${chain_sum(head)} saved=${chain_sum(saved)} leaf=${chain_sum(end)}")
+  let chains = list.sort([head, saved, end])
+  println("chain-sort=${chains |> list.map((c) => chain_sum(c))}")
   // ── the recursive record: `v` decides, then the children lexicographically
   let ts = [
     Tree { v: 1, kids: [

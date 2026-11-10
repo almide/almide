@@ -37,6 +37,7 @@ pub mod coown_names;
 pub mod host_ops;
 pub mod lower;
 pub mod mir_ops;
+pub(crate) mod mir_liveness;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
 pub mod pipeline;
@@ -45,9 +46,14 @@ pub mod purity;
 pub mod render_native;
 mod lambda_sigs;
 mod fan_native;
+mod native_parallel_maps;
 mod render_native_addr;
 mod render_native_bounds;
 mod render_native_loops;
+mod native_borrowed_tco;
+mod native_never;
+mod native_fn_aliases;
+mod native_region;
 mod render_native_or_else;
 mod render_native_closure;
 mod render_native_rec;
@@ -55,20 +61,44 @@ mod render_native_append;
 mod render_native_move;
 mod render_native_cond;
 mod render_native_borrow_read;
+mod render_native_keyed;
 mod render_native_str;
 mod render_native_interp;
 mod render_native_op_families;
+mod render_native_float32;
 mod render_native_shims;
 pub mod native_floor;
+mod native_runtime_types;
+mod native_foreign;
+pub mod native_callbacks;
 pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 mod native_slot_takes;
+mod native_cell_window;
+mod native_map_entries;
 pub mod native_move_params;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
+mod native_unread_closure;
+mod render_native_narrow;
+mod native_entry;
 mod native_hof;
+mod native_link_routes;
+mod native_list_finish;
+mod native_value_repr;
+mod native_defaults;
+mod native_mutation_places;
+mod native_map_upsert;
+mod native_group_count;
+mod native_nested_places;
+mod native_display;
+mod native_patterns;
+mod native_map_eq;
+mod native_propagation;
+mod native_fusion;
+mod native_guard_continuation;
 mod native_closure_decl;
 mod option_blocks;
 
@@ -482,21 +512,18 @@ pub enum Op {
         result: Option<Repr>,
     },
 
-    /// Call a host-provided WASM IMPORT — the body of an `@extern(wasm, module,
-    /// name)` function. The renderer emits `(call $<import>)` and DECLARES the
-    /// matching `(import "module" "name" (func …))` at module scope. This is
-    /// FAITHFUL: the function's behavior IS the host's, so a call (not a fabricated
-    /// value) is the only sound lowering — the wasm module is valid and a browser
-    /// host satisfies the import (it does NOT instantiate under wasmtime, which has
-    /// no such host; that is expected for a browser-targeted module).
+    /// Call the host target selected by a checked `@extern` declaration.
+    /// Wasm declares an import with the recorded flat signature; native uses
+    /// the checked Rust/C declaration and converts its typed values at the ABI.
+    /// Host implementation and declared purity remain trusted on both legs.
     ///
-    /// Ownership is exactly an [`Op::Call`]'s: heap-handle args are BORROWED
-    /// (live-checked, refcount unchanged), and a heap `result` is a FRESH OWNED
-    /// value (the host returns a pointer the caller now owns). `abi`/`result_abi`
-    /// carry the import's wasm SIGNATURE valtypes (mapped from the declared Almide
-    /// types: Int→i64, Float→f64, Bool→i32, String/heap→i32), parallel to `args`;
-    /// the render coerces each i64-uniform MIR local to/from the import valtype.
+    /// Heap arguments are BORROWED (live-checked, refcount unchanged), and a
+    /// heap result is FRESH OWNED. Native adapters copy values across the host
+    /// boundary to preserve this ownership contract. `abi`/`result_abi` carry
+    /// the wasm valtypes; native adapters use the full checked declaration.
     CallImport {
+        /// The selected foreign target; native declarations retain their effect class.
+        target: ImportTarget,
         dst: Option<ValueId>,
         module: String,
         name: String,
@@ -643,3 +670,8 @@ pub enum Op {
 
 include!("lib_b.rs");
 include!("lib_c.rs");
+
+mod native_fs_scope;
+mod native_test_harness;
+mod native_test_panic;
+mod native_test_assert;

@@ -48,6 +48,31 @@ fn unique_by_keyed_by_record_variant_and_float_builds_and_dedups_native() {
         ),
     )
     .unwrap();
+    // Require the certified route itself: the product run below alone could
+    // mask a native v1 rendering failure through its current fallback.
+    let source = std::fs::read_to_string(&src).unwrap();
+    let (rust, certificates) =
+        almide_mir::pipeline::try_render_rust_source_certified(&source).unwrap();
+    assert!(certificates.iter().any(|(kind, _, _)| kind == "ownership"));
+    assert!(certificates
+        .iter()
+        .any(|(kind, _, _)| kind == "native-calls"));
+    let generated = dir.join("certified.rs");
+    let binary = dir.join("certified");
+    std::fs::write(&generated, rust).unwrap();
+    let compiled = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+        .arg("--edition=2021")
+        .arg(&generated)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let certified = Command::new(binary).output().unwrap();
     let out = Command::new(almide_bin())
         .args(["run", src.to_str().unwrap()])
         .current_dir(&dir)
@@ -56,8 +81,14 @@ fn unique_by_keyed_by_record_variant_and_float_builds_and_dedups_native() {
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     std::fs::remove_dir_all(&dir).ok();
-    assert!(!stderr.contains("E0277"), "a user-type key needs Eq + Hash again:\n{stderr}");
+    assert!(
+        !stderr.contains("E0277"),
+        "a user-type key needs Eq + Hash again:\n{stderr}"
+    );
     let expected = "[\"ab\", \"abc\", \"bc\", \"b\"]\n[1, 2]\n[1, 10, 2]\n[1]\n[1, 2, 3]\n";
+    assert!(certified.status.success(), "{:?}", certified);
+    assert!(certified.stderr.is_empty(), "{:?}", certified);
+    assert_eq!(certified.stdout, expected.as_bytes());
     assert!(
         out.status.success() && stdout == expected,
         "unique_by over record/variant/Float keys must build and keep first occurrences natively:\nstdout={stdout}\nstderr={stderr}"

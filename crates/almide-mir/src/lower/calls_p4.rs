@@ -458,6 +458,11 @@ impl LowerCtx {
     /// of the materialized block, and the rollback when the inner call does not lower.
     fn lower_scalar_ok_payload_unwrap(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
+            IrExprKind::Unwrap { expr: inner }
+                if !is_heap_ty(&expr.ty) && inner.ty.is_option() =>
+            {
+                self.lower_scalar_option_abort_unwrap(inner)
+            }
             // A scalar `e!` (Unwrap) in a VALUE/OPERAND position (`acc + int.parse(s)!`) over a
             // `Result[scalar, String]` call. The auto-`?` left the operand as `Unwrap{Call(Result)}`
             // (the let-bind position got it type-stripped to a bare scalar Call; the BinOp operand
@@ -468,7 +473,9 @@ impl LowerCtx {
             // recursive `acc + parse!` accumulator silently summed 0). Scalar Ok only — a heap-Ok
             // `Result[String,String]!` value operand stays walled (the recursive-ownership frontier).
             IrExprKind::Unwrap { expr: inner }
-                if !is_heap_ty(&expr.ty) && is_result_ty(&inner.ty) =>
+                if !is_heap_ty(&expr.ty) && matches!(&inner.ty,
+                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                        if a.len() == 2 && a[1] == Ty::String) =>
             {
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
@@ -502,8 +509,8 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
                     self.ops.push(Op::IfThen { cond: tag, dst: None });
                     let msgh = self.fresh_value();
-                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(msgh), args: vec![addr] });
-                    self.ops.push(Op::Prim { kind: crate::PrimKind::Die, dst: None, args: vec![msgh] });
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(msgh), args: vec![addr] });
+                    self.emit_error_abort(msgh);
                     self.ops.push(Op::Else { val: None });
                     self.ops.push(Op::EndIf { val: None });
                     let payload = self.fresh_value();
@@ -632,54 +639,6 @@ impl LowerCtx {
     }
 
     /// Extracted from `Self::lower_scalar_binop_pow_float` (eighth-round split, cog
-    /// reduction): the `**` pow-desugar sub-chain, verbatim.
-    fn lower_scalar_binop_pow(
-        &mut self,
-        expr: &IrExpr,
-        op: &almide_ir::BinOp,
-        left: &IrExpr,
-        right: &IrExpr,
-    ) -> Option<ValueId> {
-        use almide_ir::BinOp;
-        // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `int.pow(a, b)`).
-        // `PowFloat` → `math.__fpow` (the bit-exact libm transcription),
-        // `PowInt` → `int.pow` (exponentiation-by-squaring). Both callees live in a
-        // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
-        // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
-        // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
-        let pow_callee = match op {
-            BinOp::PowFloat => Some("math.__fpow"),
-            BinOp::PowInt => Some("int.pow"),
-            _ => None,
-        };
-        if let Some(callee) = pow_callee {
-            let a = self.lower_scalar_value(left)?;
-            let b = self.lower_scalar_value(right)?;
-            let repr = repr_of(&expr.ty).ok()?;
-            let dst = self.fresh_value();
-            self.ops.push(Op::CallFn {
-                dst: Some(dst),
-                name: callee.to_string(),
-                args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
-                result: Some(repr),
-            });
-            // `int.pow` computes in the i64 carrier every integer rides here, so a
-            // NARROW result type (`Int32`, `UInt8`, …) has to come back to its declared
-            // width — the same wrap `*` and `+` already apply through `narrow_wrap`.
-            // Without it `let a: Int32 = 999997` made `a ^ 2` print the un-narrowed
-            // `999994000009` on wasm against native's `-733379959`, while `a * a` at the
-            // very same type agreed on both legs. `math.__fpow` returns a float and has no
-            // declared-width notion, so only the integer operator wraps.
-            if matches!(op, BinOp::PowInt) {
-                return Some(self.wrap_to_declared_width(dst, &expr.ty));
-            }
-            return Some(dst);
-        }
-        None
-    }
-
-    /// Extracted from `Self::lower_scalar_binop_pow_float` (eighth-round split, cog
     /// reduction): the FLOAT prim-floor sub-chain, verbatim.
     /// Extracted from `Self::lower_scalar_binop_float_prim` (ninth-round split, cog
     /// reduction): the pure `BinOp` + f32/f64-shape → `PrimKind` lookup, verbatim (a
@@ -796,3 +755,5 @@ impl LowerCtx {
         self.lower_scalar_binop_eq_list_map(op, left, right)
     }
 }
+
+include!("calls_scalar_math.rs");

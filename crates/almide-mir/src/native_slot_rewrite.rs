@@ -105,10 +105,17 @@ pub(crate) fn heap_slot_at(addr: i64) -> Option<(u32, crate::render_native::NTy)
 /// What the cell of heap slot `slot` (of kind `t`) holds.
 fn held_ty(slot: u32, t: crate::render_native::NTy) -> String {
     let ty = crate::render_native_rec::owned_ty(t);
-    if crate::native_slot_takes::snapshot_slot(slot) {
+    let held = if crate::native_slot_takes::snapshot_slot(slot) {
         format!("std::rc::Rc<{ty}>")
     } else {
         ty
+    };
+    // Result and closure carriers need no invented default value. The slot
+    // is vacant until __mg_init publishes its actual initializer.
+    if crate::render_native_rec::has_default(t) {
+        held
+    } else {
+        format!("Option<{held}>")
     }
 }
 

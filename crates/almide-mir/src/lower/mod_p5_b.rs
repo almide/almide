@@ -86,89 +86,9 @@ fn tco_rewrite(body: &IrExpr, shape: TcoShape<'_>, counters: &mut TcoCounters<'_
     }
 }
 
-/// One rewritten SELF-CALL leaf: assign each carried param its new value with
-/// SIMULTANEOUS-UPDATE staging (the loop carries all params at once). A
-/// self-call arg may read ANOTHER carried param (`acc + [string.slice(s, pos,
-/// …)]` reads `pos`; `start = pos + 1` reads `pos`), so a plain sequential
-/// assign would see already-updated values — an off-by-one. Stage every
-/// carried SCALAR's new value in a fresh temp (reading OLD params), THEN do the HEAP
-/// accumulator assigns (which read the still-OLD scalar locals), THEN commit the scalar temps.
-/// An IDENTITY arg (`acc` passed unchanged) is skipped (the stable local already holds it).
-fn tco_rewrite_self_call(
-    args: &[IrExpr],
-    shape: TcoShape<'_>,
-    counters: &mut TcoCounters<'_>,
-) -> IrExpr {
-    let TcoShape { params, carried, idx, .. } = shape;
-    let changed = |i: usize| {
-        carried[i] && !matches!(&args[i].kind, IrExprKind::Var { id } if *id == params[i].var)
-    };
-    let mut stmts: Vec<IrStmt> = Vec::new();
-    let mut finals: Vec<(VarId, VarId, Ty)> = Vec::new();
-    // Phase 1: stage carried SCALAR args in temps (read OLD params).
-    for i in 0..params.len() {
-        if changed(i) && !is_heap_ty(&params[i].ty) {
-            let t = VarId(*counters.next_var);
-            *counters.next_var += 1;
-            stmts.push(IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: t,
-                    mutability: almide_ir::Mutability::Let,
-                    ty: params[i].ty.clone(),
-                    value: args[i].clone(),
-                },
-                span: None,
-            });
-            finals.push((params[i].var, t, params[i].ty.clone()));
-        }
-    }
-    // Phase 2: HEAP append/reset accumulator(s) — `acc = acc + [x]` reads the still-OLD scalar
-    // locals. Emit in READ-DEPENDENCY order so a heap accumulator that reads ANOTHER heap
-    // accumulator (`rows = rows + [cur]` alongside `cur = []`) is assigned BEFORE that one is
-    // updated — the reader must observe the old value. try_tco_rewrite already walled the
-    // cyclic case, so the order always exists (the unwrap_or is a defensive param-order
-    // fallback).
-    let heap_changed: Vec<usize> = (0..params.len())
-        .filter(|&i| changed(i) && is_heap_ty(&params[i].ty))
-        .collect();
-    let heap_order = order_heap_accs_by_read_dep(&heap_changed, args, params)
-        .unwrap_or(heap_changed);
-    for i in heap_order {
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
-            span: None,
-        });
-    }
-    // Phase 3: commit the staged scalar updates.
-    for (p, t, ty) in finals {
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Assign {
-                var: p,
-                value: tco_ir(IrExprKind::Var { id: t }, ty),
-            },
-            span: None,
-        });
-    }
-    // LIST-ITERATOR self-call: the consumed list param is INVARIANT (carried[ci]=false), so
-    // advancing it `list.drop(cs,1)` becomes `idx = idx + 1` — the cert-clean iterator bump.
-    if let Some(iv) = idx {
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Assign {
-                var: iv,
-                value: tco_ir(
-                    IrExprKind::BinOp {
-                        op: almide_ir::BinOp::AddInt,
-                        left: Box::new(tco_ir(IrExprKind::Var { id: iv }, Ty::Int)),
-                        right: Box::new(tco_ir(IrExprKind::LitInt { value: 1 }, Ty::Int)),
-                    },
-                    Ty::Int,
-                ),
-            },
-            span: None,
-        });
-    }
-    tco_ir(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
-}
+include!("tco_owned_args.rs");
+include!("tco_short_circuit.rs");
+include!("tco_capture_snapshots.rs");
 
 /// A BASE case (a non-self tail). Set `rk` to a non-zero kind so the `while rk == 0` loop
 /// exits. The base VALUE is delivered one of two ways:
@@ -266,6 +186,7 @@ pub(crate) fn try_tco_rewrite(
     let retyped = crate::lower::owned_tco_slots().then(|| {
         let mut b = work_body.clone();
         retype_tail_err_bases(&mut b, &body.ty);
+        expose_short_circuit_tails(&mut b);
         b
     });
     let work_body: &IrExpr = retyped.as_ref().unwrap_or(work_body);
@@ -330,7 +251,7 @@ pub(crate) fn try_tco_rewrite(
     {
         return None;
     }
-    if !simultaneous_update_safe(&calls, params2, &carried) {
+    if !crate::lower::owned_tco_slots() && !simultaneous_update_safe(&calls, params2, &carried) {
         return None;
     }
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
@@ -349,7 +270,7 @@ pub(crate) fn try_tco_rewrite(
     let mut next_kind = 1i64;
     // `slot_next` is the next free VarId (after rk / list-iter idx / append slots / result) — tco_rewrite
     // draws its simultaneous-update temps from here.
-    let loop_body = tco_rewrite(
+    let mut loop_body = tco_rewrite(
         work_ref,
         TcoShape {
             fn_name, params: params2, carried: &carried, rk,
@@ -357,6 +278,9 @@ pub(crate) fn try_tco_rewrite(
         },
         &mut TcoCounters { next_kind: &mut next_kind, next_var: &mut slot_next },
     );
+    if owned_tco_slots() {
+        snapshot_tco_captures(&mut loop_body, params2, &carried, &mut slot_next);
+    }
 
     // Post-loop: the accumulator path just READS the result the loop computed; otherwise the dispatch
     // `if rk == 1 then base_1 else if … else base_N` recomputes the hit base from the carried params.
@@ -747,65 +671,4 @@ fn tco_eq_rk(rk: VarId, k: i64) -> IrExpr {
     )
 }
 
-/// The post-loop dispatch `if rk == 1 then base_1 else if … else base_N` —
-/// recomputes the hit base from the carried params.
-fn tco_post_dispatch(base_exprs: &[IrExpr], rk: VarId, ret_ty: &Ty) -> Option<IrExpr> {
-    let mut post = base_exprs.last()?.clone();
-    for (idx, base) in base_exprs.iter().enumerate().rev().skip(1) {
-        post = tco_ir(
-            IrExprKind::If {
-                cond: Box::new(tco_eq_rk(rk, (idx + 1) as i64)),
-                then: Box::new(base.clone()),
-                else_: Box::new(post),
-            },
-            ret_ty.clone(),
-        );
-    }
-    Some(post)
-}
-
-/// The loop-state init binds, in order: `[var idx = 0;] [var result = <empty>;]
-/// var rk = 0;`. The result accumulator (when used) starts at an empty value of
-/// the result type — a placeholder the first base case overwrites IN the loop;
-/// declared mutable so the in-loop base assigns it.
-fn tco_state_inits(
-    idx_var: Option<VarId>,
-    result_var: Option<VarId>,
-    rk: VarId,
-    ret_ty: &Ty,
-) -> Vec<IrStmt> {
-    let mut inits: Vec<IrStmt> = Vec::new();
-    if let Some(iv) = idx_var {
-        inits.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: iv,
-                mutability: almide_ir::Mutability::Var,
-                ty: Ty::Int,
-                value: tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int),
-            },
-            span: None,
-        });
-    }
-    if let Some(rv) = result_var {
-        inits.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: rv,
-                mutability: almide_ir::Mutability::Var,
-                ty: ret_ty.clone(),
-                value: tco_empty_for(ret_ty).expect("checked Some above"),
-            },
-            span: None,
-        });
-    }
-    inits.push(IrStmt {
-        kind: IrStmtKind::Bind {
-            var: rk,
-            mutability: almide_ir::Mutability::Var,
-            ty: Ty::Int,
-            value: tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int),
-        },
-        span: None,
-    });
-    inits
-}
-
+include!("mod_p5_b_post.rs");

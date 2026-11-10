@@ -376,3 +376,27 @@ effect fn main() -> Unit = {
     let used = main.caps.split_once('|').map(|(_, u)| u).unwrap_or("");
     assert!(used.split_whitespace().any(|id| id == "5"), "Clock (5) missing from main's used caps: `{}`", main.caps);
 }
+
+/// The whole socket/process primitive family travels through the declared
+/// floor. Adding a table row without a usable runtime closure is insufficient.
+#[test]
+fn process_and_socket_host_rows_have_a_native_runtime_closure() {
+    let failures: Vec<_> = HOST_OPS.iter()
+        .filter(|op| matches!(op.module, "net" | "process"))
+        .filter_map(|op| {
+            let name = format!("{}.{}", op.module, op.func);
+            almide_mir::native_floor::refusal(&name).map(|e| format!("{name}: {e}"))
+        }).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn process_and_socket_calls_count_the_existing_capabilities() {
+    for (call, expected) in [("process.__os_child_pid(0)", "10"), ("net.__os_tcp_is_open(0)", "7")] {
+        let src = format!("import process\nimport net\neffect fn main() -> Unit = {{ let _ = {call}; println(\"ok\") }}");
+        let w = almide_mir::pipeline::program_witnesses(&src, &[], None).expect("host caller lowers");
+        let main = w.functions.iter().find(|f| f.name == "main").expect("main certified");
+        let used = main.caps.split_once('|').expect("the caps line has a `|` separator").1;
+        assert!(used.split_whitespace().any(|id| id == expected), "{call}: {}", main.caps);
+    }
+}

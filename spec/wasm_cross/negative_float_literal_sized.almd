@@ -9,6 +9,12 @@ fn take32(f: Float32) -> String = float32.to_string(f)
 
 fn take64(f: Float64) -> String = float.to_string(float.from(f))
 
+// A carrier's payload gives a literal fallback its width before either
+// backend runs. The None/Err arms used to retain f64 bits in a Float32 slot.
+fn maybe32(b: Bool) -> Float32? = if b then some(-2.5) else none
+
+fn result32(b: Bool) -> Result[Float32, String] = if b then ok(-2.5) else err("missing")
+
 fn main() -> Unit = {
   let a: Float32 = -2.5
   let b: Float64 = -2.5
@@ -24,4 +30,8 @@ fn main() -> Unit = {
   let q: Float = 1.5
   println(float32.to_string(p))
   println(float.to_string(0.0 - q))
+  println(float32.to_string(maybe32(true) ?? -7.0))
+  println(float32.to_string(maybe32(false) ?? -7.0))
+  println(float32.to_string(result32(true) ?? -7.0))
+  println(float32.to_string(result32(false) ?? -7.0))
 }

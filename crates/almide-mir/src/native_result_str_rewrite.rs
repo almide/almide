@@ -20,8 +20,8 @@
 //! piece walls there. Any other access to a tracked block is left unrewritten
 //! and walls at the render. Ownership follows the Result carrier's: the
 //! piece's own Alloc/Consume stays (the carrier clones it); a minted carrier
-//! has no object, so its `Consume` and its release go and its `Dup` becomes
-//! `ResCopy`; a call result keeps its heap birth and its release.
+//! has its own alloc-class credit, keeps its transfer/release, and its `Dup`
+//! becomes `ResCopy`. A call result keeps its heap birth and release too.
 //!
 //! The wasm leg never sees any of this.
 
@@ -88,12 +88,26 @@ pub fn rewrite_result_str_ops(
 ) {
     let (recognized, piece_handle_ids) = recognize(&f.ops, carriers);
     let ops = std::mem::take(&mut f.ops);
+    let stored: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Store { width: 8 }, args, .. } if args.len() == 2 => Some(args[1]),
+        _ => None,
+    }).collect();
+    let transferred: BTreeSet<_> = ops.iter().filter_map(|op| match op {
+        Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if stored.contains(d) && args.len() == 1 => Some(args[0]),
+        _ => None,
+    }).collect();
     let mut out: Vec<Op> = Vec::with_capacity(ops.len());
     let mut t = Tracker::default();
+    let str_result = crate::render_native_rec::block_key(&almide_lang::types::Ty::result(
+        almide_lang::types::Ty::String, almide_lang::types::Ty::String));
+    t.vals.extend(f.aggregate_blocks.iter().filter(|(_, ty)| **ty == str_result).map(|(v, _)| *v));
     t.vals.extend(res_str_params.iter().copied());
     for op in ops {
+        if let Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } = &op {
+            if args.len() == 1 && stored.contains(d) && t.vals.contains(&args[0]) { out.push(op.clone()); }
+        }
         let Some(op) = t.window_op(op, &mut out, &recognized, &piece_handle_ids) else { continue };
-        let Some(op) = t.ownership_op(op, &mut out) else { continue };
+        let Some(op) = t.ownership_op(op, &mut out, &transferred) else { continue };
         t.flow_op(op, &mut out, res_str_fns);
     }
     f.ops = out;
@@ -174,15 +188,14 @@ impl Tracker {
 
     /// The ownership arms over a minted or tracked carrier. Hands `op` back
     /// when none of them applies.
-    fn ownership_op(&mut self, op: Op, out: &mut Vec<Op>) -> Option<Op> {
+    fn ownership_op(&mut self, op: Op, out: &mut Vec<Op>, transferred: &BTreeSet<ValueId>) -> Option<Op> {
         match &op {
             Op::Dup { dst, src } if self.minted.contains(src) => {
                 out.push(Op::Prim { kind: PrimKind::ResCopy, dst: Some(*dst), args: vec![*src] });
                 self.vals.insert(*dst);
                 self.minted.insert(*dst);
             }
-            Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
-            Op::Consume { v } if self.vals.contains(v) => {}
+            Op::Consume { v } if self.vals.contains(v) && !self.minted.contains(v) && !transferred.contains(v) => {}
             _ => return Some(op),
         }
         None
@@ -197,15 +210,9 @@ impl Tracker {
                         self.vals.insert(*d);
                     }
                 }
-                // A minted carrier has no object: as a call arg it is a value
-                // the callee copies, not a heap handle it borrows.
-                let args = args
-                    .iter()
-                    .map(|a| match a {
-                        crate::CallArg::Handle(v) if self.minted.contains(v) => crate::CallArg::Scalar(*v),
-                        other => other.clone(),
-                    })
-                    .collect();
+                // Native String-Result construction retains its owned credit;
+                // a call borrows the carrier exactly like any other Result.
+                let args = args.clone();
                 out.push(Op::CallFn { dst: *dst, name: name.clone(), args, result: *result });
             }
             Op::IfThen { dst, .. } => {
@@ -244,7 +251,7 @@ struct Tracker {
     consts: BTreeMap<ValueId, i64>,
     /// Values known to be String-Ok Results.
     vals: BTreeSet<ValueId>,
-    /// Carriers this pass minted (no object of their own).
+    /// Carriers this pass minted, each owning its own alloc-class credit.
     minted: BTreeSet<ValueId>,
     /// A swallowed `Handle` over a tracked or recognized block → the block.
     handles: BTreeMap<ValueId, ValueId>,
@@ -254,3 +261,7 @@ struct Tracker {
     piece_handles: BTreeMap<ValueId, ValueId>,
     if_dsts: Vec<Option<ValueId>>,
 }
+
+#[cfg(test)]
+#[path = "native_result_str_credit_test.rs"]
+mod credit_tests;

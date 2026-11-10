@@ -148,6 +148,8 @@ impl LowerCtx {
                 self.live_heap_handles.retain(|x| *x != v);
             }
         }
+        let ty = Ty::Tuple(elements.iter().map(|e| e.ty.clone()).collect());
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&ty));
         self.record_masks.insert(dst, heap_slots);
         self.materialized_aggregates.insert(dst);
         Some(dst)
@@ -196,7 +198,10 @@ impl LowerCtx {
         // The CANONICAL declaration-ordered (name, concrete-type) field list. A heap
         // field / unresolvable type ⇒ `None` (via `scalar_slots`) ⇒ wall.
         let (names, tys) = self.aggregate_field_tys(&value.ty)?;
-        let n = layout::scalar_slots(&tys)?;
+        // A declared empty native record owns a real zero-slot value. It
+        // carries no fields, but can still be passed, captured and dropped.
+        let n = if crate::lower::owned_tco_slots() && tys.is_empty() { 0 }
+            else { layout::scalar_slots(&tys)? };
         if names.len() != n {
             return None;
         }
@@ -391,9 +396,9 @@ impl LowerCtx {
                 if self.variant_layouts.is_ctor_for(ctor.as_str(), &value.ty) =>
             {
                 let ctor_s = ctor.as_str().to_string();
-                let case_fields = {
-                    let (_, _, case) = self.variant_layouts.lookup_ctor_for(&ctor_s, &value.ty)?;
-                    case.fields.clone()
+                let (case_fields, defaults_key) = {
+                    let (owner, _, case) = self.variant_layouts.lookup_ctor_for(&ctor_s, &value.ty)?;
+                    (case.fields.clone(), format!("{owner}::{}", case.ctor))
                 };
                 let mut ordered = Vec::with_capacity(case_fields.len());
                 for (fname, _) in &case_fields {
@@ -408,7 +413,7 @@ impl LowerCtx {
                             let d = self
                                 .variant_layouts
                                 .ctor_field_defaults
-                                .get(&ctor_s)
+                                .get(&defaults_key)
                                 .and_then(|m| m.get(fname.as_str()))?;
                             if crate::lower::expr_contains_call(d) {
                                 return Option::None;
@@ -468,7 +473,12 @@ impl LowerCtx {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
-        if matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+        // A tuple field (`TextSeg(Pair[String])`, ADT brick 5) is an aggregate
+        // like a record field: its owned payloads are released recursively by
+        // the same scope-end drop, including when the variant uses a masked
+        // block drop.
+        if (matches!(&arg.ty, Ty::Named(..) | Ty::Record { .. })
+            || matches!(&arg.ty, Ty::Tuple(..)))
             && self.aggregate_field_tys(&arg.ty).is_some()
         {
             // A RECORD-type ctor field (`Wrap(Color)`, `Box(Inner)`): materialize the record (a

@@ -1,0 +1,15 @@
+// @contract: C-095
+// A 4-byte character followed by a `\uXXXX` escape parses to the same string
+// on every leg, and the wasm leg frees every block it allocated for it (#4607):
+// the scanner's tail call into the `\u` branch left the frame without the
+// `(codepoint, length)` tuple the previous character bound.
+import json
+
+fn main() -> Unit = {
+  let one = json.parse("\"👨\\u0002\"") ?? value.null()
+  let three = json.parse("\"\\u0001👨\\u0002👨\\u0003👨\\u0004\"") ?? value.null()
+  println(json.stringify(one))
+  println(json.stringify(three))
+  println("${one == value.string("👨\u{2}")}")
+  println("${json.parse(json.stringify(three)) ?? value.null() == three}")
+}

@@ -40,7 +40,8 @@ impl Emitter<'_> {
             // The witness audit (#1696 step 4): the arm fired one argument
             // hook per argument, and declared no droppable View — or the
             // frame declines, before the promotion below adds a +1.
-            if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target) {
+            if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target)
+            {
                 em.witness_module_result(&format!("{module}.{func}"), args, before);
             }
             // A `View` into a temporary this scope releases next would
@@ -123,9 +124,19 @@ impl Emitter<'_> {
                 // evaluated (an abort inside it stays an abort).
                 self.note_host_op(crate::fs_meta::OP_EXIT_MARK);
                 let mut i = self.f.instructions();
-                i.i32_const(crate::fs_meta::OP_EXIT_MARK).i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                i.i32_const(crate::fs_meta::OP_EXIT_MARK)
+                    .i32_const(0)
+                    .i32_const(0)
+                    .i32_const(0)
+                    .i32_const(0);
                 i.call(F_FS_CALL).drop();
-                i.call(F_EXIT_IMPORT).unreachable();
+                let _ = i;
+                // Record the same process-ending continuation as a panic:
+                // no frame credit is released after the host exits, and
+                // unreachable value arms must not invent a returned credit.
+                let plan = self.exit_plan(crate::exit_plan::Continuation::Abort);
+                self.emit_exit(&plan);
+                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
                 Ok(None)
             }
             CallTarget::Module { module, func, .. }
@@ -169,7 +180,9 @@ impl Emitter<'_> {
             // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
             // `as f64` (IEEE round-to-nearest-even), bit-exact.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "int" && func.as_str() == "__raw_to_float" && args.len() == 1 =>
+                if module.as_str() == "int"
+                    && func.as_str() == "__raw_to_float"
+                    && args.len() == 1 =>
             {
                 self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
@@ -235,7 +248,10 @@ impl Emitter<'_> {
                 };
                 self.f.instructions().local_set(self.scr_i32_local);
                 let hrecv = self.hold_i32()?;
-                self.f.instructions().local_get(self.scr_i32_local).local_set(hrecv);
+                self.f
+                    .instructions()
+                    .local_get(self.scr_i32_local)
+                    .local_set(hrecv);
                 self.lower_arg(&args[1], Some(et), ArgMode::Retain)?;
                 let hdef = match et.val_type() {
                     ValType::I64 => self.hold_i64()?,
@@ -249,7 +265,9 @@ impl Emitter<'_> {
                     if is_option {
                         i.i32_eqz();
                     } else {
-                        i.i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
+                        i.i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(0)
+                            .i32_ne();
                     }
                     i.if_(BlockType::Result(et.val_type()));
                     i.local_get(hdef);
@@ -257,7 +275,11 @@ impl Emitter<'_> {
                 }
                 self.load_ty_slot(
                     et,
-                    if is_option { almide_layout::OPTION_FIELD } else { almide_layout::SUM_FIELD },
+                    if is_option {
+                        almide_layout::OPTION_FIELD
+                    } else {
+                        almide_layout::SUM_FIELD
+                    },
                 );
                 // The payload handed out is a SHARE of the receiver's (+1):
                 // with the retained default, both branches hand back an
@@ -326,7 +348,8 @@ impl Emitter<'_> {
             // reads in the module; the rest of it is self-host and keeps the
             // generic route.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "monotonic_ns") =>
+                if module.as_str() == "datetime"
+                    && matches!(func.as_str(), "now" | "monotonic_ns") =>
             {
                 if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
                     return Ok(out);

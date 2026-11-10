@@ -264,7 +264,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
         let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;
-        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs, judges: &judges }, &frames, &[arms, routines], &mut r)?;
+        check_rc(&bodies, function_imports(wasm), RcFns { inc, releases: &decs, sigs: &sigs, judges: &judges, alloc: Some(alloc) }, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

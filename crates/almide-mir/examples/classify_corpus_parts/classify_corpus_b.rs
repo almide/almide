@@ -486,6 +486,7 @@ struct Tally {
     /// kernel-unrepresentable nested-region arms, counted so the exclusion is
     /// never a silent shrink of the proof surface.
     cert_poisoned_excluded: usize,
+    cert_poisoned_names: Vec<String>,
     /// Functions whose MIR call-op count EXCEEDS their source call-node count — the
     /// caps-soundness gate for the elided-call effect markers (`record_elided_calls`).
     /// In-profile functions whose Stdout-freedom is provable transitively (every

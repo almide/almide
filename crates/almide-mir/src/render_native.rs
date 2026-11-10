@@ -29,7 +29,11 @@ use std::fmt::Write as _;
 /// The native type a MIR value renders to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum NTy {
+    /// Uninhabited payload; functions returning it have a diverging ABI.
+    Never,
     I64,
+    /// A real f32 only at a typed collection runtime boundary.
+    F32,
     /// An OWNED `String` local (fresh from a literal alloc, a heap-returning
     /// call, or a clone).
     Str,
@@ -85,6 +89,7 @@ impl NTy {
 /// List, and only the declaration disambiguates). Rung 4: scalar lists join strings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NativeSigKind {
+    Never,
     I64,
     Str,
     ListI64,
@@ -156,8 +161,14 @@ pub(crate) fn var(v: ValueId) -> String {
 /// (scripts/check-native-v1-perf-small.sh) leaves it out of a program's work
 /// by toggling collection on this function.
 const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_install() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
-const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
-const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
+/// The out-of-bounds exit every rendered element check takes: one cold,
+/// out-of-line function, as the standard codegen's checks call
+/// `almide_abort`. Written at each check, the message's formatting made every
+/// indexing function large enough that a caller's inlining declined it (a
+/// decode loop called per symbol paid a call frame per symbol).
+pub(crate) const OOB_SHIM: &str = "#[cold]\n#[inline(never)]\nfn almide_oob() -> ! {\n    almide_abort(\"index out of bounds\")\n}";
+const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize]\n}";
+const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
 
 /// Borrow a stringy value as `&str` for a call argument.
 pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
@@ -172,7 +183,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
-        NTy::I64 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+        NTy::Never | NTy::I64 | NTy::F32 | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
         NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),
@@ -207,11 +218,9 @@ use crate::render_native_shims::{
 
 /// The Perceus balance is machine-checked on the SAME ops this render erases
 /// Drops from — the certificate that scope-end drop realizes it. A violation is
-/// a wall, with the whole op list dumped under `ALMIDE_DUMP_VERIFY`.
+/// a wall. `ALMIDE_DUMP_VERIFY` dumps every verify-stage op list, including
+/// functions whose ownership passes but whose later rendering may refuse.
 fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
-    let Err(violations) = crate::verify_ownership(func) else {
-        return Ok(());
-    };
     if almide_base::env::flag("ALMIDE_DUMP_VERIFY") {
         use std::io::Write as _;
         let mut err = std::io::stderr();
@@ -220,6 +229,9 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
             let _ = writeln!(err, "  [{i}] {op:?}");
         }
     }
+    let Err(violations) = crate::verify_ownership(func) else {
+        return Ok(());
+    };
     Err(wall(format!(
         "native: ownership verification failed for `{}`: {violations:?}",
         func.name
@@ -242,37 +254,50 @@ fn push_closure_dispatch_tables(
     sigs: &NativeSigs,
 ) {
     let mut arities: BTreeMap<usize, Vec<(usize, &str)>> = BTreeMap::new();
+    for arity in crate::render_native_closure::demanded_scalar_arities() {
+        arities.entry(arity).or_default();
+    }
     let lambda_names = user_fns
         .keys()
         .copied()
         .filter(|n| n.starts_with("__lambda_"));
     for (idx, name) in lambda_names.enumerate() {
-        if !matches!(fn_rets.get(name), Some(Some(NTy::I64)) | Some(None)) {
+        if !matches!(fn_rets.get(name), Some(Some(NTy::I64 | NTy::F64)) | Some(None)) {
             continue;
         }
         // A heap-param lambda dispatches through its signature's typed table.
-        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| *k != NativeSigKind::I64)) {
+        if sigs.get(name).is_some_and(|(ps, _)| ps.iter().skip(1).any(|k| !matches!(k, NativeSigKind::I64 | NativeSigKind::F64))) {
             continue;
         }
         let arity = user_fns[name].params.len().saturating_sub(1);
         arities.entry(arity).or_default().push((idx, name));
     }
     for (arity, fns) in arities {
+        let env_ty = fns.first().map(|(_, name)| crate::render_native_closure::dispatch_env(sigs, name))
+            .unwrap_or("&__AlmdClosure");
         let params: String = (0..arity).map(|i| format!(", a{i}: i64")).collect();
-        let args: String = (0..arity).map(|i| format!(", a{i}")).collect();
         out.push_str(&format!(
-            "fn __almd_ci_{arity}(idx: i64, env: &[i64]{params}) -> i64 {{\n    match idx {{\n"
+            "#[inline]\nfn __almd_ci_{arity}(idx: i64, env: {env_ty}{params}) -> i64 {{\n    match idx {{\n"
         ));
         for (idx, name) in fns {
+            // This table serves the MIR scalar ABI: every argument/result
+            // is an i64 lane. Decode/encode Float only at the declared
+            // lambda boundary, preserving the bits for its scalar caller.
+            let args: String = (0..arity).map(|i| {
+                if sigs.get(name).and_then(|(ps, _)| ps.get(i + 1)) == Some(&NativeSigKind::F64) {
+                    format!(", f64::from_bits(a{i} as u64)")
+                } else { format!(", a{i}") }
+            }).collect();
             if fn_rets.get(name) == Some(&None) {
                 out.push_str(&format!("        {idx} => {{ {}(env{args}); 0 }}\n", mangle(name)));
+            } else if fn_rets.get(name) == Some(&Some(NTy::F64)) {
+                out.push_str(&format!("        {idx} => {}(env{args}).to_bits() as i64,\n", mangle(name)));
             } else {
                 out.push_str(&format!("        {idx} => {}(env{args}),\n", mangle(name)));
             }
         }
         out.push_str(
-            "        _ => { eprintln!(\"Error: closure index out of range\"); \
-             std::process::exit(1) }\n    }\n}\n\n",
+            "        _ => { almide_abort(\"closure index out of range\") }\n    }\n}\n\n",
         );
     }
 }
@@ -295,7 +320,7 @@ pub fn try_render_native_program(
         .iter()
         .map(|f| (f.name.as_str(), f))
         .collect();
-    if !user_fns.contains_key("main") {
+    if !user_fns.contains_key("main") && !crate::native_test_harness::active() {
         return Err(wall("native: no main in the MIR program"));
     }
     render_items(prog, sigs, true)
@@ -310,27 +335,66 @@ pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<Strin
     render_items(prog, sigs, false)
 }
 
+/// Probe linked bodies after a refused program render. Only a renderer
+/// refusal can propose a declared runtime route; retained bodies still pass
+/// ownership verification in the final render, before certificates are made.
+/// The caller restores the representation table and resets render state before
+/// using the proposal. Each surviving call is checked again by native_hof.
+pub(crate) fn refused_native_bodies(
+    prog: &MirProgram,
+    sigs: &NativeSigs,
+    linked: &std::collections::BTreeSet<String>,
+) -> Result<BTreeMap<String, LowerError>, LowerError> {
+    let user_fns = prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
+    crate::render_native_keyed::set_program(&user_fns, sigs);
+    let mut refused = BTreeMap::new();
+    for func in prog.functions.iter().filter(|f| linked.contains(&f.name)) {
+        match render_fn(func, &user_fns, sigs, &mut Vec::new()) {
+            Err(e) => { refused.insert(func.name.clone(), e.with_fn_context(&func.name)); }
+            Ok(_) => verify_ownership_or_wall(func)?,
+        }
+    }
+    Ok(refused)
+}
+
 fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
+    let _dispatch = crate::render_native_closure::DispatchScope::enter();
+    crate::render_native_rec::reset_capture_kinds();
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
         .map(|f| (f.name.as_str(), f))
         .collect();
-    let mut used_shims: Vec<&'static str> = Vec::new();
+    let mut used_shims: Vec<&'static str> = vec![crate::native_floor::floor_header()];
     let mut bodies = String::new();
     fan_rendered_reset();
+    crate::render_native_keyed::set_program(&user_fns, sigs);
     crate::render_native_bounds::reset();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();
+    let mut texts: BTreeMap<String, String> = BTreeMap::new();
     for func in &prog.functions {
         verify_ownership_or_wall(func)?;
         let (rendered, ret_nty) = render_fn(func, &user_fns, sigs, &mut used_shims)
             .map_err(|e| e.with_fn_context(&func.name))?;
+        let rendered = crate::render_native_narrow::narrow_locals(func, sigs, rendered);
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
+        let rendered = crate::render_native_keyed::specialize(func, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
         bodies.push_str(&rendered);
         bodies.push('\n');
+        texts.insert(func.name.clone(), rendered);
+    }
+    bodies.push_str(&crate::native_hof::array_twins(&texts)?);
+    // Libtest supplies the entry point, so a test-only fan program has no
+    // rendered main to bring in the worker stack-guard dependencies.
+    if fan_rendered() && !user_fns.contains_key("main") {
+        used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
+        used_shims.push(STACK_GUARD_GLUE_SHIM);
     }
     used_shims.extend(crate::native_slot_rewrite::heap_slot_statics());
+    // Every element check exits through it (never inlined, dropped by the
+    // linker when no check is written).
+    used_shims.push(OOB_SHIM);
 
     let mut out = String::from(
         "// Generated by the Almide v1 trust spine (native leg).\n\
@@ -340,6 +404,12 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // definitions, whether or not a body operates on them (#4514).
     let aliased = crate::native_floor::runtime_items_named_by(&crate::render_native_rec::alias_targets()).map_err(wall)?;
     used_shims.extend(aliased);
+    used_shims.extend(crate::native_foreign::runtime_items()?);
+    let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies);
+    if let Some(scope) = &fs_scope {
+        let support = crate::native_floor::scoped_fs_runtime_items(&scope.prelude, &used_shims, fan_rendered()).map_err(wall)?;
+        used_shims.extend(support);
+    }
     used_shims.sort();
     used_shims.dedup();
     let (runtime, glue): (Vec<&str>, Vec<&str>) = used_shims.into_iter().partition(|s| crate::native_floor::is_runtime_text(s));
@@ -348,7 +418,10 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         // after them, the runtime's included: one crate, as before.
         out.push_str(&crate::render_native_str::almide_string_alias());
         for s in runtime {
-            out.push_str(s);
+            // Fan glue owns these sinks, including raw bytes, for every arm.
+            out.push_str(if fan_rendered() && s == crate::native_floor::floor_header() {
+                s.strip_suffix(crate::native_floor::FLOOR_IO_HEADER).expect("floor IO suffix")
+            } else { s });
             out.push_str("\n\n");
         }
         out.push_str(&crate::render_native_rec::runtime_default_impls());
@@ -376,7 +449,9 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&crate::render_native_rec::runtime_default_impls());
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
     }
+    let user_start = out.len();
     out.push_str(&crate::render_native_rec::struct_defs());
+    out.push_str(&crate::render_native_rec::closure_env_defs());
     for s in glue {
         out.push_str(s);
         out.push_str("\n\n");
@@ -391,6 +466,13 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if let Some(scope) = fs_scope {
+        let user = scope.wrap_calls(&out[user_start..]);
+        out.truncate(user_start);
+        out.push_str(&scope.prelude);
+        out.push_str(&user);
+        out.insert_str(0, &format!("{}\n", almide_codegen::fs_scope::SCOPE_MARKER));
+    }
     if fan_rendered() {
         // #4006 family H: the fan runtime ahead of every other item (its
         // output macros shadow std's for all that follows), and every exit
@@ -398,6 +480,8 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         let at = out.find("\n\n").map_or(0, |i| i + 2);
         out.insert_str(at, &fan_glue());
         out = route_exits(&out);
+    } else if runtime_module {
+        out = crate::native_floor::route_process_exits(&out, "almide_host_exit");
     }
     Ok(out)
 }
@@ -447,6 +531,7 @@ fn seed_param_ntys(
     let mut tys: BTreeMap<ValueId, NTy> = BTreeMap::new();
     for (i, p) in func.params.iter().enumerate() {
         let nty = match own_sig.and_then(|(ps, _)| ps.get(i)) {
+            Some(NativeSigKind::Never) => NTy::Never,
             Some(NativeSigKind::ListI64) => NTy::VecRef,
             Some(NativeSigKind::ListStr) => NTy::VecStrRef,
             Some(NativeSigKind::Rec(i)) => NTy::RecRef(*i),

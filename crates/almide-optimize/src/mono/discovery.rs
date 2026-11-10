@@ -181,11 +181,7 @@ impl<'a> DiscoverVisitor<'a> {
     }
 
     fn try_insert(&mut self, name: String, bindings: HashMap<String, Ty>) {
-        let all_concrete = !bindings.is_empty() && bindings.values().all(|ty|
-            !matches!(ty, Ty::Unknown) && !ty.contains_unknown()
-            && !matches!(ty, Ty::TypeVar(_))
-            && !ty.contains_typevar()
-        );
+        let all_concrete = super::utils::bindings_all_concrete(&bindings);
         if almide_base::env::flag("ALMIDE_MONO_DEBUG") {
             eprintln!("[mono-debug] try_insert {name} bindings={bindings:?} concrete={all_concrete}");
         }

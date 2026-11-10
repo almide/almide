@@ -215,16 +215,17 @@ impl<'a> Interpreter<'a> {
     /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
-    /// The executing auto-imported bundled module, when it declares `name`
-    /// as an `@intrinsic` stub (a `Hole` body) — the declaration, not the
-    /// spelling, decides. Only the bundled pool needs this: its sibling
-    /// lookup (`bundled_body`) skips stubs. A program-loaded module's stub
-    /// sibling (`env.__set` inside `env.set`) already resolves through
-    /// `own_module_sibling` and the interp's own intrinsic evaluation, which
-    /// must stay the interp's vote rather than the module bridge's copy.
+    /// The executing bundled or program-loaded stdlib module's intrinsic
+    /// sibling. A retained Hole declaration must take the same intrinsic
+    /// dispatch as a qualified call, not execute the Hole. A real body or
+    /// an ordinary user hole keeps its normal resolution.
     pub(crate) fn own_module_intrinsic(&self, name: Sym) -> Option<Sym> {
-        let module = self.cur_bundled.get()?;
-        crate::stdlib_pool::bundled_stub(module, name).then_some(module)
+        if let Some(module) = self.cur_bundled.get() {
+            return crate::stdlib_pool::bundled_stub(module, name).then_some(module);
+        }
+        let module = self.program.modules.get(self.cur_space.get().checked_sub(1)? as usize)?.name;
+        let def = self.module_fns.get(&(module, name))?;
+        (matches!(def.body.kind, IrExprKind::Hole) && crate::stdlib_pool::declared_stub(module, name)).then_some(module)
     }
 
     /// The LAST step of a bare call no other step resolved: inside a
@@ -306,6 +307,34 @@ impl<'a> Interpreter<'a> {
             slots[i] = Some(val!(self.eval_expr(a, scope)));
         }
         let evaled: Vec<Value> = slots.into_iter().map(|v| v.expect("every operand evaluated")).collect();
+        self.run_lowered_fn_call(func, writebacks, evaled, scope)
+    }
+
+    /// [`Self::eval_lowered_fn_call`] for operands already evaluated in
+    /// source order by the value-only module dispatch: the `mut` places are
+    /// resolved from the argument exprs, then the body runs and copies out.
+    fn finish_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        args: &[IrExpr],
+        evaled: Vec<Value>,
+        scope: &Scope,
+    ) -> Flow {
+        match self.mut_param_lvalues(func, args) {
+            Ok(writebacks) => self.run_lowered_fn_call(func, writebacks, evaled, scope),
+            Err(flow) => flow,
+        }
+    }
+
+    /// The body of a lowered fn call over its evaluated operands, with the
+    /// `mut` parameters' copy-out to the caller's places.
+    fn run_lowered_fn_call(
+        &mut self,
+        func: &'a almide_ir::IrFunction,
+        writebacks: Vec<(usize, MutLvalue)>,
+        evaled: Vec<Value>,
+        scope: &Scope,
+    ) -> Flow {
         let root = self.root_scope();
         let is_pool = crate::stdlib_pool::is_pool_body(func);
         // Depth is owned by `run_callable`'s per-hop bump — see

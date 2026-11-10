@@ -411,7 +411,7 @@ template = "#[test]\nfn {name}() {{\n    let _almd_done = AlmdTestDone(\"{name}\
 # an effect fn, rendered with or without its Result carrier, so the outcome
 # trait takes both; an err ends the child as an effect `main`'s does.
 [abort_site_entry]
-template = "#[test]\n#[ignore = \"almide:abort-site\"]\nfn {entry}() {{\n    trait AlmdAbortSiteOutcome {{ fn finish(self); }}\n    impl AlmdAbortSiteOutcome for () {{ fn finish(self) {{}} }}\n    impl<E: std::fmt::Display> AlmdAbortSiteOutcome for Result<(), E> {{ fn finish(self) {{ if let Err(e) = self {{ almide_abort(e) }} }} }}\n    let site: i64 = std::env::var(\"ALMIDE_ABORT_SITE\").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);\n    AlmdAbortSiteOutcome::finish({dispatch}(site));\n    almide_stdout_flush();\n    std::process::exit(0);\n}}"
+template = "#[test]\n#[ignore = \"almide:abort-site\"]\nfn {entry}() {{\n    trait AlmdAbortSiteOutcome {{ fn finish(self); }}\n    impl AlmdAbortSiteOutcome for () {{ fn finish(self) {{}} }}\n    impl<{outcome_params}> AlmdAbortSiteOutcome for Result<{outcome_ok}, E> {{ fn finish(self) {{ if let Err(e) = self {{ {abort}(e) }} }} }}\n{init}    let site: i64 = std::env::var(\"ALMIDE_ABORT_SITE\").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);\n    AlmdAbortSiteOutcome::finish({dispatch}(site));\n    {flush}();\n    std::process::exit(0);\n}}"
 
 [assert_eq]
 template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"

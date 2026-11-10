@@ -1,0 +1,9 @@
+fn seen(n: Int, s: String) -> Bool = { println("${s}${n}"); n != 2 }
+fn all(n: Int, s: String) -> Bool = n == 0 or (seen(n, s) and all(n - 1, s))
+fn any(n: Int, s: String) -> Bool = n > 0 and (seen(n, s) or any(n - 1, s))
+fn main() -> Unit = {
+  println("all ${all(4, "a")}")
+  println("all ${all(1, "b")}")
+  println("any ${any(2, "c")}")
+  println("any ${any(0, "d")}")
+}

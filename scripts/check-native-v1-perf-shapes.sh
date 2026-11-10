@@ -59,7 +59,8 @@ if ! RUSTFLAGS="-C instrument-coverage" LLVM_PROFILE_FILE="$WORK/build-%m-%p.pro
 fi
 BIN="$TARGET/release/examples/render_corpus"
 
-{ grep -E '^spec/' proofs/native-verified-floor.txt; ls research/benchmark/perf/v1-shapes/*.almd; } \
+source scripts/lib/native-v1-perf-corpus.sh
+native_v1_perf_programs \
   | grep -vE "${NATIVE_V1_SHAPES_DROP:-^\$}" > "$WORK/corpus.txt"
 LLVM_PROFILE_FILE="$WORK/run-%m.profraw" "$BIN" < "$WORK/corpus.txt" > "$WORK/verdicts.txt"
 fail=0

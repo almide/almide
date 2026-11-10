@@ -94,6 +94,7 @@ fn __mlo_from_at(ph: Int, n: Int, i: Int, m: Map[String, List[Int?]]) -> Map[Str
     __mlo_from_at(ph, n, i + 1, nm)
   }
 
+@specializes("map.from_list")
 fn map_from_list_mlo(pairs: List[(String, List[Int?])]) -> Map[String, List[Int?]] = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)

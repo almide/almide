@@ -40,3 +40,7 @@ almide = { path = "../.." }
 # The native wall (#4006): emit_native_bundle pins the rendered Rust source
 # by SHA-256 in the certificate bundle; almide-verify recomputes it.
 sha2 = "0.11"
+
+[build-dependencies]
+almide-codegen = { path = "../almide-codegen" }
+almide-str = { path = "../almide-str" }

@@ -8,52 +8,7 @@ use almide_ir::{
 };
 use almide_lang::types::Ty;
 
-/// Substitute `Ty::TypeVar(name)` with the supplied concrete type throughout `ty` —
-/// the generic-record instantiation used by the VALUE MODEL (`Box[Int]`'s `value: T`
-/// becomes `value: Int`). Total over `Ty`; an unmapped `TypeVar` is left as-is (the
-/// caller's `scalar_field_width` then rejects it, walling the record).
-pub(super) fn subst_type_var(
-    ty: &Ty,
-    subst: &std::collections::HashMap<almide_lang::intern::Sym, Ty>,
-) -> Ty {
-    match ty {
-        Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
-        Ty::Applied(id, args) => {
-            Ty::Applied(id.clone(), args.iter().map(|a| subst_type_var(a, subst)).collect())
-        }
-        Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (*n, subst_type_var(t, subst))).collect(),
-        },
-        Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (*n, subst_type_var(t, subst))).collect(),
-        },
-        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_type_var(e, subst)).collect()),
-        // A generic PARAMETER of a record decl is stored as a bare `Named(T, [])` (the
-        // frontend lowers an uninstantiated type variable to a nullary named type, NOT a
-        // `Ty::TypeVar`). When `T` is one of this type's params (it is in `subst`), resolve
-        // it to the instantiated arg — this is the #650 "generic field sized by its
-        // INSTANTIATED type" fix, the substitution `aggregate_field_tys` relies on so a
-        // `Box[Int]` field `value: T` resolves to `Int` (and its heap-ness is decided
-        // correctly for the spread-copy / offset paths). A `Named` WITH args is a real
-        // applied type — recurse into the args only.
-        Ty::Named(name, args) if args.is_empty() && subst.contains_key(name) => {
-            subst.get(name).cloned().unwrap_or_else(|| ty.clone())
-        }
-        Ty::Named(name, args) => {
-            Ty::Named(*name, args.iter().map(|a| subst_type_var(a, subst)).collect())
-        }
-        Ty::Fn { is_effect: _, params, ret } => Ty::Fn { is_effect: false, 
-            params: params.iter().map(|p| subst_type_var(p, subst)).collect(),
-            ret: Box::new(subst_type_var(ret, subst)),
-        },
-        Ty::Union(members) => {
-            Ty::Union(members.iter().map(|m| subst_type_var(m, subst)).collect())
-        }
-        // Scalars, Variant, Const*, Unknown, Never, etc. carry no nested TypeVar this
-        // brick substitutes through — returned unchanged.
-        other => other.clone(),
-    }
-}
+include!("calls_subst.rs");
 
 impl LowerCtx {
 
@@ -139,6 +94,10 @@ impl LowerCtx {
             let zero = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: zero, value: 0 });
             self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![addr, zero] });
+            // Inlining removes the call's declared return type. Preserve it
+            // just as for other typed aggregate allocations; native must not
+            // guess Value versus List from their shared physical layout.
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::VALUE_KEY.to_string());
             return Ok(Some(dst));
         }
         // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an
@@ -253,9 +212,9 @@ impl LowerCtx {
         // `mir == ir` double-count gate is untouched), unlike synthesizing a `string.len` call arg.
         let name = if module == "string" && func == "slice" && args.len() == 2 {
             "string.slice2".to_string()
-        } else if let Some(krec) = self.krec_call_name(module, func, &arg_tys, result_ty) {
-            // A String-field-record key/element (C-015) — the generated `__krec_*` twin.
-            krec
+        } else if let Some(name) = crate::lower::registry_sig::declared_collection_route(module, func, &arg_tys, result_ty)
+            .or_else(|| self.krec_call_name(module, func, &arg_tys, result_ty)) {
+            name
         } else {
             list_heap_call_name(module, func, &arg_tys, result_ty, self.router_hints(&arg_tys, result_ty))
         };
@@ -265,6 +224,9 @@ impl LowerCtx {
             args: lowered,
             result: Some(repr),
         });
+        if repr.is_heap() {
+            self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(result_ty));
+        }
         Ok(dst)
     }
 
@@ -308,7 +270,7 @@ impl LowerCtx {
                 // is_known_free, no body to mismatch). The lifted lambda's caps reach this
                 // function through the FuncRef edge (folded at creation), so a printing
                 // closure can never be silently caps-verified.
-                IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
+                IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body, &a.ty) {
                     // The closure BLOCK is passed like any heap arg (borrowed; it stays in
                     // the live set here and is dropped at scope end after the combinator).
                     Some(blk) => out.push(CallArg::Handle(blk)),
@@ -426,9 +388,8 @@ impl LowerCtx {
             self.ops.push(Op::Prim { kind: crate::PrimKind::ProcExit, dst: None, args: vec![code] });
             return Ok(());
         }
-        // An IN-PLACE `&mut` BYTES mutator (set_*/write_*/fill/clear/copy_within/
-        // copy_from — the self-host bodies store through args[0]'s block), or the
-        // in-place `list.pop` (the same &mut protocol over a list receiver). The
+        if self.try_cell_bytes_mutation(module, func, args, result_ty)? { return Ok(()); }
+        // An in-place mutator (Bytes writers or list.pop). The
         // native oracle's semantics (RcCow + borrow inference) split by receiver:
         //   - a LOCAL var: `make_mut` COWs a SHARED block at the mutation — so
         //     `var b = a; bytes.put_u8(b, …)` must not write through `a` (#794;
@@ -689,6 +650,7 @@ impl LowerCtx {
     }
 }
 
+include!("calls_cell_mutation.rs");
 /// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
 /// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
 /// the in-place `list.pop` (the same &mut protocol over a list receiver), and

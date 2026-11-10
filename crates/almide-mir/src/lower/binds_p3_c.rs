@@ -11,6 +11,15 @@ impl LowerCtx {
     /// half outgrows a readable branch ladder; the ORDER across the two halves
     /// is unchanged (this one runs only after every branch above declined).
     fn lower_variant_ctor_field_tail(&mut self, arg: &IrExpr) -> Option<(ValueId, bool)> {
+        if crate::lower::owned_tco_slots()
+            && matches!(&arg.ty, Ty::Named(name, args) if args.is_empty()
+                && crate::native_runtime_types::RuntimeType::of(name.as_str()).is_some())
+        {
+            // Native runtime values keep their declared Rust type inside
+            // variants. Acquire the field through the normal ownership path;
+            // the enclosing typed aggregate recursively drops that value.
+            return self.lower_owned_heap_field(arg).map(|v| (v, true));
+        }
         if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &arg.ty {
             if a.len() == 1 && self.option_payload_drop_exact(&a[0]) {
                 // An Option ctor field whose payload the generated `$__drop_<T>` frees
@@ -144,6 +153,7 @@ impl LowerCtx {
         // Drop selection: a NESTED-variant type uses the recursive `Op::DropVariant` (the
         // generated `$__drop_<T>` frees every heap field — variant slots recursively, String
         // slots flat — then the block). A String-only-field type uses the masked DropListStr.
+        self.aggregate_blocks.insert(dst, type_name.clone());
         if needs_rec {
             self.value_drops.entry(dst).or_default().named_route = Some(type_name);
         } else if !heap_slots.is_empty() {
@@ -239,8 +249,9 @@ impl LowerCtx {
         let fields = self.record_fields_with_declared_defaults(&value.ty, &names, fields);
         let n = tys.len();
         let heap_slots = self.record_heap_slot_mask(&names, &tys, &fields)?;
-        let slots = self.lower_record_field_slots(&names, &fields)?;
+        let slots = self.lower_record_field_slots(&names, &tys, &fields)?;
         let dst = self.emit_record_slot_block(n, slots);
+        self.aggregate_blocks.insert(dst, crate::render_native_rec::block_key(&value.ty));
         self.record_masks.insert(dst, heap_slots);
         self.materialized_aggregates.insert(dst);
         if let Some(name) = self.record_drop_type_name(&value.ty) {
@@ -320,7 +331,7 @@ impl LowerCtx {
     /// #852): lowers every supplied field to its `(declared-index, slot-value, is-heap)`
     /// triple ahead of the alloc, walling (`None`) on a value it cannot own or copy.
     fn lower_record_field_slots(
-        &mut self, names: &[Sym], fields: &[(Sym, IrExpr)],
+        &mut self, names: &[Sym], tys: &[Ty], fields: &[(Sym, IrExpr)],
     ) -> Option<Vec<(usize, ValueId, bool)>> {
         // Lower each supplied field to (declared-index, slot-value, is-heap). Heap fields
         // become a fresh OWNED handle (the same kinds `try_lower_str_list_literal` admits);
@@ -329,6 +340,13 @@ impl LowerCtx {
         let mut slots: Vec<(usize, ValueId, bool)> = Vec::with_capacity(fields.len());
         for (name, expr) in fields {
             let idx = names.iter().position(|n| n == name)?;
+            // A checked field can retain a structural literal type inside
+            // List/Option even though its declaration names a recursive record.
+            // Carry that declaration down to literal constructors, just as a
+            // named record argument does; calls and variable types stay intact.
+            let mut literal = expr.clone();
+            self.contextualize_record_field_literal(&mut literal, &tys[idx]);
+            let expr = &literal;
             let is_heap = is_heap_ty(&expr.ty);
             if is_heap {
                 // A record FIELD additionally takes the FULL Option/Result
@@ -370,6 +388,34 @@ impl LowerCtx {
             }
         }
         Some(slots)
+    }
+
+    fn contextualize_record_field_literal(&self, value: &mut IrExpr, expected: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as C;
+        if expected.has_unresolved_deep() { return; }
+        match (&mut value.kind, expected) {
+            (IrExprKind::Record { .. }, Ty::Named(_, args))
+                if args.is_empty() && self.custom_variant_type_name(expected).is_none()
+                    && self.aggregate_field_tys(expected).is_some() => {
+                value.ty = expected.clone();
+            }
+            (IrExprKind::List { elements }, Ty::Applied(C::List, args)) if args.len() == 1 => {
+                for e in elements { self.contextualize_record_field_literal(e, &args[0]); }
+                value.ty = expected.clone();
+            }
+            (IrExprKind::OptionSome { expr }, Ty::Applied(C::Option, args)) if args.len() == 1 => {
+                self.contextualize_record_field_literal(expr, &args[0]);
+                value.ty = expected.clone();
+            }
+            (IrExprKind::OptionNone, Ty::Applied(C::Option, args)) if args.len() == 1 => {
+                value.ty = expected.clone();
+            }
+            (IrExprKind::Tuple { elements }, Ty::Tuple(tys)) if elements.len() == tys.len() => {
+                for (e, ty) in elements.iter_mut().zip(tys.iter()) { self.contextualize_record_field_literal(e, ty); }
+                value.ty = expected.clone();
+            }
+            _ => {}
+        }
     }
 
     /// Extracted verbatim from [`Self::try_lower_record_construct`] (codopsy round-3 sweep,

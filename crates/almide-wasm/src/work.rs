@@ -93,6 +93,9 @@ pub(crate) enum Helper {
     /// kept, count = separators + 1. Empty separator traps (Rust's
     /// empty-pattern oddity is out of contract).
     StringSplit,
+    /// `$split_byte(str, byte) -> i32` — `$split` for a separator that is
+    /// one byte at compile time (#4612; value_helpers.rs).
+    StringSplitByte,
     /// `$display_<ti>(block, cursor) -> cursor` — the runtime-recursive
     /// display of a RECURSIVE Named type (emit-time inlining follows the
     /// type shape and cycles are cut here; the body is Emitter-built in
@@ -323,6 +326,11 @@ pub(crate) struct FnWork {
     /// (line_bounded.rs — room-free outermost builds, the one-Int line,
     /// the `${int.to_string(e)}` fold). Off = the checked emission.
     pub(crate) bounded_lines: std::cell::Cell<bool>,
+    /// Some emitted `string.split` has a separator that is not one byte at
+    /// compile time, so the search kernel `$split` ships anyway: a one-byte
+    /// literal split then shares it instead of linking `$split_byte` too
+    /// (#4612 — two kernels in one module would only add bytes).
+    pub(crate) split_search_linked: std::cell::Cell<bool>,
     /// Set when a bounded-line rewrite was actually emitted: only then is
     /// there a second emission to compare against.
     pub(crate) bounded_fired: std::cell::Cell<bool>,

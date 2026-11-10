@@ -128,6 +128,10 @@ pub enum PrimKind {
     /// to the lane (sign-extended when `signed`, zero-extended otherwise) —
     /// exactly the value the re-wrap produces. No ownership event.
     NativeNarrowBin { op: IntOp, bits: u8, signed: bool },
+    /// Native integer exponentiation by squaring at the declared base width.
+    /// The exponent stays i64; negative exponents abort exactly as int.pow.
+    /// Inserted only for an int.pow result whose sole reader re-wraps it.
+    NativeNarrowPow { bits: u8, signed: bool },
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no
@@ -445,7 +449,7 @@ impl PrimKind {
     /// `Result` local. The ownership mirror and the certificate both count
     /// it alloc-class (`i`), balanced by the carrier's kept release (#4349).
     pub fn births_native_carrier(&self) -> bool {
-        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResCopy)
+        matches!(self, PrimKind::ResMakeOk | PrimKind::ResMakeErrStr | PrimKind::ResStrMake | PrimKind::ResCopy)
     }
 
     /// The native Result carrier prims that READ a carrier (`args[0]`): the
@@ -455,7 +459,7 @@ impl PrimKind {
     pub fn reads_native_carrier(&self) -> bool {
         matches!(
             self,
-            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy
+            PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr | PrimKind::ResCopy | PrimKind::ResStrSetTag
         )
     }
 }
@@ -638,6 +642,10 @@ pub enum Capability {
     /// `testing.assert_aborts`'s child run (ADR-0029). Its id is 10, the projection's, so
     /// both legs speak one registry.
     Process,
+    /// Foreign code is reachable; its declared purity is trusted (shared wasm id 8).
+    Foreign,
+    /// An effect-declared foreign function (shared wasm id 11).
+    ForeignEffect,
 }
 
 impl Capability {
@@ -645,8 +653,8 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7, Process = 10; 8 and 9 are
-    /// the wasm projection's FOREIGN and SENTINEL).
+    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7, Foreign = 8,
+    /// Process = 10, ForeignEffect = 11; 9 is the wasm projection's SENTINEL).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -658,8 +666,18 @@ impl Capability {
             Capability::Stdin => 6,
             Capability::Net => 7,
             Capability::Process => 10,
+            Capability::Foreign => 8,
+            Capability::ForeignEffect => 11,
         }
     }
+}
+
+/// The target selected from a foreign declaration. Ownership at an import
+/// remains borrowed arguments and a fresh owned result on every target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportTarget {
+    Wasm,
+    Native { kind: almide_lang::types::extern_abi::NativeExtern, is_effect: bool },
 }
 
 /// A wasm IMPORT-signature value type — the host-facing valtype an

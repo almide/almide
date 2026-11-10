@@ -57,21 +57,21 @@ pub(super) fn insert_clones_runtime_call(symbol: almide_base::intern::Sym, args:
 /// would flip the whole loop to owned elements.
 fn insert_clones_either_way_source(mut args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
     let movable = args.first().and_then(|a| match &a.kind {
-        IrExprKind::Borrow { expr, as_str: false, mutable: false } => match &expr.kind {
+        IrExprKind::Borrow { expr, mutable: false, .. } => match &expr.kind {
             IrExprKind::Var { id } if ctx.owned.contains(id) && !ctx.loops.binders.contains(id) => Some(*id),
             _ => None,
         },
         _ => None,
     });
     let Some(id) = movable else { return insert_clones_runtime_args(args, None, ctx) };
-    let IrExprKind::Borrow { expr, .. } = args.remove(0).kind else { unreachable!() };
+    let IrExprKind::Borrow { expr, as_str, .. } = args.remove(0).kind else { unreachable!() };
     let source = insert_clones_var(id, expr.ty.clone(), expr.span, ctx);
     let (source, kept_borrow) = match source.kind {
         IrExprKind::Var { .. } => (source, None),
         // Not its last use: the borrow, its clone stripped (the Borrow arm).
         IrExprKind::Clone { expr: var } => {
             let (ty, span) = (var.ty.clone(), var.span);
-            (IrExpr { kind: IrExprKind::Borrow { expr: var, as_str: false, mutable: false }, ty, span, def_id: None }, Some(id))
+            (IrExpr { kind: IrExprKind::Borrow { expr: var, as_str, mutable: false }, ty, span, def_id: None }, Some(id))
         }
         _ => unreachable!("insert_clones_var yields a Var or its Clone"),
     };

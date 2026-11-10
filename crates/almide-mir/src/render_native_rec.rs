@@ -22,7 +22,13 @@ use std::cell::RefCell;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RecDecl {
     pub name: String,
+    /// Source types prove Rust structural equality preserves language equality.
+    pub eq_safe: bool,
+    /// Source tuple fields establish the same lexicographic order as Rust.
+    pub ord_safe: bool,
     pub fields: Vec<NTy>,
+    /// Checked record field labels, in slot order; true marks a structural record.
+    pub record_labels: Option<(bool, Vec<String>)>,
     pub cases: Option<Vec<(u32, Vec<NTy>)>>,
     /// A list type of generated or nested-list elements: `Vec<elem>`.
     pub list_of: Option<NTy>,
@@ -44,6 +50,11 @@ pub(crate) struct RecDecl {
     /// A `Set[A]`: v0's runtime `AlmideSet<elem>`, so the declared floor's
     /// set bodies take it as is.
     pub set_of: Option<NTy>,
+    /// A checked callable signature. All closure values share the native
+    /// environment representation; this identity retains their call types.
+    pub closure_of: Option<(Vec<NTy>, Option<NTy>)>,
+    /// A shared captured variable; cloning its handle preserves storage identity.
+    pub cell_of: Option<NTy>,
 }
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
@@ -59,6 +70,11 @@ pub(crate) fn is_lane_scalar(t: &almide_lang::types::Ty) -> bool {
 /// a `Float32` keeps its f32 bits in the lane, like every other lane value).
 pub(crate) fn is_f64_scalar(t: &almide_lang::types::Ty) -> bool {
     matches!(t, almide_lang::types::Ty::Float | almide_lang::types::Ty::Float64)
+}
+
+/// Matrix's dtype annotation and bare handle share the runtime's tagged value.
+pub(crate) fn is_matrix_ty(t: &almide_lang::types::Ty) -> bool {
+    matches!(t, almide_lang::types::Ty::Matrix | almide_lang::types::Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
 }
 
 /// The `Option`/`Result` types a generated carrier stands for: everything the
@@ -82,30 +98,44 @@ pub(crate) fn map_kinds(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.map_of))
 }
 
+/// Collection identities whose zero-element literal is their empty value.
+/// A record/carrier with a Default is not an empty collection.
+pub(crate) fn is_empty_collection(i: u16) -> bool {
+    list_elem(i).is_some() || map_kinds(i).is_some() || set_elem(i).is_some()
+}
+
 /// The element kind of a generated set type.
 pub(crate) fn set_elem(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.set_of))
 }
 
-/// A set type the native render carries: `Set[Int]` or `Set[String]`, the
-/// elements v0's runtime set holds as the same Rust values (an `i64` lane
-/// would compare a Float by its bits and print a Bool as a number).
+/// A set whose elements retain the runtime's exact value representation.
+/// Bool and Float lanes cannot substitute their bits for the runtime values.
+/// The recursive type guard covers lists and sets without erasing their elements.
 pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (a[0] == Ty::Int || a[0] == Ty::String))
+    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (a[0] == Ty::Float32 || native_set_element_type(&a[0])))
+}
+
+/// The generated type `decl` declares: the first one `same` matches, or
+/// `decl` appended at the end (so no earlier index moves) on first use. Every
+/// on-demand type (`Bytes`, `Value`, `Matrix`, the list, set, map, option,
+/// result and slot types) is registered through it.
+fn intern(same: &dyn Fn(&RecDecl) -> bool, decl: RecDecl) -> u16 {
+    RECS.with(|r| {
+        let mut r = r.borrow_mut();
+        if let Some(i) = r.iter().position(same) {
+            return i as u16;
+        }
+        r.push(decl);
+        (r.len() - 1) as u16
+    })
 }
 
 /// The generated `AlmideSet<elem>` alias, appended on first use.
 pub(crate) fn set_type_of(e: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.set_of == Some(e)) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: format!("Set<{e:?}>"), set_of: Some(e), ..RecDecl::default() });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.set_of == Some(e), RecDecl { name: format!("Set<{e:?}>"), set_of: Some(e), ..RecDecl::default() })
 }
 
 /// The payload kind of a generated `Option` carrier.
@@ -118,16 +148,10 @@ pub(crate) fn result_payloads(i: u16) -> Option<(NTy, NTy)> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.result_of))
 }
 
-/// A value of kind `t` has a `Default` (a carrier's absent payload reads as one).
-pub(crate) fn has_default(t: NTy) -> bool {
-    match t {
-        // A Result carrier has none (the runtime `Value` and `Matrix` get
-        // theirs from `runtime_default_impls`).
-        NTy::Rec(i) | NTy::RecRef(i) => RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.result_of.is_none())),
-        NTy::Res | NTy::ResStr => false,
-        _ => true,
-    }
-}
+include!("render_native_env_types.rs");
+
+// Default support follows the declared fields recursively.
+include!("render_native_defaults.rs");
 
 /// The table key of the builtin `Bytes` type.
 pub(crate) const BYTES_KEY: &str = "Ty::Bytes";
@@ -141,13 +165,21 @@ pub(crate) fn is_scalar_instance(t: &almide_lang::types::Ty) -> bool {
 /// it joins, so no earlier index moves; the header is assembled after the
 /// bodies render, so a body may be the first user.
 pub(crate) fn bytes_index() -> u16 {
+    intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("Vec<u8>"), ..RecDecl::default() })
+}
+
+pub(crate) fn runtime_type_index(t: crate::native_runtime_types::RuntimeType) -> u16 {
+    intern(&|d| d.alias == Some(t.rust()), RecDecl {
+        name: t.0.into(), alias: Some(t.rust()), ..RecDecl::default()
+    })
+}
+
+pub(crate) fn runtime_type_of(i: u16) -> Option<crate::native_runtime_types::RuntimeType> {
     RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == BYTES_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: BYTES_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
-        (r.len() - 1) as u16
+        let r = r.borrow();
+        let d = r.get(i as usize)?;
+        let t = crate::native_runtime_types::RuntimeType::of(&d.name)?;
+        (d.alias == Some(t.rust())).then_some(t)
     })
 }
 
@@ -157,14 +189,7 @@ pub(crate) const VALUE_KEY: &str = "Ty::Value";
 /// The generated `Value` type: v0's own runtime enum (`AlmideValue`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn value_index() -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == VALUE_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: VALUE_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Value` type.
@@ -178,14 +203,7 @@ pub(crate) const MATRIX_KEY: &str = "Ty::Matrix";
 /// The generated `Matrix` type: v0's own runtime struct (`AlmideMatrix`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn matrix_index() -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.name == MATRIX_KEY) {
-            return i as u16;
-        }
-        r.push(RecDecl { name: MATRIX_KEY.into(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, set_of: None });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.name == MATRIX_KEY, RecDecl { name: MATRIX_KEY.into(), alias: Some("AlmideMatrix"), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Matrix` type.
@@ -196,24 +214,7 @@ pub(crate) fn is_matrix(t: NTy) -> bool {
 /// The generated `Result<ok, err>` carrier, appended on first use (a
 /// declared-floor call returns one the program's signatures never spell).
 pub(crate) fn result_type_of(ok: NTy, err: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.result_of == Some((ok, err))) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Result<{ok:?}, {err:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: Some((ok, err)),
-            map_of: None, set_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.result_of == Some((ok, err)), RecDecl { name: format!("Result<{ok:?}, {err:?}>"), result_of: Some((ok, err)), ..RecDecl::default() })
 }
 
 thread_local! {
@@ -221,97 +222,39 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
-/// The generated map type each value of the function being rendered is
+/// The generated carrier/map/set type each value of the function being rendered is
 /// declared as (its signature's, its callees', through joins and rebinds).
 pub(crate) fn set_declared(m: std::collections::BTreeMap<crate::ValueId, u16>) {
     DECLARED_MAPS.with(|d| *d.borrow_mut() = m);
 }
 
-/// The declared generated map type of `v` (`map.new()`'s result).
+/// The declared carrier/map/set type of `v`, including a host call result.
 pub(crate) fn declared_map(v: crate::ValueId) -> Option<u16> {
     DECLARED_MAPS.with(|d| d.borrow().get(&v).copied())
 }
 
 /// The generated `AlmideMap<key, value>` alias, appended on first use.
 pub(crate) fn map_type_of(key: NTy, value: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.map_of == Some((key, value))) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Map<{key:?}, {value:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: None,
-            map_of: Some((key, value)), set_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.map_of == Some((key, value)), RecDecl { name: format!("Map<{key:?}, {value:?}>"), map_of: Some((key, value)), ..RecDecl::default() })
 }
 
 /// The generated `Option<payload>` carrier, appended on first use.
 pub(crate) fn option_type_of(payload: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.option_of == Some(payload)) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("Option<{payload:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: None,
-            alias: None,
-            default_tag: None,
-            option_of: Some(payload),
-            result_of: None,
-            map_of: None, set_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.option_of == Some(payload), RecDecl { name: format!("Option<{payload:?}>"), option_of: Some(payload), ..RecDecl::default() })
 }
 
 /// The generated list type of `e` elements, appended on first use (at the
 /// end, like `Bytes`, so no earlier index moves).
 pub(crate) fn list_type_of(e: NTy) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        if let Some(i) = r.iter().position(|d| d.list_of == Some(e)) {
-            return i as u16;
-        }
-        r.push(RecDecl {
-            name: format!("List<{e:?}>"),
-            fields: Vec::new(),
-            cases: None,
-            list_of: Some(e),
-            alias: None,
-            default_tag: None,
-            option_of: None,
-            result_of: None,
-            map_of: None, set_of: None,
-        });
-        (r.len() - 1) as u16
-    })
+    intern(&|d| d.list_of == Some(e), RecDecl { name: format!("List<{e:?}>"), list_of: Some(e), ..RecDecl::default() })
 }
 
 /// The generated struct of an untyped block whose slot kinds its stores give
 /// (`render_native_slots`): field `fK` holds slot `K`. Appended on first use
 /// at the end, like a list type, so no earlier index moves.
 pub(crate) fn slots_type_of(fields: &[NTy]) -> u16 {
-    RECS.with(|r| {
-        let mut r = r.borrow_mut();
-        let name = format!("slots {fields:?}");
-        if let Some(i) = r.iter().position(|d| d.name == name) {
-            return i as u16;
-        }
-        r.push(RecDecl { name, fields: fields.to_vec(), cases: None, list_of: None, option_of: None, result_of: None, map_of: None, set_of: None, alias: None, default_tag: None });
-        (r.len() - 1) as u16
-    })
+    let name = format!("slots {fields:?}");
+    intern(&|d| d.name == name, RecDecl { fields: fields.to_vec(), name: name.clone(), ..RecDecl::default() })
 }
 
 /// `t` is the generated `Bytes` type.
@@ -382,6 +325,7 @@ impl Drop for RecGuard {
 }
 
 pub(crate) fn install(recs: Vec<RecDecl>) -> RecGuard {
+    CAPTURE_KINDS.with(|k| k.borrow_mut().clear());
     RECS.with(|r| *r.borrow_mut() = recs);
     RecGuard
 }
@@ -444,7 +388,7 @@ pub(crate) fn enum_slot_kinds(i: u16, k: usize) -> Vec<NTy> {
     out
 }
 
-/// A record field of enum `i` is boxed only where the field's type holds `i`
+/// A field of record or enum `i` is boxed only where its type holds `i`
 /// again inline (through struct, enum, Option and Result payloads; a list or
 /// map already holds its elements behind a pointer): a recursive variant then
 /// has a size, and a non-recursive one keeps its payload in place, as v0's
@@ -494,7 +438,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     let n = struct_name(i);
     // A region twin is `Copy` (its boxed fields are arena handles), so a
     // rewound window block owns nothing to drop.
-    let derive = if is_region(i) { "Clone, Copy" } else { "Clone" };
+    let derive = if is_region(i) { "Clone, Copy" } else if native_order_safe(i) { "Clone, PartialEq, Eq, PartialOrd, Ord" } else if d.eq_safe { "Clone, PartialEq" } else { "Clone" };
     let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
@@ -507,7 +451,9 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
     let leaf = d.default_tag.unwrap_or(cases[0].0);
-    out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
+    if has_default(NTy::Rec(i)) {
+        out.push_str(&format!("impl Default for {n} {{\n    fn default() -> Self {{ Self::with_tag({leaf}) }}\n}}\n"));
+    }
     out.push_str(&format!("#[allow(unused_variables, unreachable_patterns)]\nimpl {n} {{\n"));
     out.push_str(&enum_tag_fns(i, cases));
     let width = cases.iter().map(|(_, fs)| fs.len()).max().unwrap_or(0);
@@ -536,6 +482,10 @@ fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
     let region = is_region(i);
     out.push_str("    fn with_tag(t: i64) -> Self {\n        match t {\n");
     for (t, fs) in cases {
+        // Opaque runtime values cannot be fabricated as vacant payloads.
+        // Such cases are constructed with all fields in one expression;
+        // tag-only construction is rejected by the address renderer.
+        if !fs.iter().all(|f| has_default(*f)) { continue; }
         if fs.is_empty() {
             out.push_str(&format!("            {t} => Self::C{t},\n"));
         } else {
@@ -547,7 +497,7 @@ fn enum_tag_fns(i: u16, cases: &[(u32, Vec<NTy>)]) -> String {
             out.push_str(&format!("            {t} => Self::C{t}({defs}),\n"));
         }
     }
-    out.push_str("            _ => { eprintln!(\"Error: variant tag out of range\"); std::process::exit(1) }\n        }\n    }\n");
+    out.push_str("            _ => { almide_abort(\"variant tag out of range\") }\n        }\n    }\n");
     out.push_str("    fn tag(&self) -> i64 {\n        match self {\n");
     for (t, fs) in cases {
         let pat = if fs.is_empty() { String::new() } else { "(..)".into() };
@@ -585,7 +535,9 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         set.push_str(&format!("            {pat} => {wr},\n"));
     }
     // A slot past the case's payload reads the block's zero padding.
-    get.push_str("            _ => Default::default(),\n        }\n    }\n");
+    let absent = if has_default(kind) { "Default::default()" }
+        else { "almide_abort(\"variant payload outside its case\")" };
+    get.push_str(&format!("            _ => {absent},\n        }}\n    }}\n"));
     set.push_str("            _ => {}\n        }\n    }\n");
     out.push_str(&get);
     out.push_str(&set);
@@ -620,6 +572,20 @@ fn enum_slot_fns(i: u16, k: usize, kind: NTy, cases: &[(u32, Vec<NTy>)]) -> Stri
         }
         get_ref.push_str("            _ => None,\n        }\n    }\n");
         out.push_str(&get_ref);
+        // The move-out twin of the borrowed read: a copy of the read whose
+        // carrier dies at the copy takes the slot (the Default left behind).
+        if has_default(kind) && !is_region(i) {
+            let mut take = format!("    fn take_s{k}_{suf}(&mut self) -> {ty} {{\n        match self {{\n");
+            for (t, fs) in cases {
+                if fs.get(k - 1) != Some(&kind) {
+                    continue;
+                }
+                let r = if enum_field_boxed(i, kind) { "&mut **f" } else { "f" };
+                take.push_str(&format!("            Self::C{t}({}) => std::mem::take({r}),\n", slot_binds(fs.len(), k)));
+            }
+            take.push_str("            _ => Default::default(),\n        }\n    }\n");
+            out.push_str(&take);
+        }
     }
     out
 }
@@ -631,8 +597,10 @@ pub(crate) fn struct_name(i: u16) -> String {
 /// The owned Rust spelling of a value kind.
 pub(crate) fn owned_ty(t: NTy) -> String {
     match t {
+        NTy::Never => "std::convert::Infallible".into(),
         NTy::I64 => "i64".into(),
         NTy::F64 => "f64".into(),
+        NTy::F32 => "f32".into(),
         NTy::Str | NTy::StrRef => "AlmideString".into(),
         NTy::Vec | NTy::VecRef => "Vec<i64>".into(),
         NTy::VecStr | NTy::VecStrRef => "Vec<AlmideString>".into(),
@@ -660,50 +628,7 @@ pub(crate) fn runtime_default_impls() -> String {
     })
 }
 
-/// The struct definitions, or "" when the program declares none (so every
-/// render without a heap record is byte-identical to before).
-pub(crate) fn struct_defs() -> String {
-    RECS.with(|r| {
-        let mut out = String::new();
-        for (i, d) in r.borrow().iter().enumerate() {
-            let target = alias_target(d);
-            if let (Some(_), Some(t)) = (d.alias, &target) {
-                out.push_str(&format!("type {} = {t};\n\n", struct_name(i as u16)));
-                continue;
-            }
-            if let (Some(_), Some(t)) = (d.map_of, &target) {
-                out.push_str(&format!("/// `{}`\ntype {} = {t};\n\n", d.name, struct_name(i as u16)));
-                continue;
-            }
-            if let Some(p) = d.option_of {
-                out.push_str(&format!("/// `{}`\ntype {} = Option<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(p)));
-                continue;
-            }
-            if let (Some(_), Some(t)) = (d.set_of, &target) {
-                out.push_str(&format!("/// `{}`\ntype {} = {t};\n\n", d.name, struct_name(i as u16)));
-                continue;
-            }
-            if let Some((o, e)) = d.result_of {
-                out.push_str(&format!("/// `{}`\ntype {} = Result<{}, {}>;\n\n", d.name, struct_name(i as u16), owned_ty(o), owned_ty(e)));
-                continue;
-            }
-            if let Some(e) = d.list_of {
-                out.push_str(&format!("/// list `{}`\ntype {} = Vec<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
-                continue;
-            }
-            if let Some(cases) = &d.cases {
-                out.push_str(&enum_def(i as u16, d, cases));
-                continue;
-            }
-            out.push_str(&format!("/// record `{}`\n#[derive(Clone, Default)]\nstruct {} {{\n", d.name, struct_name(i as u16)));
-            for (k, f) in d.fields.iter().enumerate() {
-                out.push_str(&format!("    f{k}: {},\n", owned_ty(*f)));
-            }
-            out.push_str("}\n\n");
-        }
-        out
-    })
-}
+include!("render_native_defs.rs");
 
 /// The table key of a tuple type (its spelled form).
 pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
@@ -714,9 +639,25 @@ pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {
 /// non-generic aggregate by its name, any other by its spelled type.
 pub(crate) fn block_key(t: &almide_lang::types::Ty) -> String {
     match t {
+        t if crate::lower::is_value_ty(t) => VALUE_KEY.to_string(),
+        t if is_matrix_ty(t) => MATRIX_KEY.to_string(),
         almide_lang::types::Ty::Named(n, args) if args.is_empty() => n.as_str().to_string(),
         t => tuple_key(t),
     }
+}
+
+/// Resolve a checked value declaration retained by MIR lowering. This is
+/// declaration metadata, not a type inferred from an untyped payload slot.
+pub(crate) fn declared_kind(key: &str) -> Option<NTy> {
+    use almide_lang::types::Ty;
+    if let Some(kind) = declared_scalar_carriers().get(key) { return Some(*kind); }
+    if key == block_key(&Ty::String) { return Some(NTy::Str); }
+    if key == block_key(&Ty::Bytes) { return rec_index(BYTES_KEY).map(NTy::Rec); }
+    for t in [Ty::Int, Ty::Float, Ty::Bool] {
+        if key == block_key(&Ty::list(t)) { return Some(NTy::Vec); }
+    }
+    if key == block_key(&Ty::list(Ty::String)) { return Some(NTy::VecStr); }
+    rec_index(key).map(NTy::Rec)
 }
 
 /// `t` onto `out` unless it is there already.
@@ -754,11 +695,10 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
-        // A set of Int or String elements: v0's runtime `AlmideSet`.
-        t if is_native_set(t) => {
-            if !out.contains(t) {
-                out.push(t.clone());
-            }
+        // A set and its recursively typed runtime-compatible elements.
+        Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 => {
+            push_new(out, t);
+            if let Ty::Applied(_, a) = t { a.iter().for_each(|e| collect_tuples(e, out)); }
         }
         // A heap-payload Option or a Result outside the scalar carriers: its
         // own generated `Option<T>` / `Result<T, E>`.
@@ -766,11 +706,18 @@ pub(crate) fn collect_tuples(t: &almide_lang::types::Ty, out: &mut Vec<almide_la
             push_new(out, t);
             a.iter().for_each(|e| collect_tuples(e, out));
         }
+        t if is_matrix_ty(t) => push_new(out, &Ty::Matrix),
         Ty::Applied(_, a) => a.iter().for_each(|e| collect_tuples(e, out)),
+        Ty::Fn { params, ret, .. } => {
+            push_new(out, t);
+            params.iter().for_each(|p| collect_tuples(p, out));
+            collect_tuples(ret, out);
+        }
         Ty::Bytes | Ty::Matrix if !out.contains(t) => out.push(t.clone()),
         t if crate::lower::is_value_ty(t) => {
             push_new(out, t);
         }
+        Ty::Named(n, args) if args.is_empty() && crate::native_runtime_types::RuntimeType::of(n.as_str()).is_some() => push_new(out, t),
         // An instantiated generic record or variant: its own generated type.
         Ty::Named(_, args) if !args.is_empty() => {
             push_new(out, t);
@@ -789,11 +736,18 @@ fn bind_type_params(
     use almide_lang::types::Ty;
     match t {
         Ty::Named(n, a) if a.is_empty() && b.contains_key(n) => b[n].clone(),
-        Ty::Named(n, a) => Ty::Named(*n, a.iter().map(|x| bind_type_params(x, b)).collect()),
-        Ty::Applied(c, a) => Ty::Applied(c.clone(), a.iter().map(|x| bind_type_params(x, b)).collect()),
-        Ty::Tuple(es) => Ty::Tuple(es.iter().map(|x| bind_type_params(x, b)).collect()),
-        _ => almide_lang::types::substitute(t, b),
+        Ty::TypeVar(n) if b.contains_key(n) => b[n].clone(),
+        // Layout parameters may be bare Named values inside functions and
+        // anonymous fields too; the ordinary TypeVar-only substitution skips them.
+        _ => t.map_children(&|child| bind_type_params(child, b)),
     }
 }
 
 include!("render_native_rec_b.rs");
+
+include!("render_native_rec_checkpoint.rs");
+
+include!("render_native_eq.rs");
+include!("render_native_order.rs");
+
+include!("render_native_declared_carriers.rs");

@@ -14,8 +14,22 @@
 // at once. Pids are host values, so the plain run never prints one.
 import process
 import env
+import io
 
 effect fn fail() -> Int = err("boom")
+
+effect fn prepare_stop(code: Int) -> Unit = {
+  guard code != 7 else err("stop-failed")
+}
+
+// An error can propagate before a Never-typed success tail. The helper's
+// Result ABI must retain that error even though process.exit never returns.
+effect fn stop(code: Int) -> Unit = {
+  prepare_stop(code)!
+  let e = io.stderr()!
+  io.write(e, bytes.from_list([]))!
+  process.exit(code)
+}
 
 effect fn main() -> Unit = {
   let argv = env.args()
@@ -30,7 +44,8 @@ effect fn main() -> Unit = {
     _ => (),
   }
   match list.get(argv, 0) ?? "return" {
-    "exit" => process.exit(3),
+    "exit" => stop(3)!,
+    "stop-error" => stop(7)!,
     "error" => println(int.to_string(fail()!)),
     _ => (),
   }

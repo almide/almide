@@ -182,7 +182,7 @@ impl LowerCtx {
         if self.try_lower_variant_match(subject_value, arms) {
             return Ok(());
         }
-        if self.try_lower_result_match(subject_value, arms) {
+        if self.try_lower_result_match(subject_value, arms, subject) {
             return Ok(());
         }
         // A GUARDED arm reaching the linearization fallback cannot be faithfully
@@ -659,13 +659,13 @@ impl LowerCtx {
         // read must not dereference a handle this arm dropped (the `in_frame` discipline
         // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
         self.in_frame += 1;
-        for stmt in stmts {
-            self.lower_stmt(stmt)?;
-        }
-        if let Some(tail) = tail {
-            self.lower_branch_arm_tail(tail)?;
-        }
+        let result = (|| {
+            for stmt in stmts { self.lower_stmt(stmt)?; }
+            if let Some(tail) = tail { self.lower_branch_arm_tail(tail)?; }
+            Ok(())
+        })();
         self.in_frame -= 1;
+        result?;
         self.drop_arm_locals(mark);
         Ok(())
     }

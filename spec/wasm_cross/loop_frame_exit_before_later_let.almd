@@ -1,0 +1,40 @@
+// @contract: C-292
+// A self tail-recursive fn (one loop on wasm) whose early exit is written
+// before a later `let` of a heap value frees that value on every exit (#4607):
+// a tail call into another fn, and a `!` error return, leave the frame on an
+// iteration after the `let` ran and must release the block it still holds.
+fn finish(n: Int, k: Int) -> Int = if k <= 0 then n else finish(n + 1, k - 1)
+
+fn walk(i: Int, n: Int) -> Int =
+  if i >= 6 then n
+  else if i == 3 then finish(n, 2)
+  else {
+    let s = int.to_string(i) + "x"
+    walk(i + 1, n + string.len(s))
+  }
+
+fn scan(xs: List[Int], i: Int, n: Int) -> Int =
+  if i >= list.len(xs) then n
+  else if (list.get(xs, i) ?? 0) < 0 then finish(n, 2)
+  else {
+    let pair = (i, i * 2)
+    scan(xs, i + 1, n + pair.1)
+  }
+
+fn check(i: Int) -> Result[Int, String] = if i == 3 then err("three") else ok(i)
+
+effect fn steps(i: Int, n: Int) -> Int =
+  if i >= 6 then n
+  else if i == 2 then {
+    let v = check(i + 1)!
+    v + n
+  } else {
+    let s = int.to_string(i) + "x"
+    steps(i + 1, n + string.len(s))!
+  }
+
+effect fn main() -> Unit = {
+  println("walk = ${walk(0, 0)}")
+  println("scan = ${scan([1, 2, -1, 4], 0, 0)}")
+  println("steps = ${steps(0, 0) ?? -1}")
+}

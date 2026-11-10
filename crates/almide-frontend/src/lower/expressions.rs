@@ -691,8 +691,10 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         }
         ast::ExprKind::UnwrapOr { expr, fallback, .. } => {
             let inner = lower_expr(ctx, expr);
-            let fb = lower_expr(ctx, fallback);
-            // For now, use a dedicated UnwrapOr node if it exists, otherwise fallback to Call
+            let mut fb = lower_expr(ctx, fallback);
+            // The checker selected the carrier payload's type. Materialize
+            // the fallback literal at that width before either backend runs.
+            super::statements::coerce_literal_to_sized(&mut fb, &ty, ctx.env);
             ctx.mk(IrExprKind::UnwrapOr { expr: Box::new(inner), fallback: Box::new(fb) }, ty, span)
         }
         // expr? — lower to ToOption

@@ -1,0 +1,30 @@
+// @contract: C-004
+// #4615: a `fan { }` whose arms are DIRECT CALLS of user fns (`f(x)!`) is the
+// shape the certified native render lifts onto threads. An arm that reaches
+// an `@ordered` fs fn must still run in arm order (ADR-0024 D3): the reader in
+// arm 1 sees what the writer in arm 0 wrote, though the writer sleeps first.
+// The lift ran these arms on threads, so native printed `wrote old` while
+// wasm printed `wrote new`. SELF-CONTAINED: its own temp dir, removed at the
+// end.
+import env
+import fs
+
+effect fn write_late(path: String) -> Result[String, String] = {
+  env.sleep_ms(50)
+  fs.write_text(path, "new")!
+  ok("wrote")
+}
+
+effect fn read_early(path: String) -> Result[String, String] = ok(fs.read_text(path)!)
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("fanOrderedDirect")!
+  let p = d + "/f.txt"
+  fs.write_text(p, "old")!
+  let (w, r) = fan {
+    write_late(p)!
+    read_early(p)!
+  }
+  println("${w} ${r}")
+  fs.remove_all(d)!
+}

@@ -383,7 +383,7 @@ fn rewrite_windows(program: &mut IrProgram) -> bool {
 /// The twin plan for one declared entry: its transitive root-fn closure and
 /// the admissible enums every fn in it mentions. `None` when the closure
 /// leaves the root program or a mentioned type cannot be twinned.
-fn declared_plan(program: &IrProgram, cx: &Cx, entry: Sym) -> Option<(HashSet<Sym>, HashSet<Sym>)> {
+pub(crate) fn declared_plan(program: &IrProgram, cx: &Cx, entry: Sym) -> Option<(HashSet<Sym>, HashSet<Sym>)> {
     let mut fns: HashSet<Sym> = HashSet::new();
     let mut todo = vec![entry];
     while let Some(n) = todo.pop() {

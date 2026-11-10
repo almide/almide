@@ -374,7 +374,16 @@ fn flatten_bang_statement_blocks(stmts: &mut Vec<almide_ir::IrStmt>) {
     let binds_bang = |s: &almide_ir::IrStmt| {
         matches!(&s.kind,
             IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-                if matches!(value.kind, IrExprKind::Unwrap { .. }))
+                if matches!(value.kind, IrExprKind::Unwrap { .. })
+                    || (crate::lower::owned_tco_slots() && crate::native_propagation::propagates(value)))
+            // A move-mode Unit body is a statement block before the returned
+            // buffer. Its guard still exits the function; expose it before the
+            // function-tail guard pass captures the continuation.
+            || (crate::lower::owned_tco_slots() && matches!(s.kind, IrStmtKind::Guard { .. }))
+            // Assignment propagation is lifted to a Bind later; expose its
+            // statement block now so the lifted exit keeps the fn continuation.
+            || (crate::lower::owned_tco_slots() && matches!(&s.kind,
+                IrStmtKind::Assign { value, .. } if crate::native_propagation::propagates(value)))
     };
     let mut i = 0;
     while i < stmts.len() {

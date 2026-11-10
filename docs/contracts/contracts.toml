@@ -122,6 +122,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_div_mod_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rem_pow2_zero.almd", class = "fixture" },
 ]
 
 # ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────
@@ -129,12 +130,14 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.map / fan.settle are deterministic by list order"
-statement = "`fan.map` and `fan.settle` behave as a sequential evaluation of EVERY element in list order, whatever the substrate (ADR-0024 D1): the observation (stdout, stderr, exit code, returned value) is that of evaluating element 0, then element 1, and so on to the last, and no choice of substrate (sequential, threads, async subtasks) may change it; `fan.map` returns the results in list order, `fan.settle` every element's Result in list order. All are byte-identical native == wasm. `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. Since dialect epoch 14 (ADR-0028) `fan.any` is gone too: the first Ok in source order is a `??` chain (`a() ?? b() ?? fallback` — a later candidate never runs once one succeeds), and over a list it is `list.find_map(xs, (x) => f(x)?)`; every spelling of `fan.any` and `fan.race` is E027 naming the replacement. The two MAPPER heads (`fan.map/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`unix.connect`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule. The converse holds too (#1406): a CAPABILITY-BEARING callback whose capability HAS a wasm implementation (fs) runs byte-identically on both legs, in both spellings — an inline lambda reaching fs directly, and a lambda calling an effect HELPER that wraps fs (the passthrough shape `effect fn helper(p) = fs.read_text(p)`, which seeds no ResultErr and carries no `!`/`?` of its own) — consumed via `??` and via `!` alike. Two compiler facts carry this cell: the can-err ABI seeds a fn whose TAIL position returns a foreign Result (`returns_foreign_result`, so the passthrough keeps the uniform Result-carrier funcref ABI), and the mapper's result-family tracking is TYPE-split at the classify sites (`is_fan_any_map` + `is_heap_ok_result` — the pre-routing name `fan.any_map` covers all nine 3×3 pairings, so the String-output pairings' heap-Ok cap-as-tag family cannot be told apart by name). EXTENDED (#1406, 0.61.2): on the STRUCTURAL leg (the 0.60 default, which `almide run --target wasm` takes for fs programs) every spelling the ruling admits agrees with native on both mapper heads — the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`), a COMPOUND body with a statement before the `!`, and a bare effect-fn VALUE — consumed via `!`, `??`, and a match over settle's list. Two shapes diverged before: `fan.settle`'s canonical `!` (the frontend strips the marker only for `list.*` callees, and settle desugars to `list.map` AFTER that pass, so the emitter saw `ok(unwrap(f(p)))`) and a compound body on ANY head — the structural leg inlined the callback into the ENCLOSING frame, so its `!` propagated out of `main` (`Error: No such file or directory (os error 2)` at the time; since #2090 the same line reads `Error: fs.read_text(\"p\"): No such file or directory (os error 2)` — the call and its operand prefixed, the errno tail verbatim — on every leg, exit 1) where native captured the err into the element's Result. A callback body that still propagates after the canonical-wrapper strip is now lowered once as a closure value and called per element through the funcref table (the #1806 route the fs walkers take), so its `!` rides the closure's own Result channel; the fn-value `list.map` route gained the closure convention's RC-3 +1 on the borrowed element it hands the callee. The fixture lives in spec/embedded_cross (an fs program routes to the incumbent on the BUILD path), the fs-backed effect column is one row per head in spec/lang/fan_mapper_matrix_test.almd (fan.min is the reasoned omission: its mapper meters a PURE body, E006), and the http-bodied twin follows the CAPABILITY, never the mapper: it runs wherever `http.get` runs — natively, on the embedded lane (C-328) and in the stock WASI 0.3 component `almide build --target wasm` builds for it (C-330) — with the same output. A `fan { }` whose arm's executable closure reaches an `@ordered` stdlib fn — `env.set`, an `fs` write, a stdin read, a `process` spawn: process-local state a sibling arm could read (ADR-0024 D3, #3780) — runs its arms in arm order on native as well, so the sleeping reader of spec/wasm_cross/fan_ordered_arms.almd sees the value from BEFORE the writer on both targets; a fan reaching no such fn keeps its threads. A native `fan { }` arm the OS gives no thread (EAGAIN under a process or thread limit) runs INLINE on the thread that reached it, before the next arm starts, and so does an arm that would pass the bound of one live arm thread per available CPU (at most `ALMIDE_FAN_THREADS`), a pool the line-fold workers of `fs.fold_lines_chunked` share (almide#4141): that is the sequential evaluation, so stdout, stderr, exit code and value are unchanged; it was a `failed to spawn thread` panic with a std source path and exit 101, reached by a recursive two-arm fan of depth 11 under `ulimit -u 2048`."
+statement = "`fan.map` and `fan.settle` behave as a sequential evaluation of EVERY element in list order, whatever the substrate (ADR-0024 D1): the observation (stdout, stderr, exit code, returned value) is that of evaluating element 0, then element 1, and so on to the last, and no choice of substrate (sequential, threads, async subtasks) may change it; `fan.map` returns the results in list order, `fan.settle` every element's Result in list order. All are byte-identical native == wasm. `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. Since dialect epoch 14 (ADR-0028) `fan.any` is gone too: the first Ok in source order is a `??` chain (`a() ?? b() ?? fallback` — a later candidate never runs once one succeeds), and over a list it is `list.find_map(xs, (x) => f(x)?)`; every spelling of `fan.any` and `fan.race` is E027 naming the replacement. The two MAPPER heads (`fan.map/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`unix.connect`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule. The converse holds too (#1406): a CAPABILITY-BEARING callback whose capability HAS a wasm implementation (fs) runs byte-identically on both legs, in both spellings — an inline lambda reaching fs directly, and a lambda calling an effect HELPER that wraps fs (the passthrough shape `effect fn helper(p) = fs.read_text(p)`, which seeds no ResultErr and carries no `!`/`?` of its own) — consumed via `??` and via `!` alike. Two compiler facts carry this cell: the can-err ABI seeds a fn whose TAIL position returns a foreign Result (`returns_foreign_result`, so the passthrough keeps the uniform Result-carrier funcref ABI), and the mapper's result-family tracking is TYPE-split at the classify sites (`is_fan_any_map` + `is_heap_ok_result` — the pre-routing name `fan.any_map` covers all nine 3×3 pairings, so the String-output pairings' heap-Ok cap-as-tag family cannot be told apart by name). EXTENDED (#1406, 0.61.2): on the STRUCTURAL leg (the 0.60 default, which `almide run --target wasm` takes for fs programs) every spelling the ruling admits agrees with native on both mapper heads — the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`), a COMPOUND body with a statement before the `!`, and a bare effect-fn VALUE — consumed via `!`, `??`, and a match over settle's list. Two shapes diverged before: `fan.settle`'s canonical `!` (the frontend strips the marker only for `list.*` callees, and settle desugars to `list.map` AFTER that pass, so the emitter saw `ok(unwrap(f(p)))`) and a compound body on ANY head — the structural leg inlined the callback into the ENCLOSING frame, so its `!` propagated out of `main` (`Error: No such file or directory (os error 2)` at the time; since #2090 the same line reads `Error: fs.read_text(\"p\"): No such file or directory (os error 2)` — the call and its operand prefixed, the errno tail verbatim — on every leg, exit 1) where native captured the err into the element's Result. A callback body that still propagates after the canonical-wrapper strip is now lowered once as a closure value and called per element through the funcref table (the #1806 route the fs walkers take), so its `!` rides the closure's own Result channel; the fn-value `list.map` route gained the closure convention's RC-3 +1 on the borrowed element it hands the callee. The fixture lives in spec/embedded_cross (an fs program routes to the incumbent on the BUILD path), the fs-backed effect column is one row per head in spec/lang/fan_mapper_matrix_test.almd (fan.min is the reasoned omission: its mapper meters a PURE body, E006), and the http-bodied twin follows the CAPABILITY, never the mapper: it runs wherever `http.get` runs — natively, on the embedded lane (C-328) and in the stock WASI 0.3 component `almide build --target wasm` builds for it (C-330) — with the same output. A `fan { }` whose arm's executable closure reaches an `@ordered` stdlib fn — `env.set`, an `fs` write, a stdin read, a `process` spawn: process-local state a sibling arm could read (ADR-0024 D3, #3780) — runs its arms in arm order on native as well, so the sleeping reader of spec/wasm_cross/fan_ordered_arms.almd sees the value from BEFORE the writer on both targets; a fan reaching no such fn keeps its threads. That holds on every native route, the certified render's threaded fan lift included: a fan whose arms are direct calls of user fns reaching an fs write runs them in arm order there too (spec/wasm_cross/fan_ordered_direct_call_arms.almd, #4615). Every write an arm makes joins its timeline — `io.eprint` and `io.write(io.stderr(), …)` as well as `print`, `println`, `eprintln` and the stdout writes (spec/wasm_cross/fan_arm_stderr_timeline.almd, #4616). A native `fan { }` arm the OS gives no thread (EAGAIN under a process or thread limit) runs INLINE on the thread that reached it, before the next arm starts, and so does an arm that would pass the bound of one live arm thread per available CPU (at most `ALMIDE_FAN_THREADS`), a pool the line-fold workers of `fs.fold_lines_chunked` share (almide#4141): that is the sequential evaluation, so stdout, stderr, exit code and value are unchanged; it was a `failed to spawn thread` panic with a std source path and exit 101, reached by a recursive two-arm fan of depth 11 under `ulimit -u 2048`."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_deterministic.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_ordered_arms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_ordered_direct_call_arms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_arm_stderr_timeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_pure_thunks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_var_thunk_list.almd", class = "fixture" },
@@ -335,6 +338,7 @@ evidence  = [
   { path = "spec/wasm_cross/string_bidi_controls_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_slice_concat_short_unaligned.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-017"
@@ -376,6 +380,8 @@ statement = "`to_upper` / `to_lower` / `capitalize` produce the SAME bytes as na
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_upper_inplace_aliases.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
 ]
 [[contract]]
@@ -386,6 +392,7 @@ statement = "`trim` / `trim_start` / `trim_end` / `is_whitespace` match native (
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_whitespace.almd", class = "fixture" },
 ]
 [[contract]]
@@ -540,6 +547,8 @@ since     = "0.24.0"
 status    = "active"
 doc       = "C-033-cow-truth-table.md"
 evidence  = [
+  { path = "spec/wasm_cross/string_upper_inplace_aliases.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
@@ -1154,6 +1163,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_split_replace_iterative.almd", class = "fixture" },
+  { path = "spec/wasm_cross/split_one_byte_separator.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-075"
@@ -1382,6 +1392,7 @@ statement = "json.stringify_pretty produces the same indented JSON on both backe
 since     = "0.27.6"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/json_parse_astral_before_u_escape.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_stringify_control_chars.almd", class = "fixture" },
 ]
@@ -1443,6 +1454,7 @@ statement = "The self-hosted String classification predicate `string.is_alphanum
 since     = "0.27.6"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_reuse_pipeline.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_is_alphanumeric.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_to_upper.almd", class = "fixture" },
   { path = "spec/wasm_cross/split_empty_sep.almd", class = "fixture" },
@@ -2315,6 +2327,9 @@ evidence  = [
   { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_int.almd", class = "fixture" },
   { path = "spec/wasm_cross/accum_recursion_declined.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_nonneg_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_pow2_signed_induction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_walk_reduction_fused.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-171"
@@ -2460,12 +2475,13 @@ evidence  = [
 id        = "C-182"
 spec      = "ALS-E3"
 title     = "A negated float literal takes its context's float type on both targets"
-statement = "`let f: Float32 = -2.5` (and the same literal in argument position) carries the CONTEXT's float type, exactly as the positive literal already did (#890). Lowered as a `UnOp::NegFloat` over an operand still typed bare `Float` while the enclosing node claimed the annotated `Float32`, native emitted `-(2.5f64)` into an `f32` slot — `error[E0308]`, a hard build failure — and the wasm leg read the mismatched slot as `0.0`, a silent wrong value that a program doing `let scale: Float32 = -1.5` would compute with. The negation is now FOLDED into the literal at the context type, the same rule the Int case has had since #626 (which is why `let a: Int8 = -128` always worked). A negated EXPRESSION (not a literal) still negates at runtime, and the sized-float `NegFloat` selection now recognises `Float32`/`Float64` operands rather than only bare `Float`."
+statement = "`let f: Float32 = -2.5` (and the same literal in argument position) carries the CONTEXT's float type, exactly as the positive literal already did (#890). Lowered as a `UnOp::NegFloat` over an operand still typed bare `Float` while the enclosing node claimed the annotated `Float32`, native emitted `-(2.5f64)` into an `f32` slot — `error[E0308]`, a hard build failure — and the wasm leg read the mismatched slot as `0.0`, a silent wrong value that a program doing `let scale: Float32 = -1.5` would compute with. The negation is now FOLDED into the literal at the context type, the same rule the Int case has had since #626 (which is why `let a: Int8 = -128` always worked). A negated EXPRESSION (not a literal) still negates at runtime, and the sized-float `NegFloat` selection now recognises `Float32`/`Float64` operands rather than only bare `Float`. The same width rule applies to literal fallbacks of Option/Result ?? expressions: the checked payload type determines the fallback literal representation before either backend runs, including negative Float32 literals; out-of-range fallbacks are rejected during checking."
 since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/negative_float_literal_sized.almd", class = "fixture" },
   { path = "spec/wasm_cross/float32_literal_excess_precision.almd", class = "fixture" },
+  { path = "tests/sized_width_peer_join_test.rs", name = "a_coalescing_fallback_uses_the_payload_width_and_range", class = "fixture" },
 ]
 
 # ── NESTED SCALAR-RECORD LIST APPEND ─
@@ -2629,12 +2645,13 @@ evidence  = [
 id        = "C-196"
 spec      = "ALS-T6"
 title     = "Call-stack exhaustion is a defined abort at a per-target depth"
-statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT in WHERE it happens, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and exhausts its stack, neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. What IS promised: (1) the convergent boundary — recursion within both targets' limits stays byte-identical (spec/wasm_cross/recursion_depth_within_limits.almd); (2) the FAILURE FORM — exhaustion is the DEFINED abort `Error: stack overflow` on stderr + exit 1, with the stdout written before it kept, on native and on the embedded wasm host (`almide run --target wasm`) alike (spec/wasm_fail/stack_overflow_abort.almd): never Rust's `thread 'main' has overflowed its stack` / `fatal runtime error: stack overflow, aborting` (SIGABRT, exit 134), never `Error: wasm trap: call stack exhausted`. This is C-197's cohort pattern applied to the stack: unify the failure form, let the THRESHOLD stay structural, and DECLARE it per target instead of equalising it — one common depth would make native refuse depths it reaches today. The declared thresholds: native, the overflowing thread's own stack (the platform's main-thread stack, 8 MiB by default on Linux and macOS; Rust's spawned-thread default, 2 MiB, for the thread of a `fan` arm or a parallel worker); the embedded host, an 8 MiB wasm stack. The declared residuals: (a) a STOCK runtime (`wasmtime run` of a p1 module or a component, a browser engine) owns the trap and its form — `wasm trap: call stack exhausted`, exit 134 under wasmtime — because a guest cannot observe its own stack exhaustion soundly: wasm exposes no stack bound to the guest, and a frame-depth counter's limit corresponds to no byte budget on any engine; (b) on Linux, a native thread that did not record its stack bounds when it started keeps Rust's message — every thread the runtime spawns records them; (c) an overflow inside a `fan` arm exits without the ordered trap wait of ADR-0024 D6, so output that a LOWER arm had not yet flushed is not printed. The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (tools/xtarget-fuzz ladder.rs `resource_class`, unit-tested, mirroring the both-legs-exhausted skip)."
+statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT in WHERE it happens, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and exhausts its stack, neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. What IS promised: (1) the convergent boundary — recursion within both targets' limits stays byte-identical (spec/wasm_cross/recursion_depth_within_limits.almd); (2) the FAILURE FORM — exhaustion is the DEFINED abort `Error: stack overflow` on stderr + exit 1, with the stdout written before it kept, on native and on the embedded wasm host (`almide run --target wasm`) alike (spec/wasm_fail/stack_overflow_abort.almd): never Rust's `thread 'main' has overflowed its stack` / `fatal runtime error: stack overflow, aborting` (SIGABRT, exit 134), never `Error: wasm trap: call stack exhausted`. This is C-197's cohort pattern applied to the stack: unify the failure form, let the THRESHOLD stay structural, and DECLARE it per target instead of equalising it — one common depth would make native refuse depths it reaches today. The declared thresholds: native, the overflowing thread's own stack (the platform's main-thread stack, 8 MiB by default on Linux and macOS (the `RLIMIT_STACK` the program starts under); the SAME size, at most 1 GiB, for the thread of a `fan` arm, a line-fold worker or a parallel `list` worker, so a recursion depth the sequential evaluation reaches is reached under `fan` too, whatever the core count (#4617: arm threads took Rust's spawned-thread default of 2 MiB, and a depth of 200000 overflowed in a fan arm and in a parallel `fan.map` on two or more CPUs while the sequential run finished; `RUST_MIN_STACK`, when set, keeps std's meaning for every spawned thread); the embedded host, an 8 MiB wasm stack. The declared residuals: (a) a STOCK runtime (`wasmtime run` of a p1 module or a component, a browser engine) owns the trap and its form — `wasm trap: call stack exhausted`, exit 134 under wasmtime — because a guest cannot observe its own stack exhaustion soundly: wasm exposes no stack bound to the guest, and a frame-depth counter's limit corresponds to no byte budget on any engine; (b) on Linux, a native thread that did not record its stack bounds when it started keeps Rust's message — every thread the runtime spawns records them; (c) an overflow inside a `fan` arm exits without the ordered trap wait of ADR-0024 D6, so output that a LOWER arm had not yet flushed is not printed. The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (tools/xtarget-fuzz ladder.rs `resource_class`, unit-tested, mirroring the both-legs-exhausted skip)."
 since     = "0.41.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
   { path = "spec/wasm_fail/stack_overflow_abort.almd", class = "fixture" },
+  { path = "tests/fan_worker_stack_test.rs", class = "fixture", name = "a_depth_the_sequential_run_reaches_is_reached_in_fan_arms_and_parallel_workers" },
 ]
 [[contract]]
 id        = "C-197"
@@ -2962,7 +2979,7 @@ evidence  = [
 id        = "C-219"
 spec      = "ALS-T6"
 title     = "a Never-typed call in a branch arm runs on both targets and sets the exit code"
-statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read the full argv, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. A Never-typed expression also executes in a function tail, including nested blocks, if/match tails and a constant-false guard. A computed exit-code argument is evaluated exactly once before the range check; changing the expression position does not change stdout, stderr or the exit code (#2327). The exit code the arm sets is one the leg can deliver: C-350 bounds `process.exit` to the exit status 0..=255, makes any other code a defined abort and walls 126..=255 on a WASI preview-1 build, so \"exits with that code\" here reads within what the leg carries."
+statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read the full argv, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. A Never-typed expression also executes in a function tail, including nested blocks, if/match tails and a constant-false guard, and as the whole body of an `effect fn` declared to return a Result, which builds natively too (spec/wasm_cross/never_tail_of_result_effect_fn.almd, #4619). A computed exit-code argument is evaluated exactly once before the range check; changing the expression position does not change stdout, stderr or the exit code (#2327). The exit code the arm sets is one the leg can deliver: C-350 bounds `process.exit` to the exit status 0..=255, makes any other code a defined abort and walls 126..=255 on a WASI preview-1 build, so \"exits with that code\" here reads within what the leg carries."
 since     = "0.56.0"
 status    = "active"
 evidence  = [
@@ -2973,6 +2990,7 @@ evidence  = [
   { path = "tests/panic_abort_positions_test.rs", name = "panic_aborts_identically_on_native_wasm_and_interp_in_every_position", class = "fixture" },
   { path = "spec/wasm_cross/interp_diverging_part.almd", class = "fixture" },
   { path = "spec/wasm_cross/never_fn_value_positions.almd", class = "fixture" },
+  { path = "spec/wasm_cross/never_tail_of_result_effect_fn.almd", class = "fixture" },
   { path = "tests/diverging_operand_matrix_test.rs", name = "a_diverging_value_aborts_identically_in_every_position_on_every_leg", class = "fixture" },
 ]
 
@@ -3065,6 +3083,9 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_copy_kept_when_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_copy_kept_closure.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_copy_moved_when_dead.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_mut_arg_in_nested_match.almd", class = "fixture" },
   { path = "spec/wasm_cross/lambda_captures_mut_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_call_arg_credit.almd", class = "fixture" },
@@ -3437,6 +3458,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fold_float_literal_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_family_source_before_init.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_init_rebinds_source.almd", class = "fixture" },
@@ -3876,6 +3898,7 @@ evidence  = [
   { path = "spec/wasm_cross/guard_chain_cons_list.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_only_use_liveness.almd", class = "fixture" },
   { path = "spec/wasm_cross/koka_hqueens.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_frame_exit_before_later_let.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_local_scrutinee_dup.almd", class = "fixture" },
   { path = "spec/wasm_cross/merge_runs_shadowed_scrutinee.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_ctor_swap_two_types.almd", class = "fixture" },

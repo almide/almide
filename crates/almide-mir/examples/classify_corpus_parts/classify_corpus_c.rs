@@ -87,6 +87,7 @@ for mir in mirs {
         // the render is still covered by the executable verifier.
         if poisoned {
             t.cert_poisoned_excluded += 1;
+            t.cert_poisoned_names.push(format!("{} :: {}", ctx.file.display(), mir.name));
             s.names.push_str(&name_witness_string(mir));
             s.names.push('\n');
             continue;
@@ -717,6 +718,9 @@ fn print_wall_report(t: &Tally) {
             "  cert-poisoned (excluded from witness): {}  <- kernel-unrepresentable nested-region arms (#1146); render covered by the executable verifier",
             t.cert_poisoned_excluded
         );
+        for name in &t.cert_poisoned_names {
+            eprintln!("POISONED OWNERSHIP {name}");
+        }
     }
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");
@@ -777,3 +781,6 @@ fn print_wall_report(t: &Tally) {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod continuation_arm_tests { include!("continuation_arm_tests.rs"); }

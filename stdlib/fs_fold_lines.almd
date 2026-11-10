@@ -48,6 +48,7 @@ fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[S
     __ffl_walk_msi(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -83,6 +84,7 @@ fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (M
     }
   }
 
+@specializes("fs.__fallible_fold_lines")
 effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -136,6 +138,7 @@ fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, ini
     __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[List[Map[String, Int]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -181,6 +184,7 @@ fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init:
     __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int, String) -> Int) -> Result[List[Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -231,6 +235,7 @@ fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init
     __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
@@ -251,6 +256,7 @@ effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String
   }
 }
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -279,6 +285,7 @@ fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -
     __ffl_walk_s(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -304,6 +311,7 @@ fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int)
     __ffl_walk_i(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -329,6 +337,7 @@ fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[Strin
     __ffl_walk_ls(sh, slen, e + 1, nacc, f)
   }
 
+@specializes("fs.fold_lines")
 effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -384,6 +393,7 @@ fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> 
     }
   }
 
+@specializes("fs.__fallible_fold_lines")
 effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
@@ -425,6 +435,7 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
 // shape, and the availability probe's `A = Int` instantiation): the SAME
 // range walker the chunked `_i` twin already owns. Completes the range
 // column of the C-220 family matrix (#1423 bucket A).
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -451,6 +462,7 @@ fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (
     __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
   }
 
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -468,6 +480,7 @@ effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: Strin
 
 // `fs.fold_lines_range` Map[String, Int]-accumulator twin (`_msi`): the
 // surface over the range walker the chunked msi twin already owns.
+@specializes("fs.fold_lines_range")
 effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
@@ -499,6 +512,7 @@ fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init:
     __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
   }
 
+@specializes("fs.fold_lines_chunked")
 effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)

@@ -332,6 +332,12 @@ fn loop_uw_rewrite(e: &IrExpr, env: UwEnv<'_>, nv: &mut u32) -> Option<IrExpr> {
     if !expr_has_unwrap(e) && !expr_has_value_exit(e, env.vx) {
         return Some(e.clone());
     }
+    // Call operands must become bind-position unwraps inside this iteration,
+    // before the loop's flag/continuation rewrite can settle them. Reuse the
+    // shared ANF transform; hoisting outside the loop would freeze its inputs.
+    if let Some(bound) = desugar_callarg_unwrap(e, nv) {
+        return loop_uw_rewrite(&bound, env, nv);
+    }
     match &e.kind {
         IrExprKind::Block { stmts, expr: tail } => loop_uw_rewrite_block(stmts, tail, env, nv),
         IrExprKind::If { cond, then, else_ } => {

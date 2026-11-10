@@ -151,7 +151,13 @@ impl<'a> Interpreter<'a> {
         let Some(def) = self.bundled_fn(module, func) else {
             return Flow::Unsupported(why);
         };
-        if def.params.len() != args.len() || def.params.iter().any(|p| p.is_mut) {
+        if def.params.len() != args.len() {
+            return Flow::Unsupported(why);
+        }
+        if def.params.iter().any(|p| p.is_mut) {
+            // Left for a caller that still holds the argument exprs
+            // (`eval_module_call`); every other caller keeps the abstain.
+            self.bundled_mut_gated = Some((module, def, args));
             return Flow::Unsupported(why);
         }
         let root = self.root_scope();

@@ -1,0 +1,39 @@
+// @contract: C-020, C-021, C-033, C-100
+// Reusing a string preserves live aliases, Unicode case and whitespace semantics.
+fn reuse_upper(s: String) -> String = string.to_upper(string.trim(s))
+
+fn lower(s: String) -> String = string.to_lower(string.trim(s))
+
+fn repeat_trim(s: String, n: Int) -> String =
+  if n <= 0 then s else repeat_trim(string.trim(s), n - 1)
+
+fn check_reuse() -> Unit = {
+  let s = "  aBc\t${7}"
+  let kept = [s, s]
+  assert_eq(reuse_upper(s), "ABC\t7")
+  assert_eq(kept, ["  aBc\t7", "  aBc\t7"])
+  assert_eq(reuse_upper("\u{2003}éßıΣ🦀\u{2009}"), "ÉßıΣ🦀")
+  assert_eq(lower("  ΟΣ İK  "), "ος İK")
+  assert_eq(reuse_upper(" \t\n"), "")
+  assert_eq(reuse_upper(""), "")
+  assert_eq(repeat_trim("  text  ", 4), "text")
+  let xs = string.split(" a , b , c ", ",")
+  assert_eq(xs |> list.map((s) => reuse_upper(s)), ["A", "B", "C"])
+  assert_eq(xs, [" a ", " b ", " c "])
+  assert_eq(
+    string.split(" x , y ", ",") |> list.map((s) => string.to_upper(string.trim(s))),
+    ["X", "Y"],
+  )
+  var v = "  mixed  " + "Case  "
+  v = string.trim(v)
+  v = string.to_upper(v)
+  assert_eq(v, "MIXED  CASE")
+  assert_eq(string.trim_start("  x  "), "x  ")
+  assert_eq(string.trim_end("  x  "), "  x")
+}
+
+fn main() -> Unit = check_reuse()
+
+test "string reuse preserves aliases, views and Unicode" {
+  check_reuse()
+}

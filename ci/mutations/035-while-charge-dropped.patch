@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/stmts_loop.rs b/crates/almide-wasm/src/stmts_loop.rs
-index d9495c6f9..ff885a223 100644
+index cb188c3f5..d48093dc8 100644
 --- a/crates/almide-wasm/src/stmts_loop.rs
 +++ b/crates/almide-wasm/src/stmts_loop.rs
-@@ -30,9 +30,7 @@ impl Emitter<'_> {
-         // before the loop — the bounds checks inside read the local.
+@@ -45,9 +45,7 @@ impl Emitter<'_> {
          let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
+         let induction = self.induction_ranges(cond, body, &entry);
          self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
 -        // Deterministic meter: one loop-head charge per condition
 -        // CHECK (n iterations = n+1 checks), ALS-DT2.

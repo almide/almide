@@ -227,7 +227,7 @@ mod tests {
     use super::*;
 
     fn fs_src() -> &'static str {
-        almide::codegen::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().find(|(m, _)| *m == "fs").map(|(_, s)| *s).expect("fs runtime")
+        crate::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().find(|(m, _)| *m == "fs").map(|(_, s)| *s).expect("fs runtime")
     }
 
     /// Every guarded fs fn of the real runtime is twinned, and the twin
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn the_twin_covers_every_guarded_fn_and_reaches_fs_only_through_the_facade() {
         let entries: BTreeSet<String> =
-            super::super::build::fs_runtime_guards().into_iter().filter(|(_, g)| *g != "__almide_fs_root").map(|(n, _)| n).collect();
+            super::super::fs_runtime_guards().into_iter().filter(|(_, g)| *g != "__almide_fs_root").map(|(n, _)| n).collect();
         assert!(entries.len() > 30, "{entries:?}");
         let (twin, twinned) = scoped_twin(fs_src(), &entries, "");
         assert_eq!(twinned, entries, "a guarded fn is missing from the twin");

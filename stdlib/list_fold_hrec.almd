@@ -17,6 +17,7 @@ fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Val
     __fold_hrec_loop(h, f, n, i + 1, nacc)
   }
 
+@specializes("list.fold")
 fn list_fold_hrec(xs: List[Value], init: Value, f: (Value, Value) -> Value) -> Value = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)

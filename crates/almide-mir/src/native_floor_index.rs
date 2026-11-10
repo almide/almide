@@ -1,3 +1,6 @@
+/// One top-level item: (kind, name, whole text, whether `#[cfg…]`-attributed).
+type TopItem<'a> = (ItemKind, &'a str, &'a str, bool);
+
 // ── the runtime index of native_floor.rs, include!-spliced back at module level ──
 //
 // A pure code move: this file continues its parent verbatim. The split exists
@@ -12,6 +15,8 @@ struct RtItem {
 }
 
 struct RuntimeIndex {
+    /// Addresses of assembled fs items, retained across generated loading.
+    fs_built: BTreeSet<usize>,
     /// Items defined exactly once at the top level of the runtime modules.
     items: HashMap<&'static str, RtItem>,
     /// Every name the runtime and its prelude define (a type, a macro, a
@@ -23,206 +28,6 @@ struct RuntimeIndex {
     trait_methods: BTreeSet<&'static str>,
     /// Every fn name the runtime defines at its top level (taken or not).
     fns: BTreeSet<&'static str>,
-}
-
-fn runtime_index() -> &'static RuntimeIndex {
-    static IDX: OnceLock<RuntimeIndex> = OnceLock::new();
-    IDX.get_or_init(build_runtime_index)
-}
-
-/// What the first scan over the runtime modules' top-level items collects.
-#[derive(Default)]
-struct RuntimeScan {
-    items: HashMap<&'static str, RtItem>,
-    seen: BTreeMap<&'static str, usize>,
-    /// A module the runtime glob-imports (`mod almide_libm { … } pub use
-    /// almide_libm::*;`) puts its names in scope unqualified: each of them
-    /// takes the whole module and its glob along.
-    glob_mods: Vec<(&'static str, &'static str)>,
-    /// Runtime types and their impl blocks: a type travels with its
-    /// inherent impls and its impls of std traits.
-    types: Vec<(&'static str, &'static str)>,
-    impls: Vec<(&'static str, &'static str)>,
-    fns: BTreeSet<&'static str>,
-}
-
-/// One top-level item: (kind, name, whole text, whether `#[cfg…]`-attributed).
-type TopItem<'a> = (ItemKind, &'a str, &'a str, bool);
-
-impl RuntimeScan {
-    fn scan() -> Self {
-        let mut scan = RuntimeScan::default();
-        for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-            for item in top_level_items(src) {
-                scan.add(src, item);
-            }
-        }
-        scan
-    }
-
-    fn add(&mut self, src: &'static str, (kind, name, text, attributed): TopItem<'static>) {
-        if kind == ItemKind::Impl {
-            if !attributed {
-                self.impls.push((name, text));
-            }
-            return;
-        }
-        if kind == ItemKind::Fn {
-            self.fns.insert(name);
-        }
-        if kind == ItemKind::Type && !attributed {
-            self.types.push((name, text));
-        }
-        *self.seen.entry(name).or_default() += 1;
-        // A `#[cfg]`-gated item may have a sibling for another target:
-        // never take one along.
-        if matches!(kind, ItemKind::Fn | ItemKind::Const) && !attributed {
-            self.items.insert(name, RtItem { text });
-        }
-        let is_mod = kind == ItemKind::Other && lex(text).iter().take_while(|t| t.text != name).any(|t| t.text == "mod");
-        if is_mod && !attributed && src.contains(&format!("\npub use {name}::*;")) {
-            let whole: &'static str = Box::leak(format!("{text}\npub use {name}::*;").into_boxed_str());
-            self.glob_mods.push((name, whole));
-        }
-    }
-}
-
-fn build_runtime_index() -> RuntimeIndex {
-    let RuntimeScan { mut items, seen, glob_mods, types, impls, fns } = RuntimeScan::scan();
-    items.retain(|n, _| seen.get(n) == Some(&1));
-    take_glob_mods(&mut items, &seen, glob_mods);
-    // Every name the runtime or the v0 prelude defines, at any depth: what
-    // a body may reach only as a takeable item. The prelude rides in the
-    // runtime crate's source (`emit_runtime_crate`).
-    let prelude: &'static str = Box::leak(almide_codegen::emit_runtime_crate().into_boxed_str());
-    let mut defined: BTreeSet<&'static str> = defined_names(prelude);
-    let mut trait_methods = trait_method_names(prelude);
-    let mut runtime_traits: BTreeSet<&'static str> = BTreeSet::new();
-    for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        defined.extend(defined_names(src));
-        defined.extend(thread_local_names(src));
-        trait_methods.extend(trait_method_names(src));
-        runtime_traits.extend(trait_names(src));
-    }
-    let mut idx = take_prelude_traits(prelude, &runtime_traits, RuntimeIndex { items, defined, trait_methods, fns });
-    take_types(&mut idx, &seen, types, &impls);
-    take_runtime_traits(&mut idx, &seen, &impls);
-    take_fs_host_module(&mut idx);
-    idx
-}
-
-/// Each glob-imported module defined once travels whole, taken by its name
-/// or any name it defines that is not an item of its own.
-fn take_glob_mods(
-    items: &mut HashMap<&'static str, RtItem>,
-    seen: &BTreeMap<&'static str, usize>,
-    glob_mods: Vec<(&'static str, &'static str)>,
-) {
-    for (name, whole) in glob_mods {
-        if seen.get(name) != Some(&1) {
-            continue;
-        }
-        let body = &whole[whole.find('{').unwrap_or(0) + 1..whole.rfind("} //").or_else(|| whole.rfind('}')).unwrap_or(whole.len())];
-        items.insert(name, RtItem { text: whole });
-        for inner in defined_names(body) {
-            if !items.contains_key(inner) && !seen.contains_key(inner) {
-                items.insert(inner, RtItem { text: whole });
-            }
-        }
-    }
-}
-
-/// A trait the prelude alone defines travels whole: its declaration and
-/// every prelude impl of it, taken by any of its methods or its name.
-/// (An impl a runtime module adds is not taken, so a body that reaches
-/// the method through such a type fails the compile gate, never a
-/// user's build.)
-fn take_prelude_traits(prelude: &'static str, runtime_traits: &BTreeSet<&'static str>, idx: RuntimeIndex) -> RuntimeIndex {
-    let RuntimeIndex { mut items, defined, mut trait_methods, fns } = idx;
-    let traits: Vec<_> = prelude_traits(prelude)
-        .into_iter()
-        .filter(|(name, ..)| !runtime_traits.contains(name) && !items.contains_key(name))
-        .collect();
-    for (name, decl, _, methods) in &traits {
-        items.insert(name, RtItem { text: decl });
-        for m in methods {
-            trait_methods.remove(m);
-            items.entry(m).or_insert(RtItem { text: decl });
-        }
-    }
-    // An impl for a type the header cannot carry (it reaches such a
-    // name) stays behind: no carried body holds a value of that type.
-    let provisional = RuntimeIndex { items, defined, trait_methods, fns };
-    let mut taken: Vec<(&'static str, &'static str, Vec<&'static str>)> = Vec::new();
-    for (name, decl, impls, methods) in traits {
-        let mut whole = String::from(decl);
-        for imp in impls.into_iter().filter(|imp| references_in(&provisional, imp).is_ok()) {
-            whole.push('\n');
-            whole.push_str(imp);
-        }
-        taken.push((name, &*Box::leak(whole.into_boxed_str()), methods));
-    }
-    let RuntimeIndex { mut items, defined, trait_methods, fns } = provisional;
-    for (name, whole, methods) in taken {
-        items.insert(name, RtItem { text: whole });
-        for m in methods {
-            items.insert(m, RtItem { text: whole });
-        }
-    }
-    RuntimeIndex { items, defined, trait_methods, fns }
-}
-
-/// A runtime type travels with its inherent impls and its impls of std
-/// traits (a trait the runtime or the prelude defines stays behind, as
-/// a runtime module's impl of a prelude trait does above). Added last,
-/// so the prelude traits' impl filter above never takes an impl for one.
-fn take_types(
-    idx: &mut RuntimeIndex,
-    seen: &BTreeMap<&'static str, usize>,
-    types: Vec<(&'static str, &'static str)>,
-    impls: &[(&'static str, &'static str)],
-) {
-    for (name, decl) in types {
-        if seen.get(name) != Some(&1) || idx.items.contains_key(name) {
-            continue;
-        }
-        let mut whole = String::from(decl);
-        for (_, imp) in impls.iter().filter(|(n, _)| *n == name) {
-            let trait_of = impl_parts(&lex(imp)).and_then(|(t, _)| t);
-            if trait_of.is_some_and(|t| idx.defined.contains(t)) {
-                continue;
-            }
-            whole.push('\n');
-            whole.push_str(imp);
-        }
-        idx.items.insert(name, RtItem { text: Box::leak(whole.into_boxed_str()) });
-    }
-}
-
-/// A runtime trait defined once travels whole too: its declaration and
-/// every runtime impl of it (`AlmideMapKey` and its blanket impls), taken
-/// by its name or any of its methods.
-fn take_runtime_traits(idx: &mut RuntimeIndex, seen: &BTreeMap<&'static str, usize>, impls: &[(&'static str, &'static str)]) {
-    for (_, src) in almide_codegen::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        for (name, decl, _, methods) in prelude_traits(src) {
-            if seen.get(name) != Some(&1) || idx.items.contains_key(name) {
-                continue;
-            }
-            let mut whole = String::from(decl);
-            for (_, imp) in impls {
-                if impl_parts(&lex(imp)).and_then(|(t, _)| t) == Some(name) {
-                    whole.push('\n');
-                    whole.push_str(imp);
-                }
-            }
-            let whole: &'static str = Box::leak(whole.into_boxed_str());
-            idx.items.insert(name, RtItem { text: whole });
-            for m in methods {
-                idx.trait_methods.remove(m);
-                idx.items.entry(m).or_insert(RtItem { text: whole });
-            }
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -290,6 +95,11 @@ impl<'a> ItemScan<'a> {
             "const" | "static" => (ItemKind::Const, j + 1),
             "struct" | "enum" | "type" | "union" => (ItemKind::Type, j + 1),
             "trait" | "mod" | "macro_rules" => (ItemKind::Other, j + 1),
+            "thread_local" if self.toks.get(j + 1).is_some_and(|t| t.text == "!")
+                && self.toks.get(j + 2).is_some_and(|t| t.text == "{") => {
+                self.thread_local_item(j, start_off);
+                return true;
+            }
             "impl" => {
                 self.impl_item(j, start_off);
                 return true;
@@ -335,7 +145,7 @@ impl<'a> ItemScan<'a> {
                 j += 1;
             }
         }
-        while toks.get(j).is_some_and(|t| matches!(t.text, "const" | "unsafe" | "extern" | "async") && toks.get(j + 1).is_some_and(|n| matches!(n.text, "fn" | "unsafe" | "extern" | "\"C\""))) {
+        while toks.get(j).is_some_and(|t| matches!(t.text, "const" | "unsafe" | "extern" | "async") && toks.get(j + 1).is_some_and(|n| matches!(n.text, "fn" | "impl" | "unsafe" | "extern" | "\"C\""))) {
             j += 1;
         }
         j
@@ -351,6 +161,25 @@ impl<'a> ItemScan<'a> {
         self.i = end + 1;
         self.cfg_attr = false;
         self.attr_start = None;
+    }
+
+    /// A std thread-local declaration travels as one macro, selected by any
+    /// static it defines. Conditional declarations remain unavailable; copying
+    /// only an inner static would lose both its TLS semantics and its attributes.
+    fn thread_local_item(&mut self, j: usize, start_off: usize) {
+        let end = item_end(&self.toks, j);
+        let end_off = self.end_off(end);
+        let inner = &self.src[self.toks[j + 2].off + 1..self.toks[end].off];
+        let items = top_level_items(inner);
+        let conditional = self.cfg_attr || items.iter().any(|(_, _, _, cfg)| *cfg);
+        let valid = !items.is_empty() && items.iter().all(|(kind, _, text, _)|
+            *kind == ItemKind::Const && lex(text).iter().take(3).any(|t| t.text == "static"));
+        let from = self.attr_start.unwrap_or(start_off);
+        let whole = &self.src[from..end_off];
+        for (_, name, _, _) in items {
+            self.out.push((ItemKind::Const, name, whole, conditional || !valid));
+        }
+        self.finish(end);
     }
 
     /// An `impl` block whose keyword is token `j`.
@@ -391,6 +220,10 @@ fn impl_self_type<'a>(toks: &[Tok<'a>]) -> Option<&'a str> {
 }
 
 fn impl_parts<'a>(toks: &[Tok<'a>]) -> Option<(Option<&'a str>, &'a str)> {
+    // Item text may retain a cfg attribute; its gate must travel with the
+    // implementation even though it is outside the impl head itself.
+    let start = toks.iter().position(|t| t.text == "impl" && t.depth == 0)?;
+    let toks = &toks[start..];
     let base = toks.first()?.depth;
     let mut k = 1;
     // Skip the impl's own generics.
@@ -465,7 +298,19 @@ fn item_end(toks: &[Tok], from: usize) -> usize {
 fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     let toks = lex(text);
     let fn_at = toks.iter().position(|t| t.text == "fn")?;
-    let open = toks[fn_at..].iter().position(|t| t.text == "(")? + fn_at;
+    // A generic bound may itself contain `Fn(A) -> B`. Its parentheses
+    // are not the function's parameter list, and the arrow is not a `>`
+    // closing the generic parameter group.
+    let mut generic_depth = 0i32;
+    let open = (fn_at + 2..toks.len()).find(|&i| {
+        match toks[i].text {
+            "<" => generic_depth += 1,
+            ">" if toks.get(i.wrapping_sub(1)).is_none_or(|t| t.text != "-") => generic_depth -= 1,
+            "(" if generic_depth == 0 => return true,
+            _ => {}
+        }
+        false
+    })?;
     // The `)` matching the param list's `(` (a param type may hold parens:
     // `Vec<(K, V)>`).
     let close = {
@@ -483,9 +328,10 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     let mut params = Vec::new();
     let mut depth = 0i32;
     let mut cur = String::new();
-    for c in inner.chars() {
+    for (i, c) in inner.char_indices() {
         match c {
             '<' | '(' | '[' => depth += 1,
+            '>' if i > 0 && inner.as_bytes()[i - 1] == b'-' => {}
             '>' | ')' | ']' => depth -= 1,
             _ => {}
         }
@@ -508,64 +354,27 @@ fn rust_signature(text: &str) -> Option<(Vec<String>, String)> {
     Some((params, ret))
 }
 
-/// The runtime body of `symbol` and every item it reaches, or `None` when it
-/// reaches something the native header cannot carry.
-fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
-    let mut taken: BTreeSet<&'static str> = BTreeSet::new();
-    let mut texts: BTreeSet<&'static str> = BTreeSet::new();
-    let mut todo: Vec<String> = vec![symbol.to_string()];
-    let mut out = Vec::new();
-    while let Some(name) = todo.pop() {
-        let (&key, item) = rt
-            .items
-            .get_key_value(name.as_str())
-            .ok_or_else(|| format!("`{name}` is not a takeable runtime item"))?;
-        if header_items().contains(key) || !taken.insert(key) || !texts.insert(item.text) {
-            continue;
-        }
-        // A runtime module that needs a crate (`almide_codegen::runtime_crate_deps`)
-        // cannot ride the native program, which links no dependency.
-        if let Some((dep, _)) = almide_codegen::runtime_crate_deps(item.text).first() {
-            return Err(format!("`{key}` needs the `{dep}` crate, which a native program does not link"));
-        }
-        out.push(item.text);
-        for r in references(item.text).map_err(|n| format!("`{key}` reaches `{n}`, which the native header cannot carry"))? {
-            if !taken.contains(r.as_str()) {
-                todo.push(r);
-            }
-        }
-    }
-    fs_host_gate(symbol, &out)?;
-    Ok(out)
-}
-
-/// The runtime items `text` names, each closed over what it reaches: what a
-/// render takes along for the runtime types its generated table aliases
-/// (#4514), the way a floor body takes its callees. A declared type nobody
-/// operates on is reached by no body, so without this its alias would name a
-/// definition that never arrives. `Err` names one the header cannot carry.
-pub(crate) fn runtime_items_named_by(text: &str) -> Result<Vec<&'static str>, String> {
-    let mut out = Vec::new();
-    for name in references(text).map_err(|n| format!("the generated types reach `{n}`, which the native header cannot carry"))? {
-        out.extend(closure(&name, runtime_index())?);
-    }
-    Ok(out)
-}
-
-/// The runtime item names `text` reaches that need a definition beside it,
-/// or `Err(name)` when it reaches a name the runtime or its prelude defines that
-/// is not an item we can take along (a type, a macro, a module, a prelude
-/// fn, a `#[cfg]` twin). A name neither of them defines is Rust's own.
-fn references(text: &str) -> Result<Vec<String>, String> {
-    if is_fs_host_text(text) {
-        // The fs host module's own names, at any depth, are its own.
-        return references_seeded(runtime_index(), text, fs_host_own_names());
-    }
-    references_in(runtime_index(), text)
-}
-
 fn references_in(rt: &RuntimeIndex, text: &str) -> Result<Vec<String>, String> {
-    references_seeded(rt, text, &BTreeSet::new())
+    references_with_supplied(rt, text, &BTreeSet::new())
+}
+
+fn references_with_supplied(rt: &RuntimeIndex, text: &str, supplied: &BTreeSet<&str>) -> Result<Vec<String>, String> {
+    // A carried module owns its nested names, including cfg siblings. A
+    // parent/sibling reference is still resolved against the outer index.
+    let mut own = supplied.clone();
+    for (kind, name, item, _) in top_level_items(text) {
+        if kind == ItemKind::Other && lex(item).iter().take_while(|t| t.text != name).any(|t| t.text == "mod") {
+            own.extend(defined_names(item));
+            own.extend(thread_local_names(item));
+        }
+    }
+    references_seeded(rt, text, &own).map(|mut refs| {
+        // An explicitly supplied header definition takes precedence over a
+        // same-named indexed prelude helper. Pulling both would duplicate the
+        // item and incorrectly demand the helper's ambient dependencies.
+        refs.retain(|name| !supplied.contains(name.as_str()));
+        refs
+    })
 }
 
 fn references_seeded<'t>(rt: &RuntimeIndex, text: &'t str, own: &BTreeSet<&'t str>) -> Result<Vec<String>, String> {
@@ -687,15 +496,6 @@ fn by_name(rt: &RuntimeIndex, header: &BTreeSet<&'static str>, locals: &BTreeSet
 }
 
 /// The names the native header defines for a floor body.
-/// Is `text` a runtime item (the floor header or an item of the embedded
-/// runtime the floor takes along)? The render places these in the program's
-/// runtime part (`render_native::RT_MOD`), which the build compiles as its
-/// own crate with the runtime's profile (owner ruling 2026-11-02).
-pub(crate) fn is_runtime_text(text: &str) -> bool {
-    static TEXTS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
-    text == FLOOR_HEADER || TEXTS.get_or_init(|| runtime_index().items.values().map(|i| i.text).collect()).contains(text)
-}
-
 /// `text` with every top-level item it opens made `pub` (a fn, const,
 /// static, type, trait or module that is not already): the runtime part is a
 /// module, or a crate of its own, that the program reaches through a glob.
@@ -710,6 +510,14 @@ pub(crate) fn pub_items(text: &str) -> String {
         let t = &toks[i];
         if t.depth != 0 {
             nested = true;
+            i += 1;
+            continue;
+        }
+        if t.text == "}" {
+            // The closing brace itself is at its parent's depth. It ends an
+            // item; it must not consume the next item's visibility slot.
+            nested = false;
+            expect_item = true;
             i += 1;
             continue;
         }
@@ -771,4 +579,59 @@ fn pub_edit(toks: &[Tok], i: usize) -> Option<(usize, usize, &'static str)> {
     let opens = matches!(t.text, "fn" | "const" | "static" | "struct" | "enum" | "type" | "trait" | "mod" | "union" | "unsafe" | "use")
         && !(t.text == "unsafe" && toks.get(i + 1).is_some_and(|n| n.text == "impl"));
     opens.then_some((t.off, 0, "pub "))
+}
+
+#[cfg(test)]
+mod thread_local_item_tests {
+    use super::*;
+    #[test]
+    fn macro_statics_share_one_complete_declaration_and_keep_conditional_gates() {
+        let src = "thread_local! { static A: Cell<i64> = Cell::new(0); static B: RefCell<Vec<i64>> = RefCell::new(Vec::new()); } fn after() {}";
+        let items = top_level_items(src);
+        assert_eq!(items.iter().map(|(_, n, _, c)| (*n, *c)).collect::<Vec<_>>(), [("A", false), ("B", false), ("after", false)]);
+        assert_eq!(items[0].2, items[1].2);
+        assert!(items[0].2.starts_with("thread_local!"));
+        for gated in [
+            "#[cfg(unix)] thread_local! { static A: Cell<i64> = Cell::new(0); }",
+            "thread_local! { #[cfg(unix)] static A: Cell<i64> = Cell::new(0); static B: i64 = 0; }",
+        ] { assert!(top_level_items(gated).iter().all(|(_, _, _, cfg)| *cfg)); }
+        assert_eq!(top_level_items("other_macro! { static A: i64 = 0; }").len(), 0);
+    }
+}
+
+/// Rewrite actual call paths only. A user's printed string or a comment
+/// containing Rust source must not change when termination gains teardown.
+pub(crate) fn route_process_exits(text: &str, target: &str) -> String {
+    let toks = lex(text);
+    let mut out = text.to_string();
+    for w in toks.windows(6).rev() {
+        if w.iter().map(|t| t.text).eq(["std", "::", "process", "::", "exit", "("]) {
+            out.replace_range(w[0].off..w[4].off + w[4].text.len(), target);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod exit_routing_tests {
+    use super::*;
+    #[test]
+    fn exit_calls_route_without_rewriting_user_bytes_or_comments() {
+        let src = r##"fn f() { println!("std::process::exit(1)"); let raw = r#"std::process::exit(2)"#; /* std::process::exit(3) */ std :: process :: exit (4); }"##;
+        assert_eq!(route_process_exits(src, "routed"), src.replace("std :: process :: exit (4)", "routed (4)"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_visibility_tests {
+    use super::*;
+    #[test]
+    fn consecutive_items_after_empty_or_nested_bodies_are_exported() {
+        let input = "fn a() {} fn b() { if true { let _ = 1; } } pub(crate) struct C; impl Drop for C { fn drop(&mut self) {} } fn d() {}";
+        let output = pub_items(input);
+        for name in ["a", "b", "d"] { assert!(output.contains(&format!("pub fn {name}")), "{output}"); }
+        assert!(output.contains("pub struct C"));
+        assert!(!output.contains("pub impl"));
+        assert!(!output.contains("pub fn drop"));
+    }
 }

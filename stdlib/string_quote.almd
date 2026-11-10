@@ -43,6 +43,7 @@ else {
   __sq_fill_esc(src, slen, i + 1, pos1)
 }
 
+@specializes("string.__quote")
 fn string_quote(s: String) -> String = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)

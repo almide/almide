@@ -7,18 +7,18 @@
 ///
 ///   var __lr_set = false
 ///   var __lr_val: Ret = err("")               // seed, only read when set
-///   while (__lr_set == false) and cond {
+///   while (if __lr_set then false else cond) {
 ///     …; if c then { <rest of body> }
 ///        else { __lr_val = E; __lr_set = true }
 ///   }
 ///   if __lr_set then __lr_val else { <post>; <tail> }
 ///
-/// The guard's containing while AND every ANCESTOR while get the flag conjunct, so
-/// a nested-loop early return (first_duplicate) unwinds both levels. SOUNDNESS
-/// GUARDS (decline = keep the honest wall): the fn returns `Result[_, _]`; every
-/// statement that can still run after the flag is set (the stmts AFTER a nested
-/// while inside an outer body) is call-free (pure Assign/arith — running them once
-/// more is unobservable); the guard's `E` type equals the fn's Result type.
+/// The containing loop and every enclosing loop check the flag. Guards
+/// inside statement blocks, if arms and match arms share it; statements
+/// following an exited scope are skipped. A while condition is evaluated
+/// only while the function has not returned (Almide's `and` is eager).
+/// The guard result must have the function's return type; unsupported
+/// result expressions and loop-control guards leave the original IR intact.
 ///
 /// #3058 widens it along both axes the corpus walled on. The LOOP: a top-level
 /// `for x in xs` has no condition to conjoin, so its body is wrapped as
@@ -30,7 +30,7 @@
 /// not a value return and is declined (its else holds a loop exit, which in a
 /// Unit fn the type alone would not tell apart).
 pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
-    use almide_ir::{BinOp, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
+    use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
 
@@ -53,135 +53,182 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         almide_ir::visit::IrVisitor::visit_expr(&mut C { found: &mut found }, e);
         found
     }
-    fn stmt_has_call(s: &IrStmt) -> bool {
-        match &s.kind {
-            IrStmtKind::Bind { value, .. }
-            | IrStmtKind::Assign { value, .. }
-            | IrStmtKind::Expr { expr: value } => contains_call(value),
-            _ => true, // anything unusual — decline conservatively
+    fn unit_block(stmts: Vec<IrStmt>) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::Block { stmts, expr: None },
+            ty: Ty::Unit, span: None, def_id: None,
         }
     }
 
-    /// Rewrite the guard inside `body` (recursing into nested whiles). Returns
-    /// true iff a guard was rewritten somewhere below; conjoins the flag onto
-    /// every while on the path. `set`/`val` are the flag/result VarIds.
-    fn rewrite_body(
-        body: &mut Vec<IrStmt>,
-        ret_ty: &Ty,
-        set: almide_ir::VarId,
-        val: almide_ir::VarId,
-    ) -> Option<bool> {
-        // find a top-level guard with E : ret_ty
-        let gpos = body.iter().position(|s| matches!(&s.kind,
-            IrStmtKind::Guard { else_, .. } if else_.ty == *ret_ty && !contains_call(else_)));
-        if let Some(gi) = gpos {
-            let rest: Vec<IrStmt> = body.split_off(gi + 1);
-            let Some(IrStmt { kind: IrStmtKind::Guard { cond, else_ }, span }) = body.pop().map(|s| s)
-            else {
-                unreachable!()
-            };
-            let set_stmts = vec![
-                IrStmt {
-                    kind: IrStmtKind::Assign { var: val, value: else_ },
-                    span: None,
-                },
-                IrStmt {
-                    kind: IrStmtKind::Assign {
-                        var: set,
-                        value: IrExpr {
-                            kind: IrExprKind::LitBool { value: true },
-                            ty: Ty::Bool,
-                            span: None,
-                            def_id: None,
-                        },
-                    },
-                    span: None,
-                },
-            ];
-            let mk_block = |stmts: Vec<IrStmt>| IrExpr {
-                kind: IrExprKind::Block {
-                    stmts,
-                    expr: Some(Box::new(IrExpr {
-                        kind: IrExprKind::Unit,
-                        ty: Ty::Unit,
-                        span: None,
-                        def_id: None,
-                    })),
-                },
-                ty: Ty::Unit,
-                span: None,
-                def_id: None,
-            };
-            body.push(IrStmt {
-                kind: IrStmtKind::Expr {
-                    expr: IrExpr {
-                        kind: IrExprKind::If {
-                            cond: Box::new(cond),
-                            then: Box::new(mk_block(rest)),
-                            else_: Box::new(mk_block(set_stmts)),
-                        },
-                        ty: Ty::Unit,
-                        span: None,
-                        def_id: None,
-                    },
-                },
-                span,
-            });
-            return Some(true);
-        }
-        // recurse into ONE nested while (the first that rewrites)
-        for wi in 0..body.len() {
-            let IrStmtKind::Expr { expr } = &mut body[wi].kind else { continue };
-            let IrExprKind::While { cond, body: inner } = &mut expr.kind else { continue };
-            if let Some(true) = rewrite_body(inner, ret_ty, set, val) {
-                conjoin_flag(cond, set);
-                // Every stmt after the nested while may run ONCE MORE with the
-                // flag set — decline unless all are call-free (pure updates).
-                if body[wi + 1..].iter().any(stmt_has_call) {
-                    return None;
+    fn flag(set: almide_ir::VarId) -> IrExpr {
+        IrExpr { kind: IrExprKind::Var { id: set }, ty: Ty::Bool, span: None, def_id: None }
+    }
+
+    /// Guards in a value-producing branch still return from this function.
+    /// Lambda bodies have their own return boundary.
+    fn has_scope_guard(value: &IrExpr) -> bool {
+        struct Find(bool);
+        impl almide_ir::IrVisitor for Find {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if !matches!(e.kind, IrExprKind::Lambda { .. }) {
+                    almide_ir::walk_expr(self, e);
                 }
-                return Some(true);
+            }
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                self.0 |= matches!(s.kind, IrStmtKind::Guard { .. });
+                almide_ir::walk_stmt(self, s);
             }
         }
-        Some(false)
+        let mut find = Find(false);
+        almide_ir::IrVisitor::visit_expr(&mut find, value);
+        find.0
+    }
+
+    /// Move a binding and its continuation into each value-producing leaf.
+    /// The initializer's block statements stay before the binding, exposing
+    /// their guards to the ordinary statement-scope early-return rewrite.
+    /// No placeholder value is bound on a path that returns early.
+    fn bind_continuation(value: &IrExpr, binding: &IrStmt, rest: &[IrStmt]) -> Option<IrExpr> {
+        let mut out = value.clone();
+        match &mut out.kind {
+            IrExprKind::If { then, else_, .. } => {
+                **then = bind_continuation(then, binding, rest)?;
+                **else_ = bind_continuation(else_, binding, rest)?;
+            }
+            IrExprKind::Match { arms, .. } => {
+                for arm in arms { arm.body = bind_continuation(&arm.body, binding, rest)?; }
+            }
+            IrExprKind::Block { stmts, expr } => {
+                let tail = expr.as_deref().cloned().unwrap_or(IrExpr {
+                    kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+                });
+                stmts.push(IrStmt { span: tail.span, kind: IrStmtKind::Expr {
+                    expr: bind_continuation(&tail, binding, rest)?,
+                } });
+                *expr = None;
+            }
+            _ => {
+                // A guard hidden in a call operand needs its own evaluation-
+                // order transform; do not leave it as a value-shaped exit.
+                if has_scope_guard(value) { return None; }
+                if almide_ir::diverge::diverges(value) {
+                    return Some(unit_block(vec![IrStmt { span: value.span,
+                        kind: IrStmtKind::Expr { expr: value.clone() } }]));
+                }
+                let mut bound = binding.clone();
+                let IrStmtKind::Bind { value: initializer, .. } = &mut bound.kind else { return None };
+                *initializer = value.clone();
+                return Some(unit_block(std::iter::once(bound).chain(rest.iter().cloned()).collect()));
+            }
+        }
+        out.ty = Ty::Unit;
+        Some(out)
+    }
+
+    /// Walk statement scopes, never closure bodies. Once any nested scope
+    /// returns, every following statement is skipped, including pure stores:
+    /// they may change the already captured result through shared state.
+    fn rewrite_body(body: &mut Vec<IrStmt>, ret_ty: &Ty, set: almide_ir::VarId, val: almide_ir::VarId) -> Option<bool> {
+        let mut rest = Vec::new();
+        let mut changed = false;
+        for mut stmt in std::mem::take(body).into_iter().rev() {
+            if let IrStmtKind::Bind { value, .. } = &stmt.kind {
+                if has_scope_guard(value) {
+                    let mut continuation = bind_continuation(value, &stmt, &rest)?;
+                    if !rewrite_statement_scope(&mut continuation, ret_ty, set, val)? { return None; }
+                    rest = vec![IrStmt { span: stmt.span, kind: IrStmtKind::Expr { expr: continuation } }];
+                    changed = true;
+                    continue;
+                }
+            }
+            if let IrStmtKind::Guard { cond, else_ } = stmt.kind {
+                if else_.ty != *ret_ty || contains_call(&else_) { return None; }
+                let exits = vec![
+                    IrStmt { kind: IrStmtKind::Assign { var: val, value: else_ }, span: None },
+                    IrStmt { kind: IrStmtKind::Assign { var: set, value: IrExpr {
+                        kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None,
+                    } }, span: None },
+                ];
+                stmt.kind = IrStmtKind::Expr { expr: IrExpr {
+                    kind: IrExprKind::If { cond: Box::new(cond), then: Box::new(unit_block(rest)), else_: Box::new(unit_block(exits)) },
+                    ty: Ty::Unit, span: stmt.span, def_id: None,
+                } };
+                rest = vec![stmt];
+                changed = true;
+            } else {
+                let nested = match &mut stmt.kind {
+                    IrStmtKind::Expr { expr } => rewrite_statement_scope(expr, ret_ty, set, val)?,
+                    _ => false,
+                };
+                if nested && !rest.is_empty() {
+                    rest = vec![IrStmt { kind: IrStmtKind::Expr { expr: IrExpr {
+                        kind: IrExprKind::If {
+                            cond: Box::new(flag(set)), then: Box::new(unit_block(Vec::new())), else_: Box::new(unit_block(rest)),
+                        }, ty: Ty::Unit, span: None, def_id: None,
+                    } }, span: None }];
+                }
+                rest.insert(0, stmt);
+                changed |= nested;
+            }
+        }
+        *body = rest;
+        Some(changed)
+    }
+
+    fn rewrite_statement_scope(e: &mut IrExpr, ret_ty: &Ty, set: almide_ir::VarId, val: almide_ir::VarId) -> Option<bool> {
+        match &mut e.kind {
+            IrExprKind::While { cond, body } => {
+                let changed = rewrite_body(body, ret_ty, set, val)?;
+                if changed { conjoin_flag(cond, set); }
+                Some(changed)
+            }
+            IrExprKind::ForIn { body, .. } => {
+                let changed = rewrite_body(body, ret_ty, set, val)?;
+                if changed { guard_for_body(body, set); }
+                Some(changed)
+            }
+            IrExprKind::Block { stmts, expr } => {
+                // A block's tail in statement position is also discarded;
+                // keep its effects but do not evaluate it after an exit.
+                if let Some(tail) = expr.take() {
+                    stmts.push(IrStmt { span: tail.span, kind: IrStmtKind::Expr { expr: *tail } });
+                }
+                let changed = rewrite_body(stmts, ret_ty, set, val)?;
+                Some(changed)
+            }
+            IrExprKind::If { then, else_, .. } => {
+                let a = rewrite_statement_scope(then, ret_ty, set, val)?;
+                let b = rewrite_statement_scope(else_, ret_ty, set, val)?;
+                Some(a || b)
+            }
+            IrExprKind::Match { arms, .. } => {
+                let mut changed = false;
+                for arm in arms { changed |= rewrite_statement_scope(&mut arm.body, ret_ty, set, val)?; }
+                Some(changed)
+            }
+            _ => Some(false),
+        }
     }
 
     fn conjoin_flag(cond: &mut Box<IrExpr>, set: almide_ir::VarId) {
-        let not_set = IrExpr {
-            kind: IrExprKind::BinOp {
-                op: BinOp::Eq,
-                left: Box::new(IrExpr {
-                    kind: IrExprKind::Var { id: set },
-                    ty: Ty::Bool,
-                    span: None,
-                    def_id: None,
-                }),
-                right: Box::new(IrExpr {
-                    kind: IrExprKind::LitBool { value: false },
-                    ty: Ty::Bool,
-                    span: None,
-                    def_id: None,
-                }),
-            },
-            ty: Ty::Bool,
-            span: None,
-            def_id: None,
+        let old = (**cond).clone();
+        // `and` is eager in Almide: an already returned loop must not
+        // evaluate its condition again, even when that condition has effects.
+        **cond = IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(flag(set)),
+                then: Box::new(IrExpr { kind: IrExprKind::LitBool { value: false }, ty: Ty::Bool, span: None, def_id: None }),
+                else_: Box::new(old),
+            }, ty: Ty::Bool, span: None, def_id: None,
         };
-        let old = std::mem::replace(
-            cond,
-            Box::new(IrExpr {
-                kind: IrExprKind::Unit,
-                ty: Ty::Unit,
-                span: None,
-                def_id: None,
-            }),
-        );
-        *cond = Box::new(IrExpr {
-            kind: IrExprKind::BinOp { op: BinOp::And, left: Box::new(not_set), right: old },
-            ty: Ty::Bool,
-            span: None,
-            def_id: None,
-        });
+    }
+
+    fn guard_for_body(body: &mut Vec<IrStmt>, set: almide_ir::VarId) {
+        let rest = std::mem::take(body);
+        body.push(IrStmt { kind: IrStmtKind::Expr { expr: IrExpr {
+            kind: IrExprKind::If { cond: Box::new(flag(set)), then: Box::new(unit_block(Vec::new())), else_: Box::new(unit_block(rest)) },
+            ty: Ty::Unit, span: None, def_id: None,
+        } }, span: None });
     }
 
     /// The `__lr_val` seed, read only once the flag is set: `err("")` for a
@@ -220,28 +267,8 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         if rewrite_body(&mut wb, ret_ty, set, val) != Some(true) {
             return false;
         }
-        let mut cond = Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None });
-        conjoin_flag(&mut cond, set);
-        let IrExprKind::BinOp { left: not_set, .. } = cond.kind else { return false };
-        let guarded = IrExpr {
-            kind: IrExprKind::If {
-                cond: not_set,
-                then: Box::new(IrExpr {
-                    kind: IrExprKind::Block {
-                        stmts: wb,
-                        expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None })),
-                    },
-                    ty: Ty::Unit,
-                    span: None,
-                    def_id: None,
-                }),
-                else_: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }),
-            },
-            ty: Ty::Unit,
-            span: None,
-            def_id: None,
-        };
-        *wbody = vec![IrStmt { kind: IrStmtKind::Expr { expr: guarded }, span: None }];
+        guard_for_body(&mut wb, set);
+        *wbody = wb;
         true
     }
 
@@ -319,7 +346,7 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
             // post-loop continuation → the else of the flag dispatch
             let post: Vec<IrStmt> = stmts.split_off(wi + 3);
             let old_tail = tail_e.clone();
-            let else_block = if post.is_empty() {
+            let mut else_block = if post.is_empty() {
                 old_tail
             } else {
                 IrExpr {
@@ -329,6 +356,7 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                     def_id: None,
                 }
             };
+            rewrite_fn(&mut else_block, ret_ty, raw, vt);
             *tail_e = IrExpr {
                 kind: IrExprKind::If {
                     cond: Box::new(IrExpr {
@@ -344,7 +372,7 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                 span: None,
                 def_id: None,
             };
-            return; // one loop per fn (the corpus shape); later loops keep the wall
+            return; // later loops were processed in the post-loop continuation
         }
     }
 

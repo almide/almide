@@ -150,3 +150,20 @@ effect fn main() -> Unit = {
         "5 7 3.25\n",
     );
 }
+
+/// Collection forwarders may expose a chain only when every argument is
+/// still evaluated once in its original order. A reordered body keeps the
+/// ordinary call (the caller's order precedes the body's order).
+#[test]
+fn collection_forwarders_preserve_argument_effects() {
+    check("inl_collection_forward", r#"
+fn contains(xs: List[Int], n: Int) -> Bool = list.contains(xs, n)
+fn reordered(n: Int, xs: List[Int]) -> Bool = list.contains(xs, n)
+effect fn items() -> List[Int] = { println("items"); [1, 2] }
+effect fn needle() -> Int = { println("needle"); 2 }
+effect fn main() -> Unit = {
+  println("${contains(items()!, needle()!)}")
+  println("${reordered(needle()!, items()!)}")
+}
+"#, "items\nneedle\ntrue\nneedle\nitems\ntrue\n");
+}

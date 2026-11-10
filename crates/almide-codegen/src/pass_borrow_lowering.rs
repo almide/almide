@@ -655,10 +655,11 @@ impl Lower<'_> {
             IrExprKind::Var { id } if self.stays_borrowed(*id) => {
                 let value = std::mem::replace(source, mk(IrExprKind::Unit, Ty::Unit, None));
                 let (ty, span) = (value.ty.clone(), value.span);
-                *source = mk(IrExprKind::Borrow { expr: Box::new(value), as_str: false, mutable: false }, ty, span);
+                let as_str = ty == Ty::String;
+                *source = mk(IrExprKind::Borrow { expr: Box::new(value), as_str, mutable: false }, ty, span);
             }
             IrExprKind::Var { .. } => *symbol = sym(twin),
-            IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } if is_temporary(inner) => {
+            IrExprKind::Borrow { expr: inner, mutable: false, .. } if is_temporary(inner) => {
                 let IrExprKind::Borrow { expr: inner, .. } = std::mem::replace(&mut source.kind, IrExprKind::Unit) else { unreachable!() };
                 *source = *inner;
                 *symbol = sym(twin);

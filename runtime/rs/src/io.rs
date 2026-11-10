@@ -127,11 +127,9 @@ pub fn almide_rt_io___write_stdout(data: &Vec<u8>) {
 // stderr is unbuffered: stdout is flushed first so the two streams keep
 // program order on a terminal, as `eprintln` does.
 pub fn almide_rt_io___write_stderr(data: &Vec<u8>) {
-    almide_stdout_flush();
-    let _ = std::io::stderr().write_all(data);
+    almide_stderr_write_bytes(data);
 }
 
 pub fn almide_rt_io_eprint(s: &str) {
-    almide_stdout_flush();
-    let _ = std::io::stderr().write_all(s.as_bytes());
+    almide_stderr_write_bytes(s.as_bytes());
 }

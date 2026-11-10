@@ -84,16 +84,7 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
     use crate::lower::registry_sig::{registered_call_names, registry_signature};
     // http: every client entry point is an admitted host op (crate::host_ops,
     // #2739), an ordinary call whose result is materialized — none is listed.
-    const NOT_YET: &[&str] = &[
-        // process (#2589): these registry rows are the wasm legs' self-host
-        // (stdlib/process_wasm.almd). The v1 lowering keeps treating a process
-        // Result as it did before the rows existed (untracked); admit them with
-        // the layout audit of their bodies, not before.
-        "process.exec",
-        "process.__os_output",
-        "process.__os_run",
-        "process.kill",
-    ];
+    const NOT_YET: &[&str] = &[];
     let member = |module: &str, func: &str| {
         is_self_host_materialized_result_fn(module, func)
             || func.match_indices('_').any(|(i, _)| i > 0 && is_self_host_materialized_result_fn(module, &func[..i]))

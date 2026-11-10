@@ -53,6 +53,11 @@ pub(crate) struct Emitter<'a> {
     /// #2976: the params a raw-rule loop-form self call still releases at
     /// the loop-back (`exit_plan::raw_address_sources`); empty elsewhere.
     pub(crate) loop_back_releasable: std::collections::BTreeSet<u32>,
+    /// #4607: the owner locals of a loop-form frame (exit_plan.rs
+    /// `populate_loop_carried`); `loop_carried_raw` is the subset a raw
+    /// address may be read through. Empty outside a self tail-calling body.
+    pub(crate) loop_carried: std::collections::BTreeSet<u32>,
+    pub(crate) loop_carried_raw: std::collections::BTreeSet<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
@@ -135,6 +140,8 @@ pub(crate) struct Emitter<'a> {
     /// separately-lowered modules each restart VarIds at 0, so the bare
     /// id is ambiguous — lookups pair it with `var_space`.
     pub(crate) globals: &'a HashMap<crate::GVar, (u32, SliceTy)>,
+    /// Hints only: a runtime equality guard is required before specialization.
+    pub(crate) global_constants: &'a HashMap<crate::GVar, i64>,
     /// Which VarTable this function's VarIds index (0 = the entry
     /// program, i+1 = `ir.modules[i]`).
     pub(crate) var_space: u32,
@@ -188,6 +195,12 @@ pub(crate) struct Emitter<'a> {
     /// #3345: bounds facts (bounds_facts.rs; `None` = off), payload pointers (payload_ptr.rs).
     pub(crate) bounds_facts: Option<Vec<(VarId, VarId, i64)>>,
     pub(crate) payload_ptrs: HashMap<VarId, u32>,
+    /// #4611: integer range facts (int_range.rs) — `Int` locals' known
+    /// intervals where the code being lowered runs.
+    pub(crate) int_ranges: HashMap<VarId, crate::int_range::Range>,
+    /// #4611: the entry ranges a `while` statement hands its loop, keyed
+    /// by the address of the loop's condition (int_range.rs).
+    pub(crate) loop_entry_ranges: Option<(usize, HashMap<VarId, crate::int_range::Range>)>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits

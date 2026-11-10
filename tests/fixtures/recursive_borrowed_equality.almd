@@ -1,0 +1,17 @@
+type Node: Eq = Num(Float) | Wrap(Node) | Empty
+
+fn nest(n: Int, seed: Node) -> Node = if n <= 0 then seed else nest(n - 1, Wrap(seed))
+fn equal(a: Node, b: Node) -> Bool = a == b
+
+fn main() -> Unit = {
+  let a = nest(120, Num(-0.0))
+  let b = nest(120, Num(0.0))
+  let c = nest(120, Num(2.0))
+  let n = nest(120, Num(0.0 / 0.0))
+  println("${equal(a, b)}")
+  println("${equal(a, c)}")
+  println("${equal(n, n)}")
+  println("${equal(a, nest(119, Num(0.0)))}")
+  println("${equal(Empty, Empty)}")
+  println("${equal(a, b)}")
+}

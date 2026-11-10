@@ -37,6 +37,11 @@ struct PackageNatives {
 }
 
 impl CrateInputs {
+    /// Nothing to copy into the crate and no dependency to declare.
+    pub(super) fn is_empty(&self) -> bool {
+        self.packages.iter().all(|p| p.files.is_empty() && p.mod_stems.is_empty()) && self.dep_native_deps.is_empty()
+    }
+
     /// Read the `native/` trees and dependency `[native-deps]` reachable from
     /// `source_root`. Nothing is written.
     ///
@@ -155,6 +160,38 @@ impl PackageNatives {
     }
 }
 
+/// The text of every Rust file under the `native/` trees the native build of
+/// `file` compiles: the building package's and each dependency package's, as
+/// [`CrateInputs::collect`] reads them. The v1 render reads it to keep the
+/// module functions that code calls back into (#3424). Reads only; a manifest
+/// or dependency that cannot be read contributes nothing here and is reported
+/// by the build's own collection.
+pub(crate) fn native_rust_text(file: &str) -> String {
+    let here = |p: &std::path::Path| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() };
+    let file_dir = std::path::Path::new(file).parent().map(here).unwrap_or_else(|| ".".into());
+    let root = if file_dir.join("almide.toml").exists() { file_dir } else { std::path::PathBuf::from(".") };
+    let mut roots = vec![root.clone()];
+    let toml_path = root.join("almide.toml");
+    if let Some(proj) = toml_path.exists().then(|| crate::project::parse_toml(&toml_path).ok()).flatten() {
+        if !proj.dependencies.is_empty() {
+            if let Ok(fetched) = crate::project_fetch::fetch_all_deps(&proj) {
+                roots.extend(fetched.into_iter().map(|d| d.package_dir));
+            }
+        }
+    }
+    let mut text = String::new();
+    for root in roots.iter().filter(|r| r.join("native").is_dir()) {
+        let Ok(pkg) = PackageNatives::read(root) else { continue };
+        for (path, bytes) in &pkg.files {
+            if path.extension().is_some_and(|e| e == "rs") {
+                text.push_str(&String::from_utf8_lossy(bytes));
+                text.push('\n');
+            }
+        }
+    }
+    text
+}
+
 /// The byte offset just past the crate's leading inner attributes: the leading
 /// run of blank lines, `//` comments and `#![..]` lines, cut after its last
 /// `#![..]` line (offset 0 when there is none). An item declared there sits at
@@ -266,11 +303,8 @@ fn env_shapes_the_binary(name: &str) -> bool {
 pub(super) fn toolchain_identity() -> &'static str {
     static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     ID.get_or_init(|| {
-        std::process::Command::new(crate::find_rustc())
-            .arg("-vV")
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace('\n', "|"))
+        super::rustc_floor::version_output(&crate::find_rustc())
+            .map(|out| out.trim().replace('\n', "|"))
             .unwrap_or_default()
     })
 }

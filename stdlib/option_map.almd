@@ -143,6 +143,7 @@ fn option_map_h(o: String?, f: (String) -> String) -> String? = {
 
 fn __opt_unwrap_else_h(f: () -> String) -> String = f()
 
+@specializes("option.unwrap_or_else")
 fn option_unwrap_or_else_h(o: String?, f: () -> String) -> String = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -193,6 +194,7 @@ fn __opt_filterh_some(x: String, pred: (String) -> Bool) -> String? = {
   if p then some(x) else none
 }
 
+@specializes("option.filter")
 fn option_filter_h(o: String?, pred: (String) -> Bool) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -212,6 +214,7 @@ fn __opt_orelse_none_h(f: () -> String?) -> String? = {
   r
 }
 
+@specializes("option.or_else")
 fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)
@@ -223,6 +226,7 @@ fn option_or_else_h(o: String?, f: () -> String?) -> String? = {
 
 // `option.flatten` heap twin (`some(some("s"))` → `some("s")`): the inner payload
 // SHARES into the rebuilt some() (Dup); the outer/inner blocks stay caller-owned.
+@specializes("option.flatten")
 fn option_flatten_h(o: (String?)?) -> String? = {
   let h = prim.handle(o)
   let len = prim.load32(h + 4)

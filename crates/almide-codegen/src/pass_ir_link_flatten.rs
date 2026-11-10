@@ -209,6 +209,12 @@ struct TypeRename<'a> {
     ctors: &'a HashMap<String, Sym>,
 }
 
+/// Apply resolved declaration identities to every type-bearing IR site.
+/// Callers supply only aliases established by their declaration registry.
+pub fn rename_declared_type_references(program: &mut IrProgram, map: &HashMap<String, Sym>) {
+    rename_program_types(program, &TypeRename { types: map, ctors: &HashMap::new() });
+}
+
 /// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
 /// extracted verbatim (cog>30 decomposition). Deduplicates by name,
 /// preferring an `Alias` over a non-alias when both exist for the same
@@ -300,6 +306,20 @@ fn rename_program_types(program: &mut IrProgram, r: &TypeRename) {
 /// keep the plain per-module mangle, so genuinely distinct same-name types
 /// stay distinct.
 fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
+    type_rename_map(type_decls, true)
+}
+
+/// Realize the checker's structural-twin equivalence without choosing Rust
+/// identifiers. The MIR backend keeps qualified type names through lowering.
+pub fn canonicalize_structural_twins(program: &mut IrProgram) {
+    let map = type_rename_map(&program.type_decls, false);
+    if map.is_empty() { return; }
+    rename_program_types(program, &TypeRename { types: &map, ctors: &map });
+    let mut seen = std::collections::HashSet::new();
+    program.type_decls.retain(|td| seen.insert(td.name));
+}
+
+fn type_rename_map(type_decls: &[IrTypeDecl], mangle: bool) -> HashMap<String, Sym> {
     // Group decls by (base name, fingerprint).
     let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
     for td in type_decls {
@@ -315,10 +335,11 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
         // member's standard mangle.
         let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
             Some(bare) => sym(bare),
-            None => sym(&format!("almide_rt_{}", almide_base::names::qualified_ident(&members[0]))),
+            None if mangle => sym(&format!("almide_rt_{}", almide_base::names::qualified_ident(&members[0]))),
+            None => sym(&members[0]),
         };
         for m in &members {
-            if m.contains('.') {
+            if m.contains('.') && (mangle || m != canonical.as_str()) {
                 map.insert(m.clone(), canonical);
             }
         }
@@ -581,8 +602,12 @@ fn rename_pattern(p: &mut IrPattern, r: &TypeRename) {
                 rename_pattern(rest, r);
             }
         }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
-        | IrPattern::As { inner, .. } => rename_pattern(inner, r),
-        IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => rename_pattern(inner, r),
+        IrPattern::As { ty, inner, .. } => {
+            *ty = rename_ty(ty, r.types);
+            rename_pattern(inner, r);
+        }
+        IrPattern::Bind { ty, .. } => *ty = rename_ty(ty, r.types),
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }

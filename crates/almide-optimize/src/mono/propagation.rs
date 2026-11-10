@@ -12,6 +12,46 @@ pub(super) fn propagate_concrete_types(program: &mut IrProgram) {
     for tl in &mut program.top_lets {
         propagate_expr(&mut tl.value, &mut program.var_table);
     }
+    refresh_record_projections(program);
+}
+
+/// Substituting an open-row parameter can stamp the containing concrete
+/// record onto a nested row as well (`app.config: App`). Read each member's
+/// type back from its checked record declaration, bottom-up, so `config.port`
+/// uses config's layout. This copies declared types; it infers no new type.
+fn refresh_record_projections(program: &mut IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use std::collections::HashMap;
+    type Fields = Vec<(almide_base::Sym, Ty)>;
+    let mut records: HashMap<almide_base::Sym, Option<Fields>> = HashMap::new();
+    for decl in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| &m.type_decls)) {
+        let IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
+        if decl.generics.as_ref().is_some_and(|g| !g.is_empty()) { continue; }
+        let fields = fields.iter().map(|f| (f.name, f.ty.clone())).collect();
+        records.entry(decl.name).and_modify(|v| *v = None).or_insert(Some(fields));
+    }
+    struct Refresh<'a>(&'a HashMap<almide_base::Sym, Option<Fields>>);
+    impl IrMutVisitor for Refresh<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            let IrExprKind::Member { object, field } = &e.kind else { return };
+            let fields = match &object.ty {
+                Ty::Record { fields } => Some(fields),
+                Ty::Named(name, args) if args.is_empty() => self.0.get(name).and_then(Option::as_ref),
+                _ => None,
+            };
+            if let Some(ty) = fields.and_then(|fs| fs.iter().find(|(n, _)| n == field).map(|(_, t)| t)) {
+                if !ty.has_unresolved_deep() { e.ty = ty.clone(); }
+            }
+        }
+    }
+    let mut refresh = Refresh(&records);
+    for f in &mut program.functions { refresh.visit_expr_mut(&mut f.body); }
+    for tl in &mut program.top_lets { refresh.visit_expr_mut(&mut tl.value); }
+    for module in &mut program.modules {
+        for f in &mut module.functions { refresh.visit_expr_mut(&mut f.body); }
+        for tl in &mut module.top_lets { refresh.visit_expr_mut(&mut tl.value); }
+    }
 }
 
 /// If the body expression is a Match whose .ty disagrees with ret_ty, fix it.

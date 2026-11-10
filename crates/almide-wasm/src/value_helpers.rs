@@ -281,3 +281,62 @@ pub(crate) fn emit_string_split_helper() -> Function {
     i.end();
     f
 }
+
+/// `$split_byte(str, byte) -> i32` — [`emit_string_split_helper`]'s result
+/// for a separator known at compile time to be ONE byte (#4612): the same
+/// pieces, in the same order, with the empty pieces kept and
+/// count = separators + 1. A one-byte needle has no failure table and no
+/// partial match, so each pass is a plain byte compare instead of a KMP
+/// step, and a piece's bytes move through the tiny-aware `$copy` instead of a
+/// `memory.copy` libcall per piece. The separator byte is below 0x80 (a
+/// one-byte UTF-8 string), so it never matches inside a multibyte character.
+pub(crate) fn emit_string_split_byte_helper() -> Function {
+    let (sb, sep) = (0u32, 1u32);
+    let (slen, p, cnt, dst, slot, start, piece) = (2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32);
+    let pay = almide_layout::PAYLOAD as i32;
+    let at = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let mut f = Function::new([(7, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(sb).i32_load(len_memarg()).local_set(slen);
+    // ── pass 1: count = 1 + separators ──
+    i.i32_const(1).local_set(cnt);
+    i.i32_const(0).local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(slen).i32_ge_u().br_if(1);
+    i.local_get(cnt);
+    i.local_get(sb).local_get(p).i32_add().i32_load8_u(at).local_get(sep).i32_eq();
+    i.i32_add().local_set(cnt);
+    i.local_get(p).i32_const(1).i32_add().local_set(p);
+    i.br(0).end().end();
+    // ── the result list (4-byte string slots) ──
+    i.local_get(cnt).i32_const(4).i32_mul().call(F_ALLOC).local_set(dst);
+    i.local_get(dst).i32_const(pay).i32_add().local_set(slot);
+    // ── pass 2: a piece ends at each separator, then the final piece ──
+    i.i32_const(0).local_set(start);
+    i.i32_const(0).local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    // past the end: p == slen closes the final piece below
+    i.local_get(p).local_get(slen).i32_lt_u();
+    i.if_(BlockType::Empty);
+    i.local_get(sb).local_get(p).i32_add().i32_load8_u(at).local_get(sep).i32_ne();
+    i.if_(BlockType::Empty);
+    i.local_get(p).i32_const(1).i32_add().local_set(p);
+    i.br(2);
+    i.end();
+    i.end();
+    // piece = s[start, p)
+    i.local_get(p).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
+    i.local_get(piece).i32_const(pay).i32_add();
+    i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();
+    i.local_get(p).local_get(start).i32_sub();
+    i.call(F_COPY);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(slot).i32_const(4).i32_add().local_set(slot);
+    i.local_get(p).i32_const(1).i32_add().local_tee(p).local_set(start);
+    // the piece that ended at slen was the last one
+    i.local_get(p).local_get(slen).i32_le_u().br_if(0);
+    i.end().end();
+    i.local_get(dst);
+    i.end();
+    f
+}

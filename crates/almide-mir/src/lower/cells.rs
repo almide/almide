@@ -81,6 +81,17 @@ pub(crate) fn collect_cell_vars(
             if let Some(v) = inplace_mutated_receiver(e) {
                 self.mutated.insert(v);
             }
+            if crate::lower::owned_tco_slots() {
+                // Native values are copied into closure environments. A declared
+                // write, including one below a field path, needs shared storage.
+                if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
+                    for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).into_iter().flatten() {
+                        if let Some(v) = args.get(k).and_then(almide_ir::mut_args::place_root) {
+                            self.mutated.insert(v);
+                        }
+                    }
+                }
+            }
             almide_ir::visit::walk_expr(self, e);
         }
         fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
@@ -148,6 +159,10 @@ pub(crate) fn collect_cell_vars(
 pub(crate) enum CellClass {
     Scalar,
     FlatHeap,
+    /// Native only: the declared Rc cell owns its typed payload recursively.
+    /// Its Rust destructor replaces the wasm layout-specific sweep; reads and
+    /// writes still use the same owned snapshot / take / store operations.
+    NativeOwned,
     /// An inner whose exact free is a TYPE-SPECIFIC generated map sweep —
     /// `Map[String, <variant>]` / `Map[String, <all-scalar record>]` (the
     /// closure_capture_map fold class, #1143), the `map_named_value_drop` set.
@@ -215,6 +230,24 @@ pub(crate) fn cell_class_of(ty: &Ty) -> Option<CellClass> {
     }
 }
 
+#[cfg(test)]
+mod native_cell_tests {
+    use super::*;
+    #[test]
+    fn typed_recursive_cells_are_admitted_only_in_native_owned_mode() {
+        use almide_lang::types::constructor::TypeConstructorId::List;
+        let ty = Ty::Applied(List, vec![Ty::Applied(List, vec![Ty::String].into())].into());
+        let ctx = LowerCtx::default();
+        let _off = crate::lower::OwnedTcoSlotsGuard::set(false);
+        assert!(ctx.cell_class_of_ctx(&ty).is_none());
+        {
+            let _on = crate::lower::OwnedTcoSlotsGuard::set(true);
+            assert!(matches!(ctx.cell_class_of_ctx(&ty), Some(CellClass::NativeOwned)));
+        }
+        assert!(ctx.cell_class_of_ctx(&ty).is_none());
+    }
+}
+
 impl LowerCtx {
     /// The registry-aware widening of [`cell_class_of`]: the free fn's classes
     /// first, then the ROUTED map class (`map_named_value_drop` needs the
@@ -222,6 +255,7 @@ impl LowerCtx {
     /// decision goes through THIS method so admission is one set.
     pub(crate) fn cell_class_of_ctx(&self, ty: &Ty) -> Option<CellClass> {
         cell_class_of(ty).or_else(|| self.map_named_value_drop(ty).map(|_| CellClass::Routed))
+            .or_else(|| (crate::lower::owned_tco_slots() && is_heap_ty(ty)).then_some(CellClass::NativeOwned))
     }
 
     /// The address of a cell's single value slot (slot 0 of the 1-slot block).
@@ -257,6 +291,7 @@ impl LowerCtx {
                         "cell var {var:?} scalar initializer outside the value subset"
                     ))
                 })?,
+            CellClass::NativeOwned => self.lower_typed_cell_value(ty, value)?,
             CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
                 self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
@@ -273,6 +308,8 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: Init::DynList { len: len_c },
         });
+        crate::lambda_sigs::record_cell(ty);
+        self.aggregate_blocks.insert(cell, crate::lambda_sigs::cell_key(ty));
         let addr = self.cell_slot_addr(cell);
         match class {
             CellClass::Scalar => {
@@ -282,7 +319,7 @@ impl LowerCtx {
                     args: vec![addr, inner],
                 });
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed | CellClass::NativeOwned => {
                 let handle = self.fresh_value();
                 self.ops
                     .push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(handle), args: vec![inner] });
@@ -312,7 +349,7 @@ impl LowerCtx {
                     // block -> cell block); the flat heap_elem_lists sweep would
                     // dec only the inner handle and leak every owned slot.
                     self.value_drops.entry(cell).or_default().list_list_str = true;
-                } else {
+                } else if class != CellClass::NativeOwned {
                     self.value_drops.entry(cell).or_default().flat_elems = true;
                 }
             }
@@ -321,6 +358,15 @@ impl LowerCtx {
         self.cell_of.insert(var, cell);
         self.var_decl_tys.insert(var, ty.clone());
         Ok(())
+    }
+
+    /// Preserve the checked binding type when materializing a native cell's
+    /// occupant. In particular, empty fields of an anonymous record acquire
+    /// the named record's Map/List kinds through ordinary binding lowering.
+    fn lower_typed_cell_value(&mut self, ty: &Ty, value: &IrExpr) -> Result<ValueId, LowerError> {
+        let temporary = self.fresh_synth_var();
+        self.lower_bind(temporary, ty, value)?;
+        self.value_for(temporary)
     }
 
     /// A value-position read of a CELL var: load slot 0 FRESH on every reference
@@ -347,7 +393,7 @@ impl LowerCtx {
                 });
                 Ok(dst)
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed | CellClass::NativeOwned => {
                 let repr = repr_of(&ty)?;
                 let borrowed = self.fresh_value();
                 self.ops.push(Op::Prim {
@@ -409,12 +455,14 @@ impl LowerCtx {
                 });
                 Ok(())
             }
-            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed => {
-                let new = self.lower_owned_heap_field(value).ok_or_else(|| {
+            CellClass::FlatHeap | CellClass::LenOwnedSlots | CellClass::Routed | CellClass::NativeOwned => {
+                let new = if class == CellClass::NativeOwned {
+                    self.lower_typed_cell_value(&ty, value)?
+                } else { self.lower_owned_heap_field(value).ok_or_else(|| {
                     LowerError::Unsupported(format!(
                         "heap value assigned to cell var {var:?} outside the executable subset"
                     ))
-                })?;
+                })? };
                 let repr = repr_of(&ty)?;
                 let addr = self.cell_slot_addr(cell);
                 let old = self.fresh_value();

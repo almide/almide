@@ -7,6 +7,30 @@
 // the ALMIDE_DBG_QQ traces travel with their blocks.
 
 impl LowerCtx {
+    /// A non-returning primitive closes this arm. The scalar merge still
+    /// needs a syntactic operand, but it is emitted AFTER the abort and can
+    /// never be read. Refuse a Never call whose lowered body does not end in
+    /// a real abort; a type annotation alone is not a termination witness.
+    fn lower_abort_scalar_arm(&mut self, call: &IrExpr) -> Option<ValueId> {
+        self.lower_stmt_expr(call).ok()?;
+        if !matches!(self.ops.last(), Some(Op::Prim {
+            kind: crate::PrimKind::Die | crate::PrimKind::ProcExit, dst: None, ..
+        })) { return None; }
+        let dst = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst, value: 0 });
+        Some(dst)
+    }
+
+    /// A diverging fallback contributes no result type. The successful
+    /// payload keeps the type established by the checker (`Int? ?? panic`
+    /// is Int, not Never); use it for the synthesized match and its binder.
+    fn unwrap_or_value_ty(expr: &IrExpr, fallback: &IrExpr) -> Ty {
+        if matches!(fallback.ty, Ty::Never) {
+            expr.ty.option_inner().or_else(|| expr.ty.result_ok_ty()).unwrap_or(Ty::Never)
+        } else {
+            fallback.ty.clone()
+        }
+    }
     /// Verbatim from `seed_variant_value_shape`: the HeapOk-family Result drop
     /// route (the payload-class chain after the cap-as-tag read shape).
     fn seed_result_heap_ok_drop_route(&mut self, v: ValueId, ty: &Ty) {
@@ -84,7 +108,7 @@ impl LowerCtx {
         let lhh_mark = self.live_heap_handles.len();
         let synth = IrExpr {
             kind: IrExprKind::Unit,
-            ty: fallback.ty.clone(),
+            ty: Self::unwrap_or_value_ty(expr, fallback),
             span: expr.span.clone(),
             def_id: None,
         };
@@ -182,7 +206,7 @@ impl LowerCtx {
                 let owned = ctx.fresh_value();
                 ctx.ops.push(Op::Dup { dst: owned, src: borrowed });
                 ctx.ops.push(Op::Else { val: Some(owned) });
-                let fb = ctx.lift_lambda(&params, &body)?;
+                let fb = ctx.lift_lambda(&params, &body, &fallback.ty)?;
                 // The fallback block is ELSE-ARM-LOCAL and MOVES into
                 // the merge — remove it from the scope-end drop set
                 // (`lift_lambda` pushed it): an unconditional drop

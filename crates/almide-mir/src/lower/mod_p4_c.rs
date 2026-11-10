@@ -270,7 +270,7 @@ fn random_call_name(func: &str, arg_tys: &[Ty]) -> String {
 /// heap element types (the funcref-callback rails are scalar/String — a wall,
 /// not a wrong value). `fan.settle(xs, f)` is NOT in this table by design:
 /// it desugars to `list.map` in frontend lowering and is generic for free.
-fn fan_map_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
+pub(crate) fn fan_map_call_name(arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
     // `fan.map` selects a monomorphic self-host by (input element A, output element B) — `fan.map<sfx>`
     // where the suffix spells (A, B) initials. The input A is `arg_tys[0] = List[A]`; the output B is
@@ -359,7 +359,7 @@ fn heap_fold_call_name(module: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     if let Some(name) = heap_fold_call_name_hsca(module, arg_tys, result_ty) {
         return name;
     }
-    format!("{module}.fold_hacc")
+    crate::lower::registry_sig::declared_refusal_or(module, "fold", format!("{module}.fold_hacc"))
 }
 
 /// Extracted from `heap_fold_call_name` (codopsy7 complexity sweep, group 1 of 5): the ONE

@@ -5,8 +5,8 @@
 //! ownership rules certify. There is no new proof rule, and the wasm leg's
 //! lowering is unchanged (the mode is native-only).
 //!
-//! The #3550 wall stays as strict as it was: a heap self tail call the
-//! conversion still declines (a `!` early return inside the recursion) walls.
+//! Unconverted heap self tail calls still wall. Converted calls snapshot
+//! every changed argument before any carried slot is replaced.
 
 fn render(src: &str) -> Result<String, String> {
     let src = src.to_string();
@@ -109,18 +109,28 @@ effect fn main() -> Unit = {
     assert_eq!(run_native(src), "2 333334 12586269025\n");
 }
 
-/// The #3550 wall is unchanged: a heap self tail call the loop conversion
-/// still declines (two heap carries that read each other, which no update
-/// order can stage) walls with its reason.
+/// Two heap carries read each other. Both arguments must observe the old
+/// values before either slot is replaced.
 #[test]
-fn a_declined_heap_self_tail_call_still_walls_on_3550() {
+fn cyclic_heap_carries_snapshot_both_old_values() {
     let src = r#"
 fn go(n: Int, a: String, b: String) -> String = if n == 0 then a + b else go(n - 1, a + b, b + a)
 
 effect fn main() -> Unit = println(go(3, "x", "y"))
 "#;
-    let e = render(src).expect_err("a declined heap self tail call must wall");
-    assert!(e.contains("#3550"), "the wall names #3550: {e}");
+    render(src).expect("owned snapshots admit a cyclic carry");
+    assert_eq!(run_native(src), "xyyxyxxyyxxyxyyx\n");
+}
+
+#[test]
+fn short_circuit_heap_tail_calls_run_a_million_deep() {
+    let src = r#"
+fn all(n: Int, s: String) -> Bool = n == 0 or (string.len(s) == 1 and all(n - 1, s))
+fn any(n: Int, s: String) -> Bool = n > 0 and (string.len(s) == 2 or any(n - 1, s))
+fn main() -> Unit = { println("${all(1000000, "x")} ${any(1000000, "x")}") }
+"#;
+    render(src).expect("short-circuit tails loop with heap arguments");
+    assert_eq!(run_native(src), "true false\n");
 }
 
 fn run_native(src: &str) -> String {

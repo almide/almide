@@ -1,31 +1,5 @@
 impl LowerCtx {
 
-    pub(crate) fn lower_place_mutation(&mut self, target: VarId) -> Result<(), LowerError> {
-        let v = self.value_for(target)?;
-        if self.param_values.contains(&v) {
-            // The C-132 move-mode body (`{ self.n = self.n + by; self }` — a
-            // rewritten `mut` receiver/param, #1557 leg 1): the BORROW cannot
-            // be mutated in place — `MakeUnique` alone would `rc_dec` a count
-            // the borrow never incremented, stealing the CALLER's reference
-            // (undercount → UAF on the rc>1 alias path). Take an OWNED COW
-            // copy instead: `Dup` (+1) then `MakeUnique` (its dec restores
-            // the count, and rc>1 always holds after the Dup, so the local is
-            // a fresh unique clone). The body's stores land on the clone; the
-            // rewrite's tail `p` read RETURNS it (the call site's write-back
-            // owns it) — value semantics exactly, the caller's block and any
-            // alias untouched. From here on the var maps to a plain tracked
-            // local (scope-end drop if the tail is never reached on a path).
-            let owned = self.fresh_value();
-            self.ops.push(Op::Dup { dst: owned, src: v });
-            self.ops.push(Op::MakeUnique { v: owned });
-            self.live_heap_handles.push(owned);
-            self.value_of.insert(target, owned);
-            return Ok(());
-        }
-        self.ops.push(Op::MakeUnique { v });
-        Ok(())
-    }
-
     pub(crate) fn value_for(&self, var: VarId) -> Result<ValueId, LowerError> {
         self.value_of
             .get(&var)
@@ -92,7 +66,7 @@ impl LowerCtx {
             return Ok(());
         }
         // Heap global: NEW value first (RHS may read the global), as a fresh OWNED handle.
-        let new = self.lower_owned_heap_field(value).ok_or_else(|| {
+        let new = if owned_tco_slots() { self.lower_owned_binding(value) } else { self.lower_owned_heap_field(value) }.ok_or_else(|| {
             LowerError::Unsupported(format!(
                 "heap value assigned to mutable module-level var {var:?} outside the \
                  executable subset"
@@ -271,6 +245,7 @@ impl LowerCtx {
             let dst = self.fresh_value();
             self.ops.push(Op::Dup { dst, src: borrowed });
             self.materialized_call_arg(dst, repr, ty);
+            if crate::lower::owned_tco_slots() { self.seed_variant_read_shape(dst, ty); }
             self.materialized_aggregates.insert(dst);
             self.materialized_lists.insert(dst);
             // A slot holding a closure (`var handler = mk()`) is a real closure
@@ -362,7 +337,10 @@ impl LowerCtx {
         // globals (`let DERIVED = BASE + ["c"]`, #2274) folds to one literal
         // list at lowering time — pure substitution and concatenation, zero
         // calls injected — and materializes like the literal it folds to.
-        if let Some(folded) = self.fold_pure_list_init(init, 0) {
+        if let Some(folded) = self.fold_pure_literal_init(init, 0) {
+            if matches!(folded.kind, IrExprKind::LitStr { .. }) {
+                return self.materialize_const_data_global(var, ty, &folded);
+            }
             if let Some(v) = self.materialize_literal_list_global(var, &folded) {
                 return Ok(Some(v));
             }
@@ -425,12 +403,8 @@ impl LowerCtx {
             return Ok(None);
         };
         let repr = repr_of(ty)?;
-        // An `Init::IntList` copy is a REAL populated scalar-list block, so register it
-        // in `materialized_lists` — the gate `lower_scalar_index_access` consults. Without
-        // this, `WEIGHTS[j]` over a module-global int list declined the scalar read and the
-        // enclosing cond/bind walled (#1150); a local `let ws = [10, 20, 30]` already
-        // registers through `lower_bind`, so the global copy was the one unregistered
-        // producer of this block shape. `Init::Str`/`Init::Bytes` are NOT lists — excluded.
+        // Register real scalar lists for indexed reads (#1150). Strings and
+        // bytes have a different layout and must not enter this set.
         let is_int_list = matches!(const_init, crate::Init::IntList(_));
         let dst = self.fresh_value();
         self.ops.push(Op::Alloc { dst, repr, init: const_init });
@@ -443,37 +417,41 @@ impl LowerCtx {
     }
 
     /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
-    /// pure-literal-list shape, verbatim (the gate and the builder call are unchanged, the
-    /// nesting is now a guard clause).
-    /// Fold a call-free list initializer to ONE literal list: a literal list
-    /// stays, a reference to another global folds through that global's own
-    /// init (declaration order guarantees it is earlier), and `xs + ys` over
-    /// two foldable operands concatenates their elements. Anything else —
-    /// a call, a non-literal element, a mutable global, a deeper nest than
-    /// the bound allows — is `None` and keeps the honest wall. The folded
-    /// expression carries the original's type and span.
-    fn fold_pure_list_init(&self, init: &IrExpr, depth: u32) -> Option<IrExpr> {
+    /// Fold literal list/String concatenation through immutable globals, with
+    /// no injected calls. Calls, mutable globals and excessive depth decline.
+    /// The folded expression retains the checked type and source span.
+    fn fold_pure_literal_init(&self, init: &IrExpr, depth: u32) -> Option<IrExpr> {
         if depth > 8 {
             return None;
         }
         match &init.kind {
+            IrExprKind::LitStr { .. } => Some(init.clone()),
             IrExprKind::List { .. } if crate::lower::is_pure_literal_list(init) => Some(init.clone()),
             IrExprKind::Var { id } => {
                 if crate::lower::is_mutable_global(*id) {
                     return None;
                 }
                 let src = self.global_inits.get(id)?.clone();
-                self.fold_pure_list_init(&src, depth + 1)
+                self.fold_pure_literal_init(&src, depth + 1)
             }
             IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } => {
-                let l = self.fold_pure_list_init(left, depth + 1)?;
-                let r = self.fold_pure_list_init(right, depth + 1)?;
+                let l = self.fold_pure_literal_init(left, depth + 1)?;
+                let r = self.fold_pure_literal_init(right, depth + 1)?;
                 let (IrExprKind::List { elements: le }, IrExprKind::List { elements: re }) = (&l.kind, &r.kind) else {
                     return None;
                 };
                 let mut elements = le.clone();
                 elements.extend(re.iter().cloned());
                 Some(IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None })
+            }
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } => {
+                let l = self.fold_pure_literal_init(left, depth + 1)?;
+                let r = self.fold_pure_literal_init(right, depth + 1)?;
+                let (IrExprKind::LitStr { value: mut text }, IrExprKind::LitStr { value: suffix }) = (l.kind, r.kind) else {
+                    return None;
+                };
+                text.push_str(&suffix);
+                Some(IrExpr { kind: IrExprKind::LitStr { value: text }, ty: init.ty.clone(), span: init.span, def_id: None })
             }
             _ => None,
         }
@@ -706,116 +684,6 @@ impl LowerCtx {
         }
         None
     }
-
-    /// Guard-clause flattening of the former (nested, then outer) else-if chains — every branch
-    /// still returns the SAME `Op` value it evaluated to before, just via an early `return`
-    /// instead of an `if`/`else if` tail expression. No behavior change — see
-    /// docs/roadmap/active/code-health-codopsy.md.
-    pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
-        if let Some(op) = self.variant_drop_route(v) {
-            return op;
-        }
-        if let Some(op) = self.set_drop_route(v) {
-            return op;
-        }
-        if self.closure_values.contains(&v) {
-            // A CLOSURE BLOCK frees through the uniform, SELF-DESCRIBING
-            // `$__drop_closure` (fixed runtime): at the last ref it reads the drop
-            // header (slot 1), recursively drops the captured-closure slots, rc_decs
-            // the captured-heap slots, and NEVER touches slot 0 (the fnidx — a table
-            // index, not a pointer). Works for any closure value regardless of where
-            // it was created (a call-result's captures are unknowable here).
-            return Op::DropVariant { v, ty: "closure".to_string() };
-        }
-        Op::Drop { v }
-    }
-
-    /// The drop route recorded on a tracked VARIANT handle. Its `ty` string is a
-    /// tagged spelling: a bare type name is a real user ADT, while the
-    /// `optrec:` / `resrec:` / `reserr:` prefixes and the two `list_*_*` names
-    /// select a dedicated inline wrapper drop instead.
-    fn variant_drop_route(&self, v: ValueId) -> Option<Op> {
-        let ty = self.value_drops.get(&v).and_then(|d| d.named_route.as_ref())?;
-            // `List[(Int, String)]` was routed here as a pseudo-"variant" but has no generated
-            // `$__drop_list_int_str` ADT helper (the `DropVariant` render emitted a dangling call →
-            // invalid wat). Route it to the dedicated INLINE `DropListIntStr` (frees each tuple's
-            // String slot + block, then the list). Every real user-ADT variant keeps `DropVariant`.
-            if ty == "list_int_str" {
-                return Some(Op::DropListIntStr { v });
-            }
-            if ty == "list_str_int" {
-                return Some(Op::DropListStrInt { v });
-            }
-            if let Some(drop_fn) = ty.strip_prefix("optrec:") {
-                // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
-                // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the
-                // wrapper block. The `optrec:` prefix is injected by `materialize_opt_aggregate_some`.
-                return Some(Op::DropWrapperRec {
-                    v,
-                    drop_fn: drop_fn.to_string(),
-                    is_result: false,
-                    err_rec: false,
-                });
-            }
-            if let Some(drop_fn) = ty.strip_prefix("resrec:") {
-                // A Result WRAPPER holding a heap RECORD Ok payload (`ok({val, next})`): recurse into
-                // the @12 record (tag@16==0) via `$__drop_<drop_fn>`, else `rc_dec` the @12 Err
-                // String, then free the wrapper. Injected by `materialize_result_aggregate`.
-                return Some(Op::DropWrapperRec {
-                    v,
-                    drop_fn: drop_fn.to_string(),
-                    is_result: true,
-                    err_rec: false,
-                });
-            }
-            if let Some(drop_fn) = ty.strip_prefix("reserr:") {
-                // The heap-Ok × variant-ERR wrapper (`Result[String, MathError]` — the
-                // `err(NegativeInput(x))` class): recurse into the @12 VARIANT (tag@16==1)
-                // via `$__drop_<drop_fn>`, else `rc_dec` the @12 Ok payload, then free the
-                // wrapper. Injected by `try_lower_result_err_variant_ctor_heap_ok` and the
-                // both-heap `seed_variant_param` branch (rich-variant Err types).
-                return Some(Op::DropWrapperRec {
-                    v,
-                    drop_fn: drop_fn.to_string(),
-                    is_result: true,
-                    err_rec: true,
-                });
-            }
-        Some(Op::DropVariant { v, ty: ty.clone() })
-    }
-
-    /// The set-membership drop routes, MOST SPECIFIC FIRST — the order is
-    /// load-bearing: `List[List[String]]` must be tried before the generic
-    /// heap-element list (which also matches its shape and would leak the inner
-    /// rows' cell Strings), and each Result/Option wrapper before the flat list.
-    fn set_drop_route(&self, v: ValueId) -> Option<Op> {
-        let routes: [(bool, fn(ValueId) -> Op); 12] = [
-            (self.value_drops.get(&v).is_some_and(|d| d.value_result_list), |v| Op::DropResultListValue { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.value_result), |v| Op::DropResultValue { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.str_int_result), |v| Op::DropResultStrInt { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.value_int_result), |v| Op::DropResultValueInt { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.list_value_int_result), |v| Op::DropResultListValueInt { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.list_str_int_result), |v| Op::DropResultListStrInt { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.list_str_result), |v| Op::DropResultListStr { v }),
-            (self.value_elem_lists.contains(&v), |v| Op::DropListValue { v }),
-            (self.str_value_elem_lists.contains(&v), |v| Op::DropListStrValue { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.str_str_elems), |v| Op::DropListStrStr { v }),
-            (self.value_drops.get(&v).is_some_and(|d| d.list_list_str), |v| Op::DropListListStr { v }),
-            (
-                self.value_drops.get(&v).is_some_and(|d| d.flat_elems) || self.record_masks.contains_key(&v),
-                |v| Op::DropListStr { v },
-            ),
-        ];
-        let (_, make) = routes.into_iter().find(|(hit, _)| *hit)?;
-        Some(make(v))
-    }
-
-    pub(crate) fn emit_scope_end_drops(&mut self) {
-        // Reverse binding order (LIFO scope teardown). A `List[String]` value is released by a
-        // RECURSIVE `DropListStr` (frees its owned element Strings); every other heap value by
-        // a flat `Drop`.
-        let drops: Vec<Op> =
-            self.live_heap_handles.iter().rev().map(|v| self.drop_op_for(*v)).collect();
-        self.ops.extend(drops);
-    }
 }
+
+include!("mod_p3_c_drops.rs");

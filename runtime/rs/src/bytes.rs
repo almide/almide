@@ -40,6 +40,7 @@ fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
 /// self-host `list_make.almd` already uses — one limit, one message.
 
 pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
+pub fn almide_rt_bytes_eq(a: &[u8], b: &[u8]) -> bool { a == b }
 pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
 pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
@@ -196,33 +197,35 @@ pub fn almide_rt_bytes_read_f32_be(b: &Vec<u8>, pos: i64) -> f64 {
 
 // ── i16 / u16 array readers ──
 
-macro_rules! u16_le_array_impl {
-    ($name:ident, $ty:ty, $from:expr) => {
-        pub fn $name(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
-            let mut p = pos as usize;
-    // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
-    // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
-    // (ratified A, 2026-08-17): this leg allocates to its own structural bound and
-    // takes the C-197 abort when the machine cannot satisfy it. The wasm leg fails
-    // the same way at ITS bound (i32 sizes at the prim floor) — the contracted
-    // divergence C-197 declares.
+// Keep the entry points as ordinary declarations: the native runtime index
+// reads their signatures and dependency closure without expanding Rust macros.
+#[inline]
+fn almide_bytes_read_16_array(b: &Vec<u8>, pos: i64, count: i64, read: fn([u8; 2]) -> i64) -> Vec<i64> {
+    let mut p = pos as usize;
+    // `count` is the OUTPUT size: negative reads NOTHING (C-054), and there
+    // is no chosen ceiling. Allocation failure uses C-197's common abort.
     let n = if count < 0 { 0usize } else { count as usize };
-            let mut out = alloc_elems_or_oom(n);
-            for _ in 0..n {
-                if p.checked_add(2).is_none_or(|__e| __e > b.len()) { out.push(0); p += 2; continue; }
-                let v: $ty = $from([b[p], b[p+1]]);
-                out.push(v as i64);
-                p += 2;
-            }
-            out
-        }
-    };
+    let mut out = alloc_elems_or_oom(n);
+    for _ in 0..n {
+        if p.checked_add(2).is_none_or(|end| end > b.len()) { out.push(0); p += 2; continue; }
+        out.push(read([b[p], b[p+1]]));
+        p += 2;
+    }
+    out
 }
 
-u16_le_array_impl!(almide_rt_bytes_read_i16_le_array, i16, i16::from_le_bytes);
-u16_le_array_impl!(almide_rt_bytes_read_u16_le_array, u16, u16::from_le_bytes);
-u16_le_array_impl!(almide_rt_bytes_read_i16_be_array, i16, i16::from_be_bytes);
-u16_le_array_impl!(almide_rt_bytes_read_u16_be_array, u16, u16::from_be_bytes);
+pub fn almide_rt_bytes_read_i16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    almide_bytes_read_16_array(b, pos, count, |v| i16::from_le_bytes(v) as i64)
+}
+pub fn almide_rt_bytes_read_u16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    almide_bytes_read_16_array(b, pos, count, |v| u16::from_le_bytes(v) as i64)
+}
+pub fn almide_rt_bytes_read_i16_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    almide_bytes_read_16_array(b, pos, count, |v| i16::from_be_bytes(v) as i64)
+}
+pub fn almide_rt_bytes_read_u16_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+    almide_bytes_read_16_array(b, pos, count, |v| u16::from_be_bytes(v) as i64)
+}
 
 // ── i16 append + set i16/BE writers ──
 

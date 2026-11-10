@@ -358,6 +358,7 @@ fn float_to_string(x: Float) -> String = __sf_main(x, true)
 
 // The `${...}` / record / tuple / list form: integer-valued floats DROP the ".0" (`1.0` -> "1",
 // `-0.0` -> "-0"); every other value prints exactly as `float.to_string` does.
+@specializes("float.__to_string_compound")
 fn float_to_string_compound(x: Float) -> String = __sf_main(x, false)
 
 // ───────────────────────── float32.to_string: the same Schubfach at f32 ─────────────────────────
@@ -388,6 +389,7 @@ fn __sf32_main(x: Float32, dot0: Bool) -> String = {
 fn float32_to_string(x: Float32) -> String = __sf32_main(x, true)
 
 // The `${...}` form of a Float32: an integer value drops the ".0", as float_to_string_compound.
+@specializes("float32.__to_string_compound")
 fn float32_to_string_compound(x: Float32) -> String = __sf32_main(x, false)
 
 // ───────────────────────── float.to_fixed: exact value, round half to even ─────────────────────────
