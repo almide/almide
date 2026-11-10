@@ -23,7 +23,8 @@
 //! Every conversion reads its source through a shared borrow and builds a
 //! fresh value: nothing the certified side owns is aliased, and a value the
 //! native code lent is never consumed.
-use almide_ir::{IrFieldDecl, IrTypeDecl, IrTypeDeclKind, IrVariantKind};
+use almide_ir::record_shape::RecordShapeIndex;
+use almide_ir::{IrFieldDecl, IrProgram, IrTypeDecl, IrTypeDeclKind, IrVariantKind};
 use almide_lang::types::Ty;
 use crate::lower::LowerError;
 use crate::native_callback_host::canon;
@@ -75,6 +76,7 @@ struct Table {
 
 thread_local! {
     static TABLE: RefCell<Table> = RefCell::new(Table::default());
+    static RECORDS: RefCell<RecordShapeIndex> = RefCell::new(RecordShapeIndex::default());
 }
 
 /// A constructor and its fields (label, type): as declared, and as the host
@@ -84,20 +86,24 @@ type SpelledCase = (String, Vec<(String, String)>);
 type Declared = Vec<DeclaredCase>;
 type Spelled = Vec<SpelledCase>;
 
-/// The table of the render made while this guard lives.
-pub(crate) struct Guard(Table);
+/// The table of the render made while this guard lives, and the declared
+/// record types of its program.
+pub(crate) struct Guard(Table, RecordShapeIndex);
 impl Drop for Guard {
     fn drop(&mut self) {
         TABLE.with(|t| t.replace(std::mem::take(&mut self.0)));
+        RECORDS.with(|r| r.replace(std::mem::take(&mut self.1)));
     }
 }
 
 /// Carries the definitions of the named types `signature` reaches from the
 /// host source, which is rendered only when there is one to carry.
 pub(crate) fn install<'a>(
-    decls: &[IrTypeDecl], signature: impl Iterator<Item = &'a Ty>, host: impl FnOnce() -> Option<std::rc::Rc<str>>,
+    ir: &IrProgram, signature: impl Iterator<Item = &'a Ty>, host: impl FnOnce() -> Option<std::rc::Rc<str>>,
 ) -> Guard {
-    let guard = Guard(TABLE.with(|t| t.take()));
+    let records = RecordShapeIndex::build(ir, |decl| decl.name.to_string());
+    let guard = Guard(TABLE.with(|t| t.take()), RECORDS.with(|r| r.replace(records)));
+    let decls = &ir.type_decls[..];
     let mut reached = Vec::new();
     for ty in signature {
         reach(ty, decls, &mut reached);
@@ -135,8 +141,10 @@ fn reach(ty: &Ty, decls: &[IrTypeDecl], out: &mut Vec<Reached>) {
         }
         Ty::Record { fields } => {
             fields.iter().for_each(|(_, t)| reach(t, decls, out));
-            let Some(Ty::Named(name, _)) = nominal(ty) else { return };
-            if out.iter().all(|o| o.name != name.as_str()) { out.push(structural(name.as_str(), fields)); }
+            let Some(named) = nominal(ty) else { return };
+            let Ty::Named(name, _) = &named else { return };
+            if decls.iter().any(|d| d.name == *name) { reach(&named, decls, out); }
+            else if out.iter().all(|o| o.name != name.as_str()) { out.push(structural(name.as_str(), fields)); }
         }
         Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().for_each(|a| reach(a, decls, out)),
         _ => {}
@@ -155,11 +163,22 @@ fn parameter(name: &str) -> Ty {
     Ty::Named(almide_base::intern::sym(name), Vec::new().into())
 }
 
-/// A structural record as the standard codegen types it: an instance of the
-/// one definition it declares for those labels (`AlmdRec_x_y<T0, T1>`),
-/// generic in every field.
+/// The declared record type a structural record with `fields` is (#3189),
+/// at the arguments its fields bind: `Some(None)` where one is left unbound.
+fn declared_as(fields: &[(almide_lang::intern::Sym, Ty)]) -> Option<Option<Ty>> {
+    RECORDS.with(|r| r.borrow().lookup(fields).map(|(shape, bound)| {
+        let args = bound.into_iter().collect::<Option<Vec<Ty>>>()?;
+        Some(Ty::Named(shape.name, args.into()))
+    }))
+}
+
+/// A structural record as the standard codegen types it: the declared record
+/// type with those field names and types where there is one, and otherwise
+/// an instance of the one definition it declares for those labels
+/// (`AlmdRec_x_y<T0, T1>`), generic in every field.
 pub(crate) fn nominal(ty: &Ty) -> Option<Ty> {
     let Ty::Record { fields } = ty else { return None };
+    if let Some(declared) = declared_as(fields) { return declared; }
     let fields = sorted(fields);
     let labels: Vec<&str> = fields.iter().map(|(label, _)| label.as_str()).collect();
     let name = format!("AlmdRec_{}", labels.join("_"));

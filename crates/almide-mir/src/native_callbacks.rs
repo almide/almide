@@ -68,7 +68,7 @@ impl HostTypes {
     pub(crate) fn enter(ir: &IrProgram) -> Self {
         let signature = || ir.functions.iter().filter(|f| is_root(f.name.as_str()))
             .flat_map(|f| f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)));
-        let carried = crate::native_callback_types::install(&ir.type_decls, signature(), host_source);
+        let carried = crate::native_callback_types::install(ir, signature(), host_source);
         let mut types = crate::native_callback_types::named_runtime();
         for ty in signature().filter(|ty| host_scalar(ty).is_none()) {
             if let Ok(host) = crate::native_foreign::host_type(ty) {
