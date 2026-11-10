@@ -432,6 +432,10 @@ impl LowerCtx {
                 obj
             }));
         }
+        // A constructor of the payload's own variant type, in either spelling.
+        if self.variant_ctor_of(expr).is_some() {
+            return Some(self.arm_some_variant_ctor(expr, result_ty));
+        }
         Some(match &expr.kind {
             // ANY record literal with a known layout — mirroring the bind
             // position's guard (binds_p4_b.rs `try_opt_record_aggregate_payload`).
@@ -440,11 +444,6 @@ impl LowerCtx {
             // which has no Record case, and the whole `if` walled (#1495).
             IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.arm_some_record(expr, result_ty)
-            }
-            IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.is_ctor_for(name.as_str(), &expr.ty) =>
-            {
-                self.arm_some_variant_ctor(expr, result_ty)
             }
             IrExprKind::Tuple { .. }
                 if matches!(&expr.ty,
@@ -516,11 +515,8 @@ impl LowerCtx {
     fn arm_some_variant_ctor(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         let arm_mark = self.live_heap_handles.len();
         let repr = repr_of(result_ty).ok()?;
-        let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind
-        else {
-            return None;
-        };
-        let type_name = self.variant_layouts.lookup_ctor_for(name.as_str(), &expr.ty)?.0.to_string();
+        let name = self.variant_ctor_of(expr)?;
+        let type_name = self.variant_layouts.lookup_ctor_for(name, &expr.ty)?.0.to_string();
         let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
             crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
         });
