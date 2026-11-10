@@ -94,12 +94,16 @@ impl Emitter<'_> {
         crate::witness::bounds::open();
         let lowered = self.lower_stmts_moving(body, None, Self::lower_stmt_with_facts);
         crate::witness::bounds::close();
+        // Restored before the error leaves (#4654): an enclosing arm closes
+        // its own label (`shift_loop_labels(-1)`) on the way out of a refusal,
+        // and it must find the context it opened that label in — this body's
+        // fresh one underflowed there and the refusal became a panic.
+        self.loop_ctl = saved;
         lowered?;
         self.bounds_facts = outer_facts;
         if for_in {
             self.f.instructions().end();
         }
-        self.loop_ctl = saved;
         self.close_loop_rests(rest_floor);
         Ok(())
     }
