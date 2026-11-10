@@ -37,9 +37,7 @@ fn desugar_nested_branch_block_arm(
             // A conditional statement owns its branches just as a tail does.
             // Normalize inside each arm, keeping a lazy assertion message's
             // unwrap in the failing arm rather than hoisting it before the if.
-            IrStmtKind::Expr { expr }
-                if matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }) =>
-            {
+            IrStmtKind::Expr { expr } if branch_stmt_arms_normalize_in_place(expr, layouts) => {
                 match desugar_nested_branch_arms(expr, next_var, layouts) {
                     Some(expr) => {
                         changed = true;
@@ -67,5 +65,23 @@ fn desugar_nested_branch_block_arm(
         span: body.span,
         def_id: body.def_id,
     })
+}
+
+/// May the arms of a branch STATEMENT be normalized where they stand?
+///
+/// Not when an arm propagates on its statement spine (`let v = f()!`, `q = f()!`,
+/// a bare `f()!`). The propagation rewrites turn such a `!` into a match whose
+/// err arm is the enclosing block's VALUE — the function's result when that
+/// block is the function's tail, a discarded value in a statement arm, where the
+/// error would be dropped and the statements after the branch would run. Such a
+/// branch is left whole: the continuation lift moves it to the tail when every
+/// payload is admitted, and otherwise its `!` reaches the lowering and is refused.
+fn branch_stmt_arms_normalize_in_place(expr: &IrExpr, layouts: &crate::lower::VariantLayouts) -> bool {
+    if !matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }) {
+        return false;
+    }
+    let (mut propagates, mut admitted) = (false, true);
+    collect_arm_unwrap_admit(expr, &mut propagates, &mut admitted, layouts);
+    !propagates
 }
 
