@@ -14662,6 +14662,13 @@ fn reduce[A](xs: List[A], f: (A, A) -> A) -> A? = _
 @consume(xs)
 fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
 
+
+
+
+@intrinsic("almide_rt_list_group_count")
+@consume(xs)
+fn __group_count[A, B](xs: List[A], f: (A) -> B) -> Map[B, Int] = _
+
 /// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
 fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _

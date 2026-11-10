@@ -2,6 +2,7 @@
 
 pub const BOUNDS: &[Bound] = &[
     Bound { module: "list", func: "__eq_any", generic: 0, cap: Cap::Eq },
+    Bound { module: "list", func: "__group_count", generic: 1, cap: Cap::Eq },
     Bound { module: "list", func: "contains", generic: 0, cap: Cap::Eq },
     Bound { module: "list", func: "dedup", generic: 0, cap: Cap::Eq },
     Bound { module: "list", func: "group_by", generic: 1, cap: Cap::Eq },

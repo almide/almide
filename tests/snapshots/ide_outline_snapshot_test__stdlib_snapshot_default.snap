@@ -142,6 +142,7 @@ fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) ->
 fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
 fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
 fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
+fn list.__group_count[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, Int]
 fn list.__join_string(xs: List[String], sep: String) -> String
 fn list.__key_order[K](a: K, b: K) -> Int
 fn list.__max_float(xs: List[Float]) -> Option[Float]
