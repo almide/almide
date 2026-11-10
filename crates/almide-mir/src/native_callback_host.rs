@@ -20,8 +20,9 @@
 //!
 //! A record or a variant crosses under the definition the standard codegen
 //! declares for it, carried beside the adapter (`native_callback_types`). A
-//! host type outside the spellings `host_type` gives (a function value, a
-//! `mut` parameter, a generic or structural record) is refused by name.
+//! `mut` parameter is copied in and written back after the call
+//! (`native_callback_mut`). A host type outside the spellings `host_type`
+//! gives (a function value) is refused by name.
 use almide_ir::{IrFunction, IrParam};
 use almide_lang::types::Ty;
 use crate::lower::LowerError;
@@ -112,12 +113,18 @@ impl Crossing<'_> {
     /// across representations is bound in `lets` first.
     fn argument(&self, p: &IrParam, kind: NativeSigKind, lets: &mut String) -> Result<String, LowerError> {
         let Crossing { name, theirs, own } = *self;
-        if theirs == own { return Ok(name.to_string()); }
-        if p.is_mut { return Err(wall(format!("native: callback parameter `{name}` is `mut`: no host adapter"))); }
+        if theirs == own && !p.is_mut { return Ok(name.to_string()); }
         let owned = host_type(&p.ty).map_err(|_| wall(format!(
             "native: callback parameter `{name}: {theirs}` ({}) has no host adapter", p.ty.display()
         )))?;
-        let source = if canon(theirs) == canon(&owned) { format!("&{name}") }
+        // A `mut` parameter is lent for writing, as the whole owned value: it
+        // is read here through a shared reborrow, and written after the call
+        // (`native_callback_mut`).
+        let written = p.is_mut && theirs.strip_prefix("&mut ").is_some_and(|lent| canon(lent) == canon(&owned));
+        let source = if p.is_mut && !written {
+                return Err(wall(format!("native: callback parameter `{name}: {theirs}` is `mut`, and is not lent for writing as {}", p.ty.display())));
+            } else if written { format!("&*{name}") }
+            else if canon(theirs) == canon(&owned) { format!("&{name}") }
             else if lends(theirs, &owned) { name.to_string() }
             else { return Err(wall(format!("native: callback parameter `{name}: {theirs}` is not a host spelling of {}", p.ty.display()))); };
         let k = owned_nty(kind);
@@ -129,7 +136,7 @@ impl Crossing<'_> {
     }
 }
 
-fn is_carrier(k: NTy) -> bool {
+pub(crate) fn is_carrier(k: NTy) -> bool {
     matches!(k, NTy::Res | NTy::ResStr)
         || matches!(k, NTy::Rec(i) if crate::render_native_rec::result_payloads(i).is_some())
 }
@@ -184,7 +191,10 @@ pub(crate) fn adapter(
         args.push(Crossing { name, theirs: ty, own: &own.params[j].1 }.argument(p, *kind, &mut lets)?);
     }
     let call = format!("{mangled}({})", args.join(", "));
-    let body = returned(f, result, &theirs.ret, &own.ret, &call)?;
+    let written: Vec<(&str, &Ty)> = f.params.iter().zip(&theirs.params)
+        .filter(|(p, _)| p.is_mut).map(|(p, (name, _))| (name.as_str(), &p.ty)).collect();
+    let body = if written.is_empty() { returned(f, result, &theirs.ret, &own.ret, &call)? }
+        else { crate::native_callback_mut::returned(f, result, &theirs.ret, &call, &written)? };
     let ret = if theirs.ret.is_empty() { String::new() } else { format!(" -> {}", theirs.ret) };
     Ok(format!("pub fn {}({}){ret} {{\n{lets}    {body}\n}}\n", f.name, params.join(", ")))
 }

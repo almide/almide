@@ -72,6 +72,7 @@ mod native_runtime_types;
 mod native_foreign;
 pub mod native_callbacks;
 mod native_callback_host;
+mod native_callback_mut;
 mod native_callback_types;
 pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
