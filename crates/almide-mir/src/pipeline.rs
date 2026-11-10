@@ -584,6 +584,9 @@ fn prepare_checked_ir(
     // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
     crate::lower::discard_effect_main_payload(&mut ir);
     crate::lower::desugar_fn_body_guards(&mut ir);
+    // An exit in an arm of a branch STATEMENT: the branch becomes the tail, the
+    // rest of the block in each arm (the certified native render; arm_exit.rs).
+    crate::lower::lift_stmt_arm_exits(&mut ir);
     // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
     // guard restructure above; shared with classify: desugar-before-both).
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);

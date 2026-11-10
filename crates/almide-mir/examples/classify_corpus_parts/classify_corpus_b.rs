@@ -376,6 +376,7 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
         almide_mir::lower::discard_effect_main_payload(&mut ir);
         almide_mir::lower::desugar_fn_body_guards(&mut ir);
+        almide_mir::lower::lift_stmt_arm_exits(&mut ir);
         almide_mir::lower::normalize_tail_err_raise_ifs(&mut ir);
         almide_mir::lower::desugar_loop_early_returns(&mut ir);
         almide_mir::lower::hoist_spread_call_bases(&mut ir);
