@@ -28,7 +28,10 @@ fn flat_map_array_route(
     let (lambda, n, lit) = call.args.iter().find_map(|a| fixed_literal_callback(a, origins, user_fns))?;
     let items = crate::native_floor::runtime_items(ARR)?;
     let head = format!("{}(", crate::render_native::mangle(&lambda));
-    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> Vec<i64>"))?;
+    // A callback whose adapter copies the lambda's list into a fresh Vec (a
+    // Float element's parameter recode brings that copy with it) still
+    // returns a Vec whatever the lambda returns: it keeps the Vec route.
+    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> Vec<i64>") && !r.contains("let mut __copy"))?;
     rendered[k] = rendered[k]
         .replacen(&head, &format!("{}__arr(", crate::render_native::mangle(&lambda)), 1)
         .replacen("-> Vec<i64>", &format!("-> [i64; {n}]"), 1);
