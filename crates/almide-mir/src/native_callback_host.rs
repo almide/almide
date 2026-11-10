@@ -112,7 +112,9 @@ impl Crossing<'_> {
         let Crossing { name, theirs, own } = *self;
         if theirs == own { return Ok(name.to_string()); }
         if p.is_mut { return Err(wall(format!("native: callback parameter `{name}` is `mut`: no host adapter"))); }
-        let owned = host_type(&p.ty)?;
+        let owned = host_type(&p.ty).map_err(|_| wall(format!(
+            "native: callback parameter `{name}: {theirs}` ({}) has no host adapter", p.ty.display()
+        )))?;
         let source = if canon(theirs) == canon(&owned) { format!("&{name}") }
             else if lends(theirs, &owned) { name.to_string() }
             else { return Err(wall(format!("native: callback parameter `{name}: {theirs}` is not a host spelling of {}", p.ty.display()))); };
@@ -137,7 +139,10 @@ fn returned(f: &IrFunction, result: Option<NativeSigKind>, theirs: &str, own: &s
     // carries a Result only when it can fail.
     let lifted = f.is_effect && f.ret_ty.result_ok_ty().is_none();
     let host_ty = if lifted { Ty::result(f.ret_ty.clone(), Ty::String) } else { f.ret_ty.clone() };
-    if canon(&host_type(&host_ty)?) != canon(theirs) {
+    let host = host_type(&host_ty).map_err(|_| wall(format!(
+        "native: callback return `{theirs}` ({}) has no host adapter", host_ty.display()
+    )))?;
+    if canon(&host) != canon(theirs) {
         return Err(wall(format!("native: callback return `{theirs}` is not a host spelling of {}", host_ty.display())));
     }
     let Some(kind) = result else {
