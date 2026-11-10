@@ -18,6 +18,8 @@ pub(crate) struct PendingRust {
     opts: codegen::CodegenOptions,
     pub(crate) source: String,
     pub(crate) native_input: Option<NativeInput>,
+    /// The `native/*.rs` text this program is built with (`cli::native_rust_text`).
+    pub(crate) native_text: String,
 }
 
 impl PendingRust {
@@ -25,7 +27,7 @@ impl PendingRust {
     /// An unsupported body is a compilation failure, never an implicit v0 run.
     pub(crate) fn generate_tests(mut self) -> Result<String, String> {
         let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
-        render_native_tests(&self.source, input)
+        render_native_tests(&self.source, std::mem::take(&mut self.native_text), input)
     }
 
     /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
@@ -40,7 +42,8 @@ impl PendingRust {
     }
 }
 
-pub(crate) fn render_native_tests(source: &str, (ir, checker): NativeInput) -> Result<String, String> {
+pub(crate) fn render_native_tests(source: &str, native_text: String, (ir, checker): NativeInput) -> Result<String, String> {
+    let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text);
     let (rust, _) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
         source, ir, checker, almide_wasm_run::fs_scope(),
     ).map_err(|error| format!("native v1 test render: {error:?}"))?;
@@ -56,6 +59,7 @@ pub(crate) fn try_compile_pending(file: &str, no_check: bool, codegen_opts: &cod
     let (ir_program, outside_guarantee, native_input, source) = compile_to_linked_ir_with_source(file, no_check, &t)?;
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     let ir = ir_program.expect("IR required for codegen");
-    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input }, metered, outside_guarantee))
+    let native_text = cli::native_rust_text(file);
+    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input, native_text }, metered, outside_guarantee))
 }
 

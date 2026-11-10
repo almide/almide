@@ -47,6 +47,7 @@ pub(crate) mod rustc_floor;
 mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
+pub(crate) use crate_inputs::native_rust_text;
 mod native_target;
 mod std_split;
 mod js_host;
@@ -435,6 +436,7 @@ pub(crate) fn render_v1_native_or_fallback(
 ) -> String {
     let source_text = std::mem::take(&mut pending.source);
     let native_input = pending.native_input.take();
+    let _callbacks = almide_mir::native_callbacks::Scope::enter(std::mem::take(&mut pending.native_text));
     let rs_code = move || pending.generate();
     // ALMIDE_FORCE_METER_CODEGEN=1 meters the program in the standard
     // codegen even when the whole program renders — the differential that

@@ -437,7 +437,12 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         // The shared registry filter is for the self-host representation:
         // applying it here drops bodies while retaining their nominal type
         // declarations (e.g. Path's tuple steps versus self-host String steps).
-        let names = m.functions.iter().filter(|f| super::is_pure_almide_fn(f))
+        // A package module's native extern is the same declared import the
+        // entry module's is: it links under its module name and lowers to
+        // the checked foreign call (`native_foreign`).
+        let user = !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str());
+        let names = m.functions.iter()
+            .filter(|f| super::is_pure_almide_fn(f) || (user && crate::native_foreign::selected(f).is_some()))
             .map(|f| f.name.to_string())
             .filter(|f| {
                 let call = format!("{}.{}", m.name, almide_ir::mono_base_or_self(f));
@@ -511,6 +516,10 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     }
     let mut refs = References(roots);
     refs.0.extend(ir.functions.iter().filter(|f| crate::native_test_harness::is_entry(f.name.as_str()))
+        .map(|f| f.name.to_string()));
+    // A module function the package's native code calls is reached from
+    // outside the Almide call graph.
+    refs.0.extend(ir.functions.iter().filter(|f| crate::native_callbacks::is_root(f.name.as_str()))
         .map(|f| f.name.to_string()));
     for t in &ir.top_lets { refs.visit_expr(&t.value); }
     defaults(&mut ir.type_decls, |e| refs.visit_expr(e));

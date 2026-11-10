@@ -596,6 +596,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
         routed.extend(linked_names.iter().filter(|n| !retained.contains(*n)).cloned());
         rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &routed)?;
     }
+    rust.push_str(&crate::native_callbacks::render(&ir, &sigs)?);
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).
