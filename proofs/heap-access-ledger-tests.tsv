@@ -43,7 +43,7 @@ code	spec/stdlib/deque_test.almd	1511
 code	spec/stdlib/encoding_test.almd	285
 code	spec/stdlib/env_extra_test.almd	75
 code	spec/stdlib/env_semantics_manifest_test.almd	41
-code	spec/stdlib/env_vars_remove_test.almd	390
+code	spec/stdlib/env_vars_remove_test.almd	347
 code	spec/stdlib/error_test.almd	213
 code	spec/stdlib/fallible_hof_matrix_test.almd	358
 code	spec/stdlib/ffi_test.almd	257
