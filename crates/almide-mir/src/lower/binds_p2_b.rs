@@ -210,6 +210,12 @@ impl LowerCtx {
                         // current scope and recurses on the tail — the same proven
                         // route; a statement it cannot lower declines cleanly.
                         | IrExprKind::Block { .. }
+                        // RECORD literals and field projections (`ok(Comment { .. })`,
+                        // `some({ ...c, count: 1 })`, `ok(c.trace_id)`): the bind builds
+                        // the payload as the `let` the source could have spelled, and
+                        // the ctor's Var arm shares it.
+                        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+                        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
                 )
             {
                 let payload_ty = expr.ty.clone();
