@@ -413,6 +413,11 @@ fn loop_uw_rewrite_block(
         UwStep::Decline => return None,
         UwStep::NotHere => {}
     }
+    match loop_uw_branch_stmt_then_rest(stmts, tail, env, nv) {
+        UwStep::Rewritten(out) => return Some(out),
+        UwStep::Decline => return None,
+        UwStep::NotHere => {}
+    }
     // No direct `!` stmt: the `!` is nested in a TERMINAL `if`/`match` (the tail, or the
     // last stmt) — recurse into it. Everything else must be `!`-free.
     if let Some(t) = tail {
@@ -437,6 +442,46 @@ fn loop_uw_rewrite_block(
         return Some(loop_uw_node(IrExprKind::Block { stmts: ns, expr: None }, Ty::Unit));
     }
     None
+}
+
+/// The first `!`-bearing statement is a BRANCH statement (`Expr(if/match)`) that
+/// more of the block follows: rewrite the branch where it stands, then run the
+/// rest of the block only while no exit has fired —
+/// `{ <before>; <branch'>; if <not-exited> then { <rest'> } else () }`.
+/// The flag test is the branch's continuation: an arm that set the error flag
+/// skips everything after it in this iteration, exactly as the `!` would have.
+/// A branch that is the block's last element keeps the terminal-position rule.
+fn loop_uw_branch_stmt_then_rest(
+    stmts: &[IrStmt],
+    tail: &Option<Box<IrExpr>>,
+    env: UwEnv<'_>,
+    nv: &mut u32,
+) -> UwStep {
+    let Some(i) = stmts.iter().position(stmt_has_unwrap) else { return UwStep::NotHere };
+    if i + 1 == stmts.len() && tail.is_none() {
+        return UwStep::NotHere;
+    }
+    let IrStmtKind::Expr { expr } = &stmts[i].kind else { return UwStep::NotHere };
+    let Some(branch) = loop_uw_rewrite(expr, env, nv) else { return UwStep::Decline };
+    let rest = loop_uw_node(
+        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+        Ty::Unit,
+    );
+    let Some(rest2) = loop_uw_rewrite(&rest, env, nv) else { return UwStep::Decline };
+    let guarded = loop_uw_node(
+        IrExprKind::If {
+            cond: Box::new(not_exited_cond(env.ef, env.vx.map(|(vf, _, _)| vf))),
+            then: Box::new(rest2),
+            else_: Box::new(loop_uw_node(IrExprKind::Unit, Ty::Unit)),
+        },
+        Ty::Unit,
+    );
+    let mut ns = stmts[..i].to_vec();
+    ns.push(IrStmt { kind: IrStmtKind::Expr { expr: branch }, span: stmts[i].span.clone() });
+    UwStep::Rewritten(loop_uw_node(
+        IrExprKind::Block { stmts: ns, expr: Some(Box::new(guarded)) },
+        Ty::Unit,
+    ))
 }
 
 /// The `{ __vres = <payload>; __vf = true }` VALUE-exit delivery block.
