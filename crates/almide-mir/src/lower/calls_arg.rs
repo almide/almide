@@ -327,14 +327,17 @@ impl LowerCtx {
             // routers the let-bound heap match executes through
             // (`lower_bind_heap_match`): each arm materializes + consumes its
             // value, the merge is the one owned block.
+            // A declared variant subject (native owned slots) takes the first of
+            // them alone, as the let-bound match does.
             let lifted = lifted.or_else(|| {
-                if !is_variant_ty(&subject.ty) {
+                let builtin = is_variant_ty(&subject.ty);
+                if !builtin && !(crate::lower::owned_tco_slots() && self.custom_variant_type_name(&subject.ty).is_some()) {
                     return None;
                 }
                 let mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
                 let dst = self.try_lower_custom_variant_match(subject, arms, ty)
-                    .or_else(|| self.try_lower_variant_value_match(subject, arms, ty))
+                    .or_else(|| builtin.then(|| self.try_lower_variant_value_match(subject, arms, ty)).flatten())
                     .or_else(|| self.try_lower_result_match_value(subject, arms, ty))
                     .or_else(|| self.try_lower_option_match_value(subject, arms, ty));
                 if dst.is_none() {
