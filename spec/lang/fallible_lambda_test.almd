@@ -93,15 +93,21 @@ test "L9: test-block lambda bang stays unwrap, map stays map" {
 }
 
 test "a failing mapped unwrap reports the error text" {
-  testing.assert_aborts("invalid digit found in string", () => {
-    let r = ["x"] |> list.map((x) => int.parse(x)!)
-    assert_eq(r, [0])
-  })
+  testing.assert_aborts(
+    "invalid digit found in string",
+    () => {
+      let r = ["x"] |> list.map((x) => int.parse(x)!)
+      assert_eq(r, [0])
+    },
+  )
 }
 
 test "a failing mapped option unwrap reports none" {
-  testing.assert_aborts("none", () => {
-    let r = [1] |> list.map((x) => list.get([x], 9)!)
-    assert_eq(r, [0])
-  })
+  testing.assert_aborts(
+    "none",
+    () => {
+      let r = [1] |> list.map((x) => list.get([x], 9)!)
+      assert_eq(r, [0])
+    },
+  )
 }

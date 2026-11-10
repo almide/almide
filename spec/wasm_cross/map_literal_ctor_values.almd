@@ -12,9 +12,14 @@ type MapNode = { v: Int, kids: Map[String, MapNode], opts: List[MapNode?] }
 
 fn map_node_sum(n: MapNode) -> Int = {
   var sum = n.v
-  for (name, child) in n.kids { sum = sum + string.len(name) + map_node_sum(child) }
+  for (name, child) in n.kids {
+    sum = sum + string.len(name) + map_node_sum(child)
+  }
   for child in n.opts {
-    sum = sum + match child { some(c) => map_node_sum(c), none => 0 }
+    sum = sum + match child {
+      some(c) => map_node_sum(c),
+      none => 0,
+    }
   }
   sum
 }
@@ -23,7 +28,10 @@ fn main() -> Unit = {
   let node: MapNode = {
     v: 1,
     kids: map.set(map.new(), "ab", { v: 2, kids: map.new(), opts: [] }),
-    opts: [some({ v: 5, kids: map.new(), opts: [] }), none],
+    opts: [
+      some({ v: 5, kids: map.new(), opts: [] }),
+      none
+    ],
   }
   let alias = node
   println("recursive-map=${map_node_sum(node)} alias=${map_node_sum(alias)}")

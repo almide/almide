@@ -64,5 +64,5 @@ effect fn main() -> Unit = {
   }
   println("nested=${outer + inner_a + inner_b}")
   let nested_error: Result[Int, String] = nested_fail()
-  println("nested_err=${nested_error == err(\"inner\")}")
+  println("nested_err=${nested_error == err("inner")}")
 }

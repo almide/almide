@@ -16,12 +16,14 @@ type P = { name: String, n: Int }
 fn count_items(xs: List[Int]) -> Int = list.len(xs)
 
 fn scalar_temp(take: Bool) -> Int? =
-  if take then some(count_items(bytes.to_list(bytes.from_list([1, 2, 3])))) else none
+  if take then some(count_items(bytes.to_list(bytes.from_list([1, 2, 3]))))
+  else none
 
 fn join_items(xs: List[String]) -> String = list.join(xs, ",")
 
 fn heap_temp(take: Bool) -> String? =
-  if take then some(join_items(["a", "b"])) else none
+  if take then some(join_items(["a", "b"]))
+  else none
 
 fn nested_tuple(take: Bool, p: (Int, String)) -> (Int, (Int, String), (Int, String))? =
   if take then some((7, p, (9, "tail"))) else none

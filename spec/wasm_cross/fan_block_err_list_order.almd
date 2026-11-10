@@ -30,7 +30,7 @@ effect fn main() -> Unit = {
   let good: Result[Int, String] = implicit_pair(2, 3)
   let first: Result[Int, String] = implicit_pair(-1, -2)
   let second: Result[Int, String] = implicit_pair(1, -2)
-  println("implicit good=${good == ok(5)} first=${first == err(\"implicit:-1\")} second=${second == err(\"implicit:-2\")}")
+  println("implicit good=${good == ok(5)} first=${first == err("implicit:-1")} second=${second == err("implicit:-2")}")
   let (a, b) = fan {
     boom("first")
     boom("second")

@@ -16,11 +16,15 @@ effect fn main() -> Unit = {
   println("optional:${optional_body(some(response))}:${optional_body(none)}")
   println("original:${http.status(response)}:${http.body(response)}")
   let responses = [response, http.set_status(response, 202)]
-  for r in responses { println("list:${http.status(r)}:${http.body(r)}") }
+  for r in responses {
+    println("list:${http.status(r)}:${http.body(r)}")
+  }
   println("after-list:${http.status(response)}:${http.body(response)}")
   let request = http.new_request("POST", "/kept", "payload", [])
   let requests = [request, http.set_body(request, "changed")]
-  for r in requests { println("requests:${http.method(r)}:${http.body(r)}") }
+  for r in requests {
+    println("requests:${http.method(r)}:${http.body(r)}")
+  }
   println("after-requests:${http.body(request)}")
   match http.request("POST", "http://127.0.0.1:1/x", "body", [("K", "v")]) {
     ok(_) => println("request:unexpected-ok"),

@@ -11,8 +11,7 @@ type Binary = | Empty | Fork(Binary, Int, Binary) | Hop(Binary)
 fn branch_depth(t: Binary) -> Int = match t {
   Empty => 0,
   Hop(next) => branch_depth(next),
-  Fork(l, _, r) => 1 + (if branch_depth(l) > branch_depth(r)
-    then branch_depth(l) else branch_depth(r)),
+  Fork(l, _, r) => 1 + (if branch_depth(l) > branch_depth(r) then branch_depth(l) else branch_depth(r)),
 }
 
 fn regrow(t: Binary) -> Binary = match t {

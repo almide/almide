@@ -26,6 +26,7 @@ let FIRST = list.len(ITEMS)
 fn make_action(n: Int) -> Result[(Int) -> Int, String] = ok((x) => x + n)
 
 let ACTION = make_action(7)
+
 var changing_action = make_action(10)
 
 fn apply_action(a: Result[(Int) -> Int, String], n: Int) -> Int = match a {
