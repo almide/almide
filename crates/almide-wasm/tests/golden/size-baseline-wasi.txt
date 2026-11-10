@@ -221,7 +221,7 @@
 3638	spec/wasm_cross/fan_arm_unwrap_or.almd
 3596	spec/wasm_cross/fan_block_err_list_order.almd
 5095	spec/wasm_cross/fan_block_rc_closure_capture.almd
-7486	spec/wasm_cross/fan_deterministic.almd
+7498	spec/wasm_cross/fan_deterministic.almd
 4196	spec/wasm_cross/fan_effect_mapper.almd
 13293	spec/wasm_cross/fan_effect_mapper_capability.almd
 3196	spec/wasm_cross/fan_list_map_trap_order.almd
