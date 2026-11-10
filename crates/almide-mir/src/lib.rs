@@ -71,6 +71,7 @@ pub mod native_floor;
 mod native_runtime_types;
 mod native_foreign;
 pub mod native_callbacks;
+mod native_callback_host;
 pub mod native_option_rewrite;
 pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;

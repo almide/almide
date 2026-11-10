@@ -26,7 +26,7 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
     Ok(format!("{{ let __foreign_env = &{value}; let __foreign_index = __foreign_env.words().first().copied().unwrap_or_else(|| almide_abort(\"index out of bounds\")); move |{}| -> {} {{ {bindings}{body} }} }}", host_params.join(", "), host_type(&ret_ty)?))
 }
 
-fn host_type(ty: &Ty) -> Result<String, LowerError> {
+pub(crate) fn host_type(ty: &Ty) -> Result<String, LowerError> {
     if let Some(s) = scalar_host_type(ty) { return Ok(s.into()); }
     Ok(match ty {
         Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<Vec<u8>>".into(),

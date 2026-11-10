@@ -832,6 +832,11 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
     let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
     let native_input = (ir_program.clone().ok_or_else(|| unattributed("the test run did not lower".into()))?, checker);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
-    let rs_code = render_native_tests("", cli::native_rust_text(&first), native_input).map_err(unattributed)?;
+    let native_text = cli::native_rust_text(&first);
+    let host: HostSource = match &ir_program {
+        Some(ir) => host_source(ir, &codegen::CodegenOptions::default(), &native_text),
+        None => Box::new(String::new),
+    };
+    let rs_code = render_native_tests("", native_text, host, native_input).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }
