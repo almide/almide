@@ -31,12 +31,10 @@ bytes_rawptr  out-of-interp-scope capability: ffi.region: no lowered body
 count_domain_nonbytes  out-of-interp-scope capability: io.read: no lowered body
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
-io_write_ordering  out-of-interp-scope capability: io.write: no lowered body
-io_write_raw_bytes  out-of-interp-scope capability: io.write: no lowered body
+io_write_raw_bytes  out-of-interp-scope capability: io.write: bytes that are not UTF-8 on a captured text stream
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_fma_ieee_specials  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
-mut_param_branch_forward  out-of-interp-scope capability: io.write: no lowered body
 range_bind_huge  interp fuel/recursion budget exhausted
 range_head_fold_huge  out-of-interp-scope capability: prim.alloc_list(537919488) beyond the interp arena ceiling
 regex_repetition_depth  interp fuel/recursion budget exhausted
