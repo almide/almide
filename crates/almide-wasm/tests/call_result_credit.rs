@@ -770,3 +770,59 @@ fn a_borrowed_carrier_to_option_releases_the_some_cell() {
     );
     assert_eq!(g, 0, "borrowed `?`: {g} B per call leaked");
 }
+
+/// A `!` in a LATER operand of a call or a map literal returns while the
+/// operands before it are already evaluated. Their credits — a produced
+/// block's own, or the `+1` an owning parameter takes for a variable — were
+/// held by the operand stack alone and never released: one block per failed
+/// call. The high-water mark must not grow with the number of failures.
+fn later_operand_err_program(n: u32, body: &str) -> String {
+    format!(
+        r#"effect fn word(x: String) -> String = {{
+  guard x != "stop" else err("stopped")
+  x + "!"
+}}
+
+fn tag(label: String) -> String = label + "."
+
+fn join2(a: String, b: String) -> String = a + b
+
+fn join3(a: String, b: String, c: String) -> String = a + b + c
+
+effect fn produced(x: String) -> Int = string.len(join3(tag(x), word(x)!, tag(x)))
+
+effect fn variable(x: String) -> Int = {{
+  let y = x + "~"
+  string.len(join2(y, word(x)!))
+}}
+
+effect fn nested(x: String) -> Int = string.len(join2(tag(x), join2(tag(x + "in"), word(x)!)))
+
+effect fn module_op(x: String) -> Int = string.len(string.replace(tag(x), word(x)!, "z"))
+
+effect fn map_entry(x: String) -> Int = {{
+  let m = [tag(x): word(x)!]
+  map.len(m)
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+{body}
+  }}
+  println("${{total}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn a_later_operand_that_propagates_releases_the_operands_before_it() {
+    for f in ["produced", "variable", "nested", "module_op", "map_entry"] {
+        let failing = format!("    total = total + (match {f}(\"stop\") {{ ok(v) => v, err(_) => 1 }})");
+        flat_in(later_operand_err_program, &format!("{f} (err)"), &failing, "1000", "8000");
+        // The ok path is the control: the same sites, nothing propagating.
+        let passing = format!("    total = total + (match {f}(\"s\") {{ ok(_) => 2, err(_) => 1 }})");
+        flat_in(later_operand_err_program, &format!("{f} (ok)"), &passing, "2000", "16000");
+    }
+}
