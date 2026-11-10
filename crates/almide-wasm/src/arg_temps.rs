@@ -310,7 +310,7 @@ impl Binder<'_> {
             IrExprKind::MapLiteral { entries } => entries.iter_mut().flat_map(|(k, v)| [k, v]).collect(),
             _ => return false,
         };
-        if !operands.iter().any(|a| crate::fs_meta::expr_propagates(a)) {
+        if !operands.iter().any(|a| crate::fs_meta::expr_leaves_frame(a)) {
             return false;
         }
         let mut binds = Vec::new();
