@@ -495,6 +495,22 @@ fn is_accumulator_carry(calls: &[&[IrExpr]], params: &[almide_ir::IrParam], i: u
     })
 }
 
+/// Does a carried heap param's slot start as a `var` bound to the param,
+/// rather than as the `acc + <empty>` copy? A String or a list copies. A
+/// map or set the accumulator carries admit keeps its `acc + []` share. Any
+/// other type (a variant, a record, a tuple) has no `+` to copy through — a
+/// carry such as `list.fold(xs, acc, ..)` at a variant type reaches here as
+/// an accumulator carry — so on the render with owned slots it binds the
+/// param too, exactly as an owned-only carry of that type does.
+fn slot_binds_param(owned_only: bool, ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::String | Ty::Applied(TC::List, _) => false,
+        Ty::Applied(TC::Map | TC::Set, _) => owned_only,
+        _ => owned_only || crate::lower::owned_tco_slots(),
+    }
+}
+
 /// Substitute every append accumulator with an OWNED loop-carried slot: an
 /// upfront `let slot = acc + <empty>` bind (a fresh OWNED copy of the borrowed
 /// accumulator param — the concat always allocates, so the slot never aliases
@@ -523,7 +539,7 @@ fn build_append_slot_subst(
         // An owned TCO slot (`crate::lower::owned_tco_slots`) that is neither
         // a list nor a String (a tree, a variant, a tuple) starts as a `var`
         // bound to the borrowed param — the lowering's owned copy.
-        if owned_only.contains(&ai) && !matches!(list_ty, Ty::String) && !matches!(list_ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, _)) {
+        if slot_binds_param(owned_only.contains(&ai), &list_ty) {
             upfront.push(IrStmt {
                 kind: IrStmtKind::Bind {
                     var: slot,
