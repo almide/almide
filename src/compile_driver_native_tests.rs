@@ -42,7 +42,7 @@ test "日本語の名前" { assert(true) }
     if verifier.is_file() {
         assert!(Command::new(verifier).arg("bundle").arg(&bundle).status().unwrap().success());
     } else {
-        assert_ne!(std::env::var("ALMIDE_EXPECT_TOOLS").as_deref(), Ok("1"));
+        assert!(!almide_base::env::flag("ALMIDE_EXPECT_TOOLS"));
     }
     let built = Command::new(crate::find_rustc()).args(["--edition=2021", "--test", "-Awarnings"])
         .arg(&artifact).arg("-o").arg(&binary).output().unwrap();
@@ -132,7 +132,7 @@ fn render_checked_with_scope(entry: &Path, roots: Option<Vec<String>>) -> String
         assert!(verdict.status.success(), "{}\n{}", String::from_utf8_lossy(&verdict.stdout),
             String::from_utf8_lossy(&verdict.stderr));
     } else {
-        assert_ne!(std::env::var("ALMIDE_EXPECT_TOOLS").as_deref(), Ok("1"),
+        assert!(!almide_base::env::flag("ALMIDE_EXPECT_TOOLS"),
             "independent verifier is required on the verification VM");
         eprintln!("independent certificate check not run: almide-verify unavailable");
     }

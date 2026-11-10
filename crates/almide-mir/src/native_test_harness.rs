@@ -130,13 +130,20 @@ impl Plan {
             items.push((entry.origin.clone(), rendered));
         }
         let fan = crate::render_native::fan_rendered();
-        let mut out = OUTCOME.replace("__ALMD_TEST_TRAP_WAIT__", if fan { "almide_fan_trap_wait();" } else { "" });
+        let mut out = OUTCOME
+            .replace("__ALMD_TEST_TRAP_WAIT__", if fan { "almide_fan_trap_wait();" } else { "" })
+            .replace("__ALMD_TEST_ABORT_PROBE__", ABORT_PROBE);
         out.push_str(&almide_codegen::test_harness::render_module(&templates, items));
         Ok(if fan {
             crate::render_native::route_exits(&out)
         } else { out })
     }
 }
+
+/// The switch the EMITTED harness reads in the test binary (the parent of an
+/// `assert_aborts` child sets it); the compiler itself never reads it, so the
+/// name is spliced into the emitted text and not spelled as a read here.
+const ABORT_PROBE: &str = "ALMIDE_TEST_ABORT_PROBE";
 
 const OUTCOME: &str = r#"
 fn __almd_native_test_flush() {
@@ -149,7 +156,7 @@ fn __almd_native_test_abort(e: impl std::fmt::Display) -> ! {
     std::process::exit(1);
 }
 fn __almd_native_test_panic(e: impl std::fmt::Display) -> ! {
-    if std::env::var_os("ALMIDE_TEST_ABORT_PROBE").is_none() { panic!("{}", e); }
+    if std::env::var_os("__ALMD_TEST_ABORT_PROBE__").is_none() { panic!("{}", e); }
     __ALMD_TEST_TRAP_WAIT__
     __almd_native_test_flush();
     let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!("PANIC: {}", e));
