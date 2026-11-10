@@ -69,14 +69,27 @@ fn parallel_hof() -> Option<&'static Hof> {
     })
 }
 
-fn parallel_map_hof() -> Result<Hof, String> {
+/// The compiler builtin's own schema: `fan.map(List[A], (A) -> Result[B,
+/// String]) -> Result[List[B], String]`, as the frontend constrains it.
+fn fan_map_schema() -> Result<(Vec<DTy>, DTy), String> {
     use almide_lang::types::{fan, Ty};
     let a = Ty::TypeVar(almide_base::intern::sym("A"));
     let b = Ty::TypeVar(almide_base::intern::sym("B"));
     let args = [Ty::list(a.clone()), fan::map_callback(a, b.clone())];
-    let ret = fan::map_result(b);
     let dparams = args.iter().map(fan_dty).collect::<Option<Vec<_>>>().ok_or("fan builtin parameter schema changed")?;
-    let ret = fan_dty(&ret).ok_or("fan builtin result schema changed")?;
+    let ret = fan_dty(&fan::map_result(b)).ok_or("fan builtin result schema changed")?;
+    Ok((dparams, ret))
+}
+
+fn fan_map_route(symbol: &str, twin: String, schema: (Vec<DTy>, DTy), items: Vec<&'static str>) -> Hof {
+    let (dparams, ret) = schema;
+    Hof { symbol: symbol.into(), twin,
+        params: dparams.into_iter().map(|d| (d, false)).collect(),
+        mutable: vec![false; 2], matrix_ref_lists: vec![false; 2], ret, items, bounds: Vec::new(), owned: None }
+}
+
+fn parallel_map_hof() -> Result<Hof, String> {
+    let (dparams, ret) = fan_map_schema()?;
     let symbol = "almide_rt_fan_map_par";
     let (params, rust_ret, items) = crate::native_floor::parallel_runtime_body(symbol)?;
     let callback = fan_rust_type(&dparams[1]).ok_or("fan callback schema has no Rust ABI")?;
@@ -89,9 +102,41 @@ fn parallel_map_hof() -> Result<Hof, String> {
         || !head.contains(&format!("<A:Send+Sync+Clone,B:Send,F:{callback}+Send+Sync>")) {
         return Err("parallel runtime signature disagrees with the compiler builtin".into());
     }
-    Ok(Hof { symbol: symbol.into(), twin: symbol.into(),
-        params: dparams.into_iter().map(|d| (d, false)).collect(),
-        mutable: vec![false; 2], matrix_ref_lists: vec![false; 2], ret, items, bounds: Vec::new(), owned: None })
+    Ok(fan_map_route(symbol, symbol.into(), (dparams, ret), items))
+}
+
+/// The call a `fan.map` outside the scalar self-host matrix lowers to: no
+/// body is linked for it, so only the builtin's sequential runtime body can
+/// serve it (a site the product selector threads is a wrapper of its own).
+pub(crate) fn sequential_map_call(call: &str) -> bool {
+    call == crate::lower::fan_map_call_name(&[], &almide_lang::types::Ty::Unit)
+}
+
+/// The same route for a site the lowerer handed to the builtin's linked
+/// scalar body (a render with a threaded site offers that link to every
+/// pairing): the link refused the element kinds, the runtime body takes them.
+fn refused_map_link(impl_fn: &str) -> Option<&'static Hof> {
+    let source = registry_call(impl_fn)?;
+    let (module, func) = source.split_once('.')?;
+    let unlinked = crate::lower::registry_sig::refusal_twin(module, func);
+    sequential_map_call(&unlinked).then(|| of(&unlinked)).flatten()
+}
+
+/// The sequential runtime body of the builtin (every element runs in list
+/// order, the lowest-index `Err` is the map's — ADR-0024 D1), taking the
+/// caller's closure statically. Any element pair the adapter can spell rides
+/// it: nothing crosses a thread, so there is no `Send` bound to meet.
+fn sequential_map_hof() -> Result<Hof, String> {
+    let (dparams, ret) = fan_map_schema()?;
+    let symbol = "almide_rt_fan_map";
+    let (params, rust_ret, items) = crate::native_floor::runtime_body_explained(symbol)?;
+    let callback = fan_rust_type(&dparams[1]).ok_or("fan callback schema has no Rust ABI")?;
+    if params != [fan_rust_type(&dparams[0]).ok_or("fan input ABI")?, format!("std::rc::Rc<dyn{callback}>")]
+        || Some(rust_ret) != fan_rust_type(&ret) {
+        return Err("sequential runtime signature disagrees with the compiler builtin".into());
+    }
+    let (twin, items) = static_runtime_closure(symbol, items).ok_or("the sequential runtime body has no static callback route")?;
+    Ok(fan_map_route(symbol, twin, (dparams, ret), items))
 }
 
 fn fan_dty(ty: &almide_lang::types::Ty) -> Option<DTy> {
