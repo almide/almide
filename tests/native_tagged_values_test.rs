@@ -264,10 +264,16 @@ fn check_compiled_routes(dir: &std::path::Path, name: &str, source: &str,
     if matches!(name, "fan_arm_heap_capture" | "fan_arm_unwrap_or") {
         assert!(rust.contains("let __almide_fan_h0 = almide_fan_spawn"), "{name}: expected threaded arms");
     }
+    let crates = almide_codegen::runtime_crate_deps(&rust);
     std::fs::write(&rs, rust).unwrap();
-    let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
-        .arg(&rs).arg("-o").arg(&binary).output().unwrap();
-    assert!(compile.status.success(), "{name}: {}", String::from_utf8_lossy(&compile.stderr));
+    let binary = if crates.is_empty() {
+        let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+            .arg(&rs).arg("-o").arg(&binary).output().unwrap();
+        assert!(compile.status.success(), "{name}: {}", String::from_utf8_lossy(&compile.stderr));
+        binary
+    } else {
+        build_with_runtime_crates(dir, name, &rs, &crates)
+    };
     let actual = Command::new(&binary).output().unwrap();
     assert_eq!(actual.status.code(), Some(expected_exit), "{name}: native execution");
     assert_eq!(actual.stdout, expected_stdout.as_bytes(), "{name}: expected bytes");
@@ -287,6 +293,26 @@ fn check_compiled_routes(dir: &std::path::Path, name: &str, source: &str,
     assert_eq!((&actual.stdout, &actual.stderr, actual.status.code()),
         (&wasm.stdout_bytes, &wasm.stderr_bytes, Some(wasm.exit)), "{name}: wasm");
     actual
+}
+
+/// A render whose native floor names a crates.io crate (zlib is served by the
+/// runtime floor, as on the v0 route) builds the way the CLI builds it: a
+/// cargo project declaring exactly `runtime_crate_deps` of the render.
+fn build_with_runtime_crates(dir: &std::path::Path, name: &str, rs: &std::path::Path,
+    crates: &[(&str, &str)]) -> std::path::PathBuf {
+    let project = dir.join(format!("{name}-crate"));
+    std::fs::create_dir_all(&project).unwrap();
+    let mut manifest = format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n[[bin]]\nname = \"{name}\"\npath = {rs:?}\n[profile.dev]\nopt-level = 1\n[dependencies]\n");
+    for (krate, spec) in crates {
+        if spec.starts_with('{') { manifest.push_str(&format!("{krate} = {spec}\n")); }
+        else { manifest.push_str(&format!("{krate} = {spec:?}\n")); }
+    }
+    std::fs::write(project.join("Cargo.toml"), manifest).unwrap();
+    let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/native-tagged-runtime-crates");
+    let compile = Command::new(env!("CARGO")).args(["build", "--manifest-path"])
+        .arg(project.join("Cargo.toml")).arg("--target-dir").arg(&target).output().unwrap();
+    assert!(compile.status.success(), "{name}: {}", String::from_utf8_lossy(&compile.stderr));
+    target.join("debug").join(name)
 }
 
 #[test]
@@ -1433,8 +1459,12 @@ fn interpolation_heap_fallback_preserves_order_and_lazy_evaluation() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// zlib is served from the native runtime floor (flate2), as on the v0 route;
+/// the self-hosted bodies link on the wasm leg. Every leg must print the same
+/// write-backs and bound errors, and on every leg the user's fns spelled like
+/// zlib's siblings and helpers stay the user's.
 #[test]
-fn linked_zlib_bodies_keep_writebacks_bounds_and_namespaces() {
+fn zlib_keeps_writebacks_bounds_and_user_namesakes_on_the_floor_and_linked_legs() {
     let dir = std::env::temp_dir().join(format!("almide-native-linked-zlib-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     check_routes(&dir, "zlib_call_vs_user_namesake", include_str!("../spec/wasm_cross/zlib_call_vs_user_namesake.almd"),
