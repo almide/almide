@@ -40,6 +40,7 @@ pub(crate) fn host_type(ty: &Ty) -> Result<String, LowerError> {
             format!("{name}<{}>", a.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         Ty::Tuple(a) => format!("({},)", a.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        Ty::Named(name, args) => crate::native_callback_types::host_named(name.as_str(), args)?,
         _ => return Err(wall("native: foreign callback has no host value type")),
     })
 }

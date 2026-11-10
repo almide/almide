@@ -18,8 +18,10 @@
 //! adapter holds no `unsafe` and sits outside the certified functions, as the
 //! scalar adapters do.
 //!
-//! A host type outside the spellings `host_type` gives (a record, a variant,
-//! a function value, a `mut` parameter) is refused by name.
+//! A record or a variant crosses under the definition the standard codegen
+//! declares for it, carried beside the adapter (`native_callback_types`). A
+//! host type outside the spellings `host_type` gives (a function value, a
+//! `mut` parameter, a generic or structural record) is refused by name.
 use almide_ir::{IrFunction, IrParam};
 use almide_lang::types::Ty;
 use crate::lower::LowerError;
@@ -83,7 +85,7 @@ fn sig_of(text: &str, name: &str) -> Option<Sig> {
 
 /// A type spelling with its layout dropped: `(i64, AlmideString,)` and
 /// `(i64, AlmideString)` are one type.
-fn canon(ty: &str) -> String {
+pub(crate) fn canon(ty: &str) -> String {
     ty.replace(' ', "").replace(",)", ")")
 }
 
