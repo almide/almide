@@ -1,0 +1,93 @@
+// @contract: C-266
+// A failing `guard let … else err(e)` leaves the FUNCTION wherever it stands,
+// not only at the fn's tail (#4653). Inside a branch-statement arm (an `if`,
+// a `match` arm, an `if` in a loop body) the statements after the branch do
+// not run and the caller receives the err; in a Unit `effect fn` the err
+// reaches the caller instead of being dropped. The values built before the
+// failing guard and the bound payload are heap values, so the early exit
+// also has to release them: the run ends with no block live on wasm.
+fn parse_name(s: String) -> Result[String, String] =
+  if string.len(s) > 0 then ok("<" + s + ">") else err("empty name")
+
+fn pick(n: Int) -> Int? = if n > 0 then some(n) else none
+
+fn in_if_arm(c: Bool, s: String) -> Result[String, String] = {
+  var log = ["start"]
+  if c then {
+    guard let name = parse_name(s) else err("if arm: no name")
+    log = log + [name]
+  } else ()
+  log = log + ["end"]
+  ok(list.join(log, " "))
+}
+
+fn in_match_arm(o: Int?, n: Int) -> Result[Int, String] = {
+  var total = 0
+  match o {
+    some(k) => {
+      guard let v = pick(n) else err("match arm: nothing picked for " + int.to_string(k))
+      total = total + k + v
+    },
+    none => (),
+  }
+  ok(total + 1000)
+}
+
+fn in_loop_branch(xs: List[String]) -> Result[String, String] = {
+  var acc = ""
+  for x in xs {
+    if string.len(acc) < 100 then {
+      guard let name = parse_name(x) else err(e) => err("loop: " + e + " after " + acc)
+      acc = acc + name
+    } else ()
+  }
+  ok(acc)
+}
+
+effect fn unit_tail(s: String) -> Unit = {
+  let pre = "checking [" + s + "]"
+  println(pre)
+  guard let name = parse_name(s) else err("unit effect: no name")
+  println("got " + name)
+}
+
+effect fn unit_in_arm(c: Bool, n: Int) -> Unit = {
+  let label = "n=" + int.to_string(n)
+  if c then {
+    guard let v = pick(n) else err("unit effect arm: " + label)
+    println(label + " picked " + int.to_string(v))
+  } else ()
+  println(label + " done")
+}
+
+fn show(r: Result[String, String]) -> String = match r {
+  ok(s) => "ok " + s,
+  err(e) => "err " + e,
+}
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(k) => "ok " + int.to_string(k),
+  err(e) => "err " + e,
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  println(show(in_if_arm(false, "")))
+  println(show(in_if_arm(true, "ada")))
+  println(show(in_if_arm(true, "")))
+  println(show_int(in_match_arm(none, 0)))
+  println(show_int(in_match_arm(some(5), 2)))
+  println(show_int(in_match_arm(some(5), 0)))
+  println(show(in_loop_branch(["a", "b"])))
+  println(show(in_loop_branch(["a", "", "c"])))
+  println(show_unit(unit_tail("bo")))
+  println(show_unit(unit_tail("")))
+  println(show_unit(unit_in_arm(false, 0)))
+  println(show_unit(unit_in_arm(true, 3)))
+  println(show_unit(unit_in_arm(true, 0)))
+  println("end")
+}
