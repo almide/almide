@@ -459,7 +459,7 @@ impl LowerCtx {
     fn lower_scalar_ok_payload_unwrap(&mut self, expr: &IrExpr) -> Option<ValueId> {
         // Both arms below die on the failing side; where the err belongs to a caller the
         // operand declines, and the strict render refuses its statement.
-        if matches!(&expr.kind, IrExprKind::Unwrap { .. }) && self.unrewritten_bang_wall("operand").is_some() {
+        if matches!(&expr.kind, IrExprKind::Unwrap { .. }) && self.unrewritten_bang_wall("operand", expr).is_some() {
             return None;
         }
         match &expr.kind {

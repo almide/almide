@@ -10,16 +10,16 @@ impl LowerCtx {
     /// to a caller (`bang_dies` off): on the native render the two paths left for it
     /// would end the process or drop the err. `None` = the path may run (the other
     /// render, or a fn where the err ends the process anyway).
-    fn unrewritten_bang_wall(&mut self, position: &'static str) -> Option<LowerError> {
+    fn unrewritten_bang_wall(&mut self, position: &'static str, at: &IrExpr) -> Option<LowerError> {
         if !crate::lower::owned_tco_slots() || self.bang_dies {
             return None;
         }
-        self.bang_refused = Some(position);
-        Some(Self::bang_wall(position))
+        self.bang_refused = Some((position, at.span));
+        Some(Self::bang_wall(position, at.span))
     }
 
-    fn bang_wall(position: &str) -> LowerError {
-        LowerError::Unsupported(format!(
+    fn bang_wall(position: &str, span: Option<almide_ir::Span>) -> LowerError {
+        LowerError::at(span, format!(
             "a `!` in {position} position that no rewrite gave a continuation, in a fn \
              that returns its err to a caller (lowering it here would lose the err)"
         ))
@@ -27,7 +27,7 @@ impl LowerCtx {
 
     /// The fn-level verdict of [`Self::unrewritten_bang_wall`], read once the body is lowered.
     pub(crate) fn refused_bang(&self) -> Result<(), LowerError> {
-        self.bang_refused.map_or(Ok(()), |position| Err(Self::bang_wall(position)))
+        self.bang_refused.map_or(Ok(()), |(position, span)| Err(Self::bang_wall(position, span)))
     }
 
     /// A discarded `inner!` whose callee returns a real carrier, in statement position.
@@ -35,7 +35,7 @@ impl LowerCtx {
     /// for the void `main` (`match inner { err(e) => <die>, ok(_) => () }`); anywhere
     /// else it is refused.
     fn lower_discarded_unwrap(&mut self, inner: &IrExpr) -> Result<(), LowerError> {
-        if let Some(wall) = self.unrewritten_bang_wall("statement") {
+        if let Some(wall) = self.unrewritten_bang_wall("statement", inner) {
             return Err(wall);
         }
         let unit = mk_at(inner, IrExprKind::Block { stmts: Vec::new(), expr: None }, Ty::Unit);
@@ -43,8 +43,9 @@ impl LowerCtx {
         let mut next_var = crate::lower::desugar_var_seed();
         match build_unwrap_match(inner.clone(), ok, unit.clone(), &unit, &mut next_var, true) {
             Some(dies) => self.lower_stmt_expr(&dies),
-            None => Err(LowerError::Unsupported(
-                "a discarded `!` whose err has no text form cannot end the process with its message".into(),
+            None => Err(LowerError::at(
+                inner.span,
+                "a discarded `!` whose err has no text form cannot end the process with its message",
             )),
         }
     }

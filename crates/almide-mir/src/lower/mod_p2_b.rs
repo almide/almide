@@ -415,7 +415,7 @@ pub(crate) struct LowerCtx {
     /// Set when [`Self::unrewritten_bang_wall`] refused a `!` in this fn. The refusal is
     /// raised inside attempts that roll back and try another route, and no later route
     /// gives that `!` its propagation, so the fn is refused once its body is lowered.
-    bang_refused: Option<&'static str>,
+    bang_refused: Option<(&'static str, Option<almide_ir::Span>)>,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL
