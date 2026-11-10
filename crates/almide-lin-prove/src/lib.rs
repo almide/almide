@@ -18,6 +18,7 @@
 //! here is believed: the proven checker and almide-anchor-check judge every
 //! certificate it writes.
 
+mod cand;
 pub mod lp;
 mod sim;
 
