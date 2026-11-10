@@ -53,6 +53,12 @@ fn successors(func: &MirFunction) -> Option<Vec<Vec<usize>>> {
                 }
             }
             Op::Return { .. } => succ[i].clear(),
+            // A process-ending prim never returns (the render's call there is
+            // `-> !`): no op after it runs on this path. A fallible step in
+            // a loop (`acc = step(acc)!`) otherwise kept `acc` live through
+            // its failing arm into the next round, and the step copied the
+            // whole accumulator per round.
+            op if ends_process(op) => succ[i].clear(),
             _ => {}
         }
     }
@@ -302,10 +308,56 @@ pub(crate) fn last_use_on_every_path(func: &MirFunction, p: ValueId, at: &[usize
         if std::mem::replace(&mut seen[i], true) || at.contains(&i) {
             continue;
         }
+        // A path the process ends on is no exit of the function: nothing
+        // returns from it for `p` to be owed to.
+        if ends_process(&func.ops[i]) {
+            continue;
+        }
         if succ[i].is_empty() {
             return false;
         }
         work.extend(succ[i].iter().copied());
     }
     true
+}
+
+/// A process-ending prim: it never returns.
+fn ends_process(op: &Op) -> bool {
+    matches!(op, Op::Prim { kind: crate::PrimKind::Die | crate::PrimKind::ProcExit, dst: None, .. })
+}
+
+#[cfg(test)]
+mod dying_arm_tests {
+    use super::*;
+    use crate::{CallArg, PrimKind};
+
+    /// `loop { acc = step(copy of acc)!  }`: the failing arm ends the process.
+    fn fallible_fold(failing_arm: Op) -> MirFunction {
+        let v = ValueId;
+        MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::LoopStart,
+                Op::Dup { dst: v(2), src: v(1) },
+                Op::CallFn { dst: Some(v(3)), name: "step".into(), args: vec![CallArg::Handle(v(2))], result: None },
+                Op::IfThen { cond: v(9), dst: None },
+                failing_arm,
+                Op::Else { val: None },
+                Op::Drop { v: v(1) },
+                Op::SetLocal { local: v(1), src: v(3) },
+                Op::EndIf { val: None },
+                Op::LoopEnd,
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_dying_arm_does_not_keep_the_accumulator_live_into_the_next_round() {
+        let dies = fallible_fold(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![ValueId(8)] });
+        assert!(!live_after(&dies, 1, ValueId(1)), "the copy is the accumulator's last read");
+        // An arm that falls through reaches the next round's copy.
+        let falls = fallible_fold(Op::ConstInt { dst: ValueId(8), value: 0 });
+        assert!(live_after(&falls, 1, ValueId(1)));
+    }
 }
