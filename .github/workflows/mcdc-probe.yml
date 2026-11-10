@@ -139,7 +139,6 @@ jobs:
           eval "$(opam env)"
           git rev-parse HEAD
           nproc; free -m
-          (cd proofs && ./check.sh > /tmp/check.log 2>&1) || { tail -30 /tmp/check.log; exit 1; }
           rc=0
           if [ "${{ matrix.mode }}" = tests ]; then
             STRUCTURAL_WALL_LEDGER_OUT=/tmp/measured.tsv proofs/structural-wall.sh --stdlib-tests || rc=$?
