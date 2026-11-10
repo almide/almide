@@ -109,7 +109,11 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
         }
         DTy::List(e) => {
             let value = convert_callback_value(env, e, list_elem(native)?, "__item", into_native)?;
-            format!("({code}).into_iter().map(|__item| {value}).collect::<Vec<_>>()")
+            // The copy is a list as long as its source: it reserves the way
+            // every list this render builds does (C-197's abort), never
+            // through a sized `collect`'s capacity panic.
+            let reserved = crate::render_native_addr::reserved_vec("(__list.len() as i64)");
+            format!("{{ let __list = {code}; let mut __copy = {reserved}; __copy.extend(__list.into_iter().map(|__item| {value})); __copy }}")
         }
         DTy::Opt(e) => format!("({code}).map(|__item| {})",
             convert_callback_value(env, e, opt_payload(native)?, "__item", into_native)?),
