@@ -29,11 +29,18 @@ env:
 
 jobs:
   mutlab:
-    name: A4 kernel probe
+    name: wall ${{ matrix.ref }} ${{ matrix.mode }}
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [a4-on-0700, probe/a4-cand-0700]
+        mode: [fixtures, tests]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
       - uses: ./.github/actions/root-tmpdir
 
       # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
@@ -127,9 +134,20 @@ jobs:
           ocamlopt --version || true
           cargo --version
 
-      - name: kernel probe
+      - name: wall
         run: |
           eval "$(opam env)"
+          git rev-parse HEAD
           nproc; free -m
-          (cd proofs && ./build-checker.sh > /dev/null)
-          python3 scripts/kprobe2.py
+          (cd proofs && ./check.sh > /tmp/check.log 2>&1) || { tail -30 /tmp/check.log; exit 1; }
+          rc=0
+          if [ "${{ matrix.mode }}" = tests ]; then
+            STRUCTURAL_WALL_LEDGER_OUT=/tmp/measured.tsv proofs/structural-wall.sh --stdlib-tests || rc=$?
+            L=proofs/heap-access-ledger-tests.tsv
+          else
+            STRUCTURAL_WALL_LEDGER_OUT=/tmp/measured.tsv proofs/structural-wall.sh || rc=$?
+            L=proofs/heap-access-ledger.tsv
+          fi
+          echo "== wall exit $rc; ledger diff (ledger vs measured) =="
+          grep -v '^#' "$L" | diff - /tmp/measured.tsv | grep '^[<>]' || echo "== ledger identical"
+          exit $rc
