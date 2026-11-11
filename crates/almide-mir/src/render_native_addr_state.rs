@@ -58,6 +58,10 @@ pub(crate) struct AddrState {
     arith: BTreeSet<ValueId>,
     /// Payload reads that render as a borrow into their block.
     borrow_reads: BTreeSet<ValueId>,
+    /// The borrow reads whose place moves under them
+    /// (`render_native_borrow_read::moved_index_reads`): never noted as a
+    /// place a copy may read again.
+    moved_index_reads: BTreeSet<ValueId>,
     /// Heap slot reads of an owned record that move the value out
     /// (`render_native_slots::movable_loads`): nothing reads the slot again.
     moves: BTreeSet<ValueId>,
@@ -213,6 +217,7 @@ impl AddrState {
             scaled_src: BTreeMap::new(),
             arith: BTreeSet::new(),
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
+            moved_index_reads: crate::render_native_borrow_read::moved_index_reads(func),
             moves,
             moves_last,
             moves_first,
