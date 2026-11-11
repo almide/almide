@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 /// The control successors of each op of `func`; `None` when the markers do
 /// not nest.
-fn successors(func: &MirFunction) -> Option<Vec<Vec<usize>>> {
+pub(crate) fn successors(func: &MirFunction) -> Option<Vec<Vec<usize>>> {
     let n = func.ops.len();
     let mut succ: Vec<Vec<usize>> = (0..n).map(|i| if i + 1 < n { vec![i + 1] } else { Vec::new() }).collect();
     // (IfThen index, Else index) and LoopStart indices, open.

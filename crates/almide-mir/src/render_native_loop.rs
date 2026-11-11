@@ -595,6 +595,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 .expect("a field of a payload");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
+            // A by-value move consumed the carrier: no early release names it.
+            if let Some(carrier) = crate::render_native_addr::consumed_carrier(*src, &take) {
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(carrier));
+            }
             line!("let mut {} = {take};", var(*dst));
         }
         // The same move out of a String-Ok Result param (the callee's own,
