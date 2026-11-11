@@ -14,10 +14,7 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
     let (i, bind_var, bind_ty, cond, then_e, else_e) =
         stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
             IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-                IrExprKind::If { cond, then, else_ }
-                    if matches!(&then.kind, IrExprKind::Unwrap { .. })
-                        || matches!(&else_.kind, IrExprKind::Unwrap { .. }) =>
-                {
+                IrExprKind::If { cond, then, else_ } if if_spine_unwrap(then).or(if_spine_unwrap(else_)).is_some() => {
                     Some((i, *var, ty.clone(), (**cond).clone(), (**then).clone(), (**else_).clone()))
                 }
                 _ => None,
@@ -25,10 +22,12 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
             _ => None,
         })?;
     // The `Result[T, E]` type the arms unify to — take it from an unwrap arm's operand.
-    let res_ty = match (&then_e.kind, &else_e.kind) {
-        (IrExprKind::Unwrap { expr }, _) | (_, IrExprKind::Unwrap { expr }) => expr.ty.clone(),
-        _ => return None,
-    };
+    let res_ty = if_spine_unwrap(&then_e).or(if_spine_unwrap(&else_e))?.clone();
+    // An `else if` chain lifts whole only where every `!` on it reads the one
+    // Result type the lifted branch takes.
+    if !spine_unwraps_read(&then_e, &res_ty, 0) || !spine_unwraps_read(&else_e, &res_ty, 0) {
+        return None;
+    }
     let mk = |kind: IrExprKind, ty: Ty| IrExpr {
         kind,
         ty,
@@ -36,12 +35,7 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
         def_id: body.def_id,
     };
     // strip `!` from an unwrap arm (already Result[T,E]); wrap a plain arm in `ok(..)`.
-    let conv = |arm: IrExpr| -> IrExpr {
-        match arm.kind {
-            IrExprKind::Unwrap { expr } => *expr,
-            _ => mk(IrExprKind::ResultOk { expr: Box::new(arm) }, res_ty.clone()),
-        }
-    };
+    let conv = |arm: IrExpr| lift_spine_arm(arm, &res_ty, &mk);
     let new_if = mk(
         IrExprKind::If {
             cond: Box::new(cond),
@@ -78,6 +72,46 @@ pub fn desugar_if_arm_unwrap(body: &IrExpr) -> Option<IrExpr> {
     new_stmts.push(v_bind);
     new_stmts.extend_from_slice(&stmts[i + 1..]);
     Some(mk(IrExprKind::Block { stmts: new_stmts, expr: tail.clone() }, body.ty.clone()))
+}
+
+/// The Result type the first `!` on `e`'s `if` spine reads: `e` itself, or an
+/// arm of the `if` / `else if` chain `e` is.
+fn if_spine_unwrap(e: &IrExpr) -> Option<&Ty> {
+    match &e.kind {
+        IrExprKind::Unwrap { expr } => Some(&expr.ty),
+        IrExprKind::If { then, else_, .. } => if_spine_unwrap(then).or_else(|| if_spine_unwrap(else_)),
+        _ => None,
+    }
+}
+
+/// Every `!` below the first level of `e`'s `if` spine reads `res_ty` (the
+/// first level is the two-arm shape, lifted as it always was).
+fn spine_unwraps_read(e: &IrExpr, res_ty: &Ty, depth: usize) -> bool {
+    match &e.kind {
+        IrExprKind::Unwrap { expr } => depth == 0 || expr.ty == *res_ty,
+        IrExprKind::If { then, else_, .. } if if_spine_unwrap(e).is_some() => {
+            spine_unwraps_read(then, res_ty, depth + 1) && spine_unwraps_read(else_, res_ty, depth + 1)
+        }
+        _ => true,
+    }
+}
+
+/// An arm of the lifted branch as a `res_ty` value: a `!` gives its operand, an
+/// `if` with a `!` on its spine lifts arm by arm, anything else is `ok(arm)`.
+fn lift_spine_arm(arm: IrExpr, res_ty: &Ty, mk: &impl Fn(IrExprKind, Ty) -> IrExpr) -> IrExpr {
+    let nested = matches!(&arm.kind, IrExprKind::If { .. }) && if_spine_unwrap(&arm).is_some();
+    match arm.kind {
+        IrExprKind::Unwrap { expr } => *expr,
+        IrExprKind::If { cond, then, else_ } if nested => mk(
+            IrExprKind::If {
+                cond,
+                then: Box::new(lift_spine_arm(*then, res_ty, mk)),
+                else_: Box::new(lift_spine_arm(*else_, res_ty, mk)),
+            },
+            res_ty.clone(),
+        ),
+        _ => mk(IrExprKind::ResultOk { expr: Box::new(arm) }, res_ty.clone()),
+    }
 }
 
 /// `let (a, b) = if c then { let h = f(x)!; (h, q) } else (d, p)` — a
