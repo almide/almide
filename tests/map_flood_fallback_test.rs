@@ -163,13 +163,15 @@ fn colliding_int_keys_build_a_wasm_map_in_near_linear_time() {
     check_flood(&run_flood(&keys, true, "wasm"), N as usize, Some(3_000), "wasm Int");
 }
 
+/// The answer of the hash for a final state: the two halves folded,
+/// multiplied once more, the high word taken.
 fn fold(h: u64) -> u32 {
-    ((h >> 32) ^ h) as u32
+    (((h >> 32) ^ h).wrapping_mul(STR_MUL) >> 32) as u32
 }
 
 /// `$mapidx_hash_str`: the state starts as the byte length; each eight
 /// payload bytes (little-endian), then the 1..=8 bytes left, are XORed in
-/// and the state multiplied by `STR_MUL`; the two halves are folded once.
+/// and the state multiplied by `STR_MUL`; `fold` answers for the state.
 fn str_hash_wasm(s: &[u8]) -> u32 {
     let word = |b: &[u8]| b.iter().rev().fold(0u64, |w, &c| (w << 8) | u64::from(c));
     let mut h = s.len() as u64;
@@ -184,8 +186,8 @@ fn str_hash_wasm(s: &[u8]) -> u32 {
     fold(h)
 }
 
-/// `n` distinct 16-byte keys whose hash state is 0 before the fold, so
-/// every one hashes to 0 and starts at slot 0 of a table of any size. The
+/// `n` distinct 16-byte keys whose final hash state is 0, so every one
+/// hashes to 0 and starts at slot 0 of a table of any size. The
 /// second word of a key is the state its first word leaves (`h1`), so the
 /// XOR clears it; the first word is `h1` run backwards through the multiply.
 /// A candidate is kept when all sixteen bytes are ASCII a line of text can

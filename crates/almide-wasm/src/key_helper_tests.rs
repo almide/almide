@@ -49,7 +49,63 @@ fn reference_hash(bytes: &[u8]) -> u32 {
         w[..rest.len()].copy_from_slice(rest);
         h = (h ^ u64::from_le_bytes(w)).wrapping_mul(k);
     }
-    ((h >> 32) ^ h) as u32
+    ((((h >> 32) ^ h).wrapping_mul(k)) >> 32) as u32
+}
+
+/// The index build over `keys` as the emitter does it (capacity the power of
+/// two >= 2 * entries, at least 32; linear probing from `hash & mask`):
+/// the mean and the longest walk of an insert.
+fn probe_walks(keys: &[Vec<u8>]) -> (f64, u32) {
+    let cap = (2 * keys.len()).next_power_of_two().max(32);
+    let mut taken = vec![false; cap];
+    let (mut total, mut longest) = (0u64, 0u32);
+    for k in keys {
+        let mut slot = reference_hash(k) as usize & (cap - 1);
+        let mut steps = 0u32;
+        while taken[slot] {
+            slot = (slot + 1) & (cap - 1);
+            steps += 1;
+        }
+        taken[slot] = true;
+        total += u64::from(steps);
+        longest = longest.max(steps);
+    }
+    (total as f64 / keys.len() as f64, longest)
+}
+
+/// Ordinary key families spread: no insert of 20 000 such keys walks near
+/// the flood bound, and the mean walk is that of a uniform hash at load
+/// 1/2 or under (about 0.25). The families are the ones a fold of the two
+/// state halves alone sent to a few hundred starting slots (a counter in
+/// the upper bytes of an eight-byte word: mean walk 60 to 100, longest 300
+/// to 600, every one past the bound), next to ones it spread.
+#[test]
+fn ordinary_key_families_stay_far_from_the_flood_bound() {
+    const N: usize = 20_000;
+    let family = |f: &dyn Fn(usize) -> String| -> Vec<Vec<u8>> { (0..N).map(|i| f(i).into_bytes()).collect() };
+    let families: [(&str, Vec<Vec<u8>>); 12] = [
+        ("key_NNNN", family(&|i| format!("key_{i:04}"))),
+        ("userNNNN", family(&|i| format!("user{i:04}"))),
+        ("8 digits", family(&|i| format!("{i:08}"))),
+        ("16 digits", family(&|i| format!("{i:016}"))),
+        ("item-NNNNNN", family(&|i| format!("item-{i:06}"))),
+        ("user:N:name", family(&|i| format!("user:{i}:name"))),
+        ("16-byte prefix + 8 digits", family(&|i| format!("0123456789abcdef{i:08}"))),
+        ("8 digits + 8-byte suffix", family(&|i| format!("{i:08}ABCDEFGH"))),
+        ("digits in bytes 4..8 of 16", family(&|i| format!("xxxx{i:04}yyyyyyyy"))),
+        ("kN", family(&|i| format!("k{i}"))),
+        ("decimal", family(&|i| i.to_string())),
+        ("path", family(&|i| format!("/a/b/file{i:05}.txt"))),
+    ];
+    for (name, keys) in &families {
+        let (mean, longest) = probe_walks(keys);
+        assert!(
+            mean < 0.5 && longest < crate::map_ordered::FLOOD_PROBES as u32 / 4,
+            "{name}: {} keys walk {mean:.2} slots on average, {longest} at most (the flood bound is {})",
+            keys.len(),
+            crate::map_ordered::FLOOD_PROBES
+        );
+    }
 }
 
 #[test]
