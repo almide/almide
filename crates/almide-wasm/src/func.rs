@@ -330,6 +330,7 @@ pub(crate) fn lower_fn(
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             if_sites: Default::default(),
+            room_proven: None,
             display_src: None,
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(), arm_rests: Default::default(),
