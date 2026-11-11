@@ -30,7 +30,8 @@ fn print(args: &[&str]) -> (bool, String, String) {
 
 #[test]
 fn the_flags_follow_the_target_and_the_cpu_flag() {
-    let llvm = "-C llvm-args=-force-ordered-reductions=false";
+    // The release option (#3604), then the option of every level (#4674).
+    let llvm = "-C llvm-args=-force-ordered-reductions=false -C llvm-args=-unroll-add-parallel-reductions=false";
     let (ok, out, err) = print(&["--target", "x86_64-unknown-linux-gnu"]);
     assert!(ok, "{err}");
     assert_eq!(out, format!("-C target-cpu=x86-64-v3 {llvm}"));
