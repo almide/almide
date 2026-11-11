@@ -6,8 +6,9 @@
 //! conversion. `SHAPES` holds the else as an `err`, as a plain value and as
 //! another self call, a guard after a bind and two guards in a row, at a
 //! depth the loop must carry (8 000 and 16 000 calls). `PARSER` is the shape
-//! the refusal came from: propagating calls before and after the guard, and a
-//! bare `err` else.
+//! the refusal came from: an effect fn, whose self-call tail reads as its Ok
+//! side, with propagating calls before and after the guard and a bare `err`
+//! else.
 use std::process::Command;
 
 const SHAPES: &str = r##"fn peek(t: String, p: Int) -> String = string.slice(t, p, p + 1)
@@ -71,7 +72,7 @@ fn key(t: String, p: Int) -> Result[(List[String], Int), String] =
   if peek(t, p) == "k" then ok((["k" + int.to_string(p)], p + 1)) else err("no key at " + int.to_string(p))
 fn val(t: String, p: Int) -> Result[(Int, Int), String] =
   if peek(t, p) == "v" then ok((p * 10, p + 1)) else err("no value at " + int.to_string(p))
-fn doc(t: String, p: Int, root: List[String], tbl: List[String], aot: Bool) -> Result[List[String], String] = {
+effect fn doc(t: String, p: Int, root: List[String], tbl: List[String], aot: Bool) -> Result[List[String], String] = {
   if p >= string.len(t) then ok(root)
   else {
     let c = peek(t, p)
