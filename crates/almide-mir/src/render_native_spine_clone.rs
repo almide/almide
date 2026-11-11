@@ -66,3 +66,7 @@ pub(crate) fn clone_impl(name: &str, cases: &[Case]) -> Option<String> {
         "impl Clone for {name} {{\n    fn clone(&self) -> Self {{\n        let mut root = Self::C{hole};\n        let mut src = self;\n        let mut dst = &mut root;\n        loop {{\n            match src {{\n{arms}            }}\n        }}\n        root\n    }}\n}}\n"
     ))
 }
+
+#[cfg(test)]
+#[path = "render_native_spine_clone_test.rs"]
+mod tests;
