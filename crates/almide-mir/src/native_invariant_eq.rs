@@ -55,7 +55,9 @@ impl Loops<'_> {
     /// The memo binds of the loop `e`, its sites rewritten to read them.
     fn remember(&mut self, e: &mut IrExpr) -> Vec<IrStmt> {
         if !matches!(e.kind, IrExprKind::ForIn { .. } | IrExprKind::While { .. }) { return Vec::new(); }
-        let mut sites = Sites { vars: self.vars, inside: bound_vars(e), memos: Vec::new() };
+        let mut inside = Written(bound_vars(e));
+        inside.visit_expr_mut(e);
+        let mut sites = Sites { vars: self.vars, inside: inside.0, memos: Vec::new() };
         sites.visit_expr_mut(e);
         let unset = || node(IrExprKind::LitBool { value: false }, Ty::Bool);
         let bind = |var| IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Var, ty: Ty::Bool, value: unset() }, span: None };
@@ -76,12 +78,36 @@ impl IrMutVisitor for Loops<'_> {
     }
 }
 
+/// Every variable a statement of the walked loop writes, added to the ones
+/// it binds: a `let` is written by nothing, and a variable some rewrite made
+/// a slot of is not taken for one.
+struct Written(HashSet<VarId>);
+
+impl IrMutVisitor for Written {
+    fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+        match &s.kind {
+            IrStmtKind::Assign { var: v, .. }
+            | IrStmtKind::IndexAssign { target: v, .. }
+            | IrStmtKind::MapInsert { target: v, .. }
+            | IrStmtKind::FieldAssign { target: v, .. }
+            | IrStmtKind::ListSwap { target: v, .. }
+            | IrStmtKind::ListReverse { target: v, .. }
+            | IrStmtKind::ListRotateLeft { target: v, .. }
+            | IrStmtKind::ListCopySlice { dst: v, .. } => {
+                self.0.insert(*v);
+            }
+            _ => {}
+        }
+        almide_ir::visit_mut::walk_stmt_mut(self, s);
+    }
+}
+
 /// A place read through fields only: the variable and the path from it.
 type Place = (VarId, Vec<String>);
 
 struct Memo { negated: bool, left: Place, right: Place, done: VarId, answer: VarId }
 
-/// The sites of one loop. `inside`: every variable the loop binds.
+/// The sites of one loop. `inside`: every variable the loop binds or writes.
 struct Sites<'a> { vars: &'a mut VarTable, inside: HashSet<VarId>, memos: Vec<Memo> }
 
 impl Sites<'_> {
