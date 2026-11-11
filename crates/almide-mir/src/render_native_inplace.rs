@@ -55,6 +55,8 @@ type Site = (Kind, ValueId, ValueId, usize);
 thread_local! {
     /// The candidate sites of the function being rendered, by the call's op index.
     static SITES: std::cell::RefCell<BTreeMap<usize, Site>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    /// The second argument of each candidate call, where it is a handle.
+    static KEYS: std::cell::RefCell<BTreeMap<usize, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
     /// The rebinds whose call was rendered in the slot: they render nothing.
     static DONE: std::cell::RefCell<BTreeSet<usize>> = const { std::cell::RefCell::new(BTreeSet::new()) };
 }
@@ -62,6 +64,14 @@ thread_local! {
 /// Find the candidate sites of `func`.
 pub(crate) fn begin(func: &MirFunction) {
     let sites = if crate::render_native_move::drill_no_moves() { BTreeMap::new() } else { sites(func) };
+    let key = |i: &usize| match &func.ops[*i] {
+        Op::CallFn { args, .. } => match args.get(1) {
+            Some(CallArg::Handle(k)) => Some((*i, *k)),
+            _ => None,
+        },
+        _ => None,
+    };
+    KEYS.with(|k| *k.borrow_mut() = sites.keys().filter_map(key).collect());
     SITES.with(|s| *s.borrow_mut() = sites);
     DONE.with(|d| d.borrow_mut().clear());
 }
@@ -123,6 +133,24 @@ fn names(text: &str, name: &str) -> bool {
     })
 }
 
+/// The shared-key form of an edited site: where the key argument is a
+/// borrowed read of a string place made owned for the call — the place's
+/// handle shared (`place.clone()`, `native_hof_owned::shared_place_arg`) or
+/// the read's bytes copied (`AlmideString::from(read)`) — and the in-place
+/// twin has a twin taking its key by reference, that twin, its items, and
+/// the arguments with the place handed as `&place`. The handle is then
+/// shared only by an entry the call adds, and nothing is copied for a key
+/// that is found.
+fn shared_key(i: usize, kind: Kind, twin: &str, rest: &str) -> Option<(String, Vec<&'static str>, String)> {
+    if kind != Kind::Edited { return None; }
+    let key = KEYS.with(|k| k.borrow().get(&i).copied())?;
+    let place = crate::render_native_addr::str_field_of(key)?;
+    let owned = [format!("{place}.clone()"), format!("AlmideString::from({})", var(key))];
+    let after = owned.iter().find_map(|o| rest.strip_prefix(o.as_str())).filter(|a| a.is_empty() || a.starts_with(", "))?;
+    let (keyed, items) = crate::native_floor::shared_key_twin(twin)?;
+    Some((keyed, items, format!("&{place}{after}")))
+}
+
 /// Rewrite the text `ops[i]` rendered (`out[start..]`) to its in-slot form
 /// when `i` is a candidate site and the text is the one statement described
 /// in the module doc. The twin's items join `used_shims`.
@@ -152,6 +180,10 @@ pub(crate) fn rewrite(i: usize, tys: &BTreeMap<ValueId, NTy>, out: &mut String, 
     };
     // The slot is the twin's alone for the call.
     let Some((twin, items)) = twin.filter(|_| !names(rest, &slot)) else { return };
+    let (twin, items, rest) = match shared_key(i, kind, &twin, rest) {
+        Some((keyed, items, rest)) => (keyed, items, rest),
+        None => (twin, items, rest.to_string()),
+    };
     let sep = if rest.is_empty() { "" } else { ", " };
     let edited = format!("{}{indent}{twin}(&mut {slot}{sep}{rest});\n", &body[..line_at]);
     out.truncate(start);

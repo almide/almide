@@ -57,6 +57,22 @@ pub(crate) fn in_place_twin(symbol: &str) -> Twin {
     paired.then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
 }
 
+/// The shared-key twin of the in-place twin `twin`: the runtime fn
+/// `<twin>_by_ref`, paired from the signatures — the same params, the second
+/// (the key) by reference, nothing returned. It copies the key only where it
+/// stores it. Returns the twin and its items. `None` when the runtime
+/// carries no such fn.
+pub(crate) fn shared_key_twin(twin: &str) -> Twin {
+    let rt = runtime_index();
+    let (params, ret) = rust_signature(signature_text(rt, twin)?)?;
+    let keyed = format!("{twin}_by_ref");
+    let (keyed_params, keyed_ret) = rust_signature(signature_text(rt, &keyed)?)?;
+    let same = |(at, (a, b)): (usize, (&String, &String))| if at == 1 { squash(b) == format!("&{}", squash(a)) } else { squash(a) == squash(b) };
+    let paired = ret.is_empty() && keyed_ret.is_empty() && params.len() >= 2 && params.len() == keyed_params.len()
+        && params.iter().zip(&keyed_params).enumerate().all(same);
+    paired.then(|| Some((keyed.clone(), closure(&keyed, rt).ok()?)))?
+}
+
 /// The refilling twin of the building runtime body `symbol`: the runtime fn
 /// `<symbol>_into`, paired from the signatures — a `&mut` of the body's
 /// result type, then the body's own params, and nothing returned. It leaves

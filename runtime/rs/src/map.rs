@@ -829,6 +829,24 @@ pub fn almide_rt_map_upsert_mut<K: PartialEq + 'static, V: Clone>(m: &mut Almide
         m.insert(k, init);
     }
 }
+// Shared-key twins of the in-place forms (render-only, #4661): the key
+// arrives by reference and is copied only where a new entry stores it. A
+// counting loop finds its key far more often than it adds one, and handing
+// the key over by value shared and released its handle on every update.
+pub fn almide_rt_map_set_mut_by_ref<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: &K, v: V) {
+    match m.get_mut(k) {
+        Some(slot) => *slot = v,
+        None => m.insert(k.clone(), v),
+    }
+}
+pub fn almide_rt_map_upsert_mut_by_ref<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: &K, init: V, f: impl Fn(V) -> V) {
+    if let Some(v) = m.get_mut(k) {
+        let old = std::mem::replace(v, init);
+        *v = f(old);
+    } else {
+        m.insert(k.clone(), init);
+    }
+}
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in
 // place instead of cloned.
