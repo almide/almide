@@ -49,8 +49,6 @@ fn the_fixture_prints_the_same_on_wasm_and_the_certified_native_render() {
     for line in [
         "add: err big 2 len 2",
         "push_then_check: err big 3 len 4",
-        "push_checked: ok 2 len 2",
-        "push_checked: err big 2 len 2",
         "guarded: err plain len 4",
         "both: err over 2",
         "tally: err 30",
@@ -123,6 +121,53 @@ effect fn main() -> Unit = {
 }
 "#;
     assert_both(source, "ok 2\nlen 2\nok 3\nlen 3\nerr big 2\nlen 3\nerr big 3\nlen 3\n");
+}
+
+/// The raise as the argument of the write, and in a loop body whose earlier
+/// turns wrote: the corpus classifier's lowering refuses these two fns (a
+/// variant match bound to a let), so they are held here and not in the
+/// cross-target fixture.
+#[test]
+fn a_typed_raise_in_the_write_argument_and_in_a_loop_keeps_the_earlier_writes() {
+    let source = format!(
+        r#"{HEAD}
+fn push_checked(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {{
+  list.push(acc, chk(x)!)
+  ok(list.len(acc))
+}}
+
+fn fill(mut acc: List[Int], n: Int) -> Result[Int, Fail] = {{
+  for i in 0..<n {{
+    let v = chk(i)!
+    list.push(acc, v)
+  }}
+  ok(list.len(acc))
+}}
+
+effect fn main() -> Unit = {{
+  var zs: List[Int] = []
+  for k in 0..<4 {{
+    match push_checked(zs, k) {{
+      ok(n) => println("ok " + int.to_string(n)),
+      err(e) => println("err " + show(e)),
+    }}
+    println("len " + int.to_string(list.len(zs)))
+  }}
+  var fs: List[Int] = []
+  for k in 1..<4 {{
+    match fill(fs, k) {{
+      ok(n) => println("ok " + int.to_string(n)),
+      err(e) => println("err " + show(e)),
+    }}
+    println("len " + int.to_string(list.len(fs)))
+  }}
+}}
+"#
+    );
+    assert_both(
+        &source,
+        "ok 1\nlen 1\nok 2\nlen 2\nerr big 2\nlen 2\nerr big 3\nlen 2\nok 1\nlen 1\nok 3\nlen 3\nerr big 2\nlen 5\n",
+    );
 }
 
 #[test]

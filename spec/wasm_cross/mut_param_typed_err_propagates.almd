@@ -40,21 +40,6 @@ fn push_then_check(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
   ok(v + list.len(acc))
 }
 
-// the `x!` as the argument of the write itself
-fn push_checked(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
-  list.push(acc, chk(x)!)
-  ok(list.len(acc))
-}
-
-// the `x!` in a loop body: the writes of the earlier turns stay
-fn fill(mut acc: List[Int], n: Int) -> Result[Int, Fail] = {
-  for i in 0..<n {
-    let v = chk(i)!
-    list.push(acc, v)
-  }
-  ok(list.len(acc))
-}
-
 // a guard's err exit and an err tail
 fn guarded(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
   list.push(acc, x)
@@ -102,16 +87,6 @@ effect fn main() -> Unit = {
   for k in 0..<4 {
     let r: Result[Int, Fail] = push_then_check(ys, k)
     println(report("push_then_check", r, ys))
-  }
-  var zs: List[Int] = []
-  for k in 0..<4 {
-    let r: Result[Int, Fail] = push_checked(zs, k)
-    println(report("push_checked", r, zs))
-  }
-  var fs: List[Int] = []
-  for k in 1..<4 {
-    let r: Result[Int, Fail] = fill(fs, k)
-    println(report("fill", r, fs))
   }
   var gs: List[Int] = []
   for k in 0..<4 {
