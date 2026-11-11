@@ -601,6 +601,14 @@ pub(crate) fn set_moving_args(
                 .filter(|v| tys.get(v).is_some_and(|t| moves_at_call(func, at, *v, *t, borrow_arms)))
                 .collect()
         }
+        // The String-Ok carrier built around a string nothing reads again takes
+        // that string (the copy and the release of the original cancel).
+        Op::Prim { kind: crate::PrimKind::ResStrMake, args, .. } => args
+            .first()
+            .copied()
+            .filter(|v| tys.get(v) == Some(&NTy::Str) && last_use(func, at, *v, NTy::Str, borrow_arms))
+            .into_iter()
+            .collect(),
         _ => Default::default(),
     };
     // A rebound arg whose own rebind comes next, with only its release
@@ -649,7 +657,7 @@ pub(crate) fn set_moving_args(
                 let ok = payload_carrier(tys.get(&base).copied())
                     && carrier_dies_after_reading(func, at, base, borrow_arms, true)
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
-                ok.then_some((v, take))
+                ok.then(|| (v, payload_move(func, at, base, tys.get(&base).copied(), take)))
             })
             .collect(),
         _ => Default::default(),
@@ -663,6 +671,30 @@ pub(crate) fn set_moving_args(
 /// (a rebind or a return reads it first).
 pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) -> bool {
     !drill_no_moves() && func.params.iter().any(|p| p.value == base) && !crate::mir_liveness::live_after(func, at, base)
+}
+
+/// The expression that moves a payload out of its dying carrier `base` at
+/// `ops[at]`: the noted `take`, or for a String-Ok carrier that moves whole
+/// ([`carrier_moves_whole`]) the binding itself, matched by value.
+pub(crate) fn payload_move(func: &MirFunction, at: usize, base: ValueId, kind: Option<NTy>, take: String) -> String {
+    if kind == Some(NTy::ResStr) && carrier_moves_whole(func, at, base) {
+        format!("match {} {{ Ok(s) | Err(s) => s }}", crate::render_native::var(base))
+    } else {
+        take
+    }
+}
+
+/// The carrier `base` is bound once, in the same loop round as the copy at
+/// `ops[at]`, and neither it nor anything borrowed from it is read on a path
+/// after the copy: the whole binding can move there.
+fn carrier_moves_whole(func: &MirFunction, at: usize, base: ValueId) -> bool {
+    if drill_no_moves() || REBOUND.with(|m| m.borrow().contains(&base)) {
+        return false;
+    }
+    let loops = loop_of(func);
+    let mut defs = (0..func.ops.len()).filter(|d| crate::mir_ops::defined_value(&func.ops[*d]) == Some(base));
+    matches!((defs.next(), defs.next()), (Some(d), None) if d < at && loops[d] == loops[at])
+        && !crate::mir_liveness::live_after(func, at, base)
 }
 
 /// An owned carrier a borrowed payload read can be moved out of when it
