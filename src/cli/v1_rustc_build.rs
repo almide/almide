@@ -66,10 +66,17 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
 /// CPU and LLVM options (fat LTO does not inline across differing target
 /// features) and the split's `--sysroot` (an rlib must be built against the
 /// std it is linked with).
+///
+/// A release runtime is one codegen unit, as the manifest's
+/// `[profile.release]` (`codegen-units = 1`) gives every package of the cargo
+/// build. Without it rustc split the runtime into 16 units joined by a local
+/// ThinLTO pass before the program's fat LTO saw it: `decode 5000000` ran
+/// 330 ms against v0.69.1's 271 ms (GCE c4-standard-8, 2026-11-12), 290 ms
+/// with the one unit and nothing else changed.
 fn runtime_profile_args(rs_code: &str, release: bool) -> Vec<String> {
     let mut args: Vec<String> = vec!["-C".into(), "debug-assertions=off".into()];
     if release {
-        args.extend(["-C".into(), "opt-level=3".into()]);
+        args.extend(["-C".into(), "opt-level=3".into(), "-C".into(), "codegen-units=1".into()]);
         args.extend(super::native_target::release_codegen_rustc_args());
         if let Some(split) = release_split_for(rs_code) {
             args.extend(split.rustc_args().into_iter().take(2)); // the sysroot, not the link arg
