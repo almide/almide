@@ -79,7 +79,13 @@ impl Fuse<'_> {
         if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
             return self.sums.contains(name).then_some(("sum", args.as_slice()));
         }
-        list_call(e).filter(|(func, _)| matches!(*func, "fold" | "len"))
+        // Each reducer is lowered by its own arm of `rewrite` and `reduction`
+        // (its own start value and step): chosen one by one, as those arms are.
+        match list_call(e)? {
+            ("fold", args) => Some(("fold", args)),
+            ("len", args) => Some(("len", args)),
+            _ => None,
+        }
     }
 
     fn rewrite(&mut self, e: &IrExpr) -> Option<IrExpr> {
