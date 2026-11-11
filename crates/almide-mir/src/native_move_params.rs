@@ -368,7 +368,10 @@ fn own_params(
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    (crate::verify_ownership(&f).is_ok() && !newly_poisoned(func, &f)).then_some(f)
+    if crate::verify_ownership(&f).is_err() { return None; }
+    // Consumed in an arm of an arm: the same body as sibling early returns.
+    if newly_poisoned(func, &f) { return own_unnested(func, takes, hands, owned); }
+    Some(f)
 }
 
 /// The rewrite leaves a certificate the kernel-proven checker cannot accept

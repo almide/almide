@@ -293,3 +293,18 @@ fn branch_close(func: &MirFunction, depth: &[i32], end: usize, k: usize, at_top:
         .find(|&j| depth[j] == 0 && !matches!(func.ops[j], Op::Else { .. }))
         .filter(|&j| matches!(func.ops[j], Op::EndIf { .. }))
 }
+
+/// The takeover of `func`'s params over its body with the nested tail
+/// branches flattened (`native_unnest_tail`), where the body as lowered would
+/// carry a consuming event in an arm of an arm. The flattened body is judged
+/// before any param moves: it is kept only if it adds no violation and no
+/// poison of its own.
+fn own_unnested(
+    func: &MirFunction,
+    takes: &dyn Fn(usize) -> bool,
+    hands: &dyn Fn(usize) -> bool,
+    owned: &Modes<'_>,
+) -> Option<MirFunction> {
+    let flat = crate::native_unnest_tail::unnest(func).filter(|g| no_new_violations(func, g))?;
+    own_params(&flat, takes, hands, owned)
+}

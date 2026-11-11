@@ -86,6 +86,7 @@ mod native_slot_order;
 mod native_cell_window;
 mod native_map_entries;
 pub mod native_move_params;
+mod native_unnest_tail;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;
