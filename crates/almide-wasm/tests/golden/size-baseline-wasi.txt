@@ -626,7 +626,7 @@
 38964	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2420	spec/wasm_cross/mut_param_spread_reassign.almd
 8528	spec/wasm_cross/mut_param_tail_recursion.almd
-11472	spec/wasm_cross/mut_param_typed_err_propagates.almd
+10063	spec/wasm_cross/mut_param_typed_err_propagates.almd
 3292	spec/wasm_cross/mut_param_writeback_growth.almd
 5181	spec/wasm_cross/mut_scalar_param_reassign.almd
 7025	spec/wasm_cross/mutable_global_bytes_arena.almd
