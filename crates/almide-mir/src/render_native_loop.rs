@@ -543,6 +543,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                         && crate::render_native_addr::reads_of_place(&place)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
+                        // The take below leaves the field's `Default` behind:
+                        // a field with none (a typed Result) is copied instead.
+                        && (crate::render_native_addr::rebound_next(func, i, base)
+                            || crate::render_native_rec::has_default(owned_of_ref(st.tys[src])))
                 }) =>
         {
             let (base, place) = crate::render_native_addr::field_of(*src).expect("a field read");
