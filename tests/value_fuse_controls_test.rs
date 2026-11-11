@@ -602,3 +602,52 @@ fn a_lone_tree_written_once_is_left_to_the_runtime_writer() {
     );
     assert_eq!((seen.twins, seen.stringify_calls), (0, 3));
 }
+
+/// Objects past 64 keys are answered by the reader (its duplicate test moves
+/// to a probe-bounded key table there), a repeat at any position — the 65th
+/// key, the last of 1,500, inside a nested object, an outer key after a big
+/// inner object closes — still refuses so the parser's error stands; 1,024
+/// keys that share a 31-multiplier hash (blocks of "Aa" / "BB") are read.
+/// Answers match the unfused run and the native leg.
+#[test]
+fn objects_past_64_keys_are_read_and_their_repeats_refused() {
+    let seen = check(
+        "wide_objects",
+        r#"import json
+
+fn key(p: String, i: Int) -> String = "\"${p}${i}\""
+
+fn obj(p: String, n: Int, dupat: Int, dupof: Int) -> String =
+  "{" + (0..<n |> list.map((i) => key(p, if i == dupat then dupof else i) + ":" + int.to_string(i)) |> list.join(",")) + "}"
+
+fn outer(inner: String, tail: String) -> String =
+  "{" + (0..<80 |> list.map((i) => key("k", i) + ":" + int.to_string(i)) |> list.join(",")) + ",\"in\":" + inner + tail + "}"
+
+fn read(t: String) -> String = {
+  let d = json.parse(t) ?? value.null()
+  "${value.get_int(d, "k0") ?? -1} ${value.get_int(d, "k70") ?? -1} ${value.get_int(d, "k1499") ?? -1} ${value.get_int(value.get(d, "in") ?? value.null(), "j3") ?? -1}"
+}
+
+fn blocks(m: Int) -> List[String] = if m == 0 then [""] else blocks(m - 1) |> list.flat_map((s) => [s + "Aa", s + "BB"])
+
+fn main() -> Unit = {
+  for t in [
+    obj("k", 64, -1, 0),
+    obj("k", 65, -1, 0),
+    obj("k", 1500, -1, 0),
+    obj("k", 100, 64, 63),
+    obj("k", 100, 99, 3),
+    obj("k", 1500, 1499, 1000),
+    outer(obj("j", 90, -1, 0), ""),
+    outer(obj("j", 90, 89, 5), ""),
+    outer(obj("k", 90, -1, 0), ",\"k81\":1"),
+    outer(obj("j", 90, -1, 0), ",\"k7\":1"),
+    "{" + (blocks(10) |> list.map((k) => "\"${k}\":1") |> list.join(",")) + ",\"k0\":5}",
+  ] {
+    println(read(t))
+  }
+}
+"#,
+    );
+    assert_eq!(seen.readers, 1);
+}
