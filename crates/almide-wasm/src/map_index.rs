@@ -77,7 +77,7 @@
 //! | key class                 | lookup            | why                                    |
 //! |---------------------------|-------------------|----------------------------------------|
 //! | Int                       | indexed           | Fibonacci hash of the i64              |
-//! | String                    | indexed           | FNV-1a over the bytes, `$str_eq` confirm |
+//! | String                    | indexed           | word-wise multiplicative hash, `$str_eq` confirm |
 //! | Bool                      | linear `$scan_w32`| at most 2 entries — never past threshold |
 //! | Float                     | linear `$scan_f64`| native keeps floats linear too (NaN/-0.0) |
 //! | Tuple / Named (deep keys) | linear `$scan_deep`| native fingerprints (i64,i64)/(String,String); the deep lane here stays linear — a cost gap only, recorded in #1219 |
@@ -280,23 +280,43 @@ pub(crate) fn emit_hash_int() -> Function {
     f
 }
 
-/// `$mapidx_hash_str(block) -> i32`: FNV-1a over the payload bytes,
-/// folded once so the low bits carry the whole word.
+/// The odd multiplier of the string hash: the 32-bit Fibonacci constant
+/// (it encodes in half the bytes of the 64-bit one, twice per module).
+pub(crate) const HASH_STR_MUL: u64 = 0x9E37_79B1;
+
+/// `$mapidx_hash_str(block) -> i32`: a multiplicative hash over the payload
+/// taken eight bytes at a time, seeded with the length and folded once so
+/// the low bits carry the whole word (a short key's low product word is its
+/// Fibonacci hash; a long key's high word carries every byte). The last
+/// 1..=8 bytes are read as the eight-byte word ENDING at the payload's end,
+/// shifted so only payload bytes remain: for a payload shorter than eight
+/// bytes that word starts in the block's own `len`/`cap` words (never
+/// before the block, never the rc word, never past the payload), so no
+/// read leaves the block.
 pub(crate) fn emit_hash_str() -> Function {
-    // params: 0=s; locals: 1=h, 2=p, 3=end
-    let (s, h, p, end) = (0u32, 1u32, 2u32, 3u32);
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
-    let mut f = Function::new([(3, ValType::I32)]);
+    // params: 0=s; locals: 1=len (bytes left), 2=p (eight bytes BEFORE the
+    // next unread payload byte), 3=h
+    let (s, len, p, h) = (0u32, 1u32, 2u32, 3u32);
+    let at = |offset: u32| MemArg { offset: u64::from(offset), align: 0, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
-    i.i32_const(0x811C_9DC5_u32 as i32).local_set(h);
-    i.local_get(s).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
-    i.local_get(s).i32_load(len_memarg()).i32_add().local_set(end);
+    i.local_get(s).i32_load(len_memarg()).local_tee(len).i64_extend_i32_u().local_set(h);
+    i.local_get(s).i32_const(almide_layout::PAYLOAD as i32 - 8).i32_add().local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
-    i.local_get(h).local_get(p).i32_load8_u(byte).i32_xor().i32_const(0x0100_0193).i32_mul().local_set(h);
-    i.local_get(p).i32_const(1).i32_add().local_set(p);
+    i.local_get(len).i32_const(8).i32_le_u().br_if(1);
+    i.local_get(h).local_get(p).i64_load(at(8)).i64_xor().i64_const(HASH_STR_MUL as i64).i64_mul().local_set(h);
+    i.local_get(p).i32_const(8).i32_add().local_set(p);
+    i.local_get(len).i32_const(8).i32_sub().local_set(len);
     i.br(0).end().end();
-    i.local_get(h).local_get(h).i32_const(15).i32_shr_u().i32_xor();
+    i.local_get(len).if_(BlockType::Empty);
+    i.local_get(h);
+    // the word ending at the payload's end, minus its 8 - len leading bytes
+    // (a shift count is taken modulo 64: -8 * len is 64 - 8 * len)
+    i.local_get(p).local_get(len).i32_add().i64_load(at(0));
+    i.local_get(len).i32_const(-8).i32_mul().i64_extend_i32_u().i64_shr_u();
+    i.i64_xor().i64_const(HASH_STR_MUL as i64).i64_mul().local_set(h);
+    i.end();
+    i.local_get(h).i64_const(32).i64_shr_u().local_get(h).i64_xor().i32_wrap_i64();
     i.end();
     f
 }
