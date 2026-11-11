@@ -1563,6 +1563,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_STDLIB_COVERAGE` | harness | rewrite the stdlib test-coverage ledger's rows from the measured run |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
+| `ALMIDE_VALUE_FUSE_OFF` | ablation | turn the Value fusion pass off (the directed JSON reader and the direct JSON writer) |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
 | `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |

@@ -24,7 +24,9 @@ pub struct LiveBundled {
 /// The bundled functions the compiler's own lowering calls without any
 /// source spelling them (the derived codec's key listing, field read and
 /// error text, `+` on `Bytes`, the matrix operators, the wasm emitter's
-/// region-export wrapper). A module that is loaded keeps these live.
+/// region-export wrapper, the optimizer's directed JSON reader and array
+/// writer — stamped `@on_demand` by that pass, so a program no rewrite fired
+/// in drops them after mono). A module that is loaded keeps these live.
 /// `tests/compiler_inserted_calls_test.rs` scans the lowering and the wasm
 /// emitter for every literal `module.__name` call they build and refuses one
 /// that neither table lists.
@@ -37,6 +39,8 @@ pub const COMPILER_INSERTED: &[(&str, &str)] = &[
     ("matrix", "__div"),
     ("ffi", "__export_view"),
     ("ffi", "__lend"),
+    ("json", "__ints_at"),
+    ("json", "__array_text"),
 ];
 
 /// The bundled functions a TEST build calls without any source spelling

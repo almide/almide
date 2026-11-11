@@ -254,6 +254,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_STDLIB_COVERAGE", Flag, Harness, "rewrite the stdlib test-coverage ledger's rows from the measured run"),
     sw("ALMIDE_UPDATE_SURFACE", Flag, Harness, "regenerate the exercised-surface golden"),
     sw("ALMIDE_UPDATE_WITNESS_FLOOR", Flag, Harness, "regenerate the certificate witness floor"),
+    sw("ALMIDE_VALUE_FUSE_OFF", Flag, Ablation, "turn the Value fusion pass off (the directed JSON reader and the direct JSON writer)"),
     sw("ALMIDE_VERBOSE", Flag, Dbg, "same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides"),
     sw("ALMIDE_VERIFIED_DEBUG", Flag, Dbg, "name the wasm leg that rendered, and why the other declined (the route oracle)"),
     sw("ALMIDE_VERSION_LINE", Value, Ci, "NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384)"),
