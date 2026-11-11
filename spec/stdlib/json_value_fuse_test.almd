@@ -118,8 +118,15 @@ fn val(seed: Int, depth: Int) -> String = match pick(seed, 5, 13) {
 fn arr_items(seed: Int, depth: Int, i: Int, n: Int, acc: String) -> String =
   if i >= n then acc
   else {
-    let sep = if i == 0 then "" else if pick(seed, 40 + i, 60) == 0 then " " else ","
-    arr_items(seed, depth, i + 1, n, acc + sep + ws(seed, 50 + i) + val(sub(seed, 10 + i), depth) + ws(seed, 60 + i))
+    let sep = if i == 0 then ""
+    else if pick(seed, 40 + i, 60) == 0 then " " else ","
+    arr_items(
+      seed,
+      depth,
+      i + 1,
+      n,
+      acc + sep + ws(seed, 50 + i) + val(sub(seed, 10 + i), depth) + ws(seed, 60 + i),
+    )
   }
 
 fn arr(seed: Int, depth: Int) -> String = {
@@ -142,7 +149,13 @@ fn obj_items(seed: Int, depth: Int, i: Int, n: Int, acc: String) -> String =
   else {
     // a repeated key now and then: the same field seed twice
     let fs = if i > 0 and pick(seed, 70 + i, 12) == 0 then sub(seed, 20) else sub(seed, 20 + i)
-    obj_items(seed, depth, i + 1, n, acc + (if i == 0 then "" else ",") + ws(seed, 80 + i) + field(fs, depth))
+    obj_items(
+      seed,
+      depth,
+      i + 1,
+      n,
+      acc + (if i == 0 then "" else ",") + ws(seed, 80 + i) + field(fs, depth),
+    )
   }
 
 fn obj(seed: Int, depth: Int) -> String = {
@@ -161,7 +174,11 @@ fn meta(seed: Int) -> String = match pick(seed, 18, 12) {
   6 => "{\"score\":{\"score\":3}}",
   7 => "{ \"other\" : " + val(sub(seed, 6), 2) + " , \"score\" :\t" + int.to_string(pick(seed, 19, 1000)) + " }",
   8 => "null",
-  _ => "{\"score\":" + int.to_string(pick(seed, 19, 1000) - 500) + ",\"active\":" + (if pick(seed, 20, 2) == 0 then "true" else "false") + "}",
+  _ => "{\"score\":" + int.to_string(pick(seed, 19, 1000) - 500) + ",\"active\":" + (if pick(
+    seed,
+    20,
+    2,
+  ) == 0 then "true" else "false") + "}",
 }
 
 fn record(seed: Int) -> String = match pick(seed, 21, 10) {
@@ -171,7 +188,10 @@ fn record(seed: Int) -> String = match pick(seed, 21, 10) {
   3 => "{\"a\":{\"b\":{\"c\":" + int.to_string(pick(seed, 22, 99)) + ",\"d\":" + str(seed) + "}},\"score\":" + int.to_string(pick(seed, 23, 99)) + "}",
   4 => "{\"m\\u0065ta\":" + meta(seed) + "}",
   5 => "{\"meta\":" + meta(seed) + ",\"tags\":" + arr(sub(seed, 7), 2) + ",\"meta\":1}",
-  _ => "{" + ws(seed, 24) + "\"id\"" + ws(seed, 25) + ":" + int.to_string(pick(seed, 26, 50000)) + ",\"name\":" + str(seed) + ",\"tags\":[\"t" + int.to_string(pick(seed, 27, 7)) + "\"," + str(sub(seed, 8)) + "]," + ws(seed, 28) + "\"meta\":" + ws(seed, 29) + meta(seed) + ws(seed, 30) + "}",
+  _ => "{" + ws(seed, 24) + "\"id\"" + ws(seed, 25) + ":" + int.to_string(pick(seed, 26, 50000)) + ",\"name\":" + str(seed) + ",\"tags\":[\"t" + int.to_string(pick(seed, 27, 7)) + "\"," + str(sub(seed, 8)) + "]," + ws(
+    seed,
+    28,
+  ) + "\"meta\":" + ws(seed, 29) + meta(seed) + ws(seed, 30) + "}",
 }
 
 fn elems(seed: Int, i: Int, n: Int, acc: String) -> String =
@@ -193,7 +213,10 @@ fn body(seed: Int) -> String = match pick(seed, 34, 24) {
   5 => deep(1001),
   6 => string.repeat("[{\"a\":", 150) + "1" + string.repeat("}]", 150),
   7 => "",
-  _ => ws(seed, 35) + "[" + ws(seed, 36) + elems(seed, 0, pick(seed, 37, 7), "") + "]" + ws(seed, 38),
+  _ => ws(seed, 35) + "[" + ws(seed, 36) + elems(seed, 0, pick(seed, 37, 7), "") + "]" + ws(
+    seed,
+    38,
+  ),
 }
 
 fn doc(seed: Int) -> String = {
@@ -216,7 +239,15 @@ fn leaf_ref(v: Value, keys: List[String], i: Int, d: Int) -> Int =
 
 fn col_ref(xs: List[Value], keys: List[String], d: Int, i: Int, acc: List[Int]) -> List[Int] =
   if i >= list.len(xs) then acc
-  else col_ref(xs, keys, d, i + 1, acc + [leaf_ref(list.get(xs, i) ?? value.null(), keys, 0, d)])
+  else col_ref(
+    xs,
+    keys,
+    d,
+    i + 1,
+    acc + [
+      leaf_ref(list.get(xs, i) ?? value.null(), keys, 0, d)
+    ],
+  )
 
 fn tree(text: String, keys: List[String], d: Int) -> List[Int] = match json.parse(text) {
   ok(v) => match value.as_array(v) {
@@ -234,11 +265,12 @@ fn fused_a(text: String) -> List[Int] = {
   (value.as_array(back) ?? []) |> list.map(score_a)
 }
 
-fn fused_b(text: String) -> List[Int] =
-  (value.as_array(json.parse(text) ?? value.null()) ?? []) |> list.map((r) => value.get_int(r, "score") ?? -1)
+fn fused_b(text: String) -> List[Int] = (value.as_array(json.parse(text) ?? value.null()) ?? []) |> list.map((r) => value.get_int(r, "score") ?? -1)
 
-fn score_c(r: Value) -> Int =
-  value.get_int(value.get(value.get(r, "a") ?? value.null(), "b") ?? value.null(), "c") ?? 7
+fn score_c(r: Value) -> Int = value.get_int(
+  value.get(value.get(r, "a") ?? value.null(), "b") ?? value.null(),
+  "c",
+) ?? 7
 
 fn fused_c(text: String) -> List[Int] = {
   let back = json.parse(text) ?? value.null()
@@ -246,10 +278,11 @@ fn fused_c(text: String) -> List[Int] = {
   col
 }
 
-fn agree(text: String) -> Bool =
-  fused_a(text) == tree(text, ["meta", "score"], 0)
-    and fused_b(text) == tree(text, ["score"], -1)
-    and fused_c(text) == tree(text, ["a", "b", "c"], 7)
+fn agree(text: String) -> Bool = fused_a(text) == tree(text, ["meta", "score"], 0) and fused_b(text) == tree(
+  text,
+  ["score"],
+  -1,
+) and fused_c(text) == tree(text, ["a", "b", "c"], 7)
 
 fn first_bad(i: Int, n: Int) -> String =
   if i >= n then ""
@@ -266,7 +299,16 @@ test "the directed reader reads generated documents as the tree does" {
 
 test "the directed reader on the documents written by hand" {
   let good = "[{\"id\":1,\"meta\":{\"score\":5,\"active\":true}}, {\"meta\":{\"score\":-12}} ,{\"meta\":{}}, 3, \"s\", null, [], {}]"
-  assert_eq(fused_a(good), [5, -12, 0, 0, 0, 0, 0, 0])
+  assert_eq(fused_a(good), [
+    5,
+    -12,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ])
   assert_eq(fused_a("[]"), [])
   assert_eq(fused_a(" [ ] "), [])
   assert_eq(fused_a("[{\"meta\":{\"score\":1.0}}]"), [0])
@@ -280,7 +322,10 @@ test "the directed reader on the documents written by hand" {
   assert_eq(fused_a("{\"meta\":{\"score\":4}}"), [])
   assert_eq(fused_a(""), [])
   assert_eq(fused_b("[{\"score\":3},{\"scor\":3},{\"score\":\"3\"}]"), [3, -1, -1])
-  assert_eq(fused_c("[{\"a\":{\"b\":{\"c\":1}}},{\"a\":{\"b\":2}},{\"a\":[{\"b\":{\"c\":3}}]}]"), [1, 7, 7])
+  assert_eq(
+    fused_c("[{\"a\":{\"b\":{\"c\":1}}},{\"a\":{\"b\":2}},{\"a\":[{\"b\":{\"c\":3}}]}]"),
+    [1, 7, 7],
+  )
 }
 
 // ── the writer ──────────────────────────────────────────────────────────
@@ -306,7 +351,8 @@ fn ratio(i: Int) -> Float = match i % 6 {
 }
 
 fn opaque(i: Int) -> Value =
-  if i % 2 == 0 then value.string(label(i)) else value.array([value.int(i), value.null()])
+  if i % 2 == 0 then value.string(label(i))
+  else value.array([value.int(i), value.null()])
 
 fn rec(i: Int) -> Value = value.object([
   ("id", value.int(i)),
@@ -318,7 +364,7 @@ fn rec(i: Int) -> Value = value.object([
   ("meta", value.object([("score", value.int(i * 37 % 1000)), ("none", value.null()), ("f", value.float(ratio(i)))])),
   ("raw", opaque(i)),
   ("empty", value.object([])),
-  ("list", value.array([])),
+  ("list", value.array([]))
 ])
 
 fn pair(a: Int, b: Int) -> Value = {
@@ -370,7 +416,10 @@ test "a producer that calls producers is written as the runtime writer writes it
   assert_eq(list.len(value.as_array(held) ?? []), 60)
   assert_eq(json.stringify(value.array(list.range(0, 60) |> list.map(wrap))), json.stringify(held))
   let pairs = value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))
-  assert_eq(json.stringify(pairs), written(value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))))
+  assert_eq(
+    json.stringify(pairs),
+    written(value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))),
+  )
 }
 
 fn pair_of(i: Int) -> Value = pair(i * 7 % 5, i)
@@ -381,4 +430,333 @@ test "a written document reads back through the directed reader" {
   let sum = (value.as_array(back) ?? []) |> list.map(score_a) |> list.sum
   assert_eq(sum, tree(text, ["meta", "score"], 0) |> list.sum)
   assert_eq(sum > 0, true)
+}
+
+// ── every leaf kind, several leaves per element, aliases, rows under a key,
+//    a document read as an object, `match` and `!` spellings of the parse ──
+fn show_i(o: Int?) -> String = match o {
+  some(n) => "i${n}",
+  none => "-",
+}
+
+// The bits, so that -0.0, an infinity and every last digit count.
+fn show_f(o: Float?) -> String = match o {
+  some(f) => "f${float.to_bits(f)}",
+  none => "-",
+}
+
+fn show_b(o: Bool?) -> String = match o {
+  some(b) => if b then "T" else "F",
+  none => "-",
+}
+
+fn show_s(o: String?) -> String = match o {
+  some(s) => "s${string.len(s)}<${s}>",
+  none => "-",
+}
+
+// The tree's reading, spelled so that no rewrite applies: the keys are
+// values and every function takes the tree with something else.
+fn at(v: Value, keys: List[String], i: Int) -> Value =
+  if i >= list.len(keys) then v
+  else at(value.get(v, list.get(keys, i) ?? "") ?? value.null(), keys, i + 1)
+
+fn cell_ref(v: Value, keys: List[String], k: String) -> String = {
+  let o = at(v, keys, 0)
+  show_i(value.get_int(o, k)) + show_f(value.get_float(o, k)) + show_b(value.get_bool(o, k)) + show_s(value.get_string(o, k))
+}
+
+fn row_ref(v: Value, sep: String) -> String = cell_ref(v, [], "score") + "|" + cell_ref(
+  v,
+  ["meta"],
+  "score",
+) + "|" + cell_ref(v, ["meta"], "active") + "|" + cell_ref(v, [], "name") + "|" + cell_ref(
+  v,
+  [],
+  "id",
+) + "|" + cell_ref(v, ["a", "b"], "c") + "|" + cell_ref(v, ["a", "b"], "d") + sep
+
+// The same 28 readings as a reader function: four kinds at seven paths,
+// two of the objects on the way held in aliases.
+fn row_fused(x: Value) -> String = {
+  let m = value.get(x, "meta") ?? value.null()
+  let ab = value.get(value.get(x, "a") ?? value.null(), "b") ?? value.null()
+  show_i(value.get_int(x, "score")) + show_f(value.get_float(x, "score")) + show_b(value.get_bool(x, "score")) + show_s(value.get_string(x, "score")) + "|" + show_i(value.get_int(m, "score")) + show_f(value.get_float(m, "score")) + show_b(value.get_bool(m, "score")) + show_s(value.get_string(m, "score")) + "|" + show_i(value.get_int(m, "active")) + show_f(value.get_float(m, "active")) + show_b(value.get_bool(m, "active")) + show_s(value.get_string(m, "active")) + "|" + show_i(value.get_int(x, "name")) + show_f(value.get_float(x, "name")) + show_b(value.get_bool(x, "name")) + show_s(value.get_string(x, "name")) + "|" + show_i(value.get_int(x, "id")) + show_f(value.get_float(x, "id")) + show_b(value.get_bool(x, "id")) + show_s(value.get_string(x, "id")) + "|" + show_i(value.get_int(ab, "c")) + show_f(value.get_float(ab, "c")) + show_b(value.get_bool(ab, "c")) + show_s(value.get_string(ab, "c")) + "|" + show_i(value.get_int(ab, "d")) + show_f(value.get_float(ab, "d")) + show_b(value.get_bool(ab, "d")) + show_s(value.get_string(ab, "d"))
+}
+
+fn rows_ref(text: String) -> List[String] = match json.parse(text) {
+  ok(v) => match value.as_array(v) {
+    ok(xs) => xs |> list.map((e) => row_ref(e, "")),
+    err(_) => [],
+  },
+  err(_) => [],
+}
+
+fn rows_fused(text: String) -> List[String] = {
+  let d = json.parse(text) ?? value.null()
+  (value.as_array(d) ?? []) |> list.map((x) => row_fused(x))
+}
+
+// A fold straight over the rows, the parse spelled as a match.
+fn fold_ref(text: String) -> String = match json.parse(text) {
+  ok(v) => match value.as_array(v) {
+    ok(xs) => xs |> list.fold(
+      "",
+      (acc, e) => acc + cell_ref(e, [], "id") + cell_ref(e, ["meta"], "score") + ";",
+    ),
+    err(_) => "",
+  },
+  err(_) => "",
+}
+
+fn fold_fused(text: String) -> String = {
+  let d = match json.parse(text) {
+    ok(v) => v,
+    err(_) => value.null(),
+  }
+  list.fold(
+    value.as_array(d) ?? [],
+    "",
+    (acc, x) => {
+      let m = value.get(x, "meta") ?? value.null()
+      acc + show_i(value.get_int(x, "id")) + show_f(value.get_float(x, "id")) + show_b(value.get_bool(x, "id")) + show_s(value.get_string(x, "id")) + show_i(value.get_int(m, "score")) + show_f(value.get_float(m, "score")) + show_b(value.get_bool(m, "score")) + show_s(value.get_string(m, "score")) + ";"
+    },
+  )
+}
+
+// A document read as an object: leaves of the root, an object under a key
+// handed to the reader function, the rows under another key counted and
+// filtered without a list of them.
+fn wrapped(seed: Int) -> String = match pick(seed, 41, 6) {
+  0 => record(seed),
+  1 => doc(seed),
+  2 => "{\"data\":" + doc(seed) + ",\"total\":" + num(sub(seed, 51)) + "}",
+  _ => "{\"total\":" + num(sub(seed, 51)) + ",\"owner\":" + record(sub(seed, 50)) + ",\"data\":" + doc(seed) + "}",
+}
+
+fn obj_ref(text: String) -> String = match json.parse(text) {
+  ok(v) => {
+    let rows = match value.as_array(at(v, ["data"], 0)) {
+      ok(xs) => xs,
+      err(_) => [],
+    }
+    let ids = rows |> list.filter_map((e) => value.get_int(at(e, [], 0), list.get(["id"], 0) ?? ""))
+    cell_ref(v, [], "total") + "/" + row_ref(at(v, ["owner"], 0), "") + "/" + cell_ref(
+      v,
+      ["owner", "meta"],
+      "score",
+    ) + "/${ids}"
+  },
+  err(e) => "E",
+}
+
+fn obj_fused(text: String) -> String = {
+  let d = json.parse(text) ?? value.null()
+  let total = show_i(value.get_int(d, "total")) + show_f(value.get_float(d, "total")) + show_b(value.get_bool(d, "total")) + show_s(value.get_string(d, "total"))
+  let owner = value.get(d, "owner") ?? value.null()
+  let om = value.get(owner, "meta") ?? value.null()
+  let deep = show_i(value.get_int(om, "score")) + show_f(value.get_float(om, "score")) + show_b(value.get_bool(om, "score")) + show_s(value.get_string(om, "score"))
+  let ids = (value.get_array(d, "data") ?? []) |> list.filter_map((x) => value.get_int(x, "id"))
+  total + "/" + row_fused(owner) + "/" + deep + "/${ids}"
+}
+
+fn obj_ref_or_e(text: String) -> String = match json.parse(text) {
+  ok(_) => obj_ref(text),
+  err(_) => total_of_null(),
+}
+
+// What obj_fused answers for a text that is no document: every read of null.
+fn total_of_null() -> String = "----/" + row_ref(value.null(), "") + "/----/[]"
+
+// The parse unwrapped with `!`: the error is the parser's, text and all.
+effect fn strict_fused(text: String) -> Result[String, String] = {
+  let d = json.parse(text)!
+  let n = (value.as_array(d) ?? []) |> list.map((x) => value.get_int(x, "score") ?? 0) |> list.sum
+  ok("${n}")
+}
+
+effect fn strict_ref(text: String) -> Result[String, String] = match json.parse(text) {
+  ok(v) => ok("${tree(text, ["score"], 0) |> list.sum}"),
+  err(e) => err(e),
+}
+
+fn shown(r: Result[String, String]) -> String = match r {
+  ok(s) => "ok " + s,
+  err(e) => "err " + e,
+}
+
+fn agree_wide(text: String) -> Bool = rows_fused(text) == rows_ref(text) and fold_fused(text) == fold_ref(text) and obj_fused(text) == obj_ref_or_e(text)
+
+fn first_bad_wide(i: Int, n: Int) -> String =
+  if i >= n then ""
+  else {
+    let a = doc(i * 2654435 + 17)
+    let b = wrapped(i * 40503 + 5)
+    if not agree_wide(a) then "doc ${i}: ${a}"
+    else if not agree_wide(b) then "wrapped ${i}: ${b}"
+    else first_bad_wide(i + 1, n)
+  }
+
+test "every leaf kind at several paths reads generated documents as the tree does" {
+  assert_eq(first_bad_wide(0, 600), "")
+  assert_eq(first_bad_wide(600, 1200), "")
+  assert_eq(first_bad_wide(1200, 1800), "")
+  assert_eq(first_bad_wide(1800, 2400), "")
+}
+
+test "a parse unwrapped with ! keeps the parser's error for every generated document" {
+  for i in list.range(0, 2400) {
+    let a = doc(i * 2654435 + 17)
+    assert_eq(shown(strict_fused(a)), shown(strict_ref(a)))
+  }
+  for i in list.range(0, 54) {
+    let t = "[{\"score\":" + edge_num(i) + "},{\"score\":1}]"
+    assert_eq(shown(strict_fused(t)), shown(strict_ref(t)))
+  }
+}
+
+// ── boundary families: every number and string form on the path, off the
+//    path, as a bare element and as a key ──
+fn edge_num(i: Int) -> String = list.get(
+  [
+    "9223372036854775807",
+    "9223372036854775808",
+    "-9223372036854775808",
+    "-9223372036854775809",
+    "999999999999999999",
+    "1000000000000000000",
+    "9999999999999999999",
+    "10000000000000000000",
+    "99999999999999999999",
+    "-999999999999999999",
+    "-1000000000000000000",
+    "-9999999999999999999",
+    "0",
+    "-0",
+    "00",
+    "01",
+    "-01",
+    "0.0",
+    "-0.0",
+    "1e0",
+    "1E+0",
+    "1e-0",
+    "0e0",
+    "-0e0",
+    "1e",
+    "1e+",
+    "1.e1",
+    "1.5e",
+    "1.0e308",
+    "1.7976931348623157e308",
+    "1e309",
+    "-1e309",
+    "1e-400",
+    "4.9e-324",
+    "123456789012345678901234567890.5",
+    "123456789012345678901234567890",
+    "0.1e1",
+    "0.30000000000000004",
+    "2.5",
+    "100",
+    "1E5",
+    "1e05",
+    "-",
+    "--1",
+    "+1",
+    "0x10",
+    "1_000",
+    "Infinity",
+    "NaN",
+    ".5",
+    "5.",
+    "1 2",
+    "1e1.5"
+  ],
+  i,
+) ?? ""
+
+fn edge_str(i: Int) -> String = list.get(
+  [
+    "",
+    "plain",
+    "é",
+    "日本語",
+    cp(128512),
+    cp(65533),
+    cp(65535),
+    cp(65534),
+    cp(64976),
+    cp(65279),
+    cp(983039),
+    cp(1114111),
+    cp(127),
+    cp(1),
+    cp(31),
+    "\\u0000",
+    "\\u00e9",
+    "\\ud83d\\ude00",
+    "\\ud800",
+    "\\udc00",
+    "\\ud83d\\u0041",
+    "\\ud83dx",
+    "\\uFFFF",
+    "\\ufdd0",
+    "\\uD834\\uDD1E",
+    "\\b\\f\\n\\r\\t\\/\\\\\\\"",
+    "\\x",
+    "\\u12",
+    "\\u12g4",
+    "\\",
+    "a\\u0062c",
+    "tab\\tand " + cp(128512),
+    "é\\n",
+    "q\\\"q"
+  ],
+  i,
+) ?? ""
+
+fn edge_docs(v: String) -> List[String] = [
+  "[{\"score\":" + v + ",\"id\":" + v + ",\"name\":" + v + "}]",
+  "[{\"meta\":{\"score\":" + v + ",\"active\":" + v + "}}]",
+  "[{\"other\":" + v + ",\"score\":5,\"name\":\"n\"}]",
+  "[" + v + ",{\"id\":3}]",
+  "[{\"a\":{\"b\":{\"c\":" + v + ",\"d\":" + v + "}}}," + v + "]",
+  "{\"total\":" + v + ",\"owner\":{\"name\":" + v + ",\"meta\":{\"score\":" + v + "}},\"data\":[{\"id\":" + v + "}]}",
+  "{\"data\":[{\"id\":1}],\"extra\":[" + v + "],\"total\":7}"
+]
+
+fn first_bad_edge(vs: List[String]) -> String = vs |> list.flat_map(edge_docs) |> list.find((t) => not agree_wide(t)) ?? ""
+
+test "numbers at every boundary read as the tree reads them, on and off the path" {
+  assert_eq(first_bad_edge(list.range(0, 54) |> list.map(edge_num)), "")
+}
+
+test "strings in every spelling read as the tree reads them, on and off the path" {
+  assert_eq(first_bad_edge(list.range(0, 35) |> list.map((i) => "\"" + edge_str(i) + "\"")), "")
+}
+
+test "keys in every spelling are found, missed or refused as the tree has them" {
+  let keys = list.range(0, 35) |> list.map((i) => "\"" + edge_str(i) + "\"")
+  let docs = keys |> list.flat_map((k) => [
+    "[{" + k + ":1,\"score\":2,\"id\":3}]",
+    "[{\"score\":2," + k + ":{\"score\":9}," + k + ":1}]",
+    "{" + k + ":{\"meta\":{\"score\":4}},\"total\":1,\"data\":[{" + k + ":5,\"id\":6}]}",
+    "[{\"a\":1,\"\\u0061\":2,\"score\":3}]",
+    "[{\"score\":1,\"sc\\u006fre\":2}]"
+  ])
+  assert_eq(docs |> list.find((t) => not agree_wide(t)) ?? "", "")
+}
+
+test "the wide readers on documents written by hand" {
+  let t = "[{\"id\":7,\"name\":\"a\\u00e9\\n\",\"score\":1.5e1,\"meta\":{\"score\":-3,\"active\":true}},{\"a\":{\"b\":{\"c\":null,\"d\":\"x\"}}}]"
+  assert_eq(rows_fused(t), rows_ref(t))
+  assert_eq(list.len(rows_fused(t)), 2)
+  assert_eq(fold_fused(t), "i7f${float.to_bits(7.0)}--i-3f${float.to_bits(-3.0)}--;--------;")
+  let o = "{\"total\":1234567890123456789,\"owner\":{\"name\":\"" + cp(128512) + "\",\"meta\":{\"score\":true}},\"data\":[{\"id\":1},{\"id\":2.0},3,{\"id\":4}]}"
+  assert_eq(obj_fused(o), obj_ref(o))
+  assert_eq(string.ends_with(obj_fused(o), "/--T-/[1, 4]"), true)
+  assert_eq(shown(strict_fused("[{\"score\":2},{\"score\":40}]")), "ok 42")
+  assert_eq(shown(strict_fused("[{\"score\":2},]")), shown(strict_ref("[{\"score\":2},]")))
+  assert_eq(string.starts_with(shown(strict_fused("[1,]")), "err "), true)
 }
