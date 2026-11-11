@@ -137,7 +137,12 @@ impl LowerCtx {
         value: &IrExpr,
     ) -> Result<bool, LowerError> {
         use crate::PrimKind;
-        if !crate::lower::bang_return_probe() {
+        if !crate::lower::bang_return_probe() && !crate::lower::owned_tco_slots() {
+            return Ok(false);
+        }
+        // Both arms of a linearized branch run: an exit in one would leave the function
+        // on the path that never took it.
+        if self.linearized > 0 {
             return Ok(false);
         }
         let dbg = almide_base::env::flag("ALMIDE_DBG_BANG");

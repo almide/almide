@@ -467,6 +467,14 @@ impl LowerCtx {
                 ) if a.len() == 2 => Some(a[1].clone()),
                 _ => None,
             },
+            decl_ret_carrier: match &body.ty {
+                t @ Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Result
+                    | almide_lang::types::constructor::TypeConstructorId::Option,
+                    _,
+                ) => Some(t.clone()),
+                _ => None,
+            },
             // A channel-less lambda keeps its enclosing fn's reading of a bare `!`.
             bang_dies: self.bang_dies
                 && !matches!(

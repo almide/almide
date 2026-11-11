@@ -330,6 +330,13 @@ impl CarrierCx<'_> {
         self.st.addrs.get(a).copied().and_then(|ad| carrier_of(self.tys.get(&ad.base).copied()).map(|i| (ad, i)))
     }
 
+    /// The side of `base`'s tag the read `d` is on: the innermost open tag test of
+    /// `base`, else a test above whose other arm left the function.
+    fn arm_of(&self, d: ValueId, base: ValueId) -> Option<bool> {
+        self.st.arms.iter().rev().find(|(r, _)| *r == Some(base)).map(|(_, then)| *then)
+            .or_else(|| self.st.exit_proven.get(&d).copied())
+    }
+
     /// The `if` arms open around the current op, by the Result tag each tests.
     fn track_arms(&mut self, op: &Op) {
         match op {
@@ -433,7 +440,7 @@ impl CarrierCx<'_> {
             return self.tag_read(d, &b, ad.base, true);
         }
         if width == 8 && scalar_ok(i) && rec_slot(&ad) == Some(0) {
-            let arm = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
+            let arm = self.arm_of(d, ad.base);
             let read = match arm.or_else(|| self.st.hoisted.get(&d).copied()) {
                 Some(true) if len_tagged(i) => format!("match &{b} {{ Err(v) => *v, Ok(_) => 0 }}"),
                 Some(false) => format!("match &{b} {{ Ok(v) => *v, Err(_) => 0 }}"),
@@ -456,7 +463,7 @@ impl CarrierCx<'_> {
         }
         let b = var(ad.base);
         let read = if let Some(p) = option_payload(i) {
-            let guarded_some = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).is_some_and(|(_, side)| *side);
+            let guarded_some = self.arm_of(d, ad.base) == Some(true);
             let lent = crate::render_native_borrow_read::borrowed_option(ad.base);
             if lent && self.lent_option_read(d, &b, p, guarded_some) {
                 return Some(Ok(true));
@@ -533,7 +540,7 @@ impl CarrierCx<'_> {
     fn result_read(&mut self, d: ValueId, ad: Addr, i: u16, b: &str) -> Option<PayloadRead> {
         let (o, e) = result_payloads(i)?;
         // The arm of the innermost tag test of this Result, if any.
-        let arm = self.st.arms.iter().rev().find(|(r, _)| *r == Some(ad.base)).map(|(_, then)| *then);
+        let arm = self.arm_of(d, ad.base);
         // A floor result held through the runtime's borrowing twin: its Ok
         // side is already a reference (`&AlmideValue`).
         let ok_ref = crate::render_native_borrow_read::borrowed_result(ad.base);

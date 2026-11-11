@@ -569,9 +569,13 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
                 }) =>
         {
-            let (_, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            let (base, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
+            // A String-Ok carrier bound once and read on no path after the copy
+            // gives its string up by a plain move: nothing is written back into
+            // a carrier about to be dropped.
+            let take = crate::render_native_move::payload_move(func, i, base, st.tys.get(&base).copied(), take);
             line!("let mut {} = {take};", var(*dst));
         }
         // The same move out of a String-Ok Result param (the callee's own,

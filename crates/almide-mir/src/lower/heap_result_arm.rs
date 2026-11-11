@@ -136,7 +136,14 @@ impl LowerCtx {
                         arm.ty, expr.ty
                     )
                 });
-                None
+                // The native render's return rule yields the payload itself: its owned
+                // copy moves out as the arm's value, the carrier is released in the arm.
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.lower_unwrap_by_return(arm).ok()??;
+                self.live_heap_handles.retain(|h| *h != obj);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
             }
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
                 self.lower_heap_result_arm(expr, result_ty)

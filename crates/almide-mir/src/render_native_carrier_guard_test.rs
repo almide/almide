@@ -206,3 +206,86 @@ fn combined_tag_guards_prove_only_their_logical_implications() {
         assert!(!hoisted_sides(&f).contains_key(&v(7)), "a rebound carrier invalidates the combined guard");
     }
 }
+
+/// The tag read of Result `v0` into `v4`, as `guarded` builds it.
+fn tag_test() -> Vec<Op> {
+    let v = ValueId;
+    vec![
+        Op::Prim { kind: PrimKind::Handle, dst: Some(v(1)), args: vec![v(0)] },
+        Op::ConstInt { dst: v(2), value: RESULT_TAG_OFFSET },
+        Op::IntBinOp { dst: v(3), op: IntOp::Add, a: v(1), b: v(2) },
+        Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(v(4)), args: vec![v(3)] },
+    ]
+}
+
+/// The payload read of Result `v0` into `v7`.
+fn payload_read() -> Vec<Op> {
+    let v = ValueId;
+    vec![
+        Op::ConstInt { dst: v(5), value: i64::from(BLOCK_HEADER) },
+        Op::IntBinOp { dst: v(6), op: IntOp::Add, a: v(1), b: v(5) },
+        Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(7)), args: vec![v(6)] },
+    ]
+}
+
+fn exits(between: Vec<Op>, arm: Vec<Op>, after: Vec<Op>) -> MirFunction {
+    let v = ValueId;
+    let mut ops = tag_test();
+    ops.push(Op::IfThen { cond: v(4), dst: None });
+    ops.extend(arm);
+    ops.push(Op::EndIf { val: None });
+    ops.extend(between);
+    ops.extend(payload_read());
+    ops.extend(after);
+    MirFunction { ops, ..Default::default() }
+}
+
+#[test]
+fn a_payload_read_below_an_exiting_tag_arm_is_on_the_surviving_side() {
+    let v = ValueId;
+    let ret = || vec![Op::Return { val: Some(v(0)) }];
+    // The Err arm leaves the function: the read below it is on the Ok side.
+    assert_eq!(exit_proven_sides(&exits(vec![], ret(), vec![])).get(&v(7)), Some(&false));
+    // An arm that does not leave proves nothing, and neither does one with an else.
+    assert!(exit_proven_sides(&exits(vec![], vec![], vec![])).is_empty());
+    let with_else = exits(vec![], vec![Op::Return { val: Some(v(0)) }, Op::Else { val: None }], vec![]);
+    assert!(!exit_proven_sides(&with_else).contains_key(&v(7)));
+    // A write through the carrier between the test and the read ends the fact.
+    let written = exits(
+        vec![Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![v(1), v(9)] }],
+        ret(),
+        vec![],
+    );
+    assert!(!exit_proven_sides(&written).contains_key(&v(7)));
+}
+
+#[test]
+fn an_exit_proven_side_ends_with_the_scope_that_held_the_test() {
+    let v = ValueId;
+    let scoped = |open: Op, close: Op, read_inside: bool| {
+        let mut ops = vec![open];
+        ops.extend(tag_test());
+        ops.push(Op::IfThen { cond: v(4), dst: None });
+        ops.push(Op::Return { val: Some(v(0)) });
+        ops.push(Op::EndIf { val: None });
+        if read_inside {
+            ops.extend(payload_read());
+            ops.push(close);
+        } else {
+            ops.push(close);
+            ops.extend(payload_read());
+        }
+        MirFunction { ops, ..Default::default() }
+    };
+    let arm = || (Op::IfThen { cond: v(8), dst: None }, Op::EndIf { val: None });
+    let lp = || (Op::LoopStart, Op::LoopEnd);
+    for (open, close) in [arm(), lp()] {
+        assert_eq!(exit_proven_sides(&scoped(open, close, true)).get(&v(7)), Some(&false));
+    }
+    for (open, close) in [arm(), lp()] {
+        assert!(!exit_proven_sides(&scoped(open, close, false)).contains_key(&v(7)));
+    }
+    // An exit inside a loop nested in the arm is not the arm's own exit.
+    let nested = exits(vec![], vec![Op::LoopStart, Op::Return { val: Some(v(0)) }, Op::LoopEnd], vec![]);
+    assert!(!exit_proven_sides(&nested).contains_key(&v(7)));
+}
