@@ -250,7 +250,7 @@
 11283	spec/wasm_cross/field_and_interp_accumulator.almd
 3019	spec/wasm_cross/filter_map_conditional_arm.almd
 3393	spec/wasm_cross/flat_map_aliased_field.almd
-1183	spec/wasm_cross/flight_pid_control.almd
+1091	spec/wasm_cross/flight_pid_control.almd
 10928	spec/wasm_cross/float32_arithmetic_rounds.almd
 6860	spec/wasm_cross/float32_display_shortest.almd
 4134	spec/wasm_cross/float32_literal_excess_precision.almd
