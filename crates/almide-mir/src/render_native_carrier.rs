@@ -517,6 +517,8 @@ impl CarrierCx<'_> {
                 // does, so the carrier still reads `Some`. The copy was the
                 // whole rest of a chain on every step.
                 (p, format!("match &mut {b} {{ Some(v) => std::mem::take(v), None => {absent} }}"))
+            } else if guarded_some && self.borrowed_option_read(d, &b, p) {
+                return Some(Ok(true));
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }
@@ -559,6 +561,29 @@ impl CarrierCx<'_> {
         }
         self.tys.insert(d, t);
         self.emit(&format!("let mut {dv}: {ty} = match {b} {{ Some(v) => {val}, None => {absent} }};"));
+        true
+    }
+
+    /// The payload read of an Option inside its Some guard whose every use
+    /// only borrows (render_native_borrow_read::borrow_reads): a reference
+    /// into the carrier, as the Result's in-arm read
+    /// ([`Self::borrowed_result_read`]) renders, where the owned read copied
+    /// the whole payload (a `width(o: Bytes?)` match arm copied the buffer on
+    /// every call). `false` when the read needs an owned value or the payload
+    /// kind has no reference form.
+    fn borrowed_option_read(&mut self, d: ValueId, b: &str, p: NTy) -> bool {
+        if !self.st.borrow_reads.contains(&d) {
+            return false;
+        }
+        let (t, ty, val) = match p {
+            NTy::Rec(j) => (NTy::RecRef(j), format!("&{}", struct_name(j)), "v"),
+            NTy::Str => (NTy::StrRef, "&str".to_string(), "&v[..]"),
+            NTy::Vec => (NTy::VecRef, "&[i64]".to_string(), "&v[..]"),
+            NTy::VecStr => (NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]"),
+            _ => return false,
+        };
+        self.tys.insert(d, t);
+        self.emit(&format!("let mut {}: {ty} = match &{b} {{ Some(v) => {val}, None => unreachable!() }};", var(d)));
         true
     }
 
