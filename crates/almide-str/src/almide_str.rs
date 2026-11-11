@@ -464,11 +464,12 @@ impl Drop for AlmideStr {
         if self.rc() == 1 {
             self.free_block();
         } else {
-            // Through a second handle that is never dropped itself: the
-            // out-of-line call then takes that handle's address, not this
-            // one's, so a value holding a string (a `Result`'s err arm) can
-            // stay in registers on the paths that never reach here.
-            std::mem::ManuallyDrop::new(AlmideStr { ptr: self.ptr }).drop_slow();
+            // The block's address by value: the out-of-line call then takes
+            // no handle's address, so a value holding a string (a `Result`'s
+            // err arm) can stay in registers on the paths that never reach
+            // here, and this path builds no second handle to pass (at
+            // opt-level 1 that handle was a stack slot written per drop).
+            Self::drop_slow(self.ptr);
         }
     }
 }
@@ -487,23 +488,27 @@ impl AlmideStr {
         };
     }
 
-    /// A static block, a shared count or a thread-shared block.
+    /// A static block, a shared count or a thread-shared block: one owner
+    /// of the block at `ptr` goes away.
     #[inline(never)]
-    fn drop_slow(&mut self) {
-        let rc = self.rc();
+    fn drop_slow(ptr: NonNull<AlmideStrHeader>) {
+        // A handle for the block's accessors, never dropped itself.
+        let mut this = std::mem::ManuallyDrop::new(AlmideStr { ptr });
+        let this: &mut AlmideStr = &mut this;
+        let rc = this.rc();
         if rc == 0 {
             return;
         }
         if rc & ALMIDE_STR_SHARED != 0 {
-            if self.rc_cell().fetch_sub(1, AtomicOrdering::Release) != ALMIDE_STR_SHARED | 1 {
+            if this.rc_cell().fetch_sub(1, AtomicOrdering::Release) != ALMIDE_STR_SHARED | 1 {
                 return;
             }
             // Every other owner's use of the block happens before the free.
             fence(AtomicOrdering::Acquire);
-            self.free_block();
+            this.free_block();
         } else {
             // rc > 1: another owner keeps the block.
-            self.rc_cell().store(rc - 1, AtomicOrdering::Relaxed);
+            this.rc_cell().store(rc - 1, AtomicOrdering::Relaxed);
         }
     }
 }
