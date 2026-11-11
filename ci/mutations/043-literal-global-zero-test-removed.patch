@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/binop.rs b/crates/almide-wasm/src/binop.rs
+index f494e5916..514889ff8 100644
+--- a/crates/almide-wasm/src/binop.rs
++++ b/crates/almide-wasm/src/binop.rs
+@@ -289,9 +289,8 @@ impl Emitter<'_> {
+                             // always did, after the dividend was evaluated.
+                             self.lower(right, Some(INT))?;
+                             let div0 = self.pool.intern("Error: division by zero");
+-                            let mut i = self.f.instructions();
+-                            i.i64_eqz().if_(BlockType::Empty);
+-                            i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
++                            let _ = div0; // [MUTANT: the zero test of the literal global removed]
++                            self.f.instructions().drop();
+                         }
+                         if nonneg_pow2 {
+                             let mut i = self.f.instructions();
