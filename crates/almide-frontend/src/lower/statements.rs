@@ -268,7 +268,7 @@ fn lower_place_write(
 ///
 /// A comment has no span of its own: it is attached to whatever follows it, so
 /// pointing a diagnostic at the comment would point away from the code.
-fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
+pub(super) fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
     match stmt {
         ast::Stmt::Let { span, .. } | ast::Stmt::Var { span, .. }
         | ast::Stmt::Assign { span, .. } | ast::Stmt::Guard { span, .. }
@@ -293,7 +293,19 @@ fn lower_bind(
     mutability: Mutability,
     span: Option<ast::Span>,
 ) -> IrStmtKind {
-    let mut ir_val = lower_expr(ctx, value);
+    let ir_val = lower_expr(ctx, value);
+    bind_lowered(ctx, name, ty, ir_val, mutability, span)
+}
+
+/// [`lower_bind`] over an already lowered value.
+pub(super) fn bind_lowered(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ty: Option<&ast::TypeExpr>,
+    mut ir_val: IrExpr,
+    mutability: Mutability,
+    span: Option<ast::Span>,
+) -> IrStmtKind {
     // An explicit `let x: T = ...` annotation wins over the structurally
     // inferred type of the value. Otherwise two nominal record types with
     // identical fields (`Dog` and `Cat`, both `{ name: String }`) collide at
