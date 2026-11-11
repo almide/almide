@@ -439,6 +439,46 @@ fn a_fold_step_does_not_copy_its_accumulator() {
     assert!(n < 5000, "the fold allocates {n} blocks over 3600 steps: the accumulator is copied per step");
 }
 
+/// A step whose value is a branch of branches: the accumulator is updated in
+/// place on one inner path, grown on the other, and dies on the outer one.
+/// `spread` nests three deep and reads the accumulator before it gives it up.
+const NESTED_STEP: &str = r#"fn merge(turns: List[(String, List[Int])]) -> List[(String, List[Int])] =
+  list.fold(turns, [], (acc, t) => match list.last(acc) {
+    some(last) => if last.0 == t.0 then list.update(acc, list.len(acc) - 1, (_) => (last.0, last.1 + t.1)) else acc + [t],
+    none => [t],
+  })
+
+fn spread(acc: List[String], t: String) -> List[String] = match list.first(acc) {
+  some(head) => if head == t then acc
+    else if list.len(acc) > 3 then list.update(acc, 0, (v) => v + t)
+    else acc + [t + int.to_string(list.len(acc))],
+  none => [t],
+}
+
+effect fn main() -> Unit = {
+  let ts = list.map(list.range(0, STEPS), (i) => (if (i / 3) % 2 == 0 then "user" + int.to_string(i / 6) else "assistant", [i, 7]))
+  let m = merge(ts)
+  println("${list.len(m)} ${list.fold(m, 0, (a, t) => a + list.len(t.1))}")
+  let words = list.map(list.range(0, 9), (i) => "w${i % 4}")
+  println(list.join(list.fold(words, [], (acc, w) => spread(acc, w)), ","))
+  // The list a fold started from is still its caller's afterwards.
+  let base = spread(spread([], "a"), "b")
+  let more = list.fold(words, base, (acc, w) => spread(acc, w))
+  println("${list.len(base)} ${list.len(more)} ${list.join(base, ",")}")
+}
+"#;
+
+#[test]
+fn a_step_that_is_a_branch_of_branches_takes_its_accumulator_over() {
+    let at = |steps: usize| NESTED_STEP.replace("STEPS", &steps.to_string());
+    prints("nested-step", &at(600), "200 1200\nw0w1w2w3w0,w11,w22,w33\n2 4 a,b1\n");
+    // Copied per step, the accumulator's blocks are allocated again on every
+    // one: twice the steps were four times the blocks. Taken over, a step
+    // allocates what it adds, and twice the steps are twice the blocks.
+    let (small, large) = (net_allocs("nested-step-300", &at(300)), net_allocs("nested-step-600", &at(600)));
+    assert!(2 * large < 5 * small, "{small} blocks over 300 steps, {large} over 600: the accumulator is copied per step");
+}
+
 #[test]
 fn a_cleared_buffer_keeps_its_block_and_prints_the_same_on_both_targets() {
     // A copy taken before the clear keeps what it held; a buffer handed on,

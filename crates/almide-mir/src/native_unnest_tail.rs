@@ -157,3 +157,7 @@ pub(crate) fn unnest(func: &MirFunction) -> Option<MirFunction> {
     }
     crate::mir_wellformed::check_return_terminal(&f).is_ok().then_some(f)
 }
+
+#[cfg(test)]
+#[path = "native_unnest_tail_test.rs"]
+mod tests;
