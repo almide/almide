@@ -79,3 +79,7 @@ pub(crate) fn chain(out: &mut String) {
         out.push('\n');
     }
 }
+
+#[cfg(test)]
+#[path = "native_slot_chain_test.rs"]
+mod tests;
