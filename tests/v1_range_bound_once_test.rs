@@ -240,6 +240,34 @@ fn main() -> Unit = {
 }
 "#;
 
+/// The end writes what the start reads, and the body moves what the end
+/// reads: the start is still read first.
+const START_BEFORE_END: &str = r#"var lo = 1
+
+fn end_and_move(n: Int) -> Int = {
+  lo = lo + 10
+  n
+}
+
+fn main() -> Unit = {
+  var n = 4
+  var c = 0
+  var s = 0
+  for i in lo..<end_and_move(n) {
+    n = n + 5
+    c = c + 1
+    s = s + i
+  }
+  println("${c} ${s} ${lo} ${n}")
+  var m = 3
+  for _i in lo...end_and_move(m + lo) {
+    m = m + 1
+    c = c + 1
+  }
+  println("${c} ${lo} ${m}")
+}
+"#;
+
 #[test]
 fn a_range_reads_its_bounds_once() {
     prints("ranges", RANGES, RANGES_OUT);
@@ -248,4 +276,9 @@ fn a_range_reads_its_bounds_once() {
 #[test]
 fn a_counted_list_range_reads_its_bounds_once() {
     prints("list-ranges", LIST_RANGES, "5 55 28 351 354 14 2 39 48\n");
+}
+
+#[test]
+fn a_start_is_read_before_an_end_that_writes_it() {
+    prints("start-before-end", START_BEFORE_END, "3 6 11 19\n7 21 7\n");
 }
