@@ -15,6 +15,8 @@ pub(crate) struct BangAdmission {
     callee_fam: crate::lower::ResultFamily,
     rebox: bool,
     rebox_repr: Option<crate::Repr>,
+    /// The fresh err is the String-Ok built-in carrier's (native render).
+    rebox_str_ok: bool,
     heap_payload_class: bool,
     adt_payload: bool,
 }
@@ -67,9 +69,14 @@ impl LowerCtx {
         // family (the abort message is the err String @12, family-uniform)
         // and an OPTION callee (none aborts with the manufactured "none",
         // matching the desugar's v0 line byte for byte).
+        // On the native render a declared-`Unit` effect fn still hands its err to a
+        // caller that can match on it: only a fn whose err ends the process anyway
+        // (`bang_dies`) may abort there. Any other one has no channel this rule can
+        // build, and declines.
         let void_fn = fn_fam.is_none()
             && !self.ret_is_result_abi
-            && matches!(self.decl_ret_ty_is_unit, true);
+            && self.decl_ret_ty_is_unit
+            && (!crate::lower::owned_tco_slots() || self.bang_dies);
         // An OPTION callee (`let x = find(k)!` over `-> T?`): the carrier has
         // no err channel — the none path CONSTRUCTS the fn's err("none") (the
         // desugar's build_option_unwrap_match contract) — so it requires a
@@ -100,7 +107,8 @@ impl LowerCtx {
         dbg: bool,
     ) -> Result<BangAdmission, &'static str> {
         use almide_lang::types::constructor::TypeConstructorId;
-        let BangFnShape { fn_fam, void_fn, callee_is_option, opt_fn } = self.bang_fn_shape(expr);
+        let shape = self.bang_fn_shape(expr);
+        let BangFnShape { fn_fam, void_fn, callee_is_option, opt_fn } = shape;
         if fn_fam.is_none() && !void_fn && !opt_fn {
             return Err("fn-family");
         }
@@ -127,7 +135,15 @@ impl LowerCtx {
         // `materialize_result_err_str` — whose Err block is the FAMILY
         // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
         // cap-as-tag readers), so ONE constructor serves both directions.
-        let rebox = !void_fn && !opt_fn && (callee_is_option || callee_fam != fn_fam);
+        let retyped = self.bang_retyped(expr, &shape)?;
+        let rebox = !void_fn && !opt_fn && (callee_is_option || callee_fam != fn_fam || retyped);
+        // A fresh err block is a generated carrier's own constructor or the scalar-Ok
+        // built-in carrier's (`ResErrStr`); the String-Ok built-in carrier is typed by
+        // the window that builds it, so its fresh err is built through that window.
+        let rebox_str_ok = retyped
+            && self.decl_ret_carrier.as_ref().is_some_and(|t| {
+                crate::render_native_rec::scalar_carrier_kind(t) == Some(crate::render_native::NTy::ResStr)
+            });
         let rebox_repr = if rebox {
             match crate::lower::repr_of(&expr.ty) {
                 Ok(r) => Some(r),
@@ -144,9 +160,33 @@ impl LowerCtx {
             callee_fam,
             rebox,
             rebox_repr,
+            rebox_str_ok,
             heap_payload_class,
             adt_payload,
         })
+    }
+
+    /// Whether the callee's carrier is retyped on the way out (the native render types each
+    /// carrier by its declaration), or the gate that declines the pair.
+    fn bang_retyped(&self, expr: &IrExpr, shape: &BangFnShape) -> Result<bool, &'static str> {
+        // The native render types each carrier by its declaration: the callee's carrier is
+        // this fn's return value only when the two declared types are one. Any other pair
+        // takes the rebox (a fresh err of this fn's type around the same err value), which
+        // needs that value to be a heap handle; an Option pair of two types has no such
+        // piece to carry and keeps its wall.
+        let retyped = crate::lower::owned_tco_slots()
+            && !shape.void_fn
+            && self.decl_ret_carrier.as_ref() != Some(&expr.ty);
+        if !retyped {
+            return Ok(false);
+        }
+        if shape.opt_fn {
+            return Err("option-retype");
+        }
+        if !shape.callee_is_option && !self.decl_fn_err.as_ref().is_some_and(is_heap_ty) {
+            return Err("rebox-scalar-err");
+        }
+        Ok(true)
     }
 
     /// Verbatim from `try_lower_bind_unwrap_return`: the ok-payload class
@@ -199,6 +239,9 @@ impl LowerCtx {
                     if a.len() == 1 && !is_heap_ty(&a[0]))
                 || matches!(ty, Ty::Tuple(ts)
                     if ts.iter().all(|f| !is_heap_ty(f) || matches!(f, Ty::String)))
+                // The native render owns each slot by its Rust type, so there a tuple of
+                // any heap kinds the render types is the same bind.
+                || (crate::lower::owned_tco_slots() && matches!(ty, Ty::Tuple(_)) && self.bang_tuple_slots_typed(ty))
             {
                 // A user ADT payload — variant (rich or flat) or record/tuple
                 // (recursive-drop, anonrec, or all-scalar): the SAME classes a
@@ -220,6 +263,40 @@ impl LowerCtx {
             false
         };
         Ok((heap_payload_class, adt_payload))
+    }
+
+    /// Every heap slot of the tuple `ty` is a kind the native render gives a type of its
+    /// own: a String, a variant, a record, a list, a map, an Option, or a tuple of those.
+    fn bang_tuple_slots_typed(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Tuple(ts) => ts.iter().all(|f| !is_heap_ty(f) || self.bang_tuple_slots_typed(f)),
+            Ty::String => true,
+            Ty::Named(n, a) => {
+                a.is_empty()
+                    && (self.variant_layouts.by_type.contains_key(n.as_str()) || self.aggregate_field_tys(ty).is_some())
+            }
+            Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Option, a) => {
+                a.iter().all(|f| !is_heap_ty(f) || self.bang_tuple_slots_typed(f))
+            }
+            _ => false,
+        }
+    }
+
+    /// An `e!` no rewrite gave a continuation, in a value position of the native render:
+    /// the one return rule on a fresh binding, whose payload the position then reads (a
+    /// heap payload stays a tracked local of the enclosing scope). `None` = the rule
+    /// declined and nothing was emitted. Only a spelled `!` takes it here: a synthesized
+    /// `Try` in these positions keeps the refusal it had.
+    pub(crate) fn lower_unwrap_by_return(&mut self, bang: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        if !crate::lower::owned_tco_slots() || !matches!(&bang.kind, IrExprKind::Unwrap { .. }) {
+            return Ok(None);
+        }
+        let tmp = VarId(crate::lower::desugar_var_seed());
+        if !self.try_lower_bind_unwrap_return(tmp, &bang.ty, bang)? {
+            return Ok(None);
+        }
+        Ok(self.value_of.get(&tmp).copied())
     }
 
     /// Verbatim from `try_lower_bind_unwrap_return`: the void fn's abort
@@ -338,7 +415,11 @@ impl LowerCtx {
             }
             let vop = self.drop_op_for(v);
             self.ops.push(vop);
-            let new = self.materialize_result_err_str(e_dup, repr);
+            let new = if adm.rebox_str_ok {
+                self.materialize_result_str(e_dup, repr, true, false)
+            } else {
+                self.materialize_result_err_str(e_dup, repr)
+            };
             self.ops.push(Op::Return { val: Some(new) });
         } else {
             let live: Vec<ValueId> = self.live_heap_handles.clone();
@@ -367,7 +448,13 @@ impl LowerCtx {
         // route.
         if matches!(ty, Ty::Unit) {
             let d = self.fresh_value();
-            self.ops.push(Op::Const { dst: d });
+            // The native render takes no deferred value: there the Unit payload is the
+            // 0 placeholder a Unit call bind uses, which nothing reads.
+            if crate::lower::owned_tco_slots() {
+                self.ops.push(Op::ConstInt { dst: d, value: 0 });
+            } else {
+                self.ops.push(Op::Const { dst: d });
+            }
             self.value_of.insert(var, d);
         } else if heap_payload_class {
             let borrowed = self.load_at_offset(h, 12, PrimKind::LoadHandle);

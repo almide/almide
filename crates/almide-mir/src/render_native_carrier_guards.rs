@@ -108,16 +108,9 @@ pub(super) fn hoisted_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
     for op in &func.ops {
         // Uses first: a read used under a tag test of its own block.
         note_hoisted_uses(op, &reads, &arms, &mut sides);
-        let changed = match op {
-            Op::SetLocal { local, .. } => Some(*local),
-            Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| at.get(a)).map(|(root, _)| *root),
-            _ => None,
-        };
-        if let Some(root) = changed {
+        if let Some(root) = written_root(op, &at) {
             for (read, base) in &reads { if *base == root { sides.insert(*read, None); } }
-            tags.retain(|key, (base, _)| *key != root && *base != root);
-            for (_, (yes, no)) in &mut arms { yes.remove(&root); no.remove(&root); }
-            for (yes, no) in groups.values_mut() { yes.remove(&root); no.remove(&root); }
+            forget_root(root, &mut tags, &mut arms, &mut groups);
         }
         note_hoist_facts(op, &mutable, &mut consts, &mut at, &mut tags, &mut reads, &mut arms, &mut groups);
     }
@@ -188,3 +181,86 @@ fn note_hoist_facts(
         }
 }
 
+
+/// The carrier an op rewrites: a rebound local, or the root of the address a store goes through.
+fn written_root(op: &Op, at: &BTreeMap<ValueId, (ValueId, i64)>) -> Option<ValueId> {
+    match op {
+        Op::SetLocal { local, .. } => Some(*local),
+        Op::Prim { kind: PrimKind::Store { .. }, args, .. } => args.first().and_then(|a| at.get(a)).map(|(root, _)| *root),
+        _ => None,
+    }
+}
+
+/// Drops every tag fact held about the carrier `root`, which an op just rewrote.
+fn forget_root(
+    root: ValueId,
+    tags: &mut BTreeMap<ValueId, (ValueId, bool)>,
+    arms: &mut [GuardArm],
+    groups: &mut BTreeMap<ValueId, GuardSides>,
+) {
+    tags.retain(|key, (base, _)| *key != root && *base != root);
+    for (_, (yes, no)) in arms.iter_mut() { yes.remove(&root); no.remove(&root); }
+    for (yes, no) in groups.values_mut() { yes.remove(&root); no.remove(&root); }
+}
+
+/// The scopes open at an op, outermost first: each one's opening op (`true` = a loop).
+type ScopePath = Vec<(usize, bool)>;
+
+/// A payload read below a tag test whose taken arm leaves the function by an early
+/// `Return` → the side the surviving path is on. The test's own scope must still be
+/// open at the read, and the carrier unchanged since the test. Empty for every
+/// function that holds no `Return`, so a function without one renders as before.
+pub(super) fn exit_proven_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
+    let mut proven = BTreeMap::new();
+    if !func.ops.iter().any(|op| matches!(op, Op::Return { .. })) { return proven; }
+    let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
+    let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
+    let mut tags: BTreeMap<ValueId, (ValueId, bool)> = BTreeMap::new();
+    let mut reads: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut arms: Vec<GuardArm> = Vec::new();
+    let mut groups: BTreeMap<ValueId, GuardSides> = BTreeMap::new();
+    let mutable: std::collections::BTreeSet<_> = func.ops.iter().filter_map(|op|
+        if let Op::SetLocal { local, .. } = op { Some(*local) } else { None }).collect();
+    // The open scopes by opening op (`true` = a loop), the open `if`s (the facts of a
+    // false condition, an else seen, the arm left the function), and the facts held.
+    let mut scopes: ScopePath = Vec::new();
+    let mut open: Vec<(GuardFacts, bool, bool)> = Vec::new();
+    let mut held: Vec<(ScopePath, ValueId, bool)> = Vec::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        if let Some(root) = written_root(op, &at) {
+            forget_root(root, &mut tags, &mut arms, &mut groups);
+            for (no, _, _) in &mut open { no.remove(&root); }
+            held.retain(|(_, r, _)| *r != root);
+        }
+        note_hoist_facts(op, &mutable, &mut consts, &mut at, &mut tags, &mut reads, &mut arms, &mut groups);
+        match op {
+            Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { width: 8 }, dst: Some(d), .. } => {
+                let side = reads.get(d).and_then(|root| held.iter().rev().find(|(_, r, _)| r == root));
+                proven.extend(side.map(|(_, _, s)| (*d, *s)));
+            }
+            Op::IfThen { cond, .. } => {
+                open.push((predicate_facts(cond, &tags, &groups).1, false, false));
+                scopes.push((i, false));
+            }
+            Op::Else { .. } => {
+                if let Some(f) = open.last_mut() { f.1 = true; }
+                if let Some(s) = scopes.last_mut() { s.0 = i; }
+            }
+            Op::Return { .. } => {
+                if let (Some(f), Some((_, false))) = (open.last_mut(), scopes.last()) { f.2 = true; }
+            }
+            Op::EndIf { .. } | Op::LoopEnd => {
+                scopes.pop();
+                held.retain(|(sc, _, _)| scopes.starts_with(sc));
+                // An `if` with no else whose arm left the function: its false side holds below.
+                let left = if matches!(op, Op::EndIf { .. }) { open.pop() } else { None };
+                if let Some((no, false, true)) = left {
+                    held.extend(no.into_iter().map(|(root, side)| (scopes.clone(), root, side)));
+                }
+            }
+            Op::LoopStart => scopes.push((i, true)),
+            _ => {}
+        }
+    }
+    proven
+}

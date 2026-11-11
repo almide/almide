@@ -353,6 +353,7 @@
 3835	spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
 13816	spec/wasm_cross/guard_let_forms.almd
 9718	spec/wasm_cross/guard_let_forms_typed_err.almd
+3539	spec/wasm_cross/guard_let_in_bound_block.almd
 3510	spec/wasm_cross/guard_let_statement.almd
 3011	spec/wasm_cross/guard_only_use_liveness.almd
 2207	spec/wasm_cross/guard_statement.almd
@@ -625,6 +626,7 @@
 38964	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2420	spec/wasm_cross/mut_param_spread_reassign.almd
 8528	spec/wasm_cross/mut_param_tail_recursion.almd
+10063	spec/wasm_cross/mut_param_typed_err_propagates.almd
 3292	spec/wasm_cross/mut_param_writeback_growth.almd
 5181	spec/wasm_cross/mut_scalar_param_reassign.almd
 7025	spec/wasm_cross/mutable_global_bytes_arena.almd

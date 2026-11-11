@@ -91,6 +91,17 @@ fn new_lower_ctx(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _) => None,
             _ => Some(Ty::String),
         },
+        decl_ret_carrier: match &func.ret_ty {
+            t @ Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::Result
+                | almide_lang::types::constructor::TypeConstructorId::Option,
+                _,
+            ) => Some(t.clone()),
+            t if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(func.name.as_str())) => {
+                Some(Ty::result(t.clone(), Ty::String))
+            }
+            _ => None,
+        },
         bang_dies: (func.name.as_str() == "main" && matches!(&func.ret_ty, Ty::Unit))
             || crate::native_test_harness::is_entry(func.name.as_str())
             || crate::native_test_harness::is_abort_site(func.name.as_str()),
