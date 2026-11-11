@@ -23,9 +23,11 @@
 //! runtime carries a refilling twin of the building body
 //! ([`crate::native_floor::refill_twin`]: a `&mut` of the result type ahead
 //! of the body's params, leaving there what the body returns), the site
-//! refills the slot. In the MIR the same three ops, the call not naming `s`.
-//! The slot is then read at the rebind, which the move analysis is told
-//! ([`refills`]): a slot refilled later is never left moved-out.
+//! refills the slot. In the MIR the same three ops, the call not naming `s`
+//! and the release required: it is what says the slot still holds its old
+//! value (handed on earlier, the value has no release left and the slot is
+//! empty). The slot is then read at the rebind, which the move analysis is
+//! told ([`refills`]): a slot refilled later is never left moved-out.
 //!
 //! Either way the rendered text must be the one statement `let mut d: T =
 //! body(..);` whose other arguments do not name `s` (the twin holds `s`
@@ -73,7 +75,10 @@ fn site_at(func: &MirFunction, j: usize) -> Option<(usize, Site)> {
     let mut vs = Vec::new();
     crate::mir_ops::op_values(&func.ops[i], &mut vs);
     let kind = match (vs.iter().filter(|v| *v == s).count(), args.first()) {
-        (0, _) => Kind::Refilled,
+        // The slot's old value is released here, so the slot still holds
+        // it: with no release it was handed on before, and the slot is empty.
+        (0, _) if i + 1 < j => Kind::Refilled,
+        (0, _) => return None,
         (1, Some(CallArg::Handle(first))) if first == s => Kind::Edited,
         _ => return None,
     };
@@ -190,6 +195,9 @@ mod tests {
         assert_eq!(site_at(&second, 1), None);
         let twice = f(vec![call(2, vec![CallArg::Handle(v(1)), CallArg::Handle(v(1))]), rebind.clone()]);
         assert_eq!(site_at(&twice, 1), None);
+        // No release: the slot's value was handed on, there is nothing to refill.
+        let handed_on = f(vec![call(2, vec![CallArg::Imm(0)]), rebind.clone()]);
+        assert_eq!(site_at(&handed_on, 1), None);
         // The result is read again, or another op stands before the rebind.
         let read = f(vec![call(2, vec![CallArg::Imm(0)]), rebind.clone(), Op::Dup { dst: v(4), src: v(2) }]);
         assert_eq!(site_at(&read, 1), None);
