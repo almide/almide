@@ -48,6 +48,9 @@ pub(crate) struct AddrState {
     arms: Vec<(Option<ValueId>, bool)>,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
+    /// Result/Option payload reads below a tag test whose taken arm left the function →
+    /// the side the read is on.
+    exit_proven: BTreeMap<ValueId, bool>,
     /// A map's length read → the map.
     map_lens: BTreeMap<ValueId, ValueId>,
     /// `len + i` over a map's length read → (the map, `i`).
@@ -208,6 +211,7 @@ impl AddrState {
             pending: BTreeMap::new(),
             arms: Vec::new(),
             hoisted: carrier::hoisted_sides(func),
+            exit_proven: carrier::exit_proven_sides(func),
             map_lens: BTreeMap::new(),
             len_plus: BTreeMap::new(),
             scaled_src: BTreeMap::new(),
