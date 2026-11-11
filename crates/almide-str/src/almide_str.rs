@@ -464,7 +464,11 @@ impl Drop for AlmideStr {
         if self.rc() == 1 {
             self.free_block();
         } else {
-            self.drop_slow();
+            // Through a second handle that is never dropped itself: the
+            // out-of-line call then takes that handle's address, not this
+            // one's, so a value holding a string (a `Result`'s err arm) can
+            // stay in registers on the paths that never reach here.
+            std::mem::ManuallyDrop::new(AlmideStr { ptr: self.ptr }).drop_slow();
         }
     }
 }
