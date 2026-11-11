@@ -430,7 +430,7 @@ impl IrVisitor for References {
 /// All user functions remain roots, even unused ones. Only unreached library
 /// definitions/templates are pruned. Every retained body takes the same native
 /// signature, MIR ownership and artifact checks as a user function.
-pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
+pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::intern::Sym>) -> Result<IrProgram, LowerError> {
     if ir.modules.is_empty() { return Ok(ir); }
     let bodies: HashMap<String, HashSet<String>> = ir.modules.iter().map(|m| {
         // These primary bodies were loaded and checked for this native leg.
@@ -440,13 +440,16 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         // A package module's native extern is the same declared import the
         // entry module's is: it links under its module name and lowers to
         // the checked foreign call (`native_foreign`).
-        let user = !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str());
+        // A package module named like a library module is still the
+        // program's own (#4640): its bodies are the ones its calls resolved
+        // to, never the runtime's entry of the same spelling.
+        let user = user_modules.contains(&m.name) || !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str());
         let names = m.functions.iter()
             .filter(|f| super::is_pure_almide_fn(f) || (user && crate::native_foreign::selected(f).is_some()))
             .map(|f| f.name.to_string())
             .filter(|f| {
                 let call = format!("{}.{}", m.name, almide_ir::mono_base_or_self(f));
-                !super::served_natively(&call)
+                user || !super::served_natively(&call)
             })
             .collect();
         (m.name.to_string(), names)
