@@ -169,3 +169,34 @@ fn a_copy_of_a_chain_allocates_one_block_per_level() {
     let (small, large) = (allocs("chain-2000", &shapes(2000)), allocs("chain-4000", &shapes(4000)));
     assert!(large > small && large - small < 2 * small, "{small} blocks at depth 2000, {large} at 4000");
 }
+
+/// A link holds a string and a list beside the rest of the chain; each walk
+/// reads one of them after (or while) the rest is handed on.
+const LINKS: &str = r#"type T = | Nil | Cons(String, List[Int], T)
+
+fn mk(n: Int, acc: T) -> T = if n == 0 then acc else mk(n - 1, Cons("n" + int.to_string(n), [n, n * 3], acc))
+
+fn show(t: T) -> String = match t { Nil => ".", Cons(s, xs, r) => s + int.to_string(list.len(xs)) + show(r) }
+
+fn total(t: T, k: Int) -> Int = match t { Nil => k, Cons(s, xs, r) => total(r, k + string.len(s) + list.len(xs)) }
+
+fn sums(t: T, k: Int) -> Int = match t { Nil => k, Cons(_, xs, r) => sums(r, k + list.fold(xs, 0, (a, x) => a + x)) }
+
+fn names(t: T, acc: List[String]) -> List[String] = match t { Nil => acc, Cons(s, _, r) => names(r, acc + [s]) }
+
+fn rev(t: T, acc: T) -> T = match t { Nil => acc, Cons(s, xs, r) => rev(r, Cons(s, xs, acc)) }
+
+effect fn main() -> Unit = {
+  let a = mk(5, Nil)
+  let b = Cons("h", [], mk(2, Nil))
+  println("${total(a, 0)} ${sums(a, 1)} ${list.join(names(a, []), "")} ${show(rev(a, Nil))} ${show(a)}")
+  println("${total(b, 0)} ${sums(b, 1)} ${list.join(names(b, []), "")} ${show(rev(b, Nil))} ${a == rev(rev(a, Nil), Nil)}")
+}
+"#;
+
+#[test]
+fn a_payload_read_beside_the_one_handed_on_prints_the_same_on_both_targets() {
+    // The list's slice stayed lent while the rest was moved out of the same
+    // block: the Rust compiler refused the render (E0502).
+    prints("links", LINKS, "20 61 n1n2n3n4n5 n52n42n32n22n12. n12n22n32n42n52.\n9 13 hn1n2 n22n12h0. true\n");
+}
