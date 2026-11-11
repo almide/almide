@@ -358,10 +358,15 @@ pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
 /// the whole carrier (`v.take_s3_r0()` takes `&mut self`), which a sibling
 /// payload still lent there forbids: `Link(name, xs, rest) => walk(rest, k +
 /// list.len(xs))` took `rest` while `xs` was a slice of the same block.
+///
+/// A sibling read is lent as long as the binding it made is read, not as long
+/// as the value is live: in a loop the next round reads a NEW binding of it
+/// (`acc = step(acc, i)!` reads the Err side's text in one arm of every
+/// round, and the Ok side moves out in the other).
 pub(crate) fn other_payload_live(func: &MirFunction, at: usize, base: ValueId, take: &str) -> bool {
     let mut others: Vec<ValueId> = PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.0 == base && p.1 != take).map(|(v, _)| *v).collect());
     others.extend(PAYLOAD_VIEWS.with(|m| m.borrow().iter().filter(|(_, b)| **b == base).map(|(v, _)| *v).collect::<Vec<_>>()));
-    others.into_iter().any(|v| crate::mir_liveness::live_after(func, at, v))
+    others.into_iter().any(|v| crate::mir_liveness::bound_read_after(func, at, v))
 }
 
 thread_local! {
