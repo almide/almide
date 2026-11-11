@@ -35,6 +35,74 @@ fn snapshot_loop_iterables(ir: &mut IrProgram) {
     for t in &mut ir.top_lets { visitor.visit_expr_mut(&mut t.value); }
 }
 
+/// `for i in a..<b` reads its bounds once, before the first round (#4662).
+/// The counting loop compares against the bound's own local, so a body that
+/// writes a variable the bound reads would move the bound under the loop:
+/// bind such a bound ahead of the loop. A `let`-bound range read only as a
+/// loop head is carried as its two bounds and counted at the loop, so its
+/// bounds are bound where the `let` stands unless nothing can change them.
+/// Runs again after `native_range_loops` has made counted loops of its own.
+pub(super) fn snapshot_range_bounds(ir: &mut IrProgram) {
+    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarTable};
+    use almide_ir::call_writes::{CallWrites, mut_positions};
+    struct Snapshot<'a, 'b> { table: &'a mut VarTable, writes: &'a CallWrites<'b> }
+    impl Snapshot<'_, '_> {
+        fn bind(&mut self, bound: &mut IrExpr, out: &mut Vec<IrStmt>) {
+            let (ty, span) = (bound.ty.clone(), bound.span);
+            let var = self.table.alloc_fresh("__native_range_bound", ty.clone(), Mutability::Let, span);
+            let value = std::mem::replace(bound, IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None });
+            out.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
+        }
+        /// No later statement can change what `e` evaluates to.
+        fn settled(&self, e: &IrExpr) -> bool {
+            match &e.kind {
+                IrExprKind::LitInt { .. } => true,
+                IrExprKind::Var { id } => self.table.get(*id).mutability == Mutability::Let,
+                _ => false,
+            }
+        }
+    }
+    impl IrMutVisitor for Snapshot<'_, '_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            almide_ir::walk_expr_mut(self, e);
+            if let IrExprKind::Block { stmts, .. } = &mut e.kind {
+                let mut out = Vec::with_capacity(stmts.len());
+                for mut s in std::mem::take(stmts) {
+                    if let IrStmtKind::Bind { value: IrExpr { kind: IrExprKind::Range { start, end, .. }, .. }, .. } = &mut s.kind {
+                        // Start before end, as the range reads them.
+                        let unsettled = !self.settled(end);
+                        if unsettled && !self.settled(start) { self.bind(start, &mut out); }
+                        if unsettled { self.bind(end, &mut out); }
+                    }
+                    out.push(s);
+                }
+                *stmts = out;
+                return;
+            }
+            let IrExprKind::ForIn { iterable, body, .. } = &mut e.kind else { return };
+            let IrExprKind::Range { start, end, .. } = &mut iterable.kind else { return };
+            let probe = IrExpr { kind: IrExprKind::Block { stmts: body.clone(), expr: None },
+                ty: almide_lang::types::Ty::Unit, span: e.span, def_id: None };
+            let written = self.writes.assigned_by(&probe);
+            let moves = |b: &IrExpr| almide_ir::free_vars::free_vars(b, &HashSet::new()).iter().any(|v| written.contains(&v.0));
+            let (start_moves, end_moves) = (moves(start), moves(end));
+            if !start_moves && !end_moves { return; }
+            let mut binds = Vec::new();
+            // A bound bound here is evaluated here: keep start ahead of end.
+            if start_moves || !matches!(start.kind, IrExprKind::LitInt { .. } | IrExprKind::Var { .. }) { self.bind(start, &mut binds); }
+            if end_moves { self.bind(end, &mut binds); }
+            let old = std::mem::take(e);
+            *e = IrExpr { ty: old.ty.clone(), span: old.span, def_id: old.def_id,
+                kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(old)) } };
+        }
+    }
+    let positions = mut_positions(ir);
+    let writes = CallWrites::new(None, &ir.functions, &ir.top_lets, &positions);
+    let mut visitor = Snapshot { table: &mut ir.var_table, writes: &writes };
+    for f in &mut ir.functions { visitor.visit_expr_mut(&mut f.body); }
+    for t in &mut ir.top_lets { visitor.visit_expr_mut(&mut t.value); }
+}
+
 /// Arguments are values evaluated left to right. If a later argument may
 /// change an earlier read, bind the affected prefix before evaluating it.
 /// The same call-write analysis accounts for named callees and closures.

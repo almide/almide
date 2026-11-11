@@ -337,6 +337,7 @@ pub(super) fn snapshot_mut_reads(ir: &mut IrProgram) {
     for t in &mut ir.top_lets { visitor.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| visitor.visit_expr_mut(e));
     snapshot_loop_iterables(ir);
+    snapshot_range_bounds(ir);
     snapshot_call_operands(ir);
 }
 

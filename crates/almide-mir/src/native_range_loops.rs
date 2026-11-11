@@ -7,11 +7,12 @@
 //!
 //! Equivalence. `list.range(a, b)` holds exactly the Ints `a, a + 1, …, b - 1`
 //! in order, none when `b <= a`, and the loop is its only reader. The call
-//! reads its bounds once, before the first iteration. Only bounds no
-//! iteration can change are rewritten — Int literals, immutable bindings and
-//! wrapping `+ - *` over them — so the counted loop needs no promise about
-//! when it reads them; a bound that reads a `var` or calls a function keeps
-//! the list.
+//! reads its bounds once, before the first iteration, and so does the counted
+//! loop: a bound the body can write is bound ahead of it
+//! (`snapshot_range_bounds`, #4662). Bounds that evaluate nothing are
+//! rewritten — Int literals, variables and wrapping `+ - *` over them; a
+//! bound that calls a function keeps the list, since the guard below reads
+//! the bounds more than once.
 //!
 //! A range too long to be a list at all ([`unbuildable`]) is an out-of-memory
 //! abort when built, on every machine. The counted form keeps that abort:
@@ -34,11 +35,10 @@ pub(crate) fn expand(ir: &mut IrProgram) {
 struct Counted<'a> { vars: &'a mut VarTable }
 
 impl Counted<'_> {
-    /// No statement can change what `e` evaluates to.
+    /// Reading `e` again gives the same value until a statement runs.
     fn fixed(&self, e: &IrExpr) -> bool {
         match &e.kind {
-            IrExprKind::LitInt { .. } => true,
-            IrExprKind::Var { id } => self.vars.get(*id).mutability == Mutability::Let,
+            IrExprKind::LitInt { .. } | IrExprKind::Var { .. } => true,
             IrExprKind::BinOp { op: BinOp::AddInt | BinOp::SubInt | BinOp::MulInt, left, right } => self.fixed(left) && self.fixed(right),
             _ => false,
         }
