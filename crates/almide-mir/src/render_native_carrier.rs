@@ -263,7 +263,7 @@ pub(super) fn render_carrier_op(
             }
             None
         }
-        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
+        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::Return { .. } => {
             cx.track_arms(op);
             None
         }
@@ -337,14 +337,28 @@ impl CarrierCx<'_> {
                 let (res, side) = self.st.res_tags.get(cond).copied()
                     .map(|(r, s)| (Some(r), s)).unwrap_or((None, true));
                 self.st.arms.push((res, side));
+                self.st.arms_left.push(None);
             }
             Op::Else { .. } => {
                 if let Some(a) = self.st.arms.last_mut() {
                     a.1 = !a.1;
                 }
             }
+            // The arm that returns early leaves the rest to the other side.
+            Op::Return { .. } => {
+                if let (Some(a), Some(l)) = (self.st.arms.last(), self.st.arms_left.last_mut()) {
+                    *l = Some(a.1);
+                }
+            }
             _ => {
-                self.st.arms.pop();
+                let (arm, left) = (self.st.arms.pop(), self.st.arms_left.pop().flatten());
+                // A top-level tag test one side of which returned: the code
+                // after it runs on the other side only, as inside that arm.
+                if let (Some((Some(res), _)), Some(side), true) = (arm, left, self.st.arms.len() == self.st.arms_kept) {
+                    self.st.arms.push((Some(res), !side));
+                    self.st.arms_left.push(None);
+                    self.st.arms_kept += 1;
+                }
             }
         }
     }

@@ -46,6 +46,10 @@ pub(crate) struct AddrState {
     /// The open `if`s: the Result whose tag each one tests, and whether the
     /// render is in its then-arm (tag 1 = Err).
     arms: Vec<(Option<ValueId>, bool)>,
+    /// Per open `if`, the side whose arm left by an early return, if one did.
+    arms_left: Vec<Option<bool>>,
+    /// The frames at the bottom of `arms` kept after their `if` closed.
+    arms_kept: usize,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
     /// A map's length read → the map.
@@ -211,6 +215,8 @@ impl AddrState {
             res_tags: BTreeMap::new(),
             pending: BTreeMap::new(),
             arms: Vec::new(),
+            arms_left: Vec::new(),
+            arms_kept: 0,
             hoisted: carrier::hoisted_sides(func),
             map_lens: BTreeMap::new(),
             len_plus: BTreeMap::new(),
