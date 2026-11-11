@@ -775,19 +775,8 @@ impl LowerCtx {
         let kind = self.classify_list_elem_drop(elem)?;
         self.speculate_bindings(|ctx| {
             // Snapshot the left value before evaluating a right operand that may
-            // replace the same source slot. A slot the right operand neither reads
-            // nor rebinds is read in place (the append then grows it, with no copy
-            // to free).
-            let mut rebound = Vec::new();
-            crate::lower::collect_heap_reassign_vars_in_expr(right, &mut rebound);
-            let in_place = match &left.kind {
-                IrExprKind::Var { id } if !rebound.contains(id) && !expr_reads_var(right, *id) => {
-                    ctx.value_of.get(id).copied()
-                        .filter(|v| ctx.live_heap_handles.contains(v) && !ctx.param_values.contains(v))
-                }
-                _ => None,
-            };
-            let lhs = match in_place {
+            // replace the same source slot, unless it can be read in place.
+            let lhs = match ctx.concat_left_in_place(left, right) {
                 Some(slot) => slot,
                 None => ctx.lower_owned_binding(left)?,
             };
