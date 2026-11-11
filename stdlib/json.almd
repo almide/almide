@@ -21,53 +21,90 @@ fn stringify_pretty(v: Value) -> String = _
 // ── kernels of the optimizer's Value fusion (almide-optimize value_fuse.rs) ──
 // Internal: called only by code the compiler builds. The pass stamps them
 // on-demand, so only a program where a rewrite fired ships them.
-
 // The text of an array whose elements' texts are `parts` — the array writer
 // behind `json.stringify(value.array(xs |> list.map(f)))` when `f` has a
 // writer twin.
 fn __array_text(parts: List[String]) -> String = "[" + list.join(parts, ",") + "]"
 
 // ── the directed reader ─────────────────────────────────────────────────────
-// `__ints_at(text, path, dflt)`: for a document that is an array, the Int at
-// `path` (object keys, outermost first) under each element, `dflt` where an
-// element has no Int there — what `json.parse` followed by `value.get` /
-// `value.get_int` along the path reads, without building the tree. It
-// answers only for documents it can prove json.parse accepts; for everything
-// else (malformed text, an escaped key, a `\u` escape, a noncharacter
-// candidate, an exponent, an Int past 18 digits, an object past 64 keys,
-// nesting past its stack) it answers none and the caller runs json.parse, so
-// every error text and position is the parser's own.
+// `__spans(b, keys, par, slot, cfg)` reads the document `b` once, without
+// building the tree, and answers where the scalars a reading plan names sit.
+// The plan is a tree of object keys: node 0 is the document's root value,
+// node j > 0 is the value at key `keys[j]` of the object at node `par[j]`,
+// and `slot[j]` is where its scalar is recorded (-1: not read). `cfg` is
+// [row, el, g, k]: `row` is the node whose value, when an array, is read
+// element by element (-1: none), `el` the node standing for one element of
+// it, `g` the count of slots read once per document and `k` the count read
+// per element. The answer holds the g document slots, then k slots per
+// element in order. A slot is 0 where the document has no scalar at that
+// path, else `kind + 16 * start + 2^34 * end` of its token: kind 1 null,
+// 2 true, 3 false, 4 an Int token, 5 a Float token, 6 a string spelled
+// without an escape, 7 a string holding one. The `__leaf_*` readers below
+// turn a slot into what `value.get_int` / `get_float` / `get_bool` /
+// `get_string` answer at that path of the parsed tree.
+//
+// It answers only for documents it can prove json.parse accepts, and none
+// for everything else (malformed text, an escaped key, an object past 64
+// keys, nesting past its stack, a text past 2^30 bytes), so the caller runs
+// json.parse and every error text and position is the parser's own. What is
+// subtle is asked of the routine the parser itself uses, token by token: a
+// string holding `\u` or a byte from 0xEF up (surrogates, noncharacters) is
+// parsed as a document of its own, an Int past 18 digits goes through
+// int.parse, a Float with an exponent or past 18 integer digits through
+// float.parse; a token one of them refuses refuses the document.
+//
 // One loop with an explicit container stack, every piece of state local to
-// it (no heap value crosses a call except as a read-only argument):
-// st[2..kb) holds three words per
-// open container (1 for an object, its path mode, its key-stack base) and
-// st[kb..) the (start, length) of every key of every open object, for the
-// repeated-key check. A path mode m >= 1 marks an object reached through the
-// first m - 1 keys of the path; 0 is off the path.
+// it: st[2..kb) holds three words per open container (1 for an object; for
+// an object the plan node it is the value of plus one, 0 off the plan, for
+// an array 1 when it is the row array; its key-stack base) and st[kb..) the
+// (start, length) of every key of every open object, for the repeated-key
+// check.
 fn __jr_ws(b: Bytes, p0: Int, e: Int) -> Int = {
   var p = p0
-  while p < e and (b[p] == 32 or b[p] == 10 or b[p] == 13 or b[p] == 9) { p = p + 1 }
+  while p < e and (b[p] == 32 or b[p] == 10 or b[p] == 13 or b[p] == 9) {
+    p = p + 1
+  }
   p
 }
 
-fn __jr_simple_esc(c: Int) -> Bool =
-  c == 34 or c == 92 or c == 47 or c == 98 or c == 102 or c == 110 or c == 114 or c == 116
+fn __jr_simple_esc(c: Int) -> Bool = c == 34 or c == 92 or c == 47 or c == 98 or c == 102 or c == 110 or c == 114 or c == 116
 
-// Past the closing quote of the string opened at p0, or -1. `esc` admits the
-// one-character escapes (a value); a key admits none.
+fn __jr_hex(c: Int) -> Bool = (c >= 48 and c <= 57) or (c >= 65 and c <= 70) or (c >= 97 and c <= 102)
+
+// The string opened at p0 as `end * 4 + (1 if it holds an escape) + (2 if
+// the parser must be asked)`, end past the closing quote, or -1. `esc`
+// admits escapes (a value); a key admits none.
 fn __jr_str(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
   var p = p0 + 1
   var r = -2
+  var flags = 0
   while r == -2 {
-    if p >= e then { r = -1 }
-    else {
+    if p >= e then {
+      r = -1
+    } else {
       let c = b[p]
-      if c == 34 then { r = p + 1 }
-      else if c == 92 then {
-        if esc and p + 1 < e and __jr_simple_esc(b[p + 1]) then { p = p + 2 } else { r = -1 }
+      if c == 34 then {
+        r = (p + 1) * 4 + flags
+      } else if c == 92 then {
+        if not esc or p + 1 >= e then {
+          r = -1
+        } else if __jr_simple_esc(b[p + 1]) then {
+          flags = if flags >= 2 then 3 else 1
+          p = p + 2
+        } else if b[p + 1] == 117 and p + 5 < e and __jr_hex(b[p + 2]) and __jr_hex(b[p + 3]) and __jr_hex(b[p + 4]) and __jr_hex(b[p + 5]) then {
+          flags = 3
+          p = p + 6
+        } else {
+          r = -1
+        }
+      } else if c < 32 then {
+        r = -1
+      } else {
+        if c >= 239 then {
+          flags = if flags % 2 == 1 then 3 else 2
+        } else ()
+        p = p + 1
       }
-      else if c < 32 or c >= 239 then { r = -1 }
-      else { p = p + 1 }
     }
   }
   r
@@ -75,22 +112,34 @@ fn __jr_str(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
 
 fn __jr_digits(b: Bytes, p0: Int, e: Int) -> Int = {
   var p = p0
-  while p < e and b[p] >= 48 and b[p] <= 57 { p = p + 1 }
+  while p < e and b[p] >= 48 and b[p] <= 57 {
+    p = p + 1
+  }
   p
 }
 
-// Past the number at p0 as `end * 2 + (1 if it is an Int token)`, or -1:
-// `-? (0 | [1-9][0-9]*) (. [0-9]+)?` with at most 18 integer digits.
+// The number at p0 as `end * 4 + (1 if it is an Int token) + (2 if the
+// parser's number routine must be asked)`, or -1:
+// `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?`.
 fn __jr_num(b: Bytes, p0: Int, e: Int) -> Int = {
   let s = if p0 < e and b[p0] == 45 then p0 + 1 else p0
   let q = __jr_digits(b, s, e)
-  if q == s or q - s > 18 or (b[s] == 48 and q > s + 1) then -1
-  else if q < e and b[q] == 46 then {
-    let f = __jr_digits(b, q + 1, e)
-    if f == q + 1 then -1 else f * 2
-  } else q * 2 + 1
+  if q == s or (b[s] == 48 and q > s + 1) then -1
+  else {
+    let long = if q - s > 18 then 2 else 0
+    let f = if q < e and b[q] == 46 then __jr_digits(b, q + 1, e)
+    else q
+    if f == q + 1 then -1
+    else if f < e and (b[f] == 101 or b[f] == 69) then {
+      let x = if f + 1 < e and (b[f + 1] == 43 or b[f + 1] == 45) then f + 2 else f + 1
+      let y = __jr_digits(b, x, e)
+      if y == x then -1 else y * 4 + 2
+    } else if f > q then f * 4 + long
+    else q * 4 + 1 + long
+  }
 }
 
+// The Int spelled by the digits of b[p0..q), at most 18 of them.
 fn __jr_int(b: Bytes, p0: Int, q: Int) -> Int = {
   let neg = b[p0] == 45
   var v = 0
@@ -102,9 +151,31 @@ fn __jr_int(b: Bytes, p0: Int, q: Int) -> Int = {
   if neg then 0 - v else v
 }
 
+fn __jr_text(b: Bytes, p: Int, q: Int) -> String = bytes.to_string_lossy(bytes.slice(b, p, q))
+
+// Whether the routine the parser uses takes the token b[p..q): 0 a string,
+// 1 an Int, 2 a Float.
+fn __jr_asked(b: Bytes, p: Int, q: Int, what: Int) -> Bool = {
+  let t = __jr_text(b, p, q)
+  if what == 0 then (match json.parse(t) {
+    ok(_) => true,
+    err(_) => false,
+  })
+  else if what == 1 then (match int.parse(t) {
+    ok(_) => true,
+    err(_) => false,
+  })
+  else match float.parse(t) {
+    ok(_) => true,
+    err(_) => false,
+  }
+}
+
 fn __jr_span_eq(b: Bytes, x: Int, y: Int, len: Int) -> Bool = {
   var i = 0
-  while i < len and b[x + i] == b[y + i] { i = i + 1 }
+  while i < len and b[x + i] == b[y + i] {
+    i = i + 1
+  }
   i == len
 }
 
@@ -112,50 +183,90 @@ fn __jr_seen(b: Bytes, ks: Int, kl: Int, st: List[Int], lo: Int, hi: Int) -> Boo
   var i = lo
   var hit = false
   while i < hi and not hit {
-    if st[i + 1] == kl and __jr_span_eq(b, st[i], ks, kl) then { hit = true } else { i = i + 2 }
+    if st[i + 1] == kl and __jr_span_eq(b, st[i], ks, kl) then {
+      hit = true
+    } else {
+      i = i + 2
+    }
   }
   hit
 }
 
 fn __jr_key_is(b: Bytes, ks: Int, kl: Int, k: Bytes) -> Bool = {
-  if kl != bytes.len(k) then false else {
+  if kl != bytes.len(k) then false
+  else {
     var i = 0
-    while i < kl and b[ks + i] == k[i] { i = i + 1 }
+    while i < kl and b[ks + i] == k[i] {
+      i = i + 1
+    }
     i == kl
   }
+}
+
+// The plan node under `m` whose key is b[ks..ks+kl), or -1.
+fn __jr_child(b: Bytes, ks: Int, kl: Int, keys: List[Bytes], par: List[Int], m: Int) -> Int = {
+  let n = list.len(par)
+  var j = 1
+  var hit = -1
+  while j < n and hit < 0 {
+    if par[j] == m and __jr_key_is(b, ks, kl, keys[j]) then {
+      hit = j
+    } else {
+      j = j + 1
+    }
+  }
+  hit
 }
 
 fn __jr_lit(b: Bytes, p: Int, e: Int, c1: Int, c2: Int, c3: Int) -> Int =
   if p + 3 < e and b[p + 1] == c1 and b[p + 2] == c2 and b[p + 3] == c3 then p + 4 else -1
 
-// One Int per element when the document was read whole, none on any refusal.
-// The stack is sized by the text: a container costs a byte, a key three.
-fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]] = {
+fn __jr_slot(kind: Int, p: Int, q: Int) -> Int = kind + p * 16 + q * 17179869184
+
+fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int], cfg: List[Int]) -> List[Int]? = {
+  let row = cfg[0]
+  let el = cfg[1]
+  let g = cfg[2]
+  let k = cfg[3]
   let kb = 2 + 3 * int.min(e, 256)
   let cap = kb + 2 * int.min(e / 3 + 1, 512)
   var st = list.repeat(0, cap)
-  var out: List[Int] = []
-  let n = list.len(keys)
+  var cur = list.repeat(0, g + k + 1)
+  var out = list.repeat(0, g)
   var p = __jr_ws(b, 0, e)
   var sp = 2
   var kp = kb
   var pending = 0
-  var found = false
-  var val = 0
   // 0 = at a value, 1 = at a key, 2 = after a value, 3 = done, -1 = refused
-  var state = if n == 0 or p >= e or b[p] != 91 then -1 else 0
+  var state = if e >= 1073741824 then -1 else 0
   while state >= 0 and state < 3 {
     if state == 0 then {
-      if p >= e then { state = -1 } else {
+      if p >= e then {
+        state = -1
+      } else {
         let c = b[p]
+        let pn = if sp > 2 and st[sp - 3] == 0 then (if st[sp - 2] == 1 then el else -1)
+        else pending
+        let at = if pn >= 0 then slot[pn] else -1
         if c == 34 then {
-          p = __jr_str(b, p, e, true)
-          state = if p < 0 then -1 else 2
+          let r = __jr_str(b, p, e, true)
+          if r < 0 or (r % 4 >= 2 and not __jr_asked(b, p, r / 4, 0)) then {
+            state = -1
+          } else {
+            if at >= 0 then {
+              cur[at] = __jr_slot(if r % 4 == 0 then 6 else 7, p, r / 4)
+            } else ()
+            p = r / 4
+            state = 2
+          }
         } else if c == 123 or c == 91 then {
-          if sp + 3 > kb then { state = -1 } else {
+          if sp + 3 > kb then {
+            state = -1
+          } else {
             let isobj = c == 123
             st[sp] = if isobj then 1 else 0
-            st[sp + 1] = if not isobj then 0 else if sp == 5 then 1 else if pending > 0 and pending < n then pending + 1 else 0
+            st[sp + 1] = if isobj then pn + 1
+            else if pn >= 0 and pn == row then 1 else 0
             st[sp + 2] = kp
             sp = sp + 3
             p = __jr_ws(b, p + 1, e)
@@ -168,13 +279,32 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
             }
           }
         } else if c == 116 then {
-          p = __jr_lit(b, p, e, 114, 117, 101)
-          state = if p < 0 then -1 else 2
+          let q = __jr_lit(b, p, e, 114, 117, 101)
+          if q < 0 then {
+            state = -1
+          } else {
+            if at >= 0 then {
+              cur[at] = __jr_slot(2, p, q)
+            } else ()
+            p = q
+            state = 2
+          }
         } else if c == 110 then {
-          p = __jr_lit(b, p, e, 117, 108, 108)
-          state = if p < 0 then -1 else 2
+          let q = __jr_lit(b, p, e, 117, 108, 108)
+          if q < 0 then {
+            state = -1
+          } else {
+            if at >= 0 then {
+              cur[at] = __jr_slot(1, p, q)
+            } else ()
+            p = q
+            state = 2
+          }
         } else if c == 102 then {
           if p + 4 < e and b[p + 4] == 101 and __jr_lit(b, p, e, 97, 108, 115) > 0 then {
+            if at >= 0 then {
+              cur[at] = __jr_slot(3, p, p + 5)
+            } else ()
             p = p + 5
             state = 2
           } else {
@@ -182,31 +312,47 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
           }
         } else {
           let r = __jr_num(b, p, e)
-          if r < 0 then { state = -1 } else {
-            if pending == n and r % 2 == 1 then {
-              val = __jr_int(b, p, r / 2)
-              found = true
+          if r < 0 or (r % 4 >= 2 and not __jr_asked(b, p, r / 4, 2 - r % 2)) then {
+            state = -1
+          } else {
+            if at >= 0 then {
+              cur[at] = __jr_slot(5 - r % 2, p, r / 4)
             } else ()
-            p = r / 2
+            p = r / 4
             state = 2
           }
         }
-        pending = 0
+        pending = -1
       }
     } else if state == 1 then {
-      if p >= e or b[p] != 34 then { state = -1 } else {
-        let ke = __jr_str(b, p, e, false)
+      if p >= e or b[p] != 34 then {
+        state = -1
+      } else {
+        let r = __jr_str(b, p, e, false)
+        let ke = r / 4
         let ks = p + 1
         let kl = ke - p - 2
         let base = st[sp - 1]
-        if ke < 0 or kp + 2 > cap or kp - base >= 128 or __jr_seen(b, ks, kl, st, base, kp) then { state = -1 } else {
+        if r < 0 or kp + 2 > cap or kp - base >= 128 or (r % 4 >= 2 and not __jr_asked(b, p, ke, 0)) or __jr_seen(
+          b,
+          ks,
+          kl,
+          st,
+          base,
+          kp,
+        ) then {
+          state = -1
+        } else {
           st[kp] = ks
           st[kp + 1] = kl
           kp = kp + 2
           p = __jr_ws(b, ke, e)
-          if p >= e or b[p] != 58 then { state = -1 } else {
+          if p >= e or b[p] != 58 then {
+            state = -1
+          } else {
             let mode = st[sp - 2]
-            pending = if mode > 0 and __jr_key_is(b, ks, kl, keys[mode - 1]) then mode else 0
+            pending = if mode > 0 then __jr_child(b, ks, kl, keys, par, mode - 1)
+            else -1
             p = __jr_ws(b, p + 1, e)
             state = 0
           }
@@ -217,13 +363,19 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
         state = if __jr_ws(b, p, e) == e then 3 else -1
       } else {
         p = __jr_ws(b, p, e)
-        if p >= e then { state = -1 } else {
+        if p >= e then {
+          state = -1
+        } else {
           let c = b[p]
           let isobj = st[sp - 3] == 1
           if c == 44 or (c == 125 and isobj) or (c == 93 and not isobj) then {
-            if sp == 5 then {
-              list.push(out, if found then val else dflt)
-              found = false
+            if not isobj and st[sp - 2] == 1 then {
+              var j = g
+              while j < g + k {
+                list.push(out, cur[j])
+                cur[j] = 0
+                j = j + 1
+              }
             } else ()
             if c == 44 then {
               p = __jr_ws(b, p + 1, e)
@@ -240,10 +392,76 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
       }
     }
   }
-  if state == 3 then some(out) else none
+  if state == 3 then {
+    var j = 0
+    while j < g {
+      out[j] = cur[j]
+      j = j + 1
+    }
+    some(out)
+  } else none
 }
 
-fn __ints_at(text: String, path: List[String], dflt: Int) -> Option[List[Int]] = {
-  let b = bytes.from_string(text)
-  __jr_scan(b, bytes.len(b), path |> list.map((k) => bytes.from_string(k)), dflt)
+fn __spans(b: Bytes, keys: List[String], par: List[Int], slot: List[Int], cfg: List[Int]) -> List[Int]? = __jr_scan(
+  b,
+  bytes.len(b),
+  keys |> list.map((key) => bytes.from_string(key)),
+  par,
+  slot,
+  cfg,
+)
+
+// The numbers of the elements read, in order: `c` holds g document slots,
+// then k per element.
+fn __rows(c: List[Int], g: Int, k: Int) -> List[Int] = {
+  let n = (list.len(c) - g) / k
+  var out: List[Int] = []
+  var i = 0
+  while i < n {
+    list.push(out, i)
+    i = i + 1
+  }
+  out
+}
+
+// What `value.get_int` answers at the path of slot `i * k + s` of `c`.
+fn __leaf_int(b: Bytes, c: List[Int], i: Int, k: Int, s: Int) -> Int? = {
+  let v = c[i * k + s]
+  if v % 16 != 4 then none
+  else {
+    let p = v / 16 % 1073741824
+    let q = v / 17179869184
+    if q - p <= 18 then some(__jr_int(b, p, q))
+    else result.to_option(int.parse(__jr_text(b, p, q)))
+  }
+}
+
+// What `value.get_float` answers there: an Int token widens.
+fn __leaf_float(b: Bytes, c: List[Int], i: Int, k: Int, s: Int) -> Float? = {
+  let v = c[i * k + s]
+  if v % 16 == 5 then result.to_option(float.parse(__jr_text(b, v / 16 % 1073741824, v / 17179869184)))
+  else match __leaf_int(b, c, i, k, s) {
+    some(n) => some(int.__raw_to_float(n)),
+    none => none,
+  }
+}
+
+fn __leaf_bool(b: Bytes, c: List[Int], i: Int, k: Int, s: Int) -> Bool? = {
+  let kind = c[i * k + s] % 16
+  if kind == 2 then some(true)
+  else if kind == 3 then some(false) else none
+}
+
+// What `value.get_string` answers there: the bytes between the quotes, or
+// the parser's own decoding of a token that holds an escape.
+fn __leaf_string(b: Bytes, c: List[Int], i: Int, k: Int, s: Int) -> String? = {
+  let v = c[i * k + s]
+  let p = v / 16 % 1073741824
+  let q = v / 17179869184
+  if v % 16 == 6 then some(__jr_text(b, p + 1, q - 1))
+  else if v % 16 == 7 then (match json.parse(__jr_text(b, p, q)) {
+    ok(x) => result.to_option(value.as_string(x)),
+    err(_) => none,
+  })
+  else none
 }

@@ -5,26 +5,9 @@
 //! per id — the `sink_inline` discipline), both read off the shape of the
 //! code; no user function is named.
 //!
-//! **Reader.** `json.parse(t) ?? value.null()` whose only use is
-//! `(value.as_array(_) ?? []) |> list.map(f)`, where `f` reads one Int along
-//! a static key path of its element (`value.get(_, "k") ?? value.null()`
-//! steps ending in `value.get_int(_, "k") ?? d`), becomes a call to a
-//! synthesized helper
-//!
-//! ```text
-//! fn __almd_json_ints_N(t) = match json.__ints_at(t, ["k", ..], d) {
-//!   some(col) => col,
-//!   none => <the original expression>,
-//! }
-//! ```
-//!
-//! `json.__ints_at` (stdlib/json.almd) validates the whole text and answers
-//! only for documents it proves `json.parse` accepts; on any refusal the
-//! original expression runs, so every error, the repeated-key refusal, the
-//! depth bound and every number edge case are the parser's own. The parse is
-//! pure and `t` is an immutable binding, so running it at the use instead of
-//! at its `let` is unobservable; the use must sit in the block that binds the
-//! parse result, outside any loop or lambda, so it still runs at most once.
+//! **Reader.** A parsed document whose every use reads a scalar at a static
+//! key path is read off the text by one scan of it; `read.rs` holds the
+//! rule, the plan and the rewrite.
 //!
 //! **Writer.** `json.stringify(value.array(xs |> list.map((x) => g(x))))`,
 //! where the tail of `g` is a constructor tree (`value.object` /
@@ -45,8 +28,7 @@
 //!
 //! Both kernels are functions of the `json` module, kept live by
 //! `bundled_reach::COMPILER_INSERTED`, stamped `@on_demand` here and so
-//! dropped after mono when no rewrite named them. The reader's plan is (key path, Int leaf, default);
-//! a derived decoder's field list is the same plan with more leaves.
+//! dropped after mono when no rewrite named them.
 //!
 //! Ablation: `ALMIDE_VALUE_FUSE_OFF=1` skips the pass.
 
@@ -60,12 +42,13 @@ use almide_lang::types::Ty;
 
 pub const ABLATION_ENV: &str = "ALMIDE_VALUE_FUSE_OFF";
 
-const READER: &str = "__ints_at";
+mod read;
+
 const ARRAY_WRITER: &str = "__array_text";
 
 /// The kernels and their helpers (`__jr_*`) in the `json` module.
 fn is_kernel(name: &str) -> bool {
-    name == READER || name == ARRAY_WRITER || name.starts_with("__jr_")
+    name == read::SPANS || name == "__rows" || name.starts_with("__leaf_") || name == ARRAY_WRITER || name.starts_with("__jr_")
 }
 
 /// Stamps the kernels `@on_demand`: `bundled_reach` keeps them live for
@@ -88,20 +71,13 @@ pub fn fuse_value_round_trips(program: &mut IrProgram) {
     }
     let Some(json) = program.modules.iter().find(|m| m.name.as_str() == "json") else { return };
     let has = |f: &str| json.functions.iter().any(|g| g.name.as_str() == f);
-    let (reader_live, writer_live) = (has(READER), has(ARRAY_WRITER));
+    let (reader_live, writer_live) = (has(read::SPANS), has(ARRAY_WRITER));
     if !reader_live && !writer_live {
         return;
     }
 
-    let mut readers: HashMap<Sym, Plan> = HashMap::new();
+    let readers = if reader_live { read::reader_fns(&program.functions) } else { read::Readers::new() };
     let mut writers: HashSet<Sym> = HashSet::new();
-    if reader_live {
-        for f in &program.functions {
-            if let Some(plan) = reader_fn(f) {
-                readers.insert(f.name, plan);
-            }
-        }
-    }
     if writer_live {
         // A producer may call another producer: grow to the fixpoint.
         loop {
@@ -124,6 +100,7 @@ pub fn fuse_value_round_trips(program: &mut IrProgram) {
         writers: &writers,
         reader_live,
         writer_live,
+        read_twins: Vec::new(),
         new_funcs: Vec::new(),
         twins_wanted: Vec::new(),
         counter: 0,
@@ -141,19 +118,16 @@ pub fn fuse_value_round_trips(program: &mut IrProgram) {
         let twin = cx.twin(src);
         cx.new_funcs.push(twin);
     }
+    while let Some(tw) = cx.read_twins.pop() {
+        let Some(src) = functions.iter().find(|f| f.name == tw.src) else { continue };
+        let twin = cx.read_twin(src, &tw);
+        cx.new_funcs.push(twin);
+    }
     let new_funcs = std::mem::take(&mut cx.new_funcs);
     functions.extend(new_funcs);
 }
 
 // ── shapes ──────────────────────────────────────────────────────────────
-
-/// What the reader kernel is asked for: the key path under each element and
-/// the Int answered where an element has no Int there.
-#[derive(Clone)]
-struct Plan {
-    keys: Vec<String>,
-    dflt: i64,
-}
 
 fn module_call<'e>(e: &'e IrExpr, module: &str, func: &str) -> Option<&'e [IrExpr]> {
     match &e.kind {
@@ -194,64 +168,6 @@ fn plain_fn(f: &IrFunction) -> bool {
         && f.name.as_str() != "main"
         && !f.generics.as_ref().is_some_and(|g| !g.is_empty())
         && f.params.iter().all(|p| !p.is_mut && p.default.is_none() && p.open_record.is_none())
-}
-
-/// `value.get(.. value.get(p, k0) ?? value.null() .., kn) ?? value.null()`
-/// chains down from `p`; the keys are pushed outermost first.
-fn path_steps(e: &IrExpr, p: VarId, keys: &mut Vec<String>) -> bool {
-    if is_var(e, p) {
-        return true;
-    }
-    let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return false };
-    let (Some([inner, key]), true) = (module_call(expr, "value", "get"), is_value_null(fallback)) else { return false };
-    let IrExprKind::LitStr { value } = &key.kind else { return false };
-    if !path_steps(inner, p, keys) {
-        return false;
-    }
-    keys.push(value.clone());
-    true
-}
-
-/// `value.get_int(<steps from p>, k) ?? <Int literal>`.
-fn int_leaf(e: &IrExpr, p: VarId) -> Option<Plan> {
-    let IrExprKind::UnwrapOr { expr, fallback } = &tail(e).kind else { return None };
-    let [inner, key] = module_call(expr, "value", "get_int")? else { return None };
-    let IrExprKind::LitStr { value: key } = &key.kind else { return None };
-    // The pass runs before constant folding: `-1` is still a negation.
-    let dflt = match &fallback.kind {
-        IrExprKind::LitInt { value } => *value,
-        IrExprKind::UnOp { op: UnOp::NegInt, operand } => match operand.kind {
-            IrExprKind::LitInt { value } => value.checked_neg()?,
-            _ => return None,
-        },
-        _ => return None,
-    };
-    let mut keys = Vec::new();
-    if !path_steps(inner, p, &mut keys) {
-        return None;
-    }
-    keys.push(key.clone());
-    // A key the kernel compares raw must be what the parser decodes: any key
-    // is, since the kernel refuses a document key holding an escape.
-    Some(Plan { keys, dflt })
-}
-
-fn reader_fn(f: &IrFunction) -> Option<Plan> {
-    let [p] = f.params.as_slice() else { return None };
-    if !plain_fn(f) || !is_value_ty(&p.ty) {
-        return None;
-    }
-    int_leaf(&f.body, p.var)
-}
-
-/// `json.parse(<Var t>) ?? value.null()` → `t`.
-fn parse_or_null(e: &IrExpr) -> Option<VarId> {
-    let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return None };
-    let ([text], true) = (module_call(expr, "json", "parse")?, is_value_null(fallback)) else { return None };
-    match text.kind {
-        IrExprKind::Var { id } if matches!(text.ty, Ty::String) => Some(id),
-        _ => None,
-    }
 }
 
 fn clean_text(s: &str) -> bool {
@@ -475,7 +391,8 @@ impl Spell<'_> {
 
 struct Fuser<'a> {
     vt: &'a mut VarTable,
-    readers: &'a HashMap<Sym, Plan>,
+    readers: &'a read::Readers,
+    read_twins: Vec<read::ReadTwin>,
     writers: &'a HashSet<Sym>,
     reader_live: bool,
     writer_live: bool,
@@ -639,115 +556,6 @@ fn own_param(var: VarId, name: Sym, ty: Ty) -> IrParam {
 }
 
 impl Fuser<'_> {
-    /// The reader site `list.map(value.as_array(<doc>) ?? [], f)`: the
-    /// document operand and the plan `f` reads by.
-    fn reader_site<'e>(&self, e: &'e IrExpr) -> Option<(&'e IrExpr, Plan)> {
-        let [xs, f] = module_call(e, "list", "map")? else { return None };
-        let IrExprKind::UnwrapOr { expr, fallback } = &xs.kind else { return None };
-        let [doc] = module_call(expr, "value", "as_array")? else { return None };
-        if !matches!(&fallback.kind, IrExprKind::List { elements } if elements.is_empty()) {
-            return None;
-        }
-        let IrExprKind::Lambda { params, body, .. } = &f.kind else { return None };
-        let [(p, pty)] = params.as_slice() else { return None };
-        if !is_value_ty(pty) || e.ty != Ty::list(Ty::Int) {
-            return None;
-        }
-        let plan = match &tail(body).kind {
-            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if matches!(args.as_slice(), [a] if is_var(a, *p)) => {
-                self.readers.get(name)?.clone()
-            }
-            _ => int_leaf(body, *p)?,
-        };
-        Some((doc, plan))
-    }
-
-    /// `site` (a reader site whose document is the parse of `text`) as a
-    /// call to its helper.
-    fn read_through(&mut self, site: IrExpr, text: VarId, plan: Plan) -> IrExpr {
-        let span = site.span;
-        let col_ty = Ty::list(Ty::Int);
-        let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
-        let t = self.vt.alloc(sym("text"), Ty::String, Mutability::Let, span);
-        let col = self.vt.alloc(sym("col"), col_ty.clone(), Mutability::Let, span);
-        let t_read = mk(IrExprKind::Var { id: t }, Ty::String);
-        let mut fallback = site;
-        Subst { from: text, to: &t_read }.visit_expr_mut(&mut fallback);
-        let keys = mk(
-            IrExprKind::List {
-                elements: plan.keys.iter().map(|k| mk(IrExprKind::LitStr { value: k.clone() }, Ty::String)).collect(),
-            },
-            Ty::list(Ty::String),
-        );
-        let kernel = mk(
-            IrExprKind::Call {
-                target: CallTarget::Module { module: sym("json"), func: sym(READER), def_id: None },
-                args: vec![t_read, keys, mk(IrExprKind::LitInt { value: plan.dflt }, Ty::Int)],
-                type_args: vec![],
-            },
-            Ty::option(col_ty.clone()),
-        );
-        let arms = vec![
-            IrMatchArm {
-                pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: col, ty: col_ty.clone() }) },
-                guard: None,
-                body: mk(IrExprKind::Var { id: col }, col_ty.clone()),
-            },
-            IrMatchArm { pattern: IrPattern::None, guard: None, body: fallback },
-        ];
-        let body = mk(IrExprKind::Match { subject: Box::new(kernel), arms }, col_ty.clone());
-        let name = sym(&format!("__almd_json_ints_{}", self.counter));
-        self.counter += 1;
-        self.new_funcs.push(new_fn(name, vec![own_param(t, sym("text"), Ty::String)], col_ty.clone(), body));
-        mk(
-            IrExprKind::Call {
-                target: CallTarget::Named { name },
-                args: vec![mk(IrExprKind::Var { id: text }, Ty::String)],
-                type_args: vec![],
-            },
-            col_ty,
-        )
-    }
-
-    fn immutable(&self, v: VarId) -> bool {
-        matches!(self.vt.get(v).mutability, Mutability::Let)
-    }
-
-    /// `let back = json.parse(t) ?? value.null()` read once, by a reader
-    /// site in the statements after it: the site reads through the kernel
-    /// and the bind goes.
-    fn fuse_bound_parses(&mut self, stmts: &mut Vec<IrStmt>, tail: &mut Option<Box<IrExpr>>) {
-        let mut i = 0;
-        while i < stmts.len() {
-            let found = match &stmts[i].kind {
-                IrStmtKind::Bind { var, mutability: Mutability::Let, value, .. } => {
-                    parse_or_null(value).filter(|t| self.immutable(*t)).map(|t| (*var, t, value.clone()))
-                }
-                _ => None,
-            };
-            let Some((back, text, parse)) = found else {
-                i += 1;
-                continue;
-            };
-            if occurrences_in(&stmts[i + 1..], tail.as_deref(), back) != 1 {
-                i += 1;
-                continue;
-            }
-            let mut at = AtSite { cx: self, back, text, parse: &parse, done: false };
-            for s in stmts[i + 1..].iter_mut() {
-                at.visit_stmt_mut(s);
-            }
-            if let Some(t) = tail.as_deref_mut() {
-                at.visit_expr_mut(t);
-            }
-            if at.done {
-                stmts.remove(i);
-            } else {
-                i += 1;
-            }
-        }
-    }
-
     /// `let d = <tree>` read once, by `json.stringify(d)`: the bind holds
     /// the text and the stringify reads it.
     fn fuse_bound_trees(&mut self, stmts: &mut [IrStmt], tail: &mut Option<Box<IrExpr>>) {
@@ -828,38 +636,6 @@ impl Fuser<'_> {
     }
 }
 
-/// Finds the one reader site over `back` in the statements after its bind,
-/// without entering a loop or a lambda, and reads it through the kernel.
-struct AtSite<'a, 'b, 'e> {
-    cx: &'a mut Fuser<'b>,
-    back: VarId,
-    text: VarId,
-    parse: &'e IrExpr,
-    done: bool,
-}
-
-impl IrMutVisitor for AtSite<'_, '_, '_> {
-    fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-        if self.done
-            || matches!(e.kind, IrExprKind::Lambda { .. } | IrExprKind::ForIn { .. } | IrExprKind::While { .. })
-        {
-            return;
-        }
-        let hit = match self.cx.reader_site(e) {
-            Some((doc, plan)) if is_var(doc, self.back) => Some(plan),
-            _ => None,
-        };
-        let Some(plan) = hit else {
-            walk_expr_mut(self, e);
-            return;
-        };
-        let mut site = std::mem::take(e);
-        Subst { from: self.back, to: self.parse }.visit_expr_mut(&mut site);
-        *e = self.cx.read_through(site, self.text, plan);
-        self.done = true;
-    }
-}
-
 /// Counts (`text` unset) or rewrites (`text` set) `json.stringify(<var>)`.
 struct StringifyOf {
     var: VarId,
@@ -891,11 +667,14 @@ impl IrMutVisitor for StringifyOf {
 
 impl IrMutVisitor for Fuser<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        if self.reader_live {
+            self.fuse_inline_doc(e);
+        }
         // Outermost first: a block's bound forms are rewritten where they
         // are bound before the inline forms inside them are looked at.
         if let IrExprKind::Block { stmts, expr } = &mut e.kind {
             if self.reader_live {
-                self.fuse_bound_parses(stmts, expr);
+                self.fuse_bound_docs(stmts, expr);
             }
             if self.writer_live {
                 self.fuse_bound_trees(stmts, expr);
@@ -908,16 +687,6 @@ impl IrMutVisitor for Fuser<'_> {
                         *e = text;
                     }
                 }
-            }
-        }
-        if self.reader_live {
-            let inline = self.reader_site(e).and_then(|(doc, plan)| {
-                parse_or_null(doc).filter(|t| self.immutable(*t)).map(|t| (t, plan))
-            });
-            if let Some((text, plan)) = inline {
-                let site = std::mem::take(e);
-                *e = self.read_through(site, text, plan);
-                return;
             }
         }
         walk_expr_mut(self, e);
