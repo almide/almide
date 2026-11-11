@@ -357,6 +357,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     // (render_native_slots::movable_loads) moves the payload out.
     if let NTy::Rec(_) = t {
         if st.moves_first.contains(d)
+            && !has_payload_view(ad.base)
             && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
             && crate::render_native_rec::has_default(t)
             && !crate::render_native_rec::is_region(i)
