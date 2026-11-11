@@ -420,8 +420,16 @@ file = "control_p3_c.rs"
 fn = "load_payload_addr"
 loads = 1
 verdict = "CALLER_DISPATCHED"
-caller = "variant_eq_from_handles (:438 inside is_c), result_eq_general_from_handles (:514/:530 inside both_ok/both_err), option_heap_eq_from_handles (calls_p4.rs:61 inside both_some), result_scalar_eq_from_handles (calls_p4.rs:112 inside both_err), ensure_opt_record_eq_helper (synth_eq.rs:253 inside both_some), aggregate_eq_from_handles (:373 non-sum)"
-why = "Caller-supplied-offset load with no tag test of its own; all 8 call sites verified — every sum-payload site is inside its caller's tag guard, the rest are aggregate slots."
+caller = "result_eq_general_from_handles (inside both_ok/both_err), option_heap_eq_from_handles (calls_p4.rs inside both_some), result_scalar_eq_from_handles (calls_p4.rs inside both_err), ensure_opt_record_eq_helper (synth_eq.rs inside both_some), aggregate_eq_from_handles (non-sum)"
+why = "Caller-supplied-offset load with no tag test of its own; every call site verified — every sum-payload site is inside its caller's tag guard, the rest are aggregate slots. The variant-equality site moved to load_declared_payload_addr (its own entry below)."
+
+[[arm]]
+file = "control_p3_c.rs"
+fn = "load_declared_payload_addr"
+loads = 1
+verdict = "CALLER_DISPATCHED"
+caller = "variant_eq_from_handles (its only caller: both calls sit inside IfThen(tagL==tagR) and then IfThen(tag==case) for the constructor whose field list supplies the offset and the declared type)"
+why = "The same load as load_payload_addr plus a render-only side-table note of the constructor's declared payload type; no tag test of its own. Its single call site reads a field slot only inside the arm that has established both operands carry that constructor, so the slot holds that constructor's heap field. The function is private to the file, so no other caller can exist."
 
 [[arm]]
 file = "option_match.rs"

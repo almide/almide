@@ -427,6 +427,16 @@ impl LowerCtx {
         match &init.kind {
             IrExprKind::LitStr { .. } => Some(init.clone()),
             IrExprKind::List { .. } if crate::lower::is_pure_literal_list(init) => Some(init.clone()),
+            // Native owned slots: a list literal naming immutable globals is the
+            // literal list of what each one folds to.
+            IrExprKind::List { elements } if crate::lower::owned_tco_slots() => {
+                let elements = elements.iter().map(|e| match &e.kind {
+                    IrExprKind::Var { .. } => self.fold_pure_literal_init(e, depth + 1),
+                    _ => Some(e.clone()),
+                }).collect::<Option<Vec<_>>>()?;
+                let folded = IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None };
+                crate::lower::is_pure_literal_list(&folded).then_some(folded)
+            }
             IrExprKind::Var { id } => {
                 if crate::lower::is_mutable_global(*id) {
                     return None;

@@ -326,6 +326,44 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
             hoist_stmt_list_heap_if(body, next, changed);
             return;
         }
+        // A CONDITIONALLY evaluated child is a hoist ROOT of its own: an
+        // `if` arm, a `match` arm or its guard, the right side of `and` /
+        // `or`, a `??` fallback. Its binds stay inside it (the child becomes
+        // a Block carrying them). Hoisted past the branch they ran whether or
+        // not the branch took that child — the recursive call of
+        // `if n == 0 then Leaf else Node(build(n - 1), if …)` ran before the
+        // base-case test and never returned, an argument's effects printed
+        // for the arm not taken, and a pattern-bound name was read outside
+        // the arm that binds it.
+        match &mut e.kind {
+            IrExprKind::If { cond, then, else_ } => {
+                hoist(cond, binds, next, changed);
+                hoist_root(then, next, changed);
+                hoist_root(else_, next, changed);
+                return;
+            }
+            IrExprKind::Match { subject, arms } => {
+                hoist(subject, binds, next, changed);
+                for arm in arms.iter_mut() {
+                    if let Some(guard) = arm.guard.as_mut() {
+                        hoist_root(guard, next, changed);
+                    }
+                    hoist_root(&mut arm.body, next, changed);
+                }
+                return;
+            }
+            IrExprKind::BinOp { op: almide_ir::BinOp::And | almide_ir::BinOp::Or, left, right } => {
+                hoist(left, binds, next, changed);
+                hoist_root(right, next, changed);
+                return;
+            }
+            IrExprKind::UnwrapOr { expr, fallback } => {
+                hoist(expr, binds, next, changed);
+                hoist_root(fallback, next, changed);
+                return;
+            }
+            _ => {}
+        }
         // Children first, so an inner call's hoists land before the outer's.
         almide_ir::visit_mut::walk_expr_mut(
             &mut HoistWalk { binds, next, changed },
@@ -361,6 +399,18 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
                 span: a.span.clone(),
             });
         }
+    }
+    /// [`hoist`] over a conditionally evaluated child: the binds it needs
+    /// stay in the child, which becomes a Block carrying them.
+    fn hoist_root(e: &mut IrExpr, next: &mut u32, changed: &mut bool) {
+        let mut binds = Vec::new();
+        hoist(e, &mut binds, next, changed);
+        if binds.is_empty() {
+            return;
+        }
+        let (ty, span) = (e.ty.clone(), e.span);
+        let inner = std::mem::replace(e, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id: None });
+        *e = IrExpr { kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(inner)) }, ty, span, def_id: None };
     }
     struct HoistWalk<'a> {
         binds: &'a mut Vec<IrStmt>,
