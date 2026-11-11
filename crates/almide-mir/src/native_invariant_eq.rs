@@ -42,13 +42,13 @@ struct Loops<'a> { vars: &'a mut VarTable }
 impl Loops<'_> {
     /// Remember the invariant equalities of every loop standing in `stmts`
     /// (or as `tail`), the memo variables bound ahead of each.
-    fn remember_all(&mut self, stmts: &mut Vec<IrStmt>, mut tail: Option<&mut IrExpr>) {
+    fn remember_all(&mut self, stmts: &mut Vec<IrStmt>, tail: Option<&mut IrExpr>) {
         let mut out = Vec::with_capacity(stmts.len());
         for mut s in std::mem::take(stmts) {
             if let IrStmtKind::Expr { expr } = &mut s.kind { out.extend(self.remember(expr)); }
             out.push(s);
         }
-        if let Some(e) = tail.as_deref_mut() { out.extend(self.remember(e)); }
+        if let Some(e) = tail { out.extend(self.remember(e)); }
         *stmts = out;
     }
 
