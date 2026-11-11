@@ -640,6 +640,8 @@ struct FnInfo {
     /// there unconditionally, tail position and `ALMIDE_REGION_OFF`
     /// notwithstanding, or reports a compiler defect.
     scoped_entry: bool,
+    /// Control never comes back from a call to it (diverge.rs `diverging_fns`).
+    diverges: bool,
 }
 
 struct FnTable {

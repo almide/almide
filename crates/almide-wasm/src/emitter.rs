@@ -8,7 +8,7 @@ use wasm_encoder::{BlockType, Function, ValType};
 use crate::*;
 // Diverging values in a value slot (#3144): a child of the emitter.
 #[path = "diverge.rs"]
-mod diverge;
+pub(crate) mod diverge;
 use diverge::is_diverging_call;
 
 #[path = "node_marks.rs"]

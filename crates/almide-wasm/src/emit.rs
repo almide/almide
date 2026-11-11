@@ -256,6 +256,7 @@ fn emit_program_pass(
             param_mut_decl: f.params.iter().map(|p| p.is_mut).collect(),
             import,
             scoped_entry: f.is_scoped_block_entry(),
+            diverges: false,
         });
     }
     // Which params each callee owns (#2028): computed once, over the whole
@@ -267,6 +268,9 @@ fn emit_program_pass(
     // #3420: which fns hand out an address their caller's blocks back.
     for (i, y) in crate::exit_plan::address_yielders(&program_fns, &table).into_iter().enumerate() {
         table.infos[i].yields_address = y;
+    }
+    for (i, d) in crate::emitter::diverge::diverging_fns(&program_fns, &table).into_iter().enumerate() {
+        table.infos[i].diverges = d;
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);
