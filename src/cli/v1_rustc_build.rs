@@ -257,6 +257,25 @@ mod tests {
         }
     }
 
+    /// The release runtime crate is built with the codegen-unit count the
+    /// generated manifest's `[profile.release]` gives every package of the
+    /// cargo build (one): rustc's default for a library splits it into 16
+    /// units, which made `decode` 1.2x v0.69.1.
+    #[test]
+    fn release_runtime_has_the_manifests_codegen_units() {
+        let release = super::super::cargo_toml::GENERATED_CARGO_TOML
+            .split("[profile.release]")
+            .nth(1)
+            .expect("a release profile");
+        let units = release
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("codegen-units = "))
+            .expect("the release profile names its codegen units");
+        let want = format!("codegen-units={units}");
+        let r = runtime_profile_args("fn main() {}", true);
+        assert!(r.windows(2).any(|w| w[0] == "-C" && w[1] == want), "release runtime args {r:?} lack -C {want}");
+    }
+
     /// A release program links with fat LTO and one codegen unit.
     #[test]
     fn release_program_links_with_fat_lto() {
