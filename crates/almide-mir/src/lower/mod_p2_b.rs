@@ -319,6 +319,9 @@ pub(crate) struct LowerCtx {
     /// All-scalar tuple and record blocks → their declared type
     /// ([`MirFunction::aggregate_blocks`]).
     pub(crate) aggregate_blocks: std::collections::BTreeMap<ValueId, String>,
+    /// A straight-line scalar reassignment's value → its `var`'s declaring
+    /// value ([`MirFunction::slot_origins`]).
+    pub(crate) slot_origins: std::collections::BTreeMap<ValueId, ValueId>,
     /// The CURRENT binding (`lower_bind`) is a MUTABLE `var` (set by `lower_stmt` from the
     /// `Bind` mutability). A `var b = r.items` heap-field extraction may be COW-mutated later,
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow

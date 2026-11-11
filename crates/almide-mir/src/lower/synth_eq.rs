@@ -129,7 +129,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
+                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -244,7 +244,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
+                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -311,7 +311,7 @@ impl LowerCtx {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), &Ty::option(ty.clone())),
+            aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), &Ty::option(ty.clone())), slot_origins: Default::default(),
         });
         true
     }
@@ -431,7 +431,7 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String, ty: &Ty) -> MirFunctio
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: eq_param_types(ty),
+            aggregate_blocks: eq_param_types(ty), slot_origins: Default::default(),
         }
     }
 }

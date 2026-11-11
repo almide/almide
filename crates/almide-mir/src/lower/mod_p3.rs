@@ -535,7 +535,7 @@ impl LowerCtx {
             self.record_elided_calls(value);
             Ok(())
         } else {
-            self.lower_bind(var, &value.ty, value)
+            self.lower_straight_rebind(var, value)
         }
     }
 

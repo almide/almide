@@ -203,7 +203,7 @@ mod tests {
                 Op::IntBinOp { dst: ValueId(4), op: IntOp::And, a: ValueId(2), b: ValueId(3) },
             ],
             declared_caps: vec![], heap_slot_masks: Default::default(), owned_params: Default::default(),
-            call_moves: Default::default(), aggregate_blocks: Default::default(),
+            call_moves: Default::default(), aggregate_blocks: Default::default(), slot_origins: Default::default(),
         };
         let mut fused = f.clone();
         rewrite_narrow_ops(&mut fused).unwrap();

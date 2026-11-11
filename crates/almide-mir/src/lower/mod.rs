@@ -467,3 +467,4 @@ include!("mod_d.rs");
 include!("crossmod_toplet_bridge.rs");
 include!("continuation_lift.rs");
 include!("loop_slot_rebind.rs");
+include!("slot_origin.rs");

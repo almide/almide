@@ -55,6 +55,12 @@ pub struct MirFunction {
     /// that type's struct, enum or container, including an inlined Value
     /// constructor. The block's ops and the certificate are unchanged.
     pub aggregate_blocks: BTreeMap<ValueId, String>,
+    /// RENDER-ONLY side table: a scalar value a straight-line reassignment of
+    /// a `var` bound → the value that `var` was declared with. The native
+    /// render declares the new local where the `var` was declared, so mutable
+    /// locals keep their source order (`native_slot_order`). No op and no
+    /// certificate event reads it.
+    pub slot_origins: BTreeMap<ValueId, ValueId>,
 }
 
 /// A whole MIR program.

@@ -609,7 +609,7 @@ impl LowerCtx {
             heap_slot_masks: sub.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: std::mem::take(&mut sub.aggregate_blocks),
+            aggregate_blocks: std::mem::take(&mut sub.aggregate_blocks), slot_origins: std::mem::take(&mut sub.slot_origins),
         };
         crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), body.ty.clone());
         crate::lambda_sigs::record_captures(&name, layout.captures.iter().enumerate().map(|(i, (v, ty))| {
