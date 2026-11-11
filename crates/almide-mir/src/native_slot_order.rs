@@ -36,7 +36,7 @@ fn declared(line: &str) -> Option<u32> {
 }
 
 /// A one-line scalar declaration of `v` at the body level → (type, value).
-fn scalar_decl<'a>(line: &'a str, v: ValueId) -> Option<(&'static str, &'a str)> {
+fn scalar_decl(line: &str, v: ValueId) -> Option<(&'static str, &str)> {
     let rest = line.strip_prefix(PAD)?.strip_prefix("let mut ")?.strip_prefix(var(v).as_str())?;
     let (ty, rest) = [("f64", ": f64 = "), ("i64", ": i64 = ")].into_iter().find_map(|(ty, head)| Some((ty, rest.strip_prefix(head)?)))?;
     Some((ty, rest.strip_suffix(';')?))

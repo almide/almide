@@ -367,10 +367,11 @@ thread_local! {
     static PAYLOAD_VIEWS: std::cell::RefCell<BTreeMap<ValueId, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
 }
 
-/// Whether a borrowed view of a payload of `base` was rendered already: a
-/// later read of another payload must not move out through `&mut base`.
-pub(crate) fn has_payload_view(base: ValueId) -> bool {
-    PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+/// Whether a read planned as a move out of `base` (`planned`) may be one: no
+/// borrowed view of another payload of `base` was rendered before it, which
+/// a move out through `&mut base` would end.
+pub(crate) fn may_move_payload(planned: bool, base: ValueId) -> bool {
+    planned && !PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
 }
 
 /// A borrowed view of a payload of the carrier `base` that is never moved
