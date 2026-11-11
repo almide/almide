@@ -420,7 +420,7 @@
 3170	spec/wasm_cross/io_write_raw_bytes.almd
 35274	spec/wasm_cross/json_get_int_float.almd
 36594	spec/wasm_cross/json_gltf_walk.almd
-35560	spec/wasm_cross/json_many_keys.almd
+48249	spec/wasm_cross/json_many_keys.almd
 34009	spec/wasm_cross/json_number_unicode.almd
 31205	spec/wasm_cross/json_parse_astral_before_u_escape.almd
 32193	spec/wasm_cross/json_parse_depth_bound.almd

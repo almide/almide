@@ -420,7 +420,7 @@
 12	1	2517	12	spec/wasm_cross/io_write_raw_bytes.almd
 162	123	1861	162	spec/wasm_cross/json_get_int_float.almd
 6039	4690	70113	6039	spec/wasm_cross/json_gltf_walk.almd
-78713	72678	2237334	78713	spec/wasm_cross/json_many_keys.almd
+78696	72661	2237140	78696	spec/wasm_cross/json_many_keys.almd
 126	82	1722	126	spec/wasm_cross/json_number_unicode.almd
 35	21	607	35	spec/wasm_cross/json_parse_astral_before_u_escape.almd
 63623	58588	980129	63623	spec/wasm_cross/json_parse_depth_bound.almd
