@@ -30,6 +30,11 @@ fn count(main: &str, call: &str) -> usize {
     main.lines().filter(|l| l.contains(call)).count()
 }
 
+/// The separate writes of `main`: a `map.set`, consuming or in place.
+fn sets(main: &str) -> usize {
+    count(main, "almide_rt_map_set(") + count(main, "almide_rt_map_set_mut(")
+}
+
 const WORDS: &str = "[\"a\", \"b\", \"a\"]";
 
 #[test]
@@ -43,7 +48,7 @@ fn a_defaulted_read_update_is_one_upsert() {
     ] {
         let main = main_with("", map_ty, items, update);
         assert_eq!(count(&main, "almide_rt_map_upsert"), 1, "`{update}` is not one upsert:\n{main}");
-        assert_eq!(count(&main, "almide_rt_map_set("), 0, "`{update}` still writes separately:\n{main}");
+        assert_eq!(sets(&main), 0, "`{update}` still writes separately:\n{main}");
         assert_eq!(count(&main, "almide_rt_map_get("), 0, "`{update}` still reads separately:\n{main}");
     }
 }
@@ -65,6 +70,6 @@ fn an_update_outside_the_rule_stays_two_steps() {
     ] {
         let main = main_with(decls, "Map[String, Int]", WORDS, update);
         assert_eq!(count(&main, "almide_rt_map_upsert"), 0, "`{update}` was fused ({why}):\n{main}");
-        assert_eq!(count(&main, "almide_rt_map_set("), 1, "`{update}` lost its write ({why}):\n{main}");
+        assert_eq!(sets(&main), 1, "`{update}` lost its write ({why}):\n{main}");
     }
 }

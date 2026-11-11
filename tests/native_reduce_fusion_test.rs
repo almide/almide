@@ -224,11 +224,12 @@ fn a_fused_chain_builds_no_list() {
 }
 
 #[test]
-fn a_loop_over_fixed_bounds_builds_no_index_list() {
-    // The one list left is the loop whose body changes its own bound: it
-    // keeps the list, whose length was read before the first iteration.
+fn a_loop_over_list_range_builds_no_index_list() {
+    // The loop whose body changes its own bound counts too: its bound is
+    // bound ahead of it (#4662), as the list's length was read before the
+    // first iteration.
     let n = net_allocs("loop-alloc", COUNTED_LOOP);
-    assert_eq!(n, 1, "the loops allocate {n} blocks; only the changing-bound loop builds its list");
+    assert_eq!(n, 0, "the loops allocate {n} blocks; counted they build no index list");
 }
 
 #[test]
