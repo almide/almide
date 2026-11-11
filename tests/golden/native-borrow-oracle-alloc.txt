@@ -1,11 +1,11 @@
 # native borrow oracle — allocation ledger (#2228). allocs\tdeallocs\ttag, exact, per generated
 # program (tests/native_borrow_oracle_test.rs) counted by ALMIDE_ALLOC_COUNT over __almide_main;
 # `~` = calibrated out (two runs disagreed). Regenerate: ALMIDE_UPDATE_ALLOC=1 cargo test --test native_borrow_oracle_test alloc
-249	249	str
-376	376	list
-439	437	strs
-370	370	map
+233	233	str
+348	348	list
+420	418	strs
+355	355	map
 486	486	set
-480	480	bytes
-250	250	rec
+465	465	bytes
+233	233	rec
 678	678	recs
