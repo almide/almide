@@ -134,11 +134,23 @@ fn colliding_int_keys_build_a_map_in_near_linear_time() {
 /// products share the whole high word collide in every table size.
 const FIB: u64 = 0x9E37_79B9_7F4A_7C15;
 
+/// The multiplier of the wasm String hash (`HASH_STR_MUL`).
+const STR_MUL: u64 = 0x9E37_79B1;
+
 #[test]
 fn the_wasm_int_hash_is_the_emitters() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/crates/almide-wasm/src/map_index.rs")).unwrap();
     assert!(src.contains("0x9E37_79B9_7F4A_7C15"), "$mapidx_hash_int no longer uses the Fibonacci constant: update this test");
-    assert!(src.contains("0x811C_9DC5") && src.contains("0x0100_0193"), "$mapidx_hash_str is no longer FNV-1a: update this test");
+    assert!(
+        src.contains("HASH_STR_MUL: u64 = 0x9E37_79B1;") && src.contains("word-wise multiplicative hash"),
+        "$mapidx_hash_str is no longer the word-wise hash times 0x9E37_79B1: update this test's mirror and its inverse"
+    );
+    // The mirror below against the hash's definition, at every tail length.
+    assert_eq!(str_hash_wasm(b""), 0);
+    assert_eq!(str_hash_wasm(b"a"), fold((1 ^ 0x61u64).wrapping_mul(STR_MUL)));
+    let two_words = (16 ^ u64::from_le_bytes(*b"01234567")).wrapping_mul(STR_MUL);
+    assert_eq!(str_hash_wasm(b"0123456789abcdef"), fold((two_words ^ u64::from_le_bytes(*b"89abcdef")).wrapping_mul(STR_MUL)));
+    assert_eq!(str_hash_wasm(b"012345678"), fold(((9 ^ u64::from_le_bytes(*b"01234567")).wrapping_mul(STR_MUL) ^ 0x38).wrapping_mul(STR_MUL)));
 }
 
 #[test]
@@ -151,23 +163,64 @@ fn colliding_int_keys_build_a_wasm_map_in_near_linear_time() {
     check_flood(&run_flood(&keys, true, "wasm"), N as usize, Some(3_000), "wasm Int");
 }
 
-/// `$mapidx_hash_str`: FNV-1a over the bytes, folded once.
-fn fnv_wasm(s: &[u8]) -> u32 {
-    let mut h: u32 = 0x811C_9DC5;
-    for &b in s {
-        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
+fn fold(h: u64) -> u32 {
+    ((h >> 32) ^ h) as u32
+}
+
+/// `$mapidx_hash_str`: the state starts as the byte length; each eight
+/// payload bytes (little-endian), then the 1..=8 bytes left, are XORed in
+/// and the state multiplied by `STR_MUL`; the two halves are folded once.
+fn str_hash_wasm(s: &[u8]) -> u32 {
+    let word = |b: &[u8]| b.iter().rev().fold(0u64, |w, &c| (w << 8) | u64::from(c));
+    let mut h = s.len() as u64;
+    let mut rest = s;
+    while rest.len() > 8 {
+        h = (h ^ word(&rest[..8])).wrapping_mul(STR_MUL);
+        rest = &rest[8..];
     }
-    h ^ (h >> 15)
+    if !rest.is_empty() {
+        h = (h ^ word(rest)).wrapping_mul(STR_MUL);
+    }
+    fold(h)
+}
+
+/// `n` distinct 16-byte keys whose hash state is 0 before the fold, so
+/// every one hashes to 0 and starts at slot 0 of a table of any size. The
+/// second word of a key is the state its first word leaves (`h1`), so the
+/// XOR clears it; the first word is `h1` run backwards through the multiply.
+/// A candidate is kept when all sixteen bytes are ASCII a line of text can
+/// hold: about one in 300.
+fn colliding_wasm_string_keys(n: usize) -> Vec<String> {
+    let inv = inv_mul(STR_MUL);
+    let line_safe = |w: u64| w.to_le_bytes().iter().all(|&b| (1..0x80).contains(&b) && b != b'\n' && b != b'\r');
+    let mut keys = Vec::with_capacity(n);
+    let mut x = 0x1234_5678_9ABC_DEF1u64;
+    while keys.len() < n {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        // Distinct candidates: xorshift64 does not repeat within its period.
+        let h1 = u64::from_le_bytes(x.to_le_bytes().map(|b| 0x21 + b % 94));
+        let w1 = h1.wrapping_mul(inv) ^ 16;
+        if line_safe(w1) {
+            let bytes = [w1.to_le_bytes(), h1.to_le_bytes()].concat();
+            keys.push(String::from_utf8(bytes).expect("ASCII"));
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    assert_eq!(keys.len(), n, "the candidates repeat: two h1 mapped to one key");
+    keys
 }
 
 #[test]
-fn colliding_string_keys_are_answered_exactly_by_the_wasm_ordered_index() {
-    // 3 000 strings sharing the low 13 bits of the hash: every one starts at
-    // the same slot of any table up to 8 192 slots, so the 130th insert walks
-    // past the flood bound and the block moves to the ordered index. The
-    // build is too small to time; the check is that the String comparator
-    // answers removes, overwrites and lookups exactly.
-    const N: usize = 3_000;
-    let keys: Vec<String> = (0u64..).map(|i| format!("k{i:x}")).filter(|k| fnv_wasm(k.as_bytes()) & 0x1FFF == 0x0A5A).take(N).collect();
-    check_flood(&run_flood(&keys, false, "wasm"), N, None, "wasm String");
+fn colliding_string_keys_build_a_wasm_map_in_near_linear_time() {
+    // 150 000 strings with one hash: without the flood bound the build
+    // probes about n²/2 slots, each a string comparison. Past the bound the
+    // block moves to the ordered index, and the String comparator answers
+    // removes, overwrites and lookups exactly.
+    const N: usize = 150_000;
+    let keys = colliding_wasm_string_keys(N);
+    assert!(keys.iter().all(|k| str_hash_wasm(k.as_bytes()) == 0));
+    check_flood(&run_flood(&keys, false, "wasm"), N, Some(3_000), "wasm String");
 }
