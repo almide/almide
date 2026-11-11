@@ -579,6 +579,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
                     crate::render_native_move::payload_carrier(st.tys.get(&base).copied())
                         && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
+                        && !crate::render_native_addr::other_payload_live(func, i, base, &take)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))

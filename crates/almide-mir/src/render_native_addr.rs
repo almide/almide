@@ -307,6 +307,7 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
     PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().clear());
     FIELD_COPIES.with(|m| m.borrow_mut().clear());
 }
 
@@ -349,6 +350,27 @@ pub(crate) fn payload_take_of(v: ValueId) -> Option<(ValueId, String)> {
 /// Every borrowed read noted with the move-out expression `take`.
 pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
     PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == take).map(|(v, _)| *v).collect())
+}
+
+/// Whether some other borrowed payload read of the carrier `base` (one `take`
+/// does not move out) is read on a path after `ops[at]`. A move-out borrows
+/// the whole carrier (`v.take_s3_r0()` takes `&mut self`), which a sibling
+/// payload still lent there forbids: `Link(name, xs, rest) => walk(rest, k +
+/// list.len(xs))` took `rest` while `xs` was a slice of the same block.
+pub(crate) fn other_payload_live(func: &MirFunction, at: usize, base: ValueId, take: &str) -> bool {
+    let mut others: Vec<ValueId> = PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.0 == base && p.1 != take).map(|(v, _)| *v).collect());
+    others.extend(PAYLOAD_VIEWS.with(|m| m.borrow().iter().filter(|(_, b)| **b == base).map(|(v, _)| *v).collect::<Vec<_>>()));
+    others.into_iter().any(|v| crate::mir_liveness::live_after(func, at, v))
+}
+
+thread_local! {
+    static PAYLOAD_VIEWS: std::cell::RefCell<BTreeMap<ValueId, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// A borrowed view of a payload of the carrier `base` that is never moved
+/// out itself (a list slot's slice, a guarded record payload).
+pub(crate) fn note_payload_view(v: ValueId, base: ValueId) {
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().insert(v, base));
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust

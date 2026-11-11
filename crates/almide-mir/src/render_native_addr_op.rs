@@ -348,6 +348,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
             let s = crate::render_native_rec::struct_name(j);
             let r = acc.replacen("()", "_ref()", 1);
             tys.insert(*d, NTy::RecRef(j));
+            note_payload_view(*d, ad.base);
             line!("let mut {}: &{s} = {}.{r}.expect(\"checked variant payload\");", var(*d), var(ad.base));
             return Ok(true);
         }
@@ -395,6 +396,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     ) {
         let r = acc.replacen("()", "_ref()", 1);
         tys.insert(*d, rt);
+        note_payload_view(*d, ad.base);
         line!("let mut {}: {spelled} = {}.{r}.unwrap_or({empty});", var(*d), var(ad.base));
         return Ok(true);
     }

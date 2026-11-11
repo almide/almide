@@ -637,6 +637,7 @@ pub(crate) fn set_moving_args(
                 }
                 let (base, take, reads) = match crate::render_native_addr::payload_take_of(v) {
                     Some((base, take)) => {
+                        if crate::render_native_addr::other_payload_live(func, at, base, &take) { return None; }
                         let reads = crate::render_native_addr::reads_of_take(&take);
                         (base, take, reads)
                     }
