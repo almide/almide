@@ -1055,3 +1055,95 @@ impl IrMutVisitor for Fuser<'_> {
         walk_expr_mut(self, e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use almide_lang::stdlib_info::{bundled_source, BUNDLED_MODULES};
+
+    const KINDS: [(&str, ValueKind); 7] = [
+        ("null", ValueKind::Null),
+        ("bool", ValueKind::Bool),
+        ("int", ValueKind::Int),
+        ("float", ValueKind::Float),
+        ("string", ValueKind::String),
+        ("array", ValueKind::Array),
+        ("object", ValueKind::Object),
+    ];
+
+    /// The family is declared whole: a constructor per kind, and for every
+    /// kind that has a payload the read at a key and the read of the value
+    /// itself. The pass asks for a kind, never for a name, so a cell missing
+    /// here is a shape it silently stops seeing.
+    #[test]
+    fn the_value_family_declares_every_cell() {
+        for (name, kind) in KINDS {
+            assert_eq!(declared_value_op("value", name), Some(ValueOp::Make(kind)), "value.{name}");
+            if kind == ValueKind::Null {
+                continue;
+            }
+            assert_eq!(declared_value_op("value", &format!("get_{name}")), Some(ValueOp::Get(Some(kind))), "value.get_{name}");
+            assert_eq!(declared_value_op("value", &format!("as_{name}")), Some(ValueOp::As(kind)), "value.as_{name}");
+        }
+        assert_eq!(declared_value_op("value", "get"), Some(ValueOp::Get(None)));
+        assert_eq!(declared_value_op("json", "parse"), Some(ValueOp::Parse));
+        assert_eq!(declared_value_op("json", "stringify"), Some(ValueOp::Text));
+    }
+
+    /// A fn without the declaration is nothing to the pass, whatever its
+    /// name or module: the pretty writer, a merge, the pass's own kernels, a
+    /// module the stdlib does not embed.
+    #[test]
+    fn an_undeclared_fn_is_no_value_op() {
+        for (m, f) in [
+            ("json", "stringify_pretty"),
+            ("json", READER),
+            ("json", ARRAY_WRITER),
+            ("value", "merge"),
+            ("value", "__stringify"),
+            ("value", "get_path"),
+            ("list", "map"),
+            ("int", "to_string"),
+            ("not_a_stdlib_module", "int"),
+            ("value", "not_a_fn"),
+        ] {
+            assert_eq!(declared_value_op(m, f), None, "{m}.{f}");
+        }
+    }
+
+    /// Every `@value_op` in the embedded stdlib is one the reader
+    /// understands and sits on a fn of the arity its role has: a malformed
+    /// declaration would otherwise read as "no declaration" and say nothing.
+    #[test]
+    fn every_declaration_in_the_stdlib_is_well_formed() {
+        let mut seen = 0;
+        for module in BUNDLED_MODULES {
+            let Some(program) = bundled_source(module).and_then(almide_lang::parse_cached) else { continue };
+            for d in &program.decls {
+                let Decl::Fn { name, attrs, params, .. } = d else { continue };
+                if !attrs.iter().any(|a| a.name.as_str() == VALUE_OP_ATTR) {
+                    continue;
+                }
+                seen += 1;
+                let op = declared_value_op(module, name.as_str())
+                    .unwrap_or_else(|| panic!("{module}.{name}: a `@value_op` the reader does not understand"));
+                let arity = match op {
+                    ValueOp::Make(ValueKind::Null) => 0,
+                    ValueOp::Make(_) | ValueOp::As(_) | ValueOp::Parse | ValueOp::Text => 1,
+                    ValueOp::Get(_) => 2,
+                };
+                assert_eq!(params.len(), arity, "{module}.{name} is declared {op:?}");
+            }
+        }
+        // 7 constructors, 6 keyed kind reads, the keyed read, 6 kind reads, parse, text.
+        assert_eq!(seen, 22, "the declared family changed size: extend the_value_family_declares_every_cell with it");
+    }
+
+    #[test]
+    fn a_declaration_outside_the_vocabulary_declares_nothing() {
+        assert_eq!(value_op_of(&["make", "int"]), Some(ValueOp::Make(ValueKind::Int)));
+        for bad in [&["make"][..], &["make", "number"], &["get", "int", "x"], &["as"], &["text", "int"], &["write"], &[]] {
+            assert_eq!(value_op_of(bad), None, "{bad:?}");
+        }
+    }
+}
