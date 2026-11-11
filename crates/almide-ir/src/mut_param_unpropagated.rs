@@ -105,12 +105,8 @@ pub(crate) fn fn_spellings(module: Option<&str>, fname: &str) -> Vec<String> {
 /// `!` / `?` in its body is over a call to a fn still in the set, so a
 /// recursive walk whose only propagation is its own call (`walk(buf, n - 1)!`)
 /// is never-err, and one `err(..)` anywhere in a cycle takes the cycle out.
-pub(crate) fn never_err_effect_fn_keys(program: &IrProgram) -> HashSet<String> {
-    never_err_effect_fn_keys_among(program, &|_| true)
-}
-
-/// [`never_err_effect_fn_keys`] over the effect fns `admit` accepts: a fn it
-/// refuses is never a candidate, so a `!` over a call to it counts as a raise.
+/// Only the effect fns `admit` accepts are candidates: a `!` over a call to
+/// one it refuses counts as a raise.
 pub(crate) fn never_err_effect_fn_keys_among(
     program: &IrProgram,
     admit: &dyn Fn(&IrFunction) -> bool,

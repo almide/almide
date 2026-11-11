@@ -1,0 +1,113 @@
+// @contract: C-266
+// ALS-ST6 in a block bound by a `let` / `var` or assigned: the else of a `guard let`
+// returns from the FUNCTION, as it does at every other position. Every leg
+// had made the else's value the block's value and run on past the bind — or
+// refused to build when the else's type was the fn's and not the block's.
+// The front end now opens such a block into the enclosing one, so the guard
+// is the statement each leg already runs: the payload binds for the rest of
+// the block, the block's tail feeds the bind, and the names the block
+// declared end with it.
+fn parse(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("not positive")
+
+fn pick(n: Int) -> Int? = if n % 2 == 0 then some(n / 2) else none
+
+// the else's err propagates to the caller
+fn doubled(n: Int) -> Result[Int, String] = {
+  let k = {
+    guard let v = parse(n) else err("bad input")
+    v * 2
+  }
+  println("bound " + int.to_string(k))
+  ok(k + 1)
+}
+
+// the failure arm sees the error
+fn relabel(n: Int) -> Result[Int, String] = {
+  let k = {
+    guard let v = parse(n) else err(e) => err("relabel: " + e)
+    v + 10
+  }
+  ok(k)
+}
+
+// a plain value leaves the fn; the block's own type is another one
+fn describe(n: Int) -> String = {
+  let k = {
+    guard let v = pick(n) else "odd"
+    v + 1
+  }
+  "half+1 = " + int.to_string(k)
+}
+
+// a `var`, a block else that logs, and names the block shadows
+fn shadowed(n: Int) -> Int = {
+  let x = 7
+  var k = {
+    guard let v = parse(n) else {
+      println("leaving")
+      0 - x
+    }
+    let x = v * 3
+    x + 1
+  }
+  k = k + x
+  k
+}
+
+// one opened block inside another
+fn nested(n: Int) -> String = {
+  let a = {
+    guard let v = parse(n) else "outer"
+    let b = {
+      guard let h = pick(v) else "inner"
+      h * 100
+    }
+    b + v
+  }
+  "value " + int.to_string(a)
+}
+
+// in a loop the else may leave the turn
+fn sum_evens(xs: List[Int]) -> Int = {
+  var t = 0
+  for n in xs {
+    let h = {
+      guard let v = pick(n) else continue
+      v
+    }
+    t = t + h
+  }
+  t
+}
+
+// an assignment takes the block's value the same way
+fn reassigned(n: Int) -> Int = {
+  var k = 1
+  k = {
+    guard let v = parse(n) else -1
+    v + k
+  }
+  k * 10
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok " + int.to_string(n),
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  println(show(doubled(21)))
+  println(show(doubled(0)))
+  println(show(relabel(5)))
+  println(show(relabel(-5)))
+  println(describe(8))
+  println(describe(3))
+  println(int.to_string(shadowed(2)))
+  println(int.to_string(shadowed(-2)))
+  println(nested(4))
+  println(nested(3))
+  println(nested(0))
+  println(int.to_string(sum_evens([2, 3, 4, 5, 10])))
+  println(int.to_string(reassigned(4)))
+  println(int.to_string(reassigned(0)))
+}

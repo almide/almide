@@ -25,14 +25,14 @@
 /// result is ONE statement in the loop body. Nested guards fall out of the
 /// recursion, exactly as in a block.
 fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> {
-    let Some(i) = body.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) else {
+    let Some(i) = body.iter().position(leaves_by_guard_let) else {
         return body.iter().map(|s| lower_stmt(ctx, s)).collect();
     };
     let mut out: Vec<IrStmt> = body[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
     // `lower_block_body` owns the guard rewrite; a Unit-typed, tail-less block
     // over the REST is exactly the shape it expects, and its result is a single
     // expression statement here.
-    let rest = lower_block_body_in(ctx, &body[i..], None, &Ty::Unit, None, BlockPos::LoopBody);
+    let rest = lower_block_body_in(ctx, &body[i..], None, &Ty::Unit, None, BlockPos::LoopBody, None);
     out.push(IrStmt { kind: IrStmtKind::Expr { expr: rest }, span: None });
     out
 }
@@ -54,6 +54,75 @@ enum BlockPos {
     Stmt,
     /// The block is the rest of a loop body.
     LoopBody,
+}
+
+/// Where an opened block's value goes: a `let` / `var` (with its annotation),
+/// or an assignment to an existing variable.
+#[derive(Clone, Copy)]
+enum Sink<'a> {
+    Bind(Option<&'a ast::TypeExpr>, Mutability),
+    Assign,
+}
+
+/// A `let` / `var` / assignment whose value is a block with a `guard let`
+/// among its own statements: `(name, sink, the block's statements, its tail)`.
+/// The else of that guard leaves the FN (ALS-ST6), not the block, so the block
+/// cannot stay a value: [`lower_block_body_in`] opens it into the enclosing
+/// block, where the guard is the statement every leg already runs.
+type OpenedBind<'a> = (&'a str, Sink<'a>, &'a [ast::Stmt], &'a ast::Expr);
+
+fn opened_bind(s: &ast::Stmt) -> Option<OpenedBind<'_>> {
+    let (name, sink, value) = match s {
+        ast::Stmt::Let { name, ty, value, .. } => (name, Sink::Bind(ty.as_ref(), Mutability::Let), value),
+        ast::Stmt::Var { name, ty, value, .. } => (name, Sink::Bind(ty.as_ref(), Mutability::Var), value),
+        ast::Stmt::Assign { name, value, .. } => (name, Sink::Assign, value),
+        _ => return None,
+    };
+    let ast::ExprKind::Block { stmts, expr: Some(tail), .. } = &value.kind else { return None };
+    stmts.iter().any(leaves_by_guard_let).then_some((name.as_str(), sink, stmts.as_slice(), &**tail))
+}
+
+/// Is `s` a `guard let`, or a bind whose block holds one ([`opened_bind`])?
+fn leaves_by_guard_let(s: &ast::Stmt) -> bool {
+    matches!(s, ast::Stmt::GuardLet { .. }) || opened_bind(s).is_some()
+}
+
+/// What follows an opened block ([`opened_bind`]): the sink its tail feeds,
+/// then the rest of the enclosing block, lowered in the enclosing block's
+/// scope (`depth` scopes deep) at the enclosing block's type and position.
+struct Cont<'a> {
+    name: &'a str,
+    sink: Sink<'a>,
+    bind_span: Option<ast::Span>,
+    depth: usize,
+    stmts: &'a [ast::Stmt],
+    tail: Option<&'a ast::Expr>,
+    ty: &'a Ty,
+    span: Option<ast::Span>,
+    pos: BlockPos,
+    outer: Option<&'a Cont<'a>>,
+}
+
+impl Cont<'_> {
+    /// The type and position of the outermost enclosing block: what the
+    /// whole opened chain is lowered as.
+    fn root(&self) -> (&Ty, BlockPos) {
+        match self.outer {
+            Some(o) => o.root(),
+            None => (self.ty, self.pos),
+        }
+    }
+}
+
+/// `{ stmts; tail }` typed `ty`, with a block `tail`'s statements spliced in.
+fn seq_block(ctx: &mut LowerCtx, mut stmts: Vec<IrStmt>, tail: IrExpr, ty: &Ty, span: Option<ast::Span>) -> IrExpr {
+    match tail.kind {
+        IrExprKind::Block { stmts: more, expr } => {
+            stmts.extend(more);
+            ctx.mk(IrExprKind::Block { stmts, expr }, ty.clone(), span)
+        }
+        _ => ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ty.clone(), span),
+    }
 }
 
 /// The block lowering, with the POSITION fact (#1543, #4655). The else of a
@@ -83,8 +152,54 @@ fn lower_block_body_in(
     ty: &Ty,
     span: Option<ast::Span>,
     pos: BlockPos,
+    cont: Option<&Cont<'_>>,
 ) -> IrExpr {
-    if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
+    // Inside an opened block the guard leaves at the ENCLOSING block's type
+    // and position.
+    let (inner_ty, inner_pos) = (ty, pos);
+    let (ty, pos) = cont.map_or((ty, pos), |c| c.root());
+    let Some(i) = stmts.iter().position(leaves_by_guard_let) else {
+        let mut ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
+        let Some(c) = cont else {
+            let ir_expr = tail.map(|e| Box::new(lower_branch(ctx, e, pos != BlockPos::Value)));
+            return ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span);
+        };
+        // The opened block's tail is the bind's value; the block's own names
+        // end here, so the rest lowers with the enclosing block's scopes.
+        let value = match tail {
+            Some(e) => lower_expr(ctx, e),
+            None => ctx.mk(IrExprKind::Unit, Ty::Unit, None),
+        };
+        let hidden = ctx.scopes.split_off(c.depth);
+        let kind = match c.sink {
+            Sink::Bind(annot, mutability) => super::statements::bind_lowered(ctx, c.name, annot, value, mutability, c.bind_span),
+            Sink::Assign => super::statements::assign_lowered(ctx, c.name, value, c.bind_span),
+        };
+        ir_stmts.push(IrStmt { kind, span: c.bind_span });
+        let rest = lower_block_body_in(ctx, c.stmts, c.tail, c.ty, c.span, c.pos, c.outer);
+        ctx.scopes.extend(hidden);
+        return seq_block(ctx, ir_stmts, rest, ty, span);
+    };
+    if let Some((name, sink, b_stmts, b_tail)) = opened_bind(&stmts[i]) {
+        let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+        let opened = Cont {
+            name,
+            sink,
+            bind_span: super::statements::stmt_span(&stmts[i]),
+            depth: ctx.scopes.len(),
+            stmts: &stmts[i + 1..],
+            tail,
+            ty: inner_ty,
+            span,
+            pos: inner_pos,
+            outer: cont,
+        };
+        ctx.push_scope();
+        let body = lower_block_body_in(ctx, b_stmts, Some(b_tail), inner_ty, span, inner_pos, Some(&opened));
+        ctx.pop_scope();
+        return seq_block(ctx, pre, body, ty, span);
+    }
+    {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
         let (name, scrutinee, else_, mutable, fail) = match &stmts[i] {
             ast::Stmt::GuardLet { name, scrutinee, else_, mutable, fail, .. } => (*name, scrutinee, else_, *mutable, fail),
@@ -117,9 +232,9 @@ fn lower_block_body_in(
         ctx.push_scope();
         let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
         let rest = if mutable {
-            lower_guard_var_rest(ctx, name, arm_name, &pat1, &stmts[i + 1..], tail, ty, span, pos)
+            lower_guard_var_rest(ctx, name, arm_name, &pat1, &stmts[i + 1..], tail, inner_ty, span, inner_pos, cont)
         } else {
-            lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, pos)
+            lower_block_body_in(ctx, &stmts[i + 1..], tail, inner_ty, span, inner_pos, cont)
         };
         ctx.pop_scope();
         let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
@@ -184,10 +299,6 @@ fn lower_block_body_in(
         let match_expr =
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty.clone(), span);
         ctx.mk(IrExprKind::Block { stmts: pre, expr: Some(Box::new(match_expr)) }, ty.clone(), span)
-    } else {
-        let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
-        let ir_expr = tail.map(|e| Box::new(lower_branch(ctx, e, pos != BlockPos::Value)));
-        ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span)
     }
 }
 
@@ -216,6 +327,7 @@ fn lower_guard_var_rest(
     ty: &Ty,
     span: Option<ast::Span>,
     pos: BlockPos,
+    cont: Option<&Cont<'_>>,
 ) -> IrExpr {
     let payload_ty = match arm_pat {
         IrPattern::Ok { inner } | IrPattern::Some { inner } => match &**inner {
@@ -235,7 +347,8 @@ fn lower_guard_var_rest(
         },
         span,
     };
-    let body = lower_block_body_in(ctx, rest, tail, ty, span, pos);
+    let body = lower_block_body_in(ctx, rest, tail, ty, span, pos, cont);
+    let ty = cont.map_or(ty, |c| c.root().0);
     ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(body)) }, ty.clone(), span)
 }
 
