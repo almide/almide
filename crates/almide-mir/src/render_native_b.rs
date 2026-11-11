@@ -584,17 +584,27 @@ fn render_declared_floor_call(
     // the runtime's borrowing twin, no copy of the field (v0's decode path).
     let by_ref = match (dst, &floor.borrow_twin) {
         (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
-            Some((twin.as_str(), items))
+            // A derived decode's read of a declared slot: the twin's `_at`
+            // form, which tries that slot before it scans (native_decode_hint).
+            match (crate::native_decode_hint::slot(*d), &floor.hinted_twin) {
+                (Some(slot), Some((at, items))) => Some((at.as_str(), items, Some((twin.as_str(), slot)))),
+                _ => Some((twin.as_str(), items, None)),
+            }
         }
         // An element Option whose list the function borrows: the element
         // lent (`Option<&A>`), no copy of it (render_native_borrow_read).
         (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some() => {
-            Some((twin.as_str(), items))
+            Some((twin.as_str(), items, None))
         }
         _ => None,
     };
     let expr = match by_ref {
-        Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
+        Some((at, _, Some((twin, slot)))) => {
+            let hinted = expr.replacen(&format!("{}(", floor.symbol), &format!("{at}("), 1);
+            crate::native_decode_hint::with_slot(&hinted, at, slot)
+                .unwrap_or_else(|| expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1))
+        }
+        Some((twin, _, None)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
         None => expr,
     };
     let (expr, ret) = match edited {
@@ -606,7 +616,7 @@ fn render_declared_floor_call(
     };
     used_shims.push(crate::native_floor::floor_header());
     match (&floor.twin, by_ref) {
-        (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
+        (_, Some((_, items, _))) => used_shims.extend(items.iter().copied()),
         (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
         _ => used_shims.extend(floor.items.iter().copied()),
     }

@@ -532,6 +532,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     let _callback_types = crate::native_callbacks::HostTypes::enter(&ir);
     prepare_native_top_lets(&mut ir);
     let _fusion = crate::native_fusion::Scope::enter(&ir);
+    let _decode_slots = crate::native_decode_hint::Scope::enter(&ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.

@@ -458,6 +458,7 @@ pub(crate) fn set_borrowed_results(func: &MirFunction, options: BTreeSet<ValueId
     BORROWED_OPTIONS.with(|m| *m.borrow_mut() = options);
     LENT_STR_READS.with(|m| m.borrow_mut().clear());
     let set = borrowed_results(func);
+    crate::native_decode_hint::set(func, &set);
     BORROWED_RESULTS.with(|m| *m.borrow_mut() = set);
     let dups = ref_dups(func);
     REF_DUPS.with(|m| *m.borrow_mut() = dups);

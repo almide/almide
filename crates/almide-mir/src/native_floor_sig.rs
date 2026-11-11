@@ -357,6 +357,19 @@ fn borrow_twin_of(ret: FloorRet, symbol: &str, rust_params: &[String], rust_ret:
     (same && borrowed && from_ref).then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
 }
 
+/// The slot-hinted form of the borrowing twin `twin`: the runtime fn
+/// `<twin>_at`, paired from the signatures — the twin's params followed by
+/// one `usize`, and its result. `None` when the runtime carries no such fn.
+fn hinted_twin_of(twin: &str, rt: &'static RuntimeIndex) -> Option<(String, Vec<&'static str>)> {
+    let hinted = format!("{twin}_at");
+    let (tp, tr) = rust_signature(signature_text(rt, twin)?)?;
+    let (hp, hr) = rust_signature(signature_text(rt, &hinted)?)?;
+    let plain = |t: &String| squash(&without_lifetimes(t));
+    let (hint, rest) = hp.split_last()?;
+    let same = rest.len() == tp.len() && rest.iter().zip(&tp).all(|(a, b)| plain(a) == plain(b)) && plain(&hr) == plain(&tr);
+    (same && plain(hint) == "usize").then(|| Some((hinted.clone(), closure(&hinted, rt).ok()?)))?
+}
+
 /// `f` with its by-reference twin (`FloorFn::by_ref`): the runtime fn
 /// `<symbol>_ref`, paired from the signatures — the same params and result,
 /// except that each Value `f` takes by value it borrows. The render then
@@ -383,7 +396,7 @@ fn with_by_ref_twin(mut f: FloorFn, rust_params: &[String], rust_ret: &str, rt: 
         return f;
     }
     let Ok(items) = closure(&twin, rt) else { return f };
-    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, ordered: f.ordered, borrow_twin: None, by_ref: None };
+    let by_ref = FloorFn { symbol: twin, params, ret: f.ret, items, twin: None, str_only: f.str_only, ordered: f.ordered, borrow_twin: None, hinted_twin: None, by_ref: None };
     f.by_ref = Some(Box::new(by_ref));
     f
 }
