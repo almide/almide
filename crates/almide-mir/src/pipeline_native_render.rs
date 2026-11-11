@@ -498,6 +498,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     crate::native_reduce_fusion::expand(&mut ir);
     crate::native_range_loops::expand(&mut ir);
     native_bundled::snapshot_range_bounds(&mut ir);
+    crate::native_invariant_eq::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;

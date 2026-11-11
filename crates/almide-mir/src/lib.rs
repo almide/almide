@@ -102,6 +102,7 @@ mod native_group_count;
 mod native_reduce_fusion;
 mod native_decode_hint;
 mod native_range_loops;
+mod native_invariant_eq;
 mod native_nested_places;
 mod native_display;
 mod native_structural_records;
