@@ -66,3 +66,7 @@ pub(crate) fn declare_in_source_order(func: &MirFunction, out: &mut String) {
     }
 }
 
+
+#[cfg(test)]
+#[path = "native_slot_order_test.rs"]
+mod tests;
