@@ -216,8 +216,39 @@ fn a_fresh_buffer_bound_to_a_new_name_is_built() {
 #[test]
 fn a_flat_map_result_of_scalars_is_not_copied() {
     let (rust, _) = certified(
-        "fn main() -> Unit = {\n  let data = list.range(0, 9) |> list.flat_map((i) => [float.from(i) * 0.5, float.from(i)])\n  println(int.to_string(list.len(data)))\n}\n",
+        "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  let data = xs |> list.flat_map((i) => [float.from(i) * 0.5, float.from(i)])\n  println(int.to_string(list.len(data)))\n}\n",
     );
     let main = &rust[rust.find("fn main() {").expect("main")..];
     assert!(!main.contains("let mut __copy"), "the result list is copied element by element:\n{main}");
+}
+
+/// The rendered `main` of a program that binds `data` to `chain`.
+fn flat_mapped(chain: &str) -> String {
+    let (rust, _) = certified(&format!(
+        "fn pair(i: Int) -> List[Int] = [i, i + 1]\n\nfn main() -> Unit = {{\n  let n = 9\n  let data = {chain}\n  println(int.to_string(list.len(data)))\n}}\n"
+    ));
+    rust[rust.find("fn main() {").expect("main")..].to_string()
+}
+
+#[test]
+fn a_flat_map_over_a_counted_range_appends_in_a_counted_loop() {
+    for chain in ["list.range(0, n) |> list.flat_map((i) => [i, i * 2])", "list.range(2, n * 2) |> list.flat_map((i) => {\n    let t = i + n\n    [float.from(t), 0.5]\n  })"] {
+        let main = flat_mapped(chain);
+        assert!(!main.contains("almide_rt_list_flat_map"), "`{chain}` still walks an index list:\n{main}");
+        // (A range only the run can size keeps one guarded build: the abort
+        // of a range too long to be a list, `native_range_loops`.)
+        assert!(main.matches("almide_rt_list_range(").count() <= 1, "`{chain}` builds its index list:\n{main}");
+        assert!(main.contains(".extend_from_slice("), "`{chain}` does not append its literal:\n{main}");
+    }
+}
+
+#[test]
+fn a_flat_map_whose_callback_yields_no_literal_or_whose_source_is_a_list_keeps_the_combinator() {
+    for (chain, why) in [
+        ("list.range(0, n) |> list.flat_map((i) => pair(i))", "the callback's result is a call"),
+        ("[1, 2, 3] |> list.flat_map((i) => [i, i])", "the source is a list"),
+    ] {
+        let main = flat_mapped(chain);
+        assert!(main.contains("flat_map"), "`{chain}` was counted ({why}):\n{main}");
+    }
 }

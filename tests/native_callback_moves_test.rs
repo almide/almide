@@ -365,6 +365,38 @@ fn main() -> Unit = {
 }
 "#;
 
+const FLAT_MAPS: &str = r#"var seen = 0
+
+fn noisy(x: Int) -> Int = {
+  println("n${x}")
+  x + 1
+}
+
+fn boom(x: Int) -> Int = if x == 5 then panic("boom5") else x
+
+effect fn main() -> Unit = {
+  let n = 4
+  let a = list.range(0, n) |> list.flat_map((i) => [i, i * 2])
+  let b = list.range(2, 2) |> list.flat_map((i) => [i])
+  let c = list.range(5, 1) |> list.flat_map((i) => [i, i])
+  let d = list.range(0, 3) |> list.flat_map((i) => {
+    let t = noisy(i)
+    seen = seen + t
+    [float.from(t) * 0.5, float.from(seen)]
+  })
+  var m = 3
+  let e = list.range(0, m) |> list.flat_map((i) => {
+    m = m + 10
+    [i > 0, m > 20]
+  })
+  let k = 2
+  let f = list.range(k, k * 3) |> list.flat_map((i) => [i + k, a[i % 2]])
+  println("${a} ${b} ${c} ${d} ${e} ${m} ${f} ${seen}")
+  let g = list.range(3, 8) |> list.flat_map((i) => [boom(i), noisy(i)])
+  println("${g}")
+}
+"#;
+
 #[test]
 fn an_accumulator_moves_through_its_callback_and_prints_the_same_on_both_targets() {
     // Returned unchanged, rebuilt, from one arm only, read after the call
@@ -417,4 +449,12 @@ fn a_cleared_buffer_keeps_its_block_and_prints_the_same_on_both_targets() {
     // three times before it held its sixty bytes.
     let n = net_allocs("buffers-alloc", BUFFERS);
     assert!(n < 100, "the line buffer allocates {n} blocks over 3000 lines: it is built afresh per clear");
+}
+
+#[test]
+fn a_flat_map_over_a_range_prints_the_same_on_both_targets() {
+    // Empty and reversed ranges, a callback that prints, one that moves the
+    // bound it was counted to, and one that aborts midway: the rounds, their
+    // order and what the abort leaves printed are wasm's.
+    prints("flat-maps", FLAT_MAPS, "n0\nn1\nn2\n[0, 0, 1, 2, 2, 4, 3, 6] [] [] [0.5, 1, 1, 3, 1.5, 6] [false, false, true, true, true, true] 33 [4, 0, 5, 0, 6, 0, 7, 0] 6\nn3\nn4\n");
 }
