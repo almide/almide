@@ -118,8 +118,15 @@ fn val(seed: Int, depth: Int) -> String = match pick(seed, 5, 13) {
 fn arr_items(seed: Int, depth: Int, i: Int, n: Int, acc: String) -> String =
   if i >= n then acc
   else {
-    let sep = if i == 0 then "" else if pick(seed, 40 + i, 60) == 0 then " " else ","
-    arr_items(seed, depth, i + 1, n, acc + sep + ws(seed, 50 + i) + val(sub(seed, 10 + i), depth) + ws(seed, 60 + i))
+    let sep = if i == 0 then ""
+    else if pick(seed, 40 + i, 60) == 0 then " " else ","
+    arr_items(
+      seed,
+      depth,
+      i + 1,
+      n,
+      acc + sep + ws(seed, 50 + i) + val(sub(seed, 10 + i), depth) + ws(seed, 60 + i),
+    )
   }
 
 fn arr(seed: Int, depth: Int) -> String = {
@@ -142,7 +149,13 @@ fn obj_items(seed: Int, depth: Int, i: Int, n: Int, acc: String) -> String =
   else {
     // a repeated key now and then: the same field seed twice
     let fs = if i > 0 and pick(seed, 70 + i, 12) == 0 then sub(seed, 20) else sub(seed, 20 + i)
-    obj_items(seed, depth, i + 1, n, acc + (if i == 0 then "" else ",") + ws(seed, 80 + i) + field(fs, depth))
+    obj_items(
+      seed,
+      depth,
+      i + 1,
+      n,
+      acc + (if i == 0 then "" else ",") + ws(seed, 80 + i) + field(fs, depth),
+    )
   }
 
 fn obj(seed: Int, depth: Int) -> String = {
@@ -161,7 +174,11 @@ fn meta(seed: Int) -> String = match pick(seed, 18, 12) {
   6 => "{\"score\":{\"score\":3}}",
   7 => "{ \"other\" : " + val(sub(seed, 6), 2) + " , \"score\" :\t" + int.to_string(pick(seed, 19, 1000)) + " }",
   8 => "null",
-  _ => "{\"score\":" + int.to_string(pick(seed, 19, 1000) - 500) + ",\"active\":" + (if pick(seed, 20, 2) == 0 then "true" else "false") + "}",
+  _ => "{\"score\":" + int.to_string(pick(seed, 19, 1000) - 500) + ",\"active\":" + (if pick(
+    seed,
+    20,
+    2,
+  ) == 0 then "true" else "false") + "}",
 }
 
 fn record(seed: Int) -> String = match pick(seed, 21, 10) {
@@ -171,7 +188,10 @@ fn record(seed: Int) -> String = match pick(seed, 21, 10) {
   3 => "{\"a\":{\"b\":{\"c\":" + int.to_string(pick(seed, 22, 99)) + ",\"d\":" + str(seed) + "}},\"score\":" + int.to_string(pick(seed, 23, 99)) + "}",
   4 => "{\"m\\u0065ta\":" + meta(seed) + "}",
   5 => "{\"meta\":" + meta(seed) + ",\"tags\":" + arr(sub(seed, 7), 2) + ",\"meta\":1}",
-  _ => "{" + ws(seed, 24) + "\"id\"" + ws(seed, 25) + ":" + int.to_string(pick(seed, 26, 50000)) + ",\"name\":" + str(seed) + ",\"tags\":[\"t" + int.to_string(pick(seed, 27, 7)) + "\"," + str(sub(seed, 8)) + "]," + ws(seed, 28) + "\"meta\":" + ws(seed, 29) + meta(seed) + ws(seed, 30) + "}",
+  _ => "{" + ws(seed, 24) + "\"id\"" + ws(seed, 25) + ":" + int.to_string(pick(seed, 26, 50000)) + ",\"name\":" + str(seed) + ",\"tags\":[\"t" + int.to_string(pick(seed, 27, 7)) + "\"," + str(sub(seed, 8)) + "]," + ws(
+    seed,
+    28,
+  ) + "\"meta\":" + ws(seed, 29) + meta(seed) + ws(seed, 30) + "}",
 }
 
 fn elems(seed: Int, i: Int, n: Int, acc: String) -> String =
@@ -193,7 +213,10 @@ fn body(seed: Int) -> String = match pick(seed, 34, 24) {
   5 => deep(1001),
   6 => string.repeat("[{\"a\":", 150) + "1" + string.repeat("}]", 150),
   7 => "",
-  _ => ws(seed, 35) + "[" + ws(seed, 36) + elems(seed, 0, pick(seed, 37, 7), "") + "]" + ws(seed, 38),
+  _ => ws(seed, 35) + "[" + ws(seed, 36) + elems(seed, 0, pick(seed, 37, 7), "") + "]" + ws(
+    seed,
+    38,
+  ),
 }
 
 fn doc(seed: Int) -> String = {
@@ -216,7 +239,15 @@ fn leaf_ref(v: Value, keys: List[String], i: Int, d: Int) -> Int =
 
 fn col_ref(xs: List[Value], keys: List[String], d: Int, i: Int, acc: List[Int]) -> List[Int] =
   if i >= list.len(xs) then acc
-  else col_ref(xs, keys, d, i + 1, acc + [leaf_ref(list.get(xs, i) ?? value.null(), keys, 0, d)])
+  else col_ref(
+    xs,
+    keys,
+    d,
+    i + 1,
+    acc + [
+      leaf_ref(list.get(xs, i) ?? value.null(), keys, 0, d)
+    ],
+  )
 
 fn tree(text: String, keys: List[String], d: Int) -> List[Int] = match json.parse(text) {
   ok(v) => match value.as_array(v) {
@@ -234,11 +265,12 @@ fn fused_a(text: String) -> List[Int] = {
   (value.as_array(back) ?? []) |> list.map(score_a)
 }
 
-fn fused_b(text: String) -> List[Int] =
-  (value.as_array(json.parse(text) ?? value.null()) ?? []) |> list.map((r) => value.get_int(r, "score") ?? -1)
+fn fused_b(text: String) -> List[Int] = (value.as_array(json.parse(text) ?? value.null()) ?? []) |> list.map((r) => value.get_int(r, "score") ?? -1)
 
-fn score_c(r: Value) -> Int =
-  value.get_int(value.get(value.get(r, "a") ?? value.null(), "b") ?? value.null(), "c") ?? 7
+fn score_c(r: Value) -> Int = value.get_int(
+  value.get(value.get(r, "a") ?? value.null(), "b") ?? value.null(),
+  "c",
+) ?? 7
 
 fn fused_c(text: String) -> List[Int] = {
   let back = json.parse(text) ?? value.null()
@@ -246,10 +278,11 @@ fn fused_c(text: String) -> List[Int] = {
   col
 }
 
-fn agree(text: String) -> Bool =
-  fused_a(text) == tree(text, ["meta", "score"], 0)
-    and fused_b(text) == tree(text, ["score"], -1)
-    and fused_c(text) == tree(text, ["a", "b", "c"], 7)
+fn agree(text: String) -> Bool = fused_a(text) == tree(text, ["meta", "score"], 0) and fused_b(text) == tree(
+  text,
+  ["score"],
+  -1,
+) and fused_c(text) == tree(text, ["a", "b", "c"], 7)
 
 fn first_bad(i: Int, n: Int) -> String =
   if i >= n then ""
@@ -266,7 +299,16 @@ test "the directed reader reads generated documents as the tree does" {
 
 test "the directed reader on the documents written by hand" {
   let good = "[{\"id\":1,\"meta\":{\"score\":5,\"active\":true}}, {\"meta\":{\"score\":-12}} ,{\"meta\":{}}, 3, \"s\", null, [], {}]"
-  assert_eq(fused_a(good), [5, -12, 0, 0, 0, 0, 0, 0])
+  assert_eq(fused_a(good), [
+    5,
+    -12,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ])
   assert_eq(fused_a("[]"), [])
   assert_eq(fused_a(" [ ] "), [])
   assert_eq(fused_a("[{\"meta\":{\"score\":1.0}}]"), [0])
@@ -280,7 +322,10 @@ test "the directed reader on the documents written by hand" {
   assert_eq(fused_a("{\"meta\":{\"score\":4}}"), [])
   assert_eq(fused_a(""), [])
   assert_eq(fused_b("[{\"score\":3},{\"scor\":3},{\"score\":\"3\"}]"), [3, -1, -1])
-  assert_eq(fused_c("[{\"a\":{\"b\":{\"c\":1}}},{\"a\":{\"b\":2}},{\"a\":[{\"b\":{\"c\":3}}]}]"), [1, 7, 7])
+  assert_eq(
+    fused_c("[{\"a\":{\"b\":{\"c\":1}}},{\"a\":{\"b\":2}},{\"a\":[{\"b\":{\"c\":3}}]}]"),
+    [1, 7, 7],
+  )
 }
 
 // ── the writer ──────────────────────────────────────────────────────────
@@ -306,7 +351,8 @@ fn ratio(i: Int) -> Float = match i % 6 {
 }
 
 fn opaque(i: Int) -> Value =
-  if i % 2 == 0 then value.string(label(i)) else value.array([value.int(i), value.null()])
+  if i % 2 == 0 then value.string(label(i))
+  else value.array([value.int(i), value.null()])
 
 fn rec(i: Int) -> Value = value.object([
   ("id", value.int(i)),
@@ -318,7 +364,7 @@ fn rec(i: Int) -> Value = value.object([
   ("meta", value.object([("score", value.int(i * 37 % 1000)), ("none", value.null()), ("f", value.float(ratio(i)))])),
   ("raw", opaque(i)),
   ("empty", value.object([])),
-  ("list", value.array([])),
+  ("list", value.array([]))
 ])
 
 fn pair(a: Int, b: Int) -> Value = {
@@ -370,7 +416,10 @@ test "a producer that calls producers is written as the runtime writer writes it
   assert_eq(list.len(value.as_array(held) ?? []), 60)
   assert_eq(json.stringify(value.array(list.range(0, 60) |> list.map(wrap))), json.stringify(held))
   let pairs = value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))
-  assert_eq(json.stringify(pairs), written(value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))))
+  assert_eq(
+    json.stringify(pairs),
+    written(value.array(list.range(0, 9) |> list.map((i) => pair_of(i)))),
+  )
 }
 
 fn pair_of(i: Int) -> Value = pair(i * 7 % 5, i)
