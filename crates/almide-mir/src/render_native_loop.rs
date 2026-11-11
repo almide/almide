@@ -111,6 +111,7 @@ fn render_fn(
     crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
     crate::render_native_slices::begin(func, &tys);
     crate::render_native_inplace::begin(func);
+    crate::render_native_tail_return::begin(func);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
@@ -185,6 +186,7 @@ fn render_fn(
         prev_start = st.out.len();
         let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
         crate::render_native_inplace::rewrite(i, &mut st.out, prev_start, &mut *st.used_shims);
+        crate::render_native_tail_return::mark(i, &mut st.out, prev_start);
         // A shared cell's in-place borrow ends with its last read.
         for g in crate::render_native_keyed::guards_through(i) {
             for _ in 0..st.indent {
@@ -204,6 +206,7 @@ fn render_fn(
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
     crate::render_native_bounds::finish(func);
+    crate::render_native_tail_return::finish(func, sigs, is_main, &st.tys, &mut st.out);
     finish_native_fn(func, sigs, is_main, &mut st.tys, st.out)
 }
 
