@@ -56,21 +56,30 @@ enum BlockPos {
     LoopBody,
 }
 
-/// A `let` / `var` whose value is a block with a `guard let` among its own
-/// statements: `(name, annotation, the block's statements, its tail, var?)`.
+/// Where an opened block's value goes: a `let` / `var` (with its annotation),
+/// or an assignment to an existing variable.
+#[derive(Clone, Copy)]
+enum Sink<'a> {
+    Bind(Option<&'a ast::TypeExpr>, Mutability),
+    Assign,
+}
+
+/// A `let` / `var` / assignment whose value is a block with a `guard let`
+/// among its own statements: `(name, sink, the block's statements, its tail)`.
 /// The else of that guard leaves the FN (ALS-ST6), not the block, so the block
 /// cannot stay a value: [`lower_block_body_in`] opens it into the enclosing
 /// block, where the guard is the statement every leg already runs.
-type OpenedBind<'a> = (&'a str, Option<&'a ast::TypeExpr>, &'a [ast::Stmt], &'a ast::Expr, Mutability);
+type OpenedBind<'a> = (&'a str, Sink<'a>, &'a [ast::Stmt], &'a ast::Expr);
 
 fn opened_bind(s: &ast::Stmt) -> Option<OpenedBind<'_>> {
-    let (name, ty, value, mutability) = match s {
-        ast::Stmt::Let { name, ty, value, .. } => (name, ty, value, Mutability::Let),
-        ast::Stmt::Var { name, ty, value, .. } => (name, ty, value, Mutability::Var),
+    let (name, sink, value) = match s {
+        ast::Stmt::Let { name, ty, value, .. } => (name, Sink::Bind(ty.as_ref(), Mutability::Let), value),
+        ast::Stmt::Var { name, ty, value, .. } => (name, Sink::Bind(ty.as_ref(), Mutability::Var), value),
+        ast::Stmt::Assign { name, value, .. } => (name, Sink::Assign, value),
         _ => return None,
     };
     let ast::ExprKind::Block { stmts, expr: Some(tail), .. } = &value.kind else { return None };
-    stmts.iter().any(leaves_by_guard_let).then_some((name.as_str(), ty.as_ref(), stmts.as_slice(), &**tail, mutability))
+    stmts.iter().any(leaves_by_guard_let).then_some((name.as_str(), sink, stmts.as_slice(), &**tail))
 }
 
 /// Is `s` a `guard let`, or a bind whose block holds one ([`opened_bind`])?
@@ -78,13 +87,12 @@ fn leaves_by_guard_let(s: &ast::Stmt) -> bool {
     matches!(s, ast::Stmt::GuardLet { .. }) || opened_bind(s).is_some()
 }
 
-/// What follows an opened block ([`opened_bind`]): the bind its tail feeds,
+/// What follows an opened block ([`opened_bind`]): the sink its tail feeds,
 /// then the rest of the enclosing block, lowered in the enclosing block's
 /// scope (`depth` scopes deep) at the enclosing block's type and position.
 struct Cont<'a> {
     name: &'a str,
-    annot: Option<&'a ast::TypeExpr>,
-    mutability: Mutability,
+    sink: Sink<'a>,
     bind_span: Option<ast::Span>,
     depth: usize,
     stmts: &'a [ast::Stmt],
@@ -163,18 +171,20 @@ fn lower_block_body_in(
             None => ctx.mk(IrExprKind::Unit, Ty::Unit, None),
         };
         let hidden = ctx.scopes.split_off(c.depth);
-        let kind = super::statements::bind_lowered(ctx, c.name, c.annot, value, c.mutability, c.bind_span);
+        let kind = match c.sink {
+            Sink::Bind(annot, mutability) => super::statements::bind_lowered(ctx, c.name, annot, value, mutability, c.bind_span),
+            Sink::Assign => super::statements::assign_lowered(ctx, c.name, value, c.bind_span),
+        };
         ir_stmts.push(IrStmt { kind, span: c.bind_span });
         let rest = lower_block_body_in(ctx, c.stmts, c.tail, c.ty, c.span, c.pos, c.outer);
         ctx.scopes.extend(hidden);
         return seq_block(ctx, ir_stmts, rest, ty, span);
     };
-    if let Some((name, annot, b_stmts, b_tail, mutability)) = opened_bind(&stmts[i]) {
+    if let Some((name, sink, b_stmts, b_tail)) = opened_bind(&stmts[i]) {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
         let opened = Cont {
             name,
-            annot,
-            mutability,
+            sink,
             bind_span: super::statements::stmt_span(&stmts[i]),
             depth: ctx.scopes.len(),
             stmts: &stmts[i + 1..],
