@@ -1,0 +1,145 @@
+// @contract: C-132
+// #4668: a fn with a `mut` parameter raises through its declared Result
+// whatever the error type is. A `x!` inside it returns the err to the caller,
+// and a write made before the err is visible there (#2917). The wasm leg
+// carried the buffer on the err arm only for a `String` error; with a variant,
+// a record or an Int error the fn's Result was wrapped in the `(Result, Buf)`
+// tuple, a `!` in its body had no Result to return through, and the module
+// ended the process at the first err where native returned it.
+type Fail =
+  | Plain
+  | Why(String)
+
+type Er = { code: Int, msg: String }
+
+fn show(e: Fail) -> String = match e {
+  Plain => "plain",
+  Why(m) => m,
+}
+
+fn chk(x: Int) -> Result[Int, Fail] =
+  if x > 1 then err(Why("big " + int.to_string(x))) else ok(x)
+
+fn chk_rec(x: Int) -> Result[Int, Er] =
+  if x > 1 then err({ code: x, msg: "over" })
+  else ok(x)
+
+fn chk_int(x: Int) -> Result[Int, Int] = if x > 1 then err(x * 10) else ok(x)
+
+// a propagated `x!` bound by a let, before the write
+fn add(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
+  let v = chk(x)!
+  list.push(acc, v)
+  ok(list.len(acc))
+}
+
+// a write, then the `x!`: the write stays visible on the err path
+fn push_then_check(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
+  list.push(acc, x)
+  let v = chk(x)!
+  ok(v + list.len(acc))
+}
+
+// the `x!` as the argument of the write itself
+fn push_checked(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
+  list.push(acc, chk(x)!)
+  ok(list.len(acc))
+}
+
+// the `x!` in a loop body: the writes of the earlier turns stay
+fn fill(mut acc: List[Int], n: Int) -> Result[Int, Fail] = {
+  for i in 0..<n {
+    let v = chk(i)!
+    list.push(acc, v)
+  }
+  ok(list.len(acc))
+}
+
+// a guard's err exit and an err tail
+fn guarded(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
+  list.push(acc, x)
+  guard x < 3 else err(Plain)
+  if x > 1 then err(Why("tail")) else ok(list.len(acc))
+}
+
+// two levels: the inner fn's err crosses the outer fn's `!`
+fn outer(mut acc: List[Int], x: Int) -> Result[Int, Fail] = {
+  let n = push_then_check(acc, x)!
+  list.push(acc, 100)
+  ok(n + list.len(acc))
+}
+
+// two `mut` parameters, a record error
+fn both(mut acc: List[Int], mut log: List[String], x: Int) -> Result[Int, Er] = {
+  list.push(log, "x" + int.to_string(x))
+  let v = chk_rec(x)!
+  list.push(acc, v)
+  ok(list.len(acc) + list.len(log))
+}
+
+// an effect fn, an Int error
+effect fn tally(mut acc: List[Int], x: Int) -> Result[Int, Int] = {
+  list.push(acc, x)
+  let v = chk_int(x)!
+  ok(v + list.len(acc))
+}
+
+fn report(tag: String, r: Result[Int, Fail], xs: List[Int]) -> String = {
+  let body = match r {
+    ok(n) => "ok " + int.to_string(n),
+    err(e) => "err " + show(e),
+  }
+  tag + ": " + body + " len " + int.to_string(list.len(xs))
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  for k in 0..<4 {
+    let r: Result[Int, Fail] = add(xs, k)
+    println(report("add", r, xs))
+  }
+  var ys: List[Int] = []
+  for k in 0..<4 {
+    let r: Result[Int, Fail] = push_then_check(ys, k)
+    println(report("push_then_check", r, ys))
+  }
+  var zs: List[Int] = []
+  for k in 0..<4 {
+    let r: Result[Int, Fail] = push_checked(zs, k)
+    println(report("push_checked", r, zs))
+  }
+  var fs: List[Int] = []
+  for k in 1..<4 {
+    let r: Result[Int, Fail] = fill(fs, k)
+    println(report("fill", r, fs))
+  }
+  var gs: List[Int] = []
+  for k in 0..<4 {
+    let r: Result[Int, Fail] = guarded(gs, k)
+    println(report("guarded", r, gs))
+  }
+  var os: List[Int] = []
+  for k in 0..<4 {
+    let r: Result[Int, Fail] = outer(os, k)
+    println(report("outer", r, os))
+  }
+  var bs: List[Int] = []
+  var lg: List[String] = []
+  for k in 0..<4 {
+    match both(bs, lg, k) {
+      ok(n) => println("both: ok " + int.to_string(n)),
+      err(e) => println("both: err " + e.msg + " " + int.to_string(e.code)),
+    }
+    println("both: len " + int.to_string(list.len(bs)) + " log " + list.join(lg, ","))
+  }
+  var ts: List[Int] = []
+  for k in 0..<4 {
+    match tally(ts, k) {
+      ok(n) => println("tally: ok " + int.to_string(n)),
+      err(c) => println("tally: err " + int.to_string(c)),
+    }
+    println("tally: len " + int.to_string(list.len(ts)))
+  }
+  let d = add(xs, 9) ?? -1
+  println("fallback " + int.to_string(d) + " len " + int.to_string(list.len(xs)))
+}
