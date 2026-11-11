@@ -30,9 +30,10 @@ fn count(main: &str, call: &str) -> usize {
     main.lines().filter(|l| l.contains(call)).count()
 }
 
-/// The separate writes of `main`: a `map.set`, consuming or in place.
+/// The separate writes of `main`: a `map.set`, consuming or in place, the
+/// key handed over or by reference.
 fn sets(main: &str) -> usize {
-    count(main, "almide_rt_map_set(") + count(main, "almide_rt_map_set_mut(")
+    count(main, "almide_rt_map_set(") + count(main, "almide_rt_map_set_mut(") + count(main, "almide_rt_map_set_mut_by_ref(")
 }
 
 const WORDS: &str = "[\"a\", \"b\", \"a\"]";
