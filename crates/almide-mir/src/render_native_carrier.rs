@@ -505,6 +505,18 @@ impl CarrierCx<'_> {
                 (p, format!("match {b} {{ Some(v) => v.clone(), None => {absent} }}"))
             } else if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
                 (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
+            } else if self.st.moves.contains(&d)
+                && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_)))
+                && has_default(p)
+                && !crate::render_native_addr::payload_lent(ad.base)
+                && !crate::render_native_move::drill_no_moves()
+            {
+                // The last read of the payload before the carrier is rebound
+                // or read at its tag again (a loop's `o = n.next` walk): the
+                // payload leaves and its `Default` stays, as a record's field
+                // does, so the carrier still reads `Some`. The copy was the
+                // whole rest of a chain on every step.
+                (p, format!("match &mut {b} {{ Some(v) => std::mem::take(v), None => {absent} }}"))
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }

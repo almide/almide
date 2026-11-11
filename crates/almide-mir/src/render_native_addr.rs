@@ -380,6 +380,13 @@ pub(crate) fn may_move_payload(planned: bool, base: ValueId) -> bool {
     planned && !PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
 }
 
+/// Whether any payload of the carrier `base` was read by reference (a read
+/// with a noted move-out, or a view): a later move out of it would empty
+/// what that reference still names.
+pub(crate) fn payload_lent(base: ValueId) -> bool {
+    PAYLOAD_TAKES.with(|m| m.borrow().values().any(|p| p.0 == base)) || PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+}
+
 /// A borrowed view of a payload of the carrier `base` that is never moved
 /// out itself (a list slot's slice, a guarded record payload).
 pub(crate) fn note_payload_view(v: ValueId, base: ValueId) {
