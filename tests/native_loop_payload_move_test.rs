@@ -21,6 +21,14 @@
 //!
 //! The round in which a sibling payload IS read after the move keeps its copy:
 //! tests/native_spine_clone_test.rs (`Link(name, xs, rest)` walks).
+//!
+//! The same for an Option's payload: `match o { some(n) => walk(n.next, ..) }`
+//! over `type O = { v: Int, next: O? }` read the record out of the Option by
+//! copying it — the whole rest of the chain on every step (200,000 links:
+//! about 14 minutes where the standard codegen took 0.03 s) — because a
+//! carrier's payload moved out only at the carrier's very last read, and a
+//! loop's carrier is rebound and read again. It now leaves as a record's
+//! field does (its `Default` stays, the tag still reads `Some`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -156,4 +164,55 @@ fn the_folds_print_the_same_on_wasm() {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The walk of tests/recursive_type_depth_test.rs over an Option-linked record.
+fn option_chain(n: usize) -> String {
+    format!(
+        r#"type O = {{ v: Int, next: O? }}
+
+fn sum_o(o: O?, acc: Int) -> Int = match o {{
+  some(n) => sum_o(n.next, acc + n.v),
+  none => acc,
+}}
+
+effect fn main() -> Unit = {{
+  let o = list.range(0, {n}) |> list.fold(O {{ v: 0, next: none }}, (acc, i) => O {{ v: i, next: some(acc) }})
+  println("${{sum_o(some(o), 0)}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn an_option_chain_walk_moves_each_link_out() {
+    let rust = almide_mir::pipeline::try_render_rust_source(&option_chain(8)).unwrap_or_else(|e| panic!("left the certified render: {e:?}"));
+    let at = rust.find("fn almd_sum_o(").expect("the walk");
+    let body = &rust[at..at + rust[at..].find("\n}\n").expect("its end")];
+    assert!(body.contains("Some(v) => std::mem::take(v)"), "the link is not moved out of its Option:\n{body}");
+    assert!(!body.contains(".clone()"), "the walk copies a value:\n{body}");
+}
+
+#[test]
+fn an_option_chain_walk_allocates_in_proportion_to_its_links() {
+    let (small, large) = (allocs("chain-small", &option_chain(1000)), allocs("chain-large", &option_chain(4000)));
+    // Four times the links: four times the blocks, sixteen times when every
+    // step copies the rest of the chain.
+    assert!(large < small * 6, "{large} blocks at 4,000 links against {small} at 1,000 — a copy of the chain per step?");
+}
+
+#[test]
+fn an_option_chain_walk_prints_the_same_on_wasm() {
+    if Command::new("wasmtime").arg("--version").output().is_err() {
+        eprintln!("skip: wasmtime is not installed");
+        return;
+    }
+    let dir = scratch("chain");
+    let src = dir.join("prog.almd");
+    std::fs::write(&src, option_chain(3000)).unwrap();
+    for target in [None, Some("wasm")] {
+        let (stdout, stderr) = run(&src, target, false);
+        assert_eq!(stdout, "4498500\n", "on {target:?}:\n{stderr}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
