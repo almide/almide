@@ -238,6 +238,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_borrowed_string_key_twin_is_paired_from_the_signatures() {
+        let twin = |s: &str| crate::native_floor::str_key_twin(s).map(|t| t.0);
+        assert_eq!(twin("almide_rt_map_set").as_deref(), Some("almide_rt_map_set_str"));
+        // No `_str` twin, or one whose key is not the body's type parameter.
+        assert_eq!(twin("almide_rt_map_get"), None);
+        assert_eq!(twin("almide_rt_map_set_str"), None);
+    }
+
+    #[test]
     fn an_identifier_is_matched_whole() {
         assert!(names("f(v1, &v12)", "v1"));
         assert!(!names("f(v12, v21)", "v1"));
