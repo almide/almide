@@ -597,16 +597,6 @@ fn tco_empty_for(ty: &Ty) -> Option<IrExpr> {
         Ty::Applied(TypeConstructorId::List, _) => {
             Some(tco_ir(IrExprKind::List { elements: vec![] }, ty.clone()))
         }
-        // A map placeholder on the native owned slots: an empty map, which a
-        // base replaces (and the replacement releases) before anything reads it.
-        Ty::Applied(TypeConstructorId::Map, _) if crate::lower::owned_tco_slots() => Some(tco_ir(
-            IrExprKind::Call {
-                target: CallTarget::Module { module: sym("map"), func: sym("new"), def_id: None },
-                args: vec![],
-                type_args: vec![],
-            },
-            ty.clone(),
-        )),
         // Native owned slots use the declared Option carrier. None owns no
         // payload and is replaced by a base case before the result is read.
         Ty::Applied(TypeConstructorId::Option, _) if crate::lower::owned_tco_slots() => {
@@ -732,33 +722,31 @@ fn order_heap_accs_by_read_dep(
 
 /// Walk tail-position leaves: a self-call pushes its args to `calls`; any other tail leaf is a
 /// base (pushed to `bases`), including one that recurses in a non-tail position. `None` if a
-/// `match` subject recurses, unless `mixed` admits real calls beside the loop's tail calls: then
-/// the subject's self call stays a real call in the loop body, as a recursing base does.
+/// `match` subject recurses.
 fn tco_collect<'a>(
     body: &'a IrExpr,
     fn_name: &str,
-    mixed: bool,
     calls: &mut Vec<&'a [IrExpr]>,
     bases: &mut Vec<&'a IrExpr>,
 ) -> Option<()> {
     match &body.kind {
         IrExprKind::If { then, else_, .. } => {
-            tco_collect(then, fn_name, mixed, calls, bases)?;
-            tco_collect(else_, fn_name, mixed, calls, bases)
+            tco_collect(then, fn_name, calls, bases)?;
+            tco_collect(else_, fn_name, calls, bases)
         }
         // A `match` tail (the unwrap-`!` desugar's `match e { ok(v) => …, err(x) => err(x) }`): the
         // SUBJECT must not itself recurse (a self-call in `e` is not a tail), then each arm is a tail
         // leaf — the ok-arm may recurse, the err-arm is a base. Mirrors the `if`-arm recursion.
         IrExprKind::Match { subject, arms } => {
-            if !mixed && tco_contains_self(subject, fn_name) {
+            if tco_contains_self(subject, fn_name) {
                 return None;
             }
             for a in arms {
-                tco_collect(&a.body, fn_name, mixed, calls, bases)?;
+                tco_collect(&a.body, fn_name, calls, bases)?;
             }
             Some(())
         }
-        IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, mixed, calls, bases),
+        IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, calls, bases),
         // The frontend's auto-`?` wraps a tail self-call as `Try{Call self}` (and a spelled
         // `!` as `Unwrap{Call self}`) — #557's "TCO must see THROUGH" requirement: the
         // propagation is the identity on the self-call's own same-repr Result, so the
