@@ -13615,7 +13615,6 @@ fn stringify_pretty(v: Value) -> String = _
 
 
 
-
 fn __array_text(parts: List[String]) -> String = "[" + list.join(parts, ",") + "]"
 
 
@@ -13637,12 +13636,13 @@ fn __array_text(parts: List[String]) -> String = "[" + list.join(parts, ",") + "
 
 fn __jr_ws(b: Bytes, p0: Int, e: Int) -> Int = {
   var p = p0
-  while p < e and (b[p] == 32 or b[p] == 10 or b[p] == 13 or b[p] == 9) { p = p + 1 }
+  while p < e and (b[p] == 32 or b[p] == 10 or b[p] == 13 or b[p] == 9) {
+    p = p + 1
+  }
   p
 }
 
-fn __jr_simple_esc(c: Int) -> Bool =
-  c == 34 or c == 92 or c == 47 or c == 98 or c == 102 or c == 110 or c == 114 or c == 116
+fn __jr_simple_esc(c: Int) -> Bool = c == 34 or c == 92 or c == 47 or c == 98 or c == 102 or c == 110 or c == 114 or c == 116
 
 
 
@@ -13650,15 +13650,23 @@ fn __jr_str(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
   var p = p0 + 1
   var r = -2
   while r == -2 {
-    if p >= e then { r = -1 }
-    else {
+    if p >= e then {
+      r = -1
+    } else {
       let c = b[p]
-      if c == 34 then { r = p + 1 }
-      else if c == 92 then {
-        if esc and p + 1 < e and __jr_simple_esc(b[p + 1]) then { p = p + 2 } else { r = -1 }
+      if c == 34 then {
+        r = p + 1
+      } else if c == 92 then {
+        if esc and p + 1 < e and __jr_simple_esc(b[p + 1]) then {
+          p = p + 2
+        } else {
+          r = -1
+        }
+      } else if c < 32 or c >= 239 then {
+        r = -1
+      } else {
+        p = p + 1
       }
-      else if c < 32 or c >= 239 then { r = -1 }
-      else { p = p + 1 }
     }
   }
   r
@@ -13666,7 +13674,9 @@ fn __jr_str(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
 
 fn __jr_digits(b: Bytes, p0: Int, e: Int) -> Int = {
   var p = p0
-  while p < e and b[p] >= 48 and b[p] <= 57 { p = p + 1 }
+  while p < e and b[p] >= 48 and b[p] <= 57 {
+    p = p + 1
+  }
   p
 }
 
@@ -13695,7 +13705,9 @@ fn __jr_int(b: Bytes, p0: Int, q: Int) -> Int = {
 
 fn __jr_span_eq(b: Bytes, x: Int, y: Int, len: Int) -> Bool = {
   var i = 0
-  while i < len and b[x + i] == b[y + i] { i = i + 1 }
+  while i < len and b[x + i] == b[y + i] {
+    i = i + 1
+  }
   i == len
 }
 
@@ -13703,15 +13715,22 @@ fn __jr_seen(b: Bytes, ks: Int, kl: Int, st: List[Int], lo: Int, hi: Int) -> Boo
   var i = lo
   var hit = false
   while i < hi and not hit {
-    if st[i + 1] == kl and __jr_span_eq(b, st[i], ks, kl) then { hit = true } else { i = i + 2 }
+    if st[i + 1] == kl and __jr_span_eq(b, st[i], ks, kl) then {
+      hit = true
+    } else {
+      i = i + 2
+    }
   }
   hit
 }
 
 fn __jr_key_is(b: Bytes, ks: Int, kl: Int, k: Bytes) -> Bool = {
-  if kl != bytes.len(k) then false else {
+  if kl != bytes.len(k) then false
+  else {
     var i = 0
-    while i < kl and b[ks + i] == k[i] { i = i + 1 }
+    while i < kl and b[ks + i] == k[i] {
+      i = i + 1
+    }
     i == kl
   }
 }
@@ -13721,7 +13740,7 @@ fn __jr_lit(b: Bytes, p: Int, e: Int, c1: Int, c2: Int, c3: Int) -> Int =
 
 
 
-fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]] = {
+fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> List[Int]? = {
   let kb = 2 + 3 * int.min(e, 256)
   let cap = kb + 2 * int.min(e / 3 + 1, 512)
   var st = list.repeat(0, cap)
@@ -13737,16 +13756,22 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
   var state = if n == 0 or p >= e or b[p] != 91 then -1 else 0
   while state >= 0 and state < 3 {
     if state == 0 then {
-      if p >= e then { state = -1 } else {
+      if p >= e then {
+        state = -1
+      } else {
         let c = b[p]
         if c == 34 then {
           p = __jr_str(b, p, e, true)
           state = if p < 0 then -1 else 2
         } else if c == 123 or c == 91 then {
-          if sp + 3 > kb then { state = -1 } else {
+          if sp + 3 > kb then {
+            state = -1
+          } else {
             let isobj = c == 123
             st[sp] = if isobj then 1 else 0
-            st[sp + 1] = if not isobj then 0 else if sp == 5 then 1 else if pending > 0 and pending < n then pending + 1 else 0
+            st[sp + 1] = if not isobj then 0
+            else if sp == 5 then 1
+            else if pending > 0 and pending < n then pending + 1 else 0
             st[sp + 2] = kp
             sp = sp + 3
             p = __jr_ws(b, p + 1, e)
@@ -13773,7 +13798,9 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
           }
         } else {
           let r = __jr_num(b, p, e)
-          if r < 0 then { state = -1 } else {
+          if r < 0 then {
+            state = -1
+          } else {
             if pending == n and r % 2 == 1 then {
               val = __jr_int(b, p, r / 2)
               found = true
@@ -13785,17 +13812,23 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
         pending = 0
       }
     } else if state == 1 then {
-      if p >= e or b[p] != 34 then { state = -1 } else {
+      if p >= e or b[p] != 34 then {
+        state = -1
+      } else {
         let ke = __jr_str(b, p, e, false)
         let ks = p + 1
         let kl = ke - p - 2
         let base = st[sp - 1]
-        if ke < 0 or kp + 2 > cap or kp - base >= 128 or __jr_seen(b, ks, kl, st, base, kp) then { state = -1 } else {
+        if ke < 0 or kp + 2 > cap or kp - base >= 128 or __jr_seen(b, ks, kl, st, base, kp) then {
+          state = -1
+        } else {
           st[kp] = ks
           st[kp + 1] = kl
           kp = kp + 2
           p = __jr_ws(b, ke, e)
-          if p >= e or b[p] != 58 then { state = -1 } else {
+          if p >= e or b[p] != 58 then {
+            state = -1
+          } else {
             let mode = st[sp - 2]
             pending = if mode > 0 and __jr_key_is(b, ks, kl, keys[mode - 1]) then mode else 0
             p = __jr_ws(b, p + 1, e)
@@ -13808,7 +13841,9 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
         state = if __jr_ws(b, p, e) == e then 3 else -1
       } else {
         p = __jr_ws(b, p, e)
-        if p >= e then { state = -1 } else {
+        if p >= e then {
+          state = -1
+        } else {
           let c = b[p]
           let isobj = st[sp - 3] == 1
           if c == 44 or (c == 125 and isobj) or (c == 93 and not isobj) then {
@@ -13834,7 +13869,7 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], dflt: Int) -> Option[List[Int]
   if state == 3 then some(out) else none
 }
 
-fn __ints_at(text: String, path: List[String], dflt: Int) -> Option[List[Int]] = {
+fn __ints_at(text: String, path: List[String], dflt: Int) -> List[Int]? = {
   let b = bytes.from_string(text)
   __jr_scan(b, bytes.len(b), path |> list.map((k) => bytes.from_string(k)), dflt)
 }
