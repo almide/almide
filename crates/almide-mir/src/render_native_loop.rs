@@ -582,6 +582,21 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             let take = crate::render_native_move::payload_move(func, i, base, st.tys.get(&base).copied(), take);
             line!("let mut {} = {take};", var(*dst));
         }
+        // The same move for a field of a borrowed payload: the carrier dies
+        // at the copy, so the payload leaves it and the field the payload.
+        Op::Dup { dst, src }
+            if !crate::render_native_move::drill_no_moves()
+                && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
+                && crate::render_native_rec::has_default(owned_of_ref(st.tys[src]))
+                && crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
+                    .is_some() =>
+        {
+            let take = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
+                .expect("a field of a payload");
+            let owned = owned_of_ref(st.tys[src]);
+            st.tys.insert(*dst, owned);
+            line!("let mut {} = {take};", var(*dst));
+        }
         // The same move out of a String-Ok Result param (the callee's own,
         // never rebound) that no path reads after the copy: it goes by value,
         // the param needing no `mut`.
