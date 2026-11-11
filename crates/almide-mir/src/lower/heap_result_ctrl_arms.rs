@@ -96,8 +96,43 @@ impl LowerCtx {
             _ if Self::is_scalar_ok_payload_of_result(&arm.ty, result_ty) => {
                 self.lower_scalar_result_ok_wrap_arm(arm, result_ty)
             }
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+                if is_heap_ty(&arm.ty) && matches!(object.kind, IrExprKind::Call { .. }) =>
+            {
+                self.lower_fresh_container_projection_arm(arm, object, result_ty)
+            }
             _ => None,
         }
+    }
+
+    /// A heap projection off a FRESH container (`ok(ds) => check_all(k, ds).error`): the
+    /// call's result is owned by nobody yet, so there is no slot to borrow. Bind it to a
+    /// synthetic `let` and project from that — the block arm `{ let t = f(..); t.error }`
+    /// the source could have spelled, whose local the arm frees after the projection
+    /// acquired its own reference.
+    fn lower_fresh_container_projection_arm(
+        &mut self,
+        arm: &IrExpr,
+        object: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let tmp = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: tmp,
+                mutability: almide_ir::Mutability::Let,
+                ty: object.ty.clone(),
+                value: object.clone(),
+            },
+            span: object.span,
+        };
+        let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: object.ty.clone(), span: object.span, def_id: None };
+        let mut projected = arm.clone();
+        match &mut projected.kind {
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => **object = var,
+            _ => return None,
+        }
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(projected)), result_ty)
     }
 
     /// Extracted from [`Self::lower_heap_result_arm_ctrl`] (codopsy r2, #852): the

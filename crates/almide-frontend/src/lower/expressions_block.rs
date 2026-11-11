@@ -32,38 +32,57 @@ fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> 
     // `lower_block_body` owns the guard rewrite; a Unit-typed, tail-less block
     // over the REST is exactly the shape it expects, and its result is a single
     // expression statement here.
-    let rest = lower_block_body_in(ctx, &body[i..], None, &Ty::Unit, None, true);
+    let rest = lower_block_body_in(ctx, &body[i..], None, &Ty::Unit, None, BlockPos::LoopBody);
     out.push(IrStmt { kind: IrStmtKind::Expr { expr: rest }, span: None });
     out
 }
 
-fn lower_block_body(
-    ctx: &mut LowerCtx,
-    stmts: &[ast::Stmt],
-    tail: Option<&ast::Expr>,
-    ty: &Ty,
-    span: Option<ast::Span>,
-) -> IrExpr {
-    lower_block_body_in(ctx, stmts, tail, ty, span, false)
+/// Lower `e`, a branch of a control-flow form that sits at `stmt_pos`: the
+/// branch of a statement is itself a statement ([`LowerCtx::stmt_pos`]).
+fn lower_branch(ctx: &mut LowerCtx, e: &ast::Expr, stmt_pos: bool) -> IrExpr {
+    ctx.stmt_pos = stmt_pos;
+    lower_expr(ctx, e)
 }
 
-/// [`lower_block_body`] with the LOOP-position fact (#1543). In a BLOCK, the
-/// guard-let match sits in tail position, so the wildcard arm's else value IS
-/// the fn's return. In a LOOP body the match is a Unit STATEMENT — a plain
-/// value there is a type error (`match` arms `()` vs `Option<_>`, rustc
-/// E0308 → "codegen produced invalid Rust"), and semantically the else must
-/// EXIT THE FN. The IR's one fn-exit spelling from statement position is the
-/// `Guard` statement, so a fn-exiting else in a loop is wrapped as
-/// `{ guard false else <else>; () }` — every backend already renders a Guard's
-/// return channel correctly (ok-wrapping included). A `break`/`continue` else
-/// stays a bare arm (loop control is valid in arm position).
+/// Where a block stands, which decides how a `guard let` else in it leaves.
+#[derive(Clone, Copy, PartialEq)]
+enum BlockPos {
+    /// The block's value is used: the fn's tail, a lambda body, a `let` value.
+    Value,
+    /// The block is a statement, or a branch of one: its value is dropped and
+    /// the fn carries on after it ([`LowerCtx::stmt_pos`]).
+    Stmt,
+    /// The block is the rest of a loop body.
+    LoopBody,
+}
+
+/// The block lowering, with the POSITION fact (#1543, #4655). The else of a
+/// `guard let` leaves the FN with the else's value. The guard-let match is the
+/// block's tail, so where the block's value is the fn's value the wildcard
+/// arm's else IS the fn's return and stays the arm. It cannot stay the arm:
+///
+/// - in a STATEMENT (a loop body, a block in a branch arm of an `if` / `match`
+///   statement): the arm's value is dropped there and the fn carries on;
+/// - in a Unit block whose else is a value of another type (`else { log();
+///   err(e) }` at the tail of a Unit effect fn): the arms do not join, and the
+///   value would be dropped at the fn's end. An else that can only yield a
+///   spelled `ok(..)` is the exception: at a Unit tail that is what falling
+///   off the end returns, so it stays the arm every leg already runs.
+///
+/// The IR's one fn-exit spelling from statement position is the `Guard`
+/// statement, so such an else is wrapped as `{ guard false else <else>; () }`
+/// whatever its shape — every backend already renders a Guard's return
+/// channel (ok-wrapping included). Two elses stay bare arms: `break` /
+/// `continue` (loop control is valid in arm position), and outside a loop a
+/// bare `err(e)`, which in a match arm already IS the early return on every
+/// leg (the checker joins it as `Never`, `match_arm_join_ty`).
 fn lower_block_body_in(
     ctx: &mut LowerCtx,
     stmts: &[ast::Stmt],
     tail: Option<&ast::Expr>,
     ty: &Ty,
     span: Option<ast::Span>,
-    in_loop: bool,
+    pos: BlockPos,
 ) -> IrExpr {
     if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
         let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
@@ -98,9 +117,9 @@ fn lower_block_body_in(
         ctx.push_scope();
         let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
         let rest = if mutable {
-            lower_guard_var_rest(ctx, name, arm_name, &pat1, &stmts[i + 1..], tail, ty, span, in_loop)
+            lower_guard_var_rest(ctx, name, arm_name, &pat1, &stmts[i + 1..], tail, ty, span, pos)
         } else {
-            lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, in_loop)
+            lower_block_body_in(ctx, &stmts[i + 1..], tail, ty, span, pos)
         };
         ctx.pop_scope();
         let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
@@ -125,7 +144,7 @@ fn lower_block_body_in(
                         && matches!(&stmts[0].kind, IrStmtKind::Expr { expr }
                             if matches!(&expr.kind, IrExprKind::Break | IrExprKind::Continue)))
         };
-        if in_loop && alt_is_loop_control(&alt) {
+        if pos == BlockPos::LoopBody && alt_is_loop_control(&alt) {
             // Normalize a block-wrapped `{ continue }` / `{ break }` else to the
             // BARE loop-control expression: a statement-only Block in match-arm
             // position renders as `continue;` (invalid Rust in an arm without
@@ -136,10 +155,15 @@ fn lower_block_body_in(
                 }
             }
         }
-        if in_loop && !alt_is_loop_control(&alt) {
-            // See the doc comment: a fn-exiting else in a loop rides the Guard
-            // statement's return channel; the arm's own value becomes Unit so
-            // the statement-position match types.
+        let raise_leaf = matches!(alt.kind, IrExprKind::ResultErr { .. });
+        let by_guard = match pos {
+            BlockPos::LoopBody => true,
+            BlockPos::Stmt => !raise_leaf,
+            BlockPos::Value => !raise_leaf && alt.ty != Ty::Unit && !yields_only_ok(&alt),
+        };
+        if by_guard && *ty == Ty::Unit && !alt_is_loop_control(&alt) {
+            // See the doc comment: the else rides the Guard statement's return
+            // channel; the arm's own value becomes Unit so the match types.
             let guard_stmt = IrStmt {
                 kind: IrStmtKind::Guard {
                     cond: ctx.mk(IrExprKind::LitBool { value: false }, Ty::Bool, None),
@@ -162,8 +186,20 @@ fn lower_block_body_in(
         ctx.mk(IrExprKind::Block { stmts: pre, expr: Some(Box::new(match_expr)) }, ty.clone(), span)
     } else {
         let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
-        let ir_expr = tail.map(|e| Box::new(lower_expr(ctx, e)));
+        let ir_expr = tail.map(|e| Box::new(lower_branch(ctx, e, pos != BlockPos::Value)));
         ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span)
+    }
+}
+
+/// Does `e`'s value come only from spelled `ok(..)` constructors — through a
+/// block's tail and the arms of an `if` / `match`?
+fn yields_only_ok(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::ResultOk { .. } => true,
+        IrExprKind::Block { expr: Some(tail), .. } => yields_only_ok(tail),
+        IrExprKind::If { then, else_, .. } => yields_only_ok(then) && yields_only_ok(else_),
+        IrExprKind::Match { arms, .. } => arms.iter().all(|a| yields_only_ok(&a.body)),
+        _ => false,
     }
 }
 
@@ -179,7 +215,7 @@ fn lower_guard_var_rest(
     tail: Option<&ast::Expr>,
     ty: &Ty,
     span: Option<ast::Span>,
-    in_loop: bool,
+    pos: BlockPos,
 ) -> IrExpr {
     let payload_ty = match arm_pat {
         IrPattern::Ok { inner } | IrPattern::Some { inner } => match &**inner {
@@ -199,7 +235,7 @@ fn lower_guard_var_rest(
         },
         span,
     };
-    let body = lower_block_body_in(ctx, rest, tail, ty, span, in_loop);
+    let body = lower_block_body_in(ctx, rest, tail, ty, span, pos);
     ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(body)) }, ty.clone(), span)
 }
 

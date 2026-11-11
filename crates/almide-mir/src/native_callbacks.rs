@@ -6,35 +6,104 @@
 //! a crate-root item under exactly that name with the host's signature — the
 //! render's own definitions are private and prefixed.
 //!
-//! Only an all-scalar, pure signature has one host spelling (`i64`, `f64`,
-//! `bool`, the narrow integers, `()`); any other callback signature is
-//! refused here, so `run`/`build` keep their standard-codegen route for it.
+//! An all-scalar, pure signature has one host spelling (`i64`, `f64`, `bool`,
+//! the narrow integers, `()`) and is adapted here. Any other signature takes
+//! the spelling the standard codegen emits for that name — the one the native
+//! code was written against — from the build's host source
+//! (`native_callback_host`, #4640); what that cannot adapt is refused, so
+//! `run`/`build` keep their standard-codegen route for it.
 use almide_ir::{IrFunction, IrProgram};
 use almide_lang::types::Ty;
 use crate::lower::LowerError;
 use crate::render_native::{wall, NativeSigKind, NativeSigs};
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::fmt::Write as _;
 
 thread_local! {
     static NATIVE_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+    static HOST: RefCell<Host> = const { RefCell::new(Host::Absent) };
+    static HOST_TYPES: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// The standard codegen's Rust for the program being rendered: made at most
+/// once, and only when a callback's signature is not all-scalar.
+#[derive(Default)]
+enum Host {
+    #[default]
+    Absent,
+    Pending(Box<dyn FnOnce() -> String>),
+    Ready(Rc<str>),
 }
 
 /// The text of every `native/*.rs` the build compiles, for the render made
 /// while this guard lives. A nested scope restores the preceding one.
-pub struct Scope(String);
+pub struct Scope(String, Host);
 impl Scope {
     pub fn enter(native_text: String) -> Self {
-        Self(NATIVE_TEXT.with(|t| t.replace(native_text)))
+        Self(NATIVE_TEXT.with(|t| t.replace(native_text)), HOST.with(|h| h.take()))
+    }
+
+    /// `make` renders the program through the standard codegen; the adapter
+    /// of a non-scalar callback reads that fn's signature from it.
+    pub fn with_host_source(self, make: impl FnOnce() -> String + 'static) -> Self {
+        HOST.with(|h| h.replace(Host::Pending(Box::new(make))));
+        self
     }
 }
 impl Drop for Scope {
     fn drop(&mut self) {
         NATIVE_TEXT.with(|t| t.replace(std::mem::take(&mut self.0)));
+        HOST.with(|h| h.replace(std::mem::take(&mut self.1)));
     }
 }
 
-fn is_ident(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' }
+/// The host types the non-scalar callbacks of the program being rendered
+/// name, for the render made while this guard lives: a host type this
+/// render's own bodies do not use (`Bytes` is a `Vec<u8>` here, a shared
+/// handle on the host) still needs its definition beside the adapter. The
+/// records and variants among them are carried for as long (`_carried`).
+pub(crate) struct HostTypes { outer: String, _carried: crate::native_callback_types::Guard }
+impl HostTypes {
+    pub(crate) fn enter(ir: &IrProgram) -> Self {
+        let signature = || ir.functions.iter().filter(|f| is_root(f.name.as_str()))
+            .flat_map(|f| f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)));
+        let carried = crate::native_callback_types::install(ir, signature(), host_source);
+        let mut types = crate::native_callback_types::named_runtime();
+        for ty in signature().filter(|ty| host_scalar(ty).is_none()) {
+            if let Ok(host) = crate::native_foreign::host_type(ty) {
+                types.push_str(&host);
+                types.push('\n');
+            }
+        }
+        Self { outer: HOST_TYPES.with(|t| t.replace(types)), _carried: carried }
+    }
+}
+impl Drop for HostTypes {
+    fn drop(&mut self) {
+        HOST_TYPES.with(|t| t.replace(std::mem::take(&mut self.outer)));
+    }
+}
+
+/// The runtime items the callbacks' host types reach.
+pub(crate) fn runtime_items() -> Result<Vec<&'static str>, LowerError> {
+    HOST_TYPES.with(|t| crate::native_floor::runtime_items_named_by(&t.borrow())).map_err(wall)
+}
+
+/// The host source of the scope, rendering it on first use.
+fn host_source() -> Option<Rc<str>> {
+    let pending = HOST.with(|h| match h.take() {
+        Host::Pending(make) => Some(make),
+        other => { h.replace(other); None }
+    });
+    if let Some(make) = pending {
+        let text: Rc<str> = make().into();
+        HOST.with(|h| h.replace(Host::Ready(text)));
+    }
+    HOST.with(|h| match &*h.borrow() { Host::Ready(text) => Some(text.clone()), _ => None })
+}
+
+pub(crate) fn is_ident(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' }
 
 /// Whether `text` spells `name` as a whole identifier.
 fn names(text: &str, name: &str) -> bool {
@@ -107,16 +176,29 @@ fn adapter(f: &IrFunction, sigs: &NativeSigs) -> Option<String> {
 }
 
 /// The crate-root items the native code links, one per callback root.
-pub(crate) fn render(ir: &IrProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
+/// `rendered` is the program's own items, whose signatures the adapters call.
+pub(crate) fn render(ir: &IrProgram, sigs: &NativeSigs, rendered: &str) -> Result<String, LowerError> {
     let mut out = String::new();
     for f in ir.functions.iter().filter(|f| is_root(f.name.as_str())) {
-        let item = adapter(f, sigs).ok_or_else(|| wall(format!(
-            "native: fn `{}` is called from native code with a signature that has no single host spelling",
-            f.name
-        )))?;
+        let item = match adapter(f, sigs) {
+            Some(item) => item,
+            None => host_adapter(f, sigs, rendered)?,
+        };
         write!(out, "{item}").expect("writing to a String cannot fail");
     }
+    out.push_str(&crate::native_callback_types::render()?);
     Ok(out)
+}
+
+/// The adapter of a callback whose signature is not all-scalar.
+fn host_adapter(f: &IrFunction, sigs: &NativeSigs, rendered: &str) -> Result<String, LowerError> {
+    let (Some(host), Some((kinds, result))) = (host_source(), sigs.get(f.name.as_str())) else {
+        return Err(wall(format!(
+            "native: fn `{}` is called from native code with a signature that has no single host spelling",
+            f.name
+        )));
+    };
+    crate::native_callback_host::adapter(f, (kinds, *result), rendered, &host)
 }
 
 #[cfg(test)]

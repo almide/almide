@@ -496,6 +496,9 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         Op::Dup { dst, src } if st.borrows.arms.contains(dst) => {
             crate::borrow_join::render_arm(dst, src, &mut st.tys, &mut st.out, st.indent)?
         }
+        Op::Alloc { dst, init: crate::Init::Str(text), .. } if st.borrows.arms.contains(dst) => {
+            crate::borrow_join::render_literal_arm(dst, text, &mut st.tys, &mut st.out, st.indent)
+        }
         // A copy of a heap slot's snapshot that only borrows reads through
         // the snapshot's reference (#4562, render_native_heap_slot); its
         // release ends that borrow, and the snapshot frees at scope end.

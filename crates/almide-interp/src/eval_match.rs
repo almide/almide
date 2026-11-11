@@ -2,7 +2,12 @@ impl<'a> Interpreter<'a> {
 
     // ── Match ───────────────────────────────────────────────────
 
-    fn eval_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], scope: &Scope) -> Flow {
+    /// `raises`: the match is not Result-typed, so an arm that is a bare
+    /// `err(e)` contributes no value — it is the fn's early return (the else
+    /// of a `guard let` desugars to exactly this arm, #4653). Both backends
+    /// leave the fn there: the native walker renders the arm as `return
+    /// Err(..)`, the wasm emitter takes its raise leaf.
+    fn eval_match(&mut self, subject: &IrExpr, arms: &[IrMatchArm], raises: bool, scope: &Scope) -> Flow {
         let subj = val!(self.eval_expr(subject, scope));
         for arm in arms {
             let mut binds = Vec::new();
@@ -25,7 +30,14 @@ impl<'a> Interpreter<'a> {
                         other => return other,
                     }
                 }
-                return self.eval_expr(&arm.body, &frame);
+                return match self.eval_expr(&arm.body, &frame) {
+                    Flow::Value(v @ Value::Result(Err(_)))
+                        if raises && matches!(arm.body.kind, IrExprKind::ResultErr { .. }) =>
+                    {
+                        Flow::Return(v)
+                    }
+                    other => other,
+                };
             }
         }
         // Name the scrutinee: a checked program's match IS exhaustive, so

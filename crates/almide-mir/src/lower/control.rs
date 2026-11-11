@@ -146,6 +146,8 @@ impl LowerCtx {
     /// the arm body verbatim, re-narrowed via `let-else`. Pure text move.
     fn lower_branch_match(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
         let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+        let payload_bound = self.some_tuple_arms_as_binds(&subject.ty, arms);
+        let arms = payload_bound.as_ref().unwrap_or(arms);
         // The subject is inspected once. A heap subject goes through
         // `lower_call_args` — an already-tracked `Var` is BORROWED, a FRESH
         // heap value (a call/literal result) is MATERIALIZED into an owned temp

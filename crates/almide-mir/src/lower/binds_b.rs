@@ -396,7 +396,7 @@ impl LowerCtx {
                 // same fresh-owned move-in; the list's DropListListStr reclaims it two levels deep.
                 (elem_value && is_value_ty(&e.ty)) || elem_str || elem_list_flat
             }
-            _ => false,
+            _ => Self::list_literal_elem_is_bound_block(e),
         }
     }
 
@@ -639,7 +639,7 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
         for (i, elem) in elements.iter().enumerate() {
-            let Some(ev) = self.lower_str_list_literal_elem(elem, &class) else {
+            let Some(ev) = self.lower_list_literal_elem_or_bound_block(elem, &class) else {
                 crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[str-list] lowering declined: {elem:?}"));
                 return None;
             };

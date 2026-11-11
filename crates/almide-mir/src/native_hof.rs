@@ -169,10 +169,13 @@ fn unlinked(call: &str) -> bool {
 /// A combinator only its declaration serves: no linked body, and a runtime
 /// body that takes a callback (a plain call keeps the declared floor).
 pub(crate) fn declared_only(call: &str) -> bool {
-    unlinked(call) && of(call).is_some_and(|h| h.params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))))
+    (unlinked(call) || sequential_map_call(call)) && of(call).is_some_and(|h| h.params.iter().any(|(d, _)| matches!(d, DTy::Fn(..))))
 }
 
 fn derive(impl_fn: &str) -> Option<Hof> {
+    if sequential_map_call(impl_fn) {
+        return sequential_map_hof().ok();
+    }
     derive_explained(impl_fn).ok()
 }
 
@@ -573,7 +576,7 @@ fn plan(
     sigs: &NativeSigs,
     tys: &BTreeMap<ValueId, NTy>,
 ) -> Option<(&'static Hof, (String, usize), Served)> {
-    let hof = if parallel_selected(call.name) { parallel_hof()? } else { of(call.name)? };
+    let hof = if parallel_selected(call.name) { parallel_hof()? } else { of(call.name).or_else(|| refused_map_link(call.name))? };
     let (at, origins) = STATE.with(|st| {
         let st = st.borrow();
         st.at.clone().filter(|a| !a.2).map(|a| (a, st.origins.clone()))

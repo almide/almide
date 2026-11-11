@@ -147,7 +147,7 @@ impl<'a> Interpreter<'a> {
         Some(match &expr.kind {
             // ── Control flow ──
             IrExprKind::If { cond, then, else_ } => self.eval_if(cond, then, else_, scope),
-            IrExprKind::Match { subject, arms } => self.eval_match(subject, arms, scope),
+            IrExprKind::Match { subject, arms } => self.eval_match(subject, arms, !expr.ty.is_result(), scope),
             IrExprKind::Block { stmts, expr } => self.eval_block(stmts, expr.as_deref(), scope),
             // Fan block: evaluate each expr SEQUENTIALLY in source order — the
             // deterministic mode both backends collapse to (WASM has no threads;

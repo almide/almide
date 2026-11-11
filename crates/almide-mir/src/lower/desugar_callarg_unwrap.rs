@@ -51,6 +51,13 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId, nv: &mut u32) -> Option<
             lifted
         }
         IrExprKind::Tuple { elements } | IrExprKind::List { elements } => ordered_unwrap_children(elements, tmp, nv)?,
+        IrExprKind::Record { fields, .. } => {
+            // Fields are evaluated in the order they are written, like arguments.
+            let mut children: Vec<_> = fields.iter().map(|(_, e)| e.clone()).collect();
+            let lifted = ordered_unwrap_children(&mut children, tmp, nv)?;
+            for ((_, slot), child) in fields.iter_mut().zip(children) { *slot = child; }
+            lifted
+        }
         IrExprKind::StringInterp { parts } => {
             let mut children: Vec<_> = parts.iter().filter_map(|p| match p {
                 almide_ir::IrStringPart::Expr { expr } => Some(expr.clone()), _ => None,
@@ -89,6 +96,7 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId, nv: &mut u32) -> Option<
         | IrExprKind::ResultOk { expr: child } | IrExprKind::ResultErr { expr: child }
         | IrExprKind::OptionSome { expr: child } | IrExprKind::UnwrapOr { expr: child, .. }
         | IrExprKind::If { cond: child, .. } | IrExprKind::Match { subject: child, .. }
+        | IrExprKind::ForIn { iterable: child, .. }
         | IrExprKind::Member { object: child, .. } | IrExprKind::TupleIndex { object: child, .. } => {
             let (prefix, value, rest) = take_unwrap_or_recurse(child, tmp, nv)?;
             **child = rest;

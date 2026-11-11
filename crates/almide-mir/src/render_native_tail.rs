@@ -758,11 +758,14 @@ pub(crate) fn render_dup(
         }
         NTy::StrRef => {
             tys.insert(*dst, NTy::Str);
-            match crate::render_native_addr::str_field_of(*src) {
+            let lent = crate::render_native_borrow_read::lent_str_copy(*src);
+            match (crate::render_native_addr::str_field_of(*src), lent) {
                 // A borrowed record field's string: share the field's handle.
-                Some(place) => line!("let mut {} = {place}.clone();", var(*dst)),
+                (Some(place), _) => line!("let mut {} = {place}.clone();", var(*dst)),
+                // A lent list element: share the element's handle.
+                (None, Some(copy)) => line!("let mut {}: AlmideString = {copy};", var(*dst)),
                 // Dup of a borrowed param mints a fresh owned handle.
-                None => line!("let mut {} = AlmideString::from({});", var(*dst), var(*src)),
+                (None, None) => line!("let mut {} = AlmideString::from({});", var(*dst), var(*src)),
             }
         }
         NTy::VecRef => {

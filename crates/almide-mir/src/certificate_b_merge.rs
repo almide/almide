@@ -24,23 +24,11 @@ pub fn merge_dst_i_credits(func: &MirFunction) -> usize {
             Op::IfThen { dst: Some(d), .. } => {
                 merge_dsts.insert(*d);
             }
-            Op::Consume { v }
-            | Op::Drop { v }
-            | Op::DropListStr { v }
-            // A RECORD/VARIANT-typed merge dst releases through the TYPED
-            // recursive drop (the #1287 record-merge seeding emits DropVariant,
-            // not Drop) — without this arm the dst never enters the released
-            // set, its IfThen `i` credit is skipped, and the DropVariant certs
-            // as a bare `d` the kernel checker rejects (unowned Dec).
-            | Op::DropVariant { v, .. } => {
-                if merge_dsts.contains(v) {
-                    released.insert(*v);
-                }
-            }
             Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) } if merge_dsts.contains(v) => {
                 released.insert(*v);
             }
-            _ => {}
+            // The same releases `ownership_certificate_released_merge_dsts` reads.
+            _ => released.extend(merge_release_value(op).filter(|v| merge_dsts.contains(v))),
         }
     }
     if let Some(r) = func.ret {
@@ -120,6 +108,33 @@ fn merge_slot_chain(
 /// same single `d` on its object), or `None` for any other op.
 fn drop_family_value(op: &Op) -> Option<ValueId> {
     match op {
+        // The region window's close (#4006 C2): the arena rewind releases the
+        // window's mark — the one `d` its `RegionSave` opened.
+        Op::Prim { kind: PrimKind::RegionRestore, args, .. } => args.first().copied(),
+        _ => typed_drop_value(op),
+    }
+}
+
+/// The op that ends a branch-merge dst's reference in this frame: a `Consume`
+/// (the reference moves on) or a drop. Which drop op releases a merge follows
+/// its TYPE — a Result of a Value drops through `DropResultValue`, a wrapper
+/// record through `DropWrapperRec` — and every one of them is the same single
+/// release of the one reference the taken arm moved in: `verify_ownership`
+/// steps them all as one release and [`CertScan::step`] writes each as one
+/// `d`. A merge released by a drop this did not list held no reference for
+/// either of them, so every read through it was a use after free and its drop
+/// a double free, on a lowering that moves one owned value in per arm and
+/// releases it once.
+fn merge_release_value(op: &Op) -> Option<ValueId> {
+    match op {
+        Op::Consume { v } => Some(*v),
+        _ => typed_drop_value(op),
+    }
+}
+
+/// The value a typed drop op releases, or `None` for any other op.
+fn typed_drop_value(op: &Op) -> Option<ValueId> {
+    match op {
         Op::Drop { v }
         | Op::DropListStr { v }
         | Op::DropValue { v }
@@ -138,9 +153,6 @@ fn drop_family_value(op: &Op) -> Option<ValueId> {
         | Op::DropListListStr { v }
         | Op::DropVariant { v, .. }
         | Op::DropWrapperRec { v, .. } => Some(*v),
-        // The region window's close (#4006 C2): the arena rewind releases the
-        // window's mark — the one `d` its `RegionSave` opened.
-        Op::Prim { kind: PrimKind::RegionRestore, args, .. } => args.first().copied(),
         _ => None,
     }
 }

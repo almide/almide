@@ -605,6 +605,34 @@ impl Checker {
         self.check_place_root_mutable(target, path, shape);
     }
 
+    /// The else of a `guard let` leaves the fn through its return channel
+    /// (ALS-ST6). In an effect fn whose declared return is not a Result that
+    /// channel is the lifted `Result[ret, String]`, which `open_result_slot`
+    /// does not see: an `err(e)` ending a block else kept its ok side open
+    /// (`Result[?, String]`), and the native build refused the unresolved
+    /// type (#4655). Each spelled `ok` / `err` the else's value comes from
+    /// takes the lifted channel for a slot nothing else fills — a default
+    /// like #2599's, so it cannot contradict what the program says.
+    fn default_else_slots_to_lifted_channel(&mut self, else_: &ast::Expr) {
+        if self.env.lambda_depth != 0 || !self.env.can_call_effect {
+            return;
+        }
+        let Some(ret) = self.env.current_ret.clone().filter(|r| !r.is_result()) else { return };
+        let mut leaves = Vec::new();
+        Self::tail_leaves(else_, &mut leaves);
+        for leaf in leaves {
+            if !matches!(leaf.kind, ast::ExprKind::Ok { .. } | ast::ExprKind::Err { .. }) {
+                continue;
+            }
+            if let Some(Ty::Applied(TypeConstructorId::Result, args)) = self.type_map.get(&leaf.id).cloned()
+                && args.len() == 2
+            {
+                self.result_slot_defaults.push((args[0].clone(), ret.clone()));
+                self.result_slot_defaults.push((args[1].clone(), Ty::String));
+            }
+        }
+    }
+
     /// `ast::Stmt::GuardLet` arm of [`Self::check_stmt`]: Swift-style
     /// `guard let` binding of the Option/Result payload for the rest of
     /// the block. Verbatim text move.
@@ -666,6 +694,7 @@ impl Checker {
         if fail.is_some() {
             self.env.pop_scope();
         }
+        self.default_else_slots_to_lifted_channel(else_);
         // ADR-0021: inside a lambda the else returns into the lambda's channel.
         self.record_lambda_returned_err(&ety, matches!(else_.kind, ast::ExprKind::Ok { .. }), else_.span);
         self.env.define_var(name, bound_ty);

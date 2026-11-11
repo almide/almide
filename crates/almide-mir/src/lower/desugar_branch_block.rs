@@ -37,9 +37,7 @@ fn desugar_nested_branch_block_arm(
             // A conditional statement owns its branches just as a tail does.
             // Normalize inside each arm, keeping a lazy assertion message's
             // unwrap in the failing arm rather than hoisting it before the if.
-            IrStmtKind::Expr { expr }
-                if matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }) =>
-            {
+            IrStmtKind::Expr { expr } if branch_stmt_arms_normalize_in_place(expr) => {
                 match desugar_nested_branch_arms(expr, next_var, layouts) {
                     Some(expr) => {
                         changed = true;
@@ -67,5 +65,41 @@ fn desugar_nested_branch_block_arm(
         span: body.span,
         def_id: body.def_id,
     })
+}
+
+/// May the arms of a branch STATEMENT be normalized where they stand?
+///
+/// Not when an arm propagates ANYWHERE: on its statement spine (`let v = f()!`,
+/// `q = f()!`, a bare `f()!`) or inside a value (`q = q + g(f()!)`, a call
+/// argument, a list element, a condition), which the operand hoists turn into
+/// a spine `!` once the arm is normalized. The propagation rewrites turn a `!`
+/// into a match whose err arm is the enclosing block's VALUE — the function's
+/// result when that block is the function's tail, a discarded value in a
+/// statement arm, where the error would be dropped and the statements after the
+/// branch would run. Such a branch is left whole: the continuation lift moves it
+/// to the tail when it takes the arm, and otherwise its `!` reaches the lowering
+/// and is refused.
+fn branch_stmt_arms_normalize_in_place(expr: &IrExpr) -> bool {
+    matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. })
+        && !propagates_outside_lambdas(expr)
+}
+
+/// Does `e` hold a `!` whose error leaves `e`? Every `!` in the subtree but
+/// those of a lambda body, which propagate out of the lambda only.
+fn propagates_outside_lambdas(e: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct P(bool);
+    impl IrVisitor for P {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match e.kind {
+                IrExprKind::Lambda { .. } => {}
+                IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => self.0 = true,
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut p = P(false);
+    p.visit_expr(e);
+    p.0
 }
 

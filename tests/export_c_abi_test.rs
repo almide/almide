@@ -28,6 +28,11 @@ fn run_package(tag: &str, almd: &str, host: &str, args: &[&str]) -> (Option<i32>
 /// [`run_package`] with arguments after the source path too
 /// (`almide src/main.almd --target rust`).
 fn run_package_with(tag: &str, almd: &str, host: &str, args: &[&str], after: &[&str]) -> (Option<i32>, String, String) {
+    run_package_env(tag, almd, host, args, after, &[])
+}
+
+/// [`run_package_with`] under the environment variables `envs`.
+fn run_package_env(tag: &str, almd: &str, host: &str, args: &[&str], after: &[&str], envs: &[(&str, &str)]) -> (Option<i32>, String, String) {
     let dir = std::env::temp_dir().join(format!("almide_export_c_abi_{tag}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("native")).unwrap();
@@ -38,6 +43,7 @@ fn run_package_with(tag: &str, almd: &str, host: &str, args: &[&str], after: &[&
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))
         .current_dir(&dir)
         .env("ALMIDE_RUN_PROJECT_DIR", dir.join(".run"))
+        .envs(envs.iter().copied())
         .args(args)
         .arg(Path::new("src/main.almd"))
         .args(after)
@@ -88,6 +94,12 @@ const ROWS: &[Row] = &[
 /// `Unit` return in both forms, and a `Handle` that comes back as the same
 /// pointer.
 fn matrix() -> (String, String, String) {
+    matrix_of(true)
+}
+
+/// [`matrix`], with or without its `Handle` exports: without them every
+/// export stays in the scalar rows the certified native route adapts.
+fn matrix_of(handle: bool) -> (String, String, String) {
     let mut almd = String::from(
         "local fn gate(fail: Bool) -> Result[Int, String] = if fail then err(\"refused\") else ok(0)\n\n",
     );
@@ -120,23 +132,28 @@ fn matrix() -> (String, String, String) {
         "@export(c, \"x_unit\")\nfn x_unit(v: Int) -> Unit = println(\"unit ${v}\")\n\n",
         "@export(c, \"xe_unit\")\neffect fn xe_unit(v: Int, fail: Bool) -> Unit = {\n  let _g = gate(fail)!\n  println(\"unit effect ${v}\")\n}\n\n",
         "@extern(c, \"c\", \"cf_unit\")\nfn c_unit() -> Unit = _\n\n",
+    ));
+    decls.push_str("    fn x_unit(v: i64);\n    fn xe_unit(v: i64, fail: i32);\n");
+    drivers.push_str("#[no_mangle]\npub extern \"C\" fn cf_unit() { unsafe { x_unit(5000000000); xe_unit(-5000000000, 0) } }\n");
+    main.push_str("  c_unit()\n");
+    expected.push_str("unit 5000000000\nunit effect -5000000000\n");
+    if handle {
         // Handle: the same pointer comes back, in both forms.
-        "@export(c, \"x_handle\")\nfn x_handle(v: Handle) -> Handle = v\n\n",
-        "@export(c, \"xe_handle\")\neffect fn xe_handle(v: Handle, fail: Bool) -> Handle = {\n  let _g = gate(fail)!\n  v\n}\n\n",
-        "@extern(c, \"c\", \"cf_handle\")\nfn c_handle() -> Int = _\n\n",
-    ));
-    decls.push_str(concat!(
-        "    fn x_unit(v: i64);\n    fn xe_unit(v: i64, fail: i32);\n",
-        "    fn x_handle(v: *mut u8) -> *mut u8;\n    fn xe_handle(v: *mut u8, fail: i32) -> *mut u8;\n",
-    ));
-    drivers.push_str(concat!(
-        "#[no_mangle]\npub extern \"C\" fn cf_unit() { unsafe { x_unit(5000000000); xe_unit(-5000000000, 0) } }\n",
-        "#[no_mangle]\npub extern \"C\" fn cf_handle() -> i64 {\n",
-        "    let mut cell = 7u8;\n    let p: *mut u8 = &mut cell;\n",
-        "    unsafe { (x_handle(p) == p && xe_handle(p, 0) == p) as i64 }\n}\n",
-    ));
-    main.push_str("  c_unit()\n  println(\"handle \" + int.to_string(c_handle()))\n}\n");
-    expected.push_str("unit 5000000000\nunit effect -5000000000\nhandle 1\n");
+        almd.push_str(concat!(
+            "@export(c, \"x_handle\")\nfn x_handle(v: Handle) -> Handle = v\n\n",
+            "@export(c, \"xe_handle\")\neffect fn xe_handle(v: Handle, fail: Bool) -> Handle = {\n  let _g = gate(fail)!\n  v\n}\n\n",
+            "@extern(c, \"c\", \"cf_handle\")\nfn c_handle() -> Int = _\n\n",
+        ));
+        decls.push_str("    fn x_handle(v: *mut u8) -> *mut u8;\n    fn xe_handle(v: *mut u8, fail: i32) -> *mut u8;\n");
+        drivers.push_str(concat!(
+            "#[no_mangle]\npub extern \"C\" fn cf_handle() -> i64 {\n",
+            "    let mut cell = 7u8;\n    let p: *mut u8 = &mut cell;\n",
+            "    unsafe { (x_handle(p) == p && xe_handle(p, 0) == p) as i64 }\n}\n",
+        ));
+        main.push_str("  println(\"handle \" + int.to_string(c_handle()))\n");
+        expected.push_str("handle 1\n");
+    }
+    main.push_str("}\n");
     almd.push_str(&main);
     let host = format!(
         "#![allow(dead_code, unused_imports, clippy::missing_safety_doc)]\n\nextern \"C\" {{\n{decls}}}\n\n{drivers}"
@@ -300,18 +317,109 @@ fn export_c_types_without_a_c_form_are_e090() {
     assert_eq!(code, Some(0), "check refused the accepted @export(c) rows:\n{stdout}{stderr}");
 }
 
-/// The v1 native render (`try_render_rust_source`) has no `@export(c)`
-/// wrapper — its program's `exports` are empty — so it walls a program that
-/// declares one, and the build takes the standard codegen, which renders the
-/// wrapper. The same program without the attribute renders.
+/// The v1 native render (`try_render_rust_source`) adapts an `@export(c)`
+/// fn whose signature stays in the scalar rows of the table: a crate-root
+/// `extern "C"` item under the declared symbol, spelling the table's C types
+/// — for an export no Almide code calls too. Any other row has no adapter
+/// there, so the render walls, naming the fn and the type, and the build
+/// takes the standard codegen, which renders that wrapper.
 #[test]
-fn the_v1_native_render_walls_an_export_c_program() {
-    let plain = "fn wide(v: Int) -> Int = v + 1\n\neffect fn main() -> Unit = println(int.to_string(wide(2)))\n";
-    let exported = format!("@export(c, \"wide\")\n{plain}");
-    assert!(
-        almide_mir::pipeline::try_render_rust_source(plain).is_ok(),
-        "the control program walled, so the wall below would prove nothing"
+fn the_v1_native_render_adapts_the_scalar_rows_and_walls_every_other() {
+    let main = "effect fn main() -> Unit = println(int.to_string(wide(2)))\n";
+    let scalar = format!(concat!(
+        "@export(c, \"wide\")\nfn wide(v: Int) -> Int = v + 1\n\n",
+        "local fn gate(on: Bool) -> Result[Int, String] = if on then ok(1) else err(\"off\")\n\n",
+        "@export(c, \"uncalled\")\neffect fn uncalled(x: Float, on: Bool, n: Int32) -> Bool = gate(on)! > 0\n\n",
+        "{}"), main);
+    let rust = almide_mir::pipeline::try_render_rust_source(&scalar).expect("the v1 render walled a scalar @export(c) program");
+    for want in [
+        "#[export_name = \"wide\"]\npub extern \"C\" fn __c_almd_wide(a0: i64) -> i64 {",
+        "#[export_name = \"uncalled\"]\npub extern \"C\" fn __c_almd_uncalled(a0: f64, a1: i32, a2: i32) -> i32 {",
+        "eprintln!(\"{}\", __almide_e); almide_host_exit(1)",
+    ] {
+        assert!(rust.contains(want), "no `{want}` in the v1 render:\n{rust}");
+    }
+    assert_eq!(rust.matches("#[export_name").count(), 2, "one C adapter per export");
+
+    let walls = [
+        ("fn keep(h: Handle) -> Handle = h", "@export(c) fn `keep`: parameter `h: Handle` is outside the scalar C rows"),
+        ("effect fn size(buf: Region) -> Int = ffi.len(buf)", "@export(c) fn `size`: parameter `buf: Region` is outside the scalar C rows"),
+    ];
+    for (decl, reason) in walls {
+        let src = format!("import ffi\n\nfn wide(v: Int) -> Int = v + 1\n\n@export(c, \"other\")\n{decl}\n\n{main}");
+        let wall = almide_mir::pipeline::try_render_rust_source(&src).expect_err("the v1 render accepted an @export(c) row it has no adapter for");
+        assert!(wall.to_string().contains(reason), "{decl}: {wall}");
+    }
+    // A String or a record has no C form at all (E090): no render either.
+    for decl in ["fn name(s: String) -> Int = string.len(s)", "fn pair(n: Int) -> (Int, Int) = (n, n)"] {
+        let src = format!("fn wide(v: Int) -> Int = v + 1\n\n@export(c, \"other\")\n{decl}\n\n{main}");
+        assert!(almide_mir::pipeline::try_render_rust_source(&src).is_err(), "the v1 render accepted `{decl}`");
+    }
+}
+
+/// The scalar matrix runs on the certified native route — no wall, the
+/// ownership certificate enforced — and answers what the standard codegen's
+/// wrapper answers for the same program and the same hand-written C host.
+/// With the `Handle` exports the same run walls, naming the row, and still
+/// answers through the standard codegen.
+#[test]
+#[cfg(unix)]
+fn the_scalar_matrix_runs_on_the_certified_native_route_as_on_the_standard_codegen() {
+    let certified = [("ALMIDE_VERBOSE", "1"), ("ALMIDE_CERTIFY_OWNERSHIP", "fail")];
+    let (almd, host, expected) = matrix_of(false);
+    let (code, stdout, stderr) = run_package_env("scalar_v1", &almd, &host, &["run"], &[], &certified);
+    assert_eq!(code, Some(0), "--- stderr ---\n{stderr}");
+    assert!(!stderr.contains("verified native render walled"), "the scalar matrix walled:\n{stderr}");
+    assert_eq!(stdout, expected, "--- stderr ---\n{stderr}");
+    let (code, standard, stderr) =
+        run_package_env("scalar_v0", &almd, &host, &["run", "--no-verified"], &[], &[("ALMIDE_NO_VERIFIED_OK", "1")]);
+    assert_eq!((code, standard.as_str()), (Some(0), stdout.as_str()), "--- stderr ---\n{stderr}");
+
+    let (almd, host, expected) = matrix_of(true);
+    let (code, stdout, stderr) = run_package_env("handle_v1", &almd, &host, &["run"], &[], &certified);
+    assert_eq!(code, Some(0), "--- stderr ---\n{stderr}");
+    assert!(stderr.contains("verified native render walled"), "a Handle export did not wall:\n{stderr}");
+    assert!(stderr.contains("parameter `v: Handle` is outside the scalar C rows"), "{stderr}");
+    assert_eq!(stdout, expected, "--- stderr ---\n{stderr}");
+}
+
+/// C-452 on the certified native route: the effect export's err writes its
+/// message and exits 1 before the host regains control, with the lines
+/// `main` printed before it flushed — the standard codegen's answer.
+#[test]
+#[cfg(unix)]
+fn an_effect_export_err_exits_1_on_the_certified_native_route_too() {
+    let almd = concat!(
+        "local fn check(n: Int) -> Result[Int, String] = if n > 100 then err(\"over 100: ${n}\") else ok(n)\n\n",
+        "@export(c, \"xe_half\")\neffect fn xe_half(n: Int) -> Float = float.from(check(n)!) / 2.0\n\n",
+        "@extern(c, \"c\", \"cf_half\")\nfn c_half(n: Int) -> Float = _\n\n",
+        "effect fn main() -> Unit = {\n",
+        "  println(\"ok \" + float.to_string(c_half(3)))\n",
+        "  println(\"err \" + float.to_string(c_half(200)))\n",
+        "  println(\"after\")\n",
+        "}\n",
     );
-    let wall = almide_mir::pipeline::try_render_rust_source(&exported).expect_err("the v1 render accepted an @export(c) program");
-    assert!(wall.to_string().contains("fn `wide` is @export(c)"), "{wall}");
+    let host = concat!(
+        "#![allow(dead_code, clippy::missing_safety_doc)]\n",
+        "extern \"C\" { fn xe_half(n: i64) -> f64; }\n",
+        "#[no_mangle]\npub extern \"C\" fn cf_half(n: i64) -> f64 {\n",
+        "    let r = unsafe { xe_half(n) };\n    eprintln!(\"host regained control\");\n    r\n}\n",
+    );
+    let (code, stdout, stderr) =
+        run_package_env("err_v1", almd, host, &["run"], &[], &[("ALMIDE_VERBOSE", "1"), ("ALMIDE_CERTIFY_OWNERSHIP", "fail")]);
+    assert!(!stderr.contains("verified native render walled"), "the program walled:\n{stderr}");
+    assert_eq!(code, Some(1), "--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}");
+    assert_eq!(stdout, "ok 1.5\n", "--- stderr ---\n{stderr}");
+    assert!(stderr.contains("over 100: 200\n"), "--- stderr ---\n{stderr}");
+    assert_eq!(stderr.matches("host regained control").count(), 1, "the host ran on after the err\n{stderr}");
+}
+
+/// C-452's judge fixture renders on the certified native route: one adapter
+/// per export, none left to the standard codegen.
+#[test]
+fn the_c452_fixture_renders_on_the_certified_native_route() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/native_only/export_c_scalar_abi.almd");
+    let source = std::fs::read_to_string(fixture).expect("read the fixture");
+    let rust = almide_mir::pipeline::try_render_rust_source(&source).expect("the v1 render walled the C-452 fixture");
+    assert_eq!(rust.matches("#[export_name = \"ecx_").count(), 9, "one C adapter per export:\n{rust}");
 }

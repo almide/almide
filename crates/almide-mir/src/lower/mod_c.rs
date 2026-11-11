@@ -512,6 +512,18 @@ fn wrap_unit_block_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
             expr: Some(Box::new(wrap_unit_body_in_ok(t, result_ty.clone()))) },
             ty: result_ty, span: body.span, def_id: body.def_id };
     }
+    // A tail that already is the fn's Result (`guard c else { note(); err(e) }` — the
+    // else block of an early exit) stays the block's value: as a statement followed by
+    // `ok(())` its err would be discarded. The certified native render only; the other
+    // render's lowering is unchanged.
+    if crate::lower::owned_tco_slots() {
+        if let Some(t) = old_tail.as_ref().filter(|t| t.ty == result_ty
+            && matches!(t.kind, IrExprKind::ResultErr { .. } | IrExprKind::ResultOk { .. }))
+        {
+            return IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(t.clone())) },
+                ty: result_ty, span: body.span, def_id: body.def_id };
+        }
+    }
     if let Some(t) = old_tail {
         stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: t }, span: None });
     }

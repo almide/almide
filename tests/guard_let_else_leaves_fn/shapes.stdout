@@ -1,0 +1,56 @@
+ok start end
+ok start <ada> end
+err if arm: no name
+ok 1000
+ok 1007
+err match arm: nothing picked for 5
+ok <a><b>
+err loop: empty name after <a>
+checking [bo]
+got <bo>
+ok
+checking []
+err unit effect: no name
+n=0 done
+ok
+n=3 picked 3
+n=3 done
+ok
+err unit effect arm: n=0
+ok start end
+ok start <eve> end
+leaving after start
+err if arm block: no name
+ok m
+ok m+<kit>
+ok early at 4
+picked 1 2
+nothing
+v:.
+v:<lin>.
+fallback for [v:]
+ok w987
+ok stopped at w21
+err negative start
+u0 after
+u6 has 6
+u6 after
+u0 nothing
+tail [mo] got <mo>
+ok
+tail [] leaving
+err unit effect block: no name
+arm [] done
+ok
+arm [ny] got <ny>
+arm [ny] done
+ok
+arm [] leaving
+err unit effect arm block: no name
+k=0 done
+ok
+k=8 picked 8
+k=8 done
+ok
+ok
+end

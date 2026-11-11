@@ -620,6 +620,11 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
         // A statement `f(x)!`: the site runs, its payload is discarded
         // (released when the extraction handed the frame its credit).
         IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => value_subset(e),
+        // #4653: a bare `err(e)` as a statement body is the raise leaf of a
+        // statement-position match arm (patterns.rs `stmt_arm_raises`): the
+        // err block is built and leaves through the frame's error exit,
+        // recorded as the value-position raise is (data.rs `lower_err_raise`).
+        IrExprKind::ResultErr { .. } => value_subset(e),
         other => Some(Why::Here(tag(other))),
     }
 }

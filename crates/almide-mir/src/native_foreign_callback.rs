@@ -26,7 +26,7 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
     Ok(format!("{{ let __foreign_env = &{value}; let __foreign_index = __foreign_env.words().first().copied().unwrap_or_else(|| almide_abort(\"index out of bounds\")); move |{}| -> {} {{ {bindings}{body} }} }}", host_params.join(", "), host_type(&ret_ty)?))
 }
 
-fn host_type(ty: &Ty) -> Result<String, LowerError> {
+pub(crate) fn host_type(ty: &Ty) -> Result<String, LowerError> {
     if let Some(s) = scalar_host_type(ty) { return Ok(s.into()); }
     Ok(match ty {
         Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<Vec<u8>>".into(),
@@ -40,6 +40,11 @@ fn host_type(ty: &Ty) -> Result<String, LowerError> {
             format!("{name}<{}>", a.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         Ty::Tuple(a) => format!("({},)", a.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        Ty::Named(name, args) => crate::native_callback_types::host_named(name.as_str(), args)?,
+        Ty::Record { .. } => match crate::native_callback_types::nominal(ty) {
+            Some(named) => host_type(&named)?,
+            None => return Err(wall("native: foreign callback has no host value type")),
+        },
         _ => return Err(wall("native: foreign callback has no host value type")),
     })
 }

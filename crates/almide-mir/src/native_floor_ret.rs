@@ -29,7 +29,8 @@ fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
         | FloorRet::ResStrValuePairs
         | FloorRet::ResListStr
         | FloorRet::ResBytes
-        | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat => Ok(carrier_ret_of(r, call)),
+        | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr => Ok(carrier_ret_of(r, call)),
+        FloorRet::ResFileStat => Ok(file_stat_ret(call, dst_map)),
         _ => Ok(plain_ret_of(r, call)),
     }
 }
@@ -109,10 +110,6 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             (format!("({call}).map(|o| o.map(|xs| xs.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>())).map_err(AlmideString::from)"),
                 Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))))
         }
-        FloorRet::ResFileStat => (
-            format!("({call}).map(|s| vec![s.size, s.is_dir as i64, s.is_file as i64, s.modified]).map_err(AlmideString::from)"),
-            Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::Vec, NTy::Str))),
-        ),
         FloorRet::ResOptBytes => {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
             let o = NTy::Rec(crate::render_native_rec::option_type_of(b));
@@ -303,4 +300,69 @@ fn aggregate_host_ret(r: FloorRet, call: String, declared: Option<u16>) -> Resul
     let result = rec::result_type_of(NTy::Rec(record), NTy::Str);
     let name = rec::struct_name(record);
     Ok((format!("({call}).map(|s| {name} {{ f0: {}, f1: {}, f2: {} }}).map_err(AlmideString::from)", values[0], values[1], values[2]), Some(NTy::Rec(result))))
+}
+
+/// `fs.stat`'s result. The program's own `FileStat` record when its generated
+/// type is in the table — the destination's declared Ok payload, or the type
+/// under the declaration's name — and its labels and kinds are the runtime
+/// struct's: a value a `FileStat` (or `Result[FileStat, String]`) parameter
+/// takes as it is. Otherwise the four fields as a slot list, which only field
+/// reads consume.
+fn file_stat_ret(call: String, declared: Option<u16>) -> (String, Option<NTy>) {
+    use crate::render_native_rec as rec;
+    let abi = file_stat_slots();
+    let record = declared
+        .and_then(rec::result_payloads)
+        .and_then(|(ok, err)| if err == NTy::Str { ok.rec() } else { None })
+        .or_else(|| rec::rec_index("FileStat"))
+        .filter(|&i| rec::record_fields(i).is_some_and(|(_, fields)| {
+            fields.iter().map(|(name, kind)| (name.as_str(), *kind)).eq(abi.iter().map(|(label, _)| (*label, NTy::I64)))
+        }));
+    let Some(record) = record else {
+        let values = abi.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
+        return (
+            format!("({call}).map(|s| vec![{values}]).map_err(AlmideString::from)"),
+            Some(NTy::Rec(rec::result_type_of(NTy::Vec, NTy::Str))),
+        );
+    };
+    let fields: Vec<String> = abi.iter().enumerate().map(|(i, (_, v))| format!("f{i}: {v}")).collect();
+    (
+        format!("({call}).map(|s| {} {{ {} }}).map_err(AlmideString::from)", rec::struct_name(record), fields.join(", ")),
+        Some(NTy::Rec(rec::result_type_of(NTy::Rec(record), NTy::Str))),
+    )
+}
+
+#[cfg(test)]
+mod file_stat_ret_tests {
+    use super::*;
+    use crate::render_native_rec::{install, RecDecl};
+
+    fn record(labels: &[&str], fields: Vec<NTy>) -> RecDecl {
+        RecDecl {
+            name: "FileStat".into(),
+            fields,
+            record_labels: Some((false, labels.iter().map(|l| l.to_string()).collect())),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_declared_record_is_returned_only_when_it_is_the_runtime_layout() {
+        {
+            let _guard = install(vec![record(&["size", "is_dir", "is_file", "modified"], vec![NTy::I64; 4])]);
+            let (code, kind) = file_stat_ret("c".into(), None);
+            assert!(code.contains("f0: s.size, f1: s.is_dir as i64, f2: s.is_file as i64, f3: s.modified"), "{code}");
+            let result = kind.and_then(NTy::rec).expect("a generated result type");
+            assert_eq!(crate::render_native_rec::result_payloads(result), Some((NTy::Rec(0), NTy::Str)));
+        }
+        // A record of the same name with another layout (a user's own type) is
+        // not the runtime struct: the slot list stays.
+        for other in [record(&["name", "n"], vec![NTy::Str, NTy::I64]), record(&["size", "is_dir", "is_file", "mtime"], vec![NTy::I64; 4])] {
+            let _guard = install(vec![other]);
+            let (code, kind) = file_stat_ret("c".into(), None);
+            assert!(code.contains("vec![s.size, s.is_dir as i64, s.is_file as i64, s.modified]"), "{code}");
+            let result = kind.and_then(NTy::rec).expect("a generated result type");
+            assert_eq!(crate::render_native_rec::result_payloads(result), Some((NTy::Vec, NTy::Str)));
+        }
+    }
 }

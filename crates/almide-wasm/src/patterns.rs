@@ -184,10 +184,27 @@ impl Emitter<'_> {
                     }
                 })
             }
+            // #4653: a bare `err(e)` arm of a statement-position match in a
+            // Result-returning frame is the fn's early return — the else of
+            // a `guard let` that is not the fn's tail (inside a branch arm,
+            // or the tail of a Unit effect body). It lowers at the raw Unit
+            // so the constructor takes the raise leaf (`lower_err_raise`),
+            // exactly as a value-position arm does; as a statement the err
+            // was built and dropped and the fn carried on. `main` keeps its
+            // own carrier route (`try_lower_main_err_carrier`).
+            None if self.stmt_arm_raises(body) => self.lower(body, Some(SliceTy::Unit)).map(|_| ()),
             None => self.lower_stmt_expr(body),
         };
         self.branch_depth -= 1;
         r
+    }
+
+    /// Is `body`, the body of a statement-position match arm, an `err(e)`
+    /// that leaves the frame? True in any Result-returning fn but `main`.
+    fn stmt_arm_raises(&self, body: &IrExpr) -> bool {
+        matches!(body.kind, almide_ir::IrExprKind::ResultErr { .. })
+            && !self.in_main
+            && matches!(self.fn_ret, Some(SliceTy::Result(..)))
     }
 
     /// Push an i32 bool: does the subject (in `scr`) match `p`?

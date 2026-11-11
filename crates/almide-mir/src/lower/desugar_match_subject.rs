@@ -95,7 +95,24 @@ fn match_subject_needs_hoist(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -
         && arms.iter().any(|a| matches!(a.pattern, almide_ir::IrPattern::Tuple { .. }));
     (has_literal_arm && !is_pure_match_subject(subject) && !is_variant_subject(&subject.ty))
         || is_hoistable_call_subject(subject)
+        || is_branch_carrier_subject(subject)
         || tuple_call_subject
+}
+
+/// A heap Option/Result `if` as the match subject — `match (if c then f(x)
+/// else ok(d)) { ok(v) => …, err(e) => … }`, what `(if c then f(x) else
+/// ok(d))!` is once its `!` is a match. The branch's merge is a value no arm
+/// dispatch can read (the statement match refused it as an untracked subject
+/// with a call- or assignment-bearing arm); bound to a `let` first, the
+/// branch bind splits the match into each arm, where the subject is that
+/// arm's own tracked call result or constructor. The subject runs once before
+/// the arms either way.
+fn is_branch_carrier_subject(subject: &IrExpr) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    use almide_lang::types::Ty;
+    matches!(&subject.kind, IrExprKind::If { .. })
+        && matches!(&subject.ty, Ty::Applied(TC::Option | TC::Result, _))
+        && is_heap_ty(&subject.ty)
 }
 
 /// The call shapes hoisted EVEN for an Option/Result subject: a COMPUTED call
