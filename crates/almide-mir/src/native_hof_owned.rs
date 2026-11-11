@@ -96,3 +96,14 @@ fn shared_place_arg(a: &CallArg, t: NTy, by_ref: bool) -> Option<String> {
     let (false, NTy::StrRef, CallArg::Handle(v)) = (by_ref, t, a) else { return None };
     Some(format!("{}.clone()", crate::render_native_addr::str_field_of(*v)?))
 }
+
+/// Whether the runtime body that alone serves `call` takes its param `k` by
+/// value, plainly — beside a callback too. [`takes_by_value`] refuses a body
+/// with a callback because the linked body may serve the site instead, and
+/// lends; a call no body is linked for has only this route.
+pub(crate) fn served_by_value(call: &str, k: usize) -> bool {
+    of(call).is_some_and(|h| {
+        !h.mutable.iter().any(|m| *m)
+            && matches!(h.params.get(k), Some((d, false)) if !matches!(d, DTy::Fn(..)) && !has_runtime_tuple(d))
+    })
+}

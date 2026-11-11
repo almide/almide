@@ -15,6 +15,16 @@ thread_local! {
     static NATIVE_RESULTS: std::cell::RefCell<BTreeSet<(String, usize)>> = const { std::cell::RefCell::new(BTreeSet::new()) };
 }
 
+thread_local! {
+    /// The functions of the program ([`rewrite`] sets them): a call to any
+    /// other name has no body here, only its declared runtime route.
+    static BODIES: std::cell::RefCell<BTreeSet<String>> = const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+fn has_body(name: &str) -> bool {
+    BODIES.with(|d| d.borrow().contains(name))
+}
+
 fn native_result(name: &str, k: usize) -> bool {
     NATIVE_RESULTS.with(|d| d.borrow().contains(&(name.to_string(), k)))
 }

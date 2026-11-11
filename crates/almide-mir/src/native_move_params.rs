@@ -45,7 +45,7 @@ fn by_value(name: &str, k: usize) -> bool {
     // modes decide; only a call it does not reaches the runtime route.
     match crate::native_floor::declared(name) {
         Some(_) => crate::native_floor::takes_by_value(name, k),
-        None => crate::native_hof::takes_by_value(name, k),
+        None => crate::native_hof::takes_by_value(name, k) || (!has_body(name) && crate::native_hof::served_by_value(name, k)),
     }
 }
 
@@ -639,6 +639,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     }
     let taken = taken_functions(functions);
     DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    BODIES.with(|d| *d.borrow_mut() = functions.iter().map(|f| f.name.clone()).collect());
     NATIVE_RESULTS.with(|d| *d.borrow_mut() = native_result_params(sigs));
     let reached_otherwise = reached_otherwise(functions);
     // The closure table: every taken function in the program, by param shape.
