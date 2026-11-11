@@ -25,13 +25,16 @@ pub(crate) fn slice_twin(symbol: &str) -> Option<(String, bool, Vec<bool>, Vec<&
     paired.then(|| Some((twin.clone(), pair, from, closure(&twin, rt).ok()?)))?
 }
 
+/// A paired twin: its name and its items.
+type Twin = Option<(String, Vec<&'static str>)>;
+
 /// The in-place twin of the consuming runtime body `symbol`: the runtime fn
 /// `<symbol>_mut`, paired from the signatures. The body takes its first param
 /// by value and returns that type; the twin takes it `&mut`, every other
 /// param as the body does (a boxed callback as the same `impl Fn`), and
 /// returns nothing. Returns the twin and its items. `None` when the runtime
 /// carries no such fn.
-pub(crate) fn in_place_twin(symbol: &str) -> Option<(String, Vec<&'static str>)> {
+pub(crate) fn in_place_twin(symbol: &str) -> Twin {
     let rt = runtime_index();
     let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
     let twin = format!("{symbol}_mut");
@@ -59,8 +62,8 @@ pub(crate) fn in_place_twin(symbol: &str) -> Option<(String, Vec<&'static str>)>
 /// result type, then the body's own params, and nothing returned. It leaves
 /// in the place it is handed what the body returns. Returns the twin and its
 /// items. `None` when the runtime carries no such fn.
-pub(crate) fn refill_twin(symbol: &str) -> Option<(String, Vec<&'static str>)> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<(String, Vec<&'static str>)>>>> = OnceLock::new();
+pub(crate) fn refill_twin(symbol: &str) -> Twin {
+    static CACHE: OnceLock<Mutex<HashMap<String, Twin>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(symbol) {
         return hit.clone();
