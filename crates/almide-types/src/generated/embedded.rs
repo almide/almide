@@ -13783,6 +13783,103 @@ fn __jr_seen(b: Bytes, ks: Int, kl: Int, st: List[Int], lo: Int, hi: Int) -> Boo
   hit
 }
 
+
+fn __jr_khash(b: Bytes, ks: Int, kl: Int) -> Int = {
+  var h = 2166136261
+  var i = 0
+  while i < kl {
+    h = int.band(int.bxor(h, b[ks + i]) * 16777619, 4294967295)
+    i = i + 1
+  }
+  h
+}
+
+
+
+
+fn __jr_hput(b: Bytes, kst: List[Int], j: Int, mut ht: List[Int]) -> Bool = {
+  let t = list.len(ht) - 1
+  var s = int.band(__jr_khash(b, kst[j], kst[j + 1]), t - 1)
+  var n = 0
+  while n <= 64 and ht[s + 1] != 0 {
+    s = int.band(s + 1, t - 1)
+    n = n + 1
+  }
+  if n <= 64 then {
+    ht[s + 1] = j + 1
+    ht[0] = ht[0] + 1
+    true
+  } else false
+}
+
+
+
+
+fn __jr_hroom(b: Bytes, kst: List[Int], kp: Int, mut ht: List[Int]) -> Bool = {
+  let t = list.len(ht) - 1
+  if t > 0 and 2 * (ht[0] + 1) <= t then true
+  else {
+    var kept: List[Int] = []
+    var s = 1
+    while s <= t {
+      if ht[s] != 0 and ht[s] <= kp then { list.push(kept, ht[s] - 1) } else ()
+      ht[s] = 0
+      s = s + 1
+    }
+    var add = if t > 0 then t else 257
+    while add > 0 {
+      list.push(ht, 0)
+      add = add - 1
+    }
+    ht[0] = 0
+    var fine = true
+    var i = 0
+    while fine and i < list.len(kept) {
+      fine = __jr_hput(b, kst, kept[i], ht)
+      i = i + 1
+    }
+    fine
+  }
+}
+
+
+
+
+fn __jr_hdup(b: Bytes, kst: List[Int], base: Int, kp: Int, mut ht: List[Int]) -> Int = {
+  var fine = true
+  if kp - base == 128 then {
+    var j = base
+    while fine and j < kp {
+      fine = __jr_hroom(b, kst, kp, ht) and __jr_hput(b, kst, j, ht)
+      j = j + 2
+    }
+  } else ()
+  if not fine or not __jr_hroom(b, kst, kp, ht) then -1
+  else {
+    let t = list.len(ht) - 1
+    let kl = kst[kp + 1]
+    var s = int.band(__jr_khash(b, kst[kp], kl), t - 1)
+    var n = 0
+    var r = -2
+    while r == -2 {
+      let x = ht[s + 1]
+      if x == 0 then {
+        ht[s + 1] = kp + 1
+        ht[0] = ht[0] + 1
+        r = 0
+      } else if x > base and x <= kp and kst[x] == kl and __jr_span_eq(b, kst[x - 1], kst[kp], kl) then {
+        r = 1
+      } else if n >= 64 then {
+        r = -1
+      } else {
+        s = int.band(s + 1, t - 1)
+        n = n + 1
+      }
+    }
+    r
+  }
+}
+
 fn __jr_key_is(b: Bytes, ks: Int, kl: Int, k: Bytes) -> Bool = {
   if kl != bytes.len(k) then false
   else {
@@ -13814,19 +13911,26 @@ fn __jr_lit(b: Bytes, p: Int, e: Int, c1: Int, c2: Int, c3: Int) -> Int =
 
 fn __jr_slot(kind: Int, p: Int, q: Int) -> Int = kind + p * 16 + q * 17179869184
 
-fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int], cfg: List[Int]) -> List[Int]? = {
+fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int], cfg: List[Int], cz: List[Int], oz: List[Int]) -> List[Int]? = {
   let row = cfg[0]
   let el = cfg[1]
   let g = cfg[2]
   let k = cfg[3]
-  let kb = 2 + 3 * int.min(e, 256)
-  let cap = kb + 2 * int.min(e / 3 + 1, 512)
-  var st = list.repeat(0, cap)
-  var cur = list.repeat(0, g + k + 1)
-  var out = list.repeat(0, g)
+
+
+
+
+  let kb = 2 + 3 * int.min(e, 1000)
+  var st = [0, 0, 0, 0, 0]
+  var kst = [0, 0, 0, 0]
+  var ht: List[Int] = []
+
+
+  var cur = cz
+  var out = oz
   var p = __jr_ws(b, 0, e)
   var sp = 2
-  var kp = kb
+  var kp = 0
   var pending = 0
 
   var state = if e >= 1073741824 then -1 else 0
@@ -13854,6 +13958,9 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int
           if sp + 3 > kb then {
             state = -1
           } else {
+            while sp + 3 > list.len(st) {
+              list.push(st, 0)
+            }
             let isobj = c == 123
             st[sp] = if isobj then 1 else 0
             st[sp + 1] = if isobj then pn + 1
@@ -13924,18 +14031,19 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int
         let ks = p + 1
         let kl = ke - p - 2
         let base = st[sp - 1]
-        if r < 0 or kp + 2 > cap or kp - base >= 128 or (r % 4 >= 2 and not __jr_asked(b, p, ke, 0)) or __jr_seen(
-          b,
-          ks,
-          kl,
-          st,
-          base,
-          kp,
-        ) then {
+        let dup = if r < 0 or (r % 4 >= 2 and not __jr_asked(b, p, ke, 0)) then 1
+        else {
+          while kp + 2 > list.len(kst) {
+            list.push(kst, 0)
+          }
+          kst[kp] = ks
+          kst[kp + 1] = kl
+          if kp - base < 128 then (if __jr_seen(b, ks, kl, kst, base, kp) then 1 else 0)
+          else __jr_hdup(b, kst, base, kp, ht)
+        }
+        if dup != 0 then {
           state = -1
         } else {
-          st[kp] = ks
-          st[kp + 1] = kl
           kp = kp + 2
           p = __jr_ws(b, ke, e)
           if p >= e or b[p] != 58 then {
@@ -13993,13 +14101,15 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int
   } else none
 }
 
-fn __spans(b: Bytes, keys: List[String], par: List[Int], slot: List[Int], cfg: List[Int]) -> List[Int]? = __jr_scan(
+fn __spans(b: Bytes, keys: List[String], par: List[Int], slot: List[Int], cfg: List[Int], cz: List[Int], oz: List[Int]) -> List[Int]? = __jr_scan(
   b,
   bytes.len(b),
   keys |> list.map((key) => bytes.from_string(key)),
   par,
   slot,
   cfg,
+  cz,
+  oz,
 )
 
 

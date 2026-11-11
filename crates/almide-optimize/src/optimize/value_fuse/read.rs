@@ -541,7 +541,7 @@ impl IrMutVisitor for AtDoc<'_, '_> {
             || row_site(e, &self.roots).is_some();
         if site {
             let col_ty = Ty::list(Ty::Int);
-            let c = self.cx.vt.alloc(sym("scan"), col_ty.clone(), Mutability::Let, e.span);
+            let c = self.cx.vt.alloc_fresh("scan", col_ty.clone(), Mutability::Let, e.span);
             if let Some(fused) = self.cx.fused(e, self.job, &self.roots, self.b, c, None) {
                 let old = std::mem::take(e);
                 *e = on_scan(self.cols, IrPattern::Bind { var: c, ty: col_ty }, fused, old);
@@ -597,7 +597,7 @@ impl Fuser<'_> {
         }
         let mut out = e.clone();
         Rename { vt: &mut *self.vt, map: HashMap::new() }.visit_expr_mut(&mut out);
-        let iv = self.vt.alloc(sym("row"), Ty::Int, Mutability::Let, span);
+        let iv = self.vt.alloc_fresh("row", Ty::Int, Mutability::Let, span);
         let IrExprKind::Call { args, .. } = &mut out.kind else { return None };
         // The kernel hands out the row numbers itself: a program that
         // reads rows need not otherwise link `list.range`.
@@ -642,8 +642,8 @@ impl Fuser<'_> {
             return None;
         }
         let cols_ty = Ty::option(Ty::list(Ty::Int));
-        let b = self.vt.alloc(sym("bytes"), Ty::Bytes, Mutability::Let, span);
-        let cols = self.vt.alloc(sym("cols"), cols_ty.clone(), Mutability::Let, span);
+        let b = self.vt.alloc_fresh("bytes", Ty::Bytes, Mutability::Let, span);
+        let cols = self.vt.alloc_fresh("cols", cols_ty.clone(), Mutability::Let, span);
         let strs = |xs: &[String]| {
             let elements = xs.iter().map(|k| mk(IrExprKind::LitStr { value: k.clone() }, Ty::String, span)).collect();
             mk(IrExprKind::List { elements }, Ty::list(Ty::String), span)
@@ -658,6 +658,8 @@ impl Fuser<'_> {
                 ints(plan.par.iter().copied(), span),
                 ints(slots.iter().copied(), span),
                 ints([node(plan.row), node(plan.el), g, k], span),
+                ints(std::iter::repeat_n(0, (g + k + 1) as usize), span),
+                ints(std::iter::repeat_n(0, g as usize), span),
             ],
             cols_ty.clone(),
             span,
@@ -668,7 +670,7 @@ impl Fuser<'_> {
         // The text is read twice (the scan, and the parse of a refused
         // document): anything but a variable is evaluated once, here.
         if !matches!(slot.kind, IrExprKind::Var { .. }) {
-            let t = self.vt.alloc(sym("text"), Ty::String, Mutability::Let, span);
+            let t = self.vt.alloc_fresh("text", Ty::String, Mutability::Let, span);
             let text = std::mem::replace(slot, mk(IrExprKind::Var { id: t }, Ty::String, span));
             binds.push(bind(t, Ty::String, text));
         }
@@ -725,7 +727,7 @@ impl Fuser<'_> {
         if parse_of(arg).is_none() {
             return;
         }
-        let doc = self.vt.alloc(sym("doc"), arg.ty.clone(), Mutability::Let, arg.span);
+        let doc = self.vt.alloc_fresh("doc", arg.ty.clone(), Mutability::Let, arg.span);
         let read = mk(IrExprKind::Var { id: doc }, arg.ty.clone(), arg.span);
         let parse = std::mem::replace(arg, read);
         let mut stmt = bind(doc, parse.ty.clone(), parse);
@@ -755,9 +757,9 @@ impl Fuser<'_> {
         rn.bind(&mut root);
         rn.visit_expr_mut(&mut body);
         let col_ty = Ty::list(Ty::Int);
-        let b = self.vt.alloc(sym("bytes"), Ty::Bytes, Mutability::Let, None);
-        let c = self.vt.alloc(sym("scan"), col_ty.clone(), Mutability::Let, None);
-        let i = self.vt.alloc(sym("row"), Ty::Int, Mutability::Let, None);
+        let b = self.vt.alloc_fresh("bytes", Ty::Bytes, Mutability::Let, None);
+        let c = self.vt.alloc_fresh("scan", col_ty.clone(), Mutability::Let, None);
+        let i = self.vt.alloc_fresh("row", Ty::Int, Mutability::Let, None);
         OverScan { cx: self, job: &tw.job, roots: Roots::from([(root, tw.base)]), b, c, i: Some(i) }.visit_expr_mut(&mut body);
         let params =
             vec![own_param(b, sym("bytes"), Ty::Bytes), own_param(c, sym("scan"), col_ty), own_param(i, sym("row"), Ty::Int)];
@@ -831,10 +833,10 @@ mod tests {
         assert_eq!(
             names,
             [
-                ("get_int", "__leaf_int"),
-                ("get_float", "__leaf_float"),
-                ("get_bool", "__leaf_bool"),
-                ("get_string", "__leaf_string")
+                (ValueOp::Get(Some(ValueKind::Int)), "__leaf_int"),
+                (ValueOp::Get(Some(ValueKind::Float)), "__leaf_float"),
+                (ValueOp::Get(Some(ValueKind::Bool)), "__leaf_bool"),
+                (ValueOp::Get(Some(ValueKind::String)), "__leaf_string")
             ]
         );
     }

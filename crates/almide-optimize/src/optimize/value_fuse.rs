@@ -886,7 +886,7 @@ mod tests {
     fn an_undeclared_fn_is_no_value_op() {
         for (m, f) in [
             ("json", "stringify_pretty"),
-            ("json", READER),
+            ("json", read::SPANS),
             ("json", ARRAY_WRITER),
             ("value", "merge"),
             ("value", "__stringify"),
