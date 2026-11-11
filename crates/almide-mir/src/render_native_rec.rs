@@ -439,7 +439,14 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     // A region twin is `Copy` (its boxed fields are arena handles), so a
     // rewound window block owns nothing to drop.
     let derive = if is_region(i) { "Clone, Copy" } else if native_order_safe(i) { "Clone, PartialEq, Eq, PartialOrd, Ord" } else if d.eq_safe { "Clone, PartialEq" } else { "Clone" };
-    let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
+    // A chain of the type's own boxed last fields is copied in a loop.
+    let own: Vec<crate::render_native_spine_clone::Case> = cases.iter()
+        .map(|(t, fs)| crate::render_native_spine_clone::Case { tag: *t, own_box: fs.iter().map(|f| *f == NTy::Rec(i) && enum_field_boxed(i, *f)).collect() })
+        .collect();
+    let spine = if is_region(i) { None } else { crate::render_native_spine_clone::clone_impl(&n, &own) };
+    let derive = if spine.is_some() { derive.strip_prefix("Clone").unwrap_or(derive).trim_start_matches(", ") } else { derive };
+    let attr = if derive.is_empty() { String::new() } else { format!("#[derive({derive})]\n") };
+    let mut out = format!("/// variant `{}`\n{attr}enum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("    C{t},\n"));
@@ -448,6 +455,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
         }
     }
     out.push_str("}\n");
+    out.push_str(spine.as_deref().unwrap_or(""));
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
     let leaf = d.default_tag.unwrap_or(cases[0].0);
