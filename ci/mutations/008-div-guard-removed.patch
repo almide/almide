@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/binop.rs b/crates/almide-wasm/src/binop.rs
-index 2703dfd20..95b6d87ca 100644
+index f494e5916..3a1a9af0c 100644
 --- a/crates/almide-wasm/src/binop.rs
 +++ b/crates/almide-wasm/src/binop.rs
-@@ -314,8 +314,7 @@ impl Emitter<'_> {
-                     self.f.instructions().else_();
-                 }
+@@ -320,8 +320,7 @@ impl Emitter<'_> {
+                 let l = self.hold_i64()?;
+                 self.f.instructions().local_set(r).local_set(l);
                  let mut i = self.f.instructions();
 -                i.local_get(r).i64_eqz().if_(BlockType::Empty);
 -                i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
@@ -12,7 +12,7 @@ index 2703dfd20..95b6d87ca 100644
                  if unsigned {
                      // C-179: no overflow case exists in the unsigned lane.
                      i.local_get(l).local_get(r);
-@@ -333,10 +332,7 @@ impl Emitter<'_> {
+@@ -339,10 +338,7 @@ impl Emitter<'_> {
                          Some((bits, true)) => -(1i64 << (bits - 1)),
                          _ => i64::MIN,
                      };
