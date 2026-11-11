@@ -88,8 +88,9 @@ pub(super) fn snapshot_range_bounds(ir: &mut IrProgram) {
             let (start_moves, end_moves) = (moves(start), moves(end));
             if !start_moves && !end_moves { return; }
             let mut binds = Vec::new();
-            // A bound bound here is evaluated here: keep start ahead of end.
-            if start_moves || !matches!(start.kind, IrExprKind::LitInt { .. } | IrExprKind::Var { .. }) { self.bind(start, &mut binds); }
+            // A bound bound here is evaluated here, so start goes ahead of
+            // an end bound here: evaluating that end may write what start reads.
+            if start_moves || (end_moves && !matches!(start.kind, IrExprKind::LitInt { .. })) { self.bind(start, &mut binds); }
             if end_moves { self.bind(end, &mut binds); }
             let old = std::mem::take(e);
             *e = IrExpr { ty: old.ty.clone(), span: old.span, def_id: old.def_id,
