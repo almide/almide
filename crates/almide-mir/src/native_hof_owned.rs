@@ -87,3 +87,12 @@ pub(crate) fn array_twins(texts: &BTreeMap<String, String>) -> Result<String, Lo
     Ok(out)
 }
 
+
+/// A borrowed string read of a list element or a record field handed to a
+/// param that takes it by value: the place's own handle, shared by its count
+/// (as a copy of the read is, `render_dup`), never its bytes copied into a
+/// new block. `None` for any other argument.
+fn shared_place_arg(a: &CallArg, t: NTy, by_ref: bool) -> Option<String> {
+    let (false, NTy::StrRef, CallArg::Handle(v)) = (by_ref, t, a) else { return None };
+    Some(format!("{}.clone()", crate::render_native_addr::str_field_of(*v)?))
+}
