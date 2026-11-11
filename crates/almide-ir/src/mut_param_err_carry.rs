@@ -7,14 +7,15 @@
 //! effect fn `f(mut b: Buf, ..) -> T` (the rewrite already returns `(T, Buf)`)
 //! is declared
 //!
-//!   f(b, ..) -> Result[(T, Buf), (String, Buf)]
+//!   f(b, ..) -> Result[(T, Buf), (E, Buf)]
 //!
-//! (was-Unit: `Result[Buf, (String, Buf)]`; several `mut` params: every
-//! buffer in both tuples). Every raising exit pairs the buffer it holds at
+//! (`E` the fn's err type: its declared `Result[_, E]`'s, else `String`;
+//! was-Unit: `Result[Buf, (E, Buf)]`; several `mut` params: every buffer in
+//! both tuples). Every raising exit pairs the buffer it holds at
 //! that point with the error:
 //!
 //!   err(m) tail / raise leaf   → err((m, b))!
-//!   x!  (x : Result[A, String]) → match x { ok(v) => v, err(e) => err((e, b))! }
+//!   x!  (x : Result[A, E])      → match x { ok(v) => v, err(e) => err((e, b))! }
 //!   guard c else err(m)         → guard c else err((m, b))
 //!   guard c else v              → guard c else ok(<v paired>)
 //!
@@ -28,7 +29,7 @@
 //!       err((e, b)) => (err(e), b),
 //!     };
 //!     p = b';
-//!     __mp_r }                                       : Result[T, String]
+//!     __mp_r }                                       : Result[T, E]
 //!
 //! A `!` site writes back, then propagates. Where the place is one of the
 //! calling fn's own carried buffers, the err arm writes back and re-raises —
@@ -43,8 +44,8 @@
 //!
 //! A fn whose raises cannot all be paired keeps the #1576 form (ok arm
 //! only); its unpropagated call sites stay walled. That is an Option-typed
-//! `!` or a typed error in the body, or a guard exiting with a Result value
-//! that is not an `err(..)` constructor.
+//! `!` or an error of another type than `E` in the body, or a guard exiting
+//! with a Result value that is not an `err(..)` constructor.
 
 use std::collections::HashSet;
 
@@ -55,24 +56,32 @@ use crate::visit::IrVisitor;
 use crate::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use crate::*;
 
-/// Is `t` an err type a raise can carry as the `String` first half of the
-/// err tuple? (`Unknown` is the checker's placeholder on an `ok(..)`-only
-/// Result; the channel is `String`.)
-fn string_channel(t: &Ty) -> bool {
-    matches!(t, Ty::String | Ty::Unknown)
+/// Is `t` an err type a raise can carry as the first half of an err tuple
+/// whose channel is `chan`? (`Unknown` is the checker's placeholder on an
+/// `ok(..)`-only Result; it rides the channel as it is.)
+fn channel_admits(t: &Ty, chan: &Ty) -> bool {
+    matches!(t, Ty::Unknown) || t == chan
 }
 
-/// Can every raising exit of `body` be paired with the buffer?
-pub(crate) fn pairable(body: &IrExpr) -> bool {
-    struct Scan(bool);
-    impl IrVisitor for Scan {
+/// The err type `func` raises through: its declared `Result[_, E]`'s `E`
+/// (#4668: any type, not only `String`), or `String` — the lifted carrier of
+/// an effect fn declared with a plain return. Read off the ORIGINAL signature.
+pub(crate) fn channel_err_ty(func: &IrFunction) -> Ty {
+    func.ret_ty.result_err_ty().filter(|t| !matches!(t, Ty::Unknown)).unwrap_or(Ty::String)
+}
+
+/// Can every raising exit of `body` be paired with the buffer, on an err
+/// channel of type `chan`?
+pub(crate) fn pairable(body: &IrExpr, chan: &Ty) -> bool {
+    struct Scan<'c>(bool, &'c Ty);
+    impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if !self.0 || matches!(e.kind, IrExprKind::Lambda { .. }) {
                 return;
             }
             if let IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } = &e.kind {
                 let raises_err = matches!(through_empty_blocks(expr).kind, IrExprKind::ResultErr { .. });
-                if !raises_err && !expr.ty.result_err_ty().is_some_and(|t| string_channel(&t)) {
+                if !raises_err && !expr.ty.result_err_ty().is_some_and(|t| channel_admits(&t, self.1)) {
                     self.0 = false;
                     return;
                 }
@@ -99,7 +108,7 @@ pub(crate) fn pairable(body: &IrExpr) -> bool {
             crate::visit::walk_stmt(self, s);
         }
     }
-    let mut s = Scan(true);
+    let mut s = Scan(true, chan);
     s.visit_expr(body);
     s.0
 }
@@ -121,6 +130,9 @@ fn through_empty_blocks_mut(e: &mut IrExpr) -> &mut IrExpr {
     e
 }
 
+/// The err-carrying fns, by `MutFns` key, each with its channel's err type.
+pub(crate) type Carry = std::collections::HashMap<String, Ty>;
+
 /// Every `MutFns` key of a can-err move-mode fn whose raises can all be
 /// paired: an [`err_channel`](crate::mut_param::err_channel) fn, not
 /// never-err, [`pairable`].
@@ -128,15 +140,16 @@ pub(crate) fn carry_keys(
     program: &IrProgram,
     is_mut_key: impl Fn(&str) -> bool,
     never_err: &HashSet<String>,
-) -> HashSet<String> {
-    let mut keys = HashSet::new();
+) -> Carry {
+    let mut keys = Carry::new();
     let mut admit = |module: Option<&str>, f: &IrFunction| {
         let scoped = crate::mut_param::scope_key(module.unwrap_or(""), f.name.as_str());
-        if !crate::mut_param::err_channel(f) || !is_mut_key(&scoped) || never_err.contains(&scoped) || !pairable(&f.body) {
+        let chan = channel_err_ty(f);
+        if !crate::mut_param::err_channel(f) || !is_mut_key(&scoped) || never_err.contains(&scoped) || !pairable(&f.body, &chan) {
             return;
         }
         let spellings = crate::mut_param_unpropagated::fn_spellings(module, f.name.as_str());
-        keys.extend(spellings.into_iter().filter(|k| is_mut_key(k)));
+        keys.extend(spellings.into_iter().filter(|k| is_mut_key(k)).map(|k| (k, chan.clone())));
     };
     for f in &program.functions {
         admit(None, f);
@@ -161,9 +174,10 @@ fn placeholder() -> IrExpr {
     node(IrExprKind::Unit, Ty::Unit)
 }
 
-/// The err payload a raise carries: `(String, Buf1, …, BufN)`.
-pub(crate) fn err_payload_ty(buf_tys: &[Ty]) -> Ty {
-    Ty::Tuple(std::iter::once(Ty::String).chain(buf_tys.iter().cloned()).collect())
+/// The err payload a raise carries: `(E, Buf1, …, BufN)`, `E` the channel's
+/// err type.
+pub(crate) fn err_payload_ty(chan: &Ty, buf_tys: &[Ty]) -> Ty {
+    Ty::Tuple(std::iter::once(chan.clone()).chain(buf_tys.iter().cloned()).collect())
 }
 
 /// A site block's binders: the buffers the write-backs read, and the
@@ -202,18 +216,18 @@ fn site_binders(block: &IrExpr) -> Option<SiteBinders> {
 ///       err((e, b..)) => (err(e), b..),
 ///     };
 ///     <write-backs of b'..>;
-///     __mp_r }                                  : Result[<tail>, String]
+///     __mp_r }                                  : Result[<tail>, E]
 ///
 /// The write-backs stay straight-line after the match (an Assign inside a
 /// value-position arm is not a shape the lowering releases correctly).
-pub(crate) fn to_result_block(expr: &mut IrExpr, vt: &mut VarTable) {
+pub(crate) fn to_result_block(expr: &mut IrExpr, vt: &mut VarTable, chan: &Ty) {
     let Some((buf_vars, res)) = site_binders(expr) else { return };
     let IrExprKind::Block { stmts, expr: Some(tail) } = &mut expr.kind else { return };
     let span = expr.span;
     let t_ty = tail.ty.clone();
-    let res_ty = Ty::result(t_ty, Ty::String);
+    let res_ty = Ty::result(t_ty, chan.clone());
     let buf_tys: Vec<Ty> = buf_vars.iter().map(|(_, t)| t.clone()).collect();
-    let err_ty = err_payload_ty(&buf_tys);
+    let err_ty = err_payload_ty(chan, &buf_tys);
     let pair_ty = Ty::Tuple(std::iter::once(res_ty.clone()).chain(buf_tys.iter().cloned()).collect());
 
     let first = stmts.remove(0);
@@ -250,17 +264,17 @@ pub(crate) fn to_result_block(expr: &mut IrExpr, vt: &mut VarTable) {
     );
 
     // err((e, b..)) => (err(e), b..)
-    let e = vt.alloc(sym("__mp_err"), Ty::String, Mutability::Let, None);
+    let e = vt.alloc(sym("__mp_err"), chan.clone(), Mutability::Let, None);
     let e_bufs: Vec<(VarId, Ty)> =
         buf_tys.iter().map(|t| (vt.alloc(sym("__mp_ebuf"), t.clone(), Mutability::Let, None), t.clone())).collect();
     let err_inner = IrPattern::Tuple {
-        elements: std::iter::once(IrPattern::Bind { var: e, ty: Ty::String })
+        elements: std::iter::once(IrPattern::Bind { var: e, ty: chan.clone() })
             .chain(e_bufs.iter().map(|(v, t)| IrPattern::Bind { var: *v, ty: t.clone() }))
             .collect(),
     };
     let err_body = node(
         IrExprKind::Tuple {
-            elements: std::iter::once(node(IrExprKind::ResultErr { expr: Box::new(var(e, Ty::String)) }, res_ty.clone()))
+            elements: std::iter::once(node(IrExprKind::ResultErr { expr: Box::new(var(e, chan.clone())) }, res_ty.clone()))
                 .chain(e_bufs.iter().map(|(v, t)| var(*v, t.clone())))
                 .collect(),
         },
@@ -292,7 +306,7 @@ pub(crate) fn to_result_block(expr: &mut IrExpr, vt: &mut VarTable) {
 
 
 /// Callee side: give every fn in `carry` the err-carrying signature.
-pub(crate) fn carry_bodies(program: &mut IrProgram, mut_fns: &crate::mut_param::MutFns, carry: &HashSet<String>) {
+pub(crate) fn carry_bodies(program: &mut IrProgram, mut_fns: &crate::mut_param::MutFns, carry: &Carry) {
     if carry.is_empty() {
         return;
     }
@@ -313,13 +327,11 @@ fn carry_fn(
     func: &mut IrFunction,
     scope: &str,
     mut_fns: &crate::mut_param::MutFns,
-    carry: &HashSet<String>,
+    carry: &Carry,
     vt: &mut VarTable,
 ) {
     let key = crate::mut_param::scope_key(scope, func.name.as_str());
-    if !carry.contains(&key) {
-        return;
-    }
+    let Some(chan) = carry.get(&key).cloned() else { return };
     let Some((idx, mut_ty, _, _, extra)) = mut_fns.get(&key).cloned() else { return };
     let Some(p) = func.params.get(idx) else { return };
     let mut bufs = vec![(p.var, mut_ty)];
@@ -328,7 +340,7 @@ fn carry_fn(
         bufs.push((q.var, t.clone()));
     }
     let buf_tys: Vec<Ty> = bufs.iter().map(|(_, t)| t.clone()).collect();
-    let err_ty = err_payload_ty(&buf_tys);
+    let err_ty = err_payload_ty(&chan, &buf_tys);
     let ret_ty = func.ret_ty.clone();
     let carrier = Ty::result(ret_ty.clone(), err_ty.clone());
     let IrExprKind::Block { stmts, expr: Some(tail) } = &mut func.body.kind else { return };
@@ -351,14 +363,16 @@ fn carry_fn(
     **tail = node(IrExprKind::ResultOk { expr: Box::new(old_tail) }, carrier.clone());
     func.body.ty = carrier.clone();
     func.ret_ty = carrier.clone();
-    let mut pairer = Pairer { bufs: &bufs, err_ty, carrier, vt };
+    let mut pairer = Pairer { bufs: &bufs, chan, err_ty, carrier, vt };
     pairer.visit_expr_mut(&mut func.body);
 }
 
 struct Pairer<'a> {
     bufs: &'a [(VarId, Ty)],
+    /// The fn's err channel type `E`.
+    chan: Ty,
     err_ty: Ty,
-    /// The fn's return type, `Result[R, (String, Buf..)]` — a guard's exit.
+    /// The fn's return type, `Result[R, (E, Buf..)]` — a guard's exit.
     carrier: Ty,
     vt: &'a mut VarTable,
 }
@@ -404,14 +418,15 @@ impl IrMutVisitor for Pairer<'_> {
                 let mut x = std::mem::replace(inner.as_mut(), placeholder());
                 // A rotated move-mode call (`let b = f(r)!`, a never-err
                 // callee) is typed with its raw payload; its value is still
-                // the lifted `Result[_, String]` carrier.
+                // the lifted carrier on this fn's channel.
                 if x.ty.result_ok_ty().is_none() {
-                    x.ty = Ty::result(x.ty.clone(), Ty::String);
+                    x.ty = Ty::result(x.ty.clone(), self.chan.clone());
                 }
+                let e_ty = x.ty.result_err_ty().filter(|t| !matches!(t, Ty::Unknown)).unwrap_or_else(|| self.chan.clone());
                 let ok_ty = x.ty.result_ok_ty().filter(|t| !matches!(t, Ty::Unknown)).unwrap_or_else(|| ty.clone());
                 let v = self.vt.alloc(sym("__mp_v"), ok_ty.clone(), Mutability::Let, None);
-                let er = self.vt.alloc(sym("__mp_e"), Ty::String, Mutability::Let, None);
-                let raise = self.raise(var(er, Ty::String), &ty);
+                let er = self.vt.alloc(sym("__mp_e"), e_ty.clone(), Mutability::Let, None);
+                let raise = self.raise(var(er, e_ty.clone()), &ty);
                 *e = IrExpr {
                     kind: IrExprKind::Match {
                         subject: Box::new(x),
@@ -422,7 +437,7 @@ impl IrMutVisitor for Pairer<'_> {
                                 body: var(v, ok_ty),
                             },
                             IrMatchArm {
-                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: er, ty: Ty::String }) },
+                                pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: er, ty: e_ty }) },
                                 guard: None,
                                 body: raise,
                             },
@@ -484,14 +499,18 @@ pub(crate) fn own_buffers(
     func: &IrFunction,
     scope: &str,
     mut_fns: &crate::mut_param::MutFns,
-    carry: &HashSet<String>,
+    carry: &Carry,
 ) -> HashSet<VarId> {
     let key = crate::mut_param::scope_key(scope, func.name.as_str());
-    let Some((idx, _, _, _, extra)) = carry.contains(&key).then(|| mut_fns.get(&key)).flatten() else {
+    let Some((idx, _, _, _, extra)) = carry.contains_key(&key).then(|| mut_fns.get(&key)).flatten() else {
         return HashSet::new();
     };
     std::iter::once(*idx).chain(extra.iter().map(|(i, _)| *i)).filter_map(|i| func.params.get(i).map(|p| p.var)).collect()
 }
+
+/// The recorded site blocks of carry callees, by [`site_key`], each with its
+/// callee's err channel type.
+pub(crate) type Sites = std::collections::HashMap<VarId, Ty>;
 
 /// The key a site block is recorded under: the first var its first statement
 /// binds, while that statement still binds the bare call.
@@ -522,15 +541,14 @@ pub(crate) fn site_key(block: &IrExpr) -> Option<VarId> {
 /// Returns true when `expr` was such a site.
 pub(crate) fn propagate_site(
     expr: &mut IrExpr,
-    pending: &mut HashSet<VarId>,
+    pending: &mut Sites,
     vt: &mut VarTable,
     own_bufs: &HashSet<VarId>,
 ) -> bool {
     let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &mut expr.kind else {
         return false;
     };
-    let Some(key) = site_key(inner).filter(|k| pending.contains(k)) else { return false };
-    pending.remove(&key);
+    let Some(chan) = site_key(inner).and_then(|k| pending.remove(&k)) else { return false };
     let ty = expr.ty.clone();
     let span = expr.span;
     let mut block = std::mem::replace(inner.as_mut(), placeholder());
@@ -541,9 +559,9 @@ pub(crate) fn propagate_site(
         _ => false,
     });
     if writes_own {
-        write_back_armwise(&mut block, vt, &ty, true);
+        write_back_armwise(&mut block, vt, &ty, true, &chan);
     } else {
-        reraise_only(&mut block, vt);
+        reraise_only(&mut block, vt, &chan);
     }
     block.ty = ty;
     block.span = span;
@@ -553,7 +571,7 @@ pub(crate) fn propagate_site(
 
 /// The light `!` form of [`propagate_site`]: the bound call becomes
 /// `match call { ok(x) => x, err((e, _..)) => err(e)! }`.
-fn reraise_only(block: &mut IrExpr, vt: &mut VarTable) {
+fn reraise_only(block: &mut IrExpr, vt: &mut VarTable, chan: &Ty) {
     let Some((buf_vars, _)) = site_binders(block) else { return };
     let bufs: Vec<Ty> = buf_vars.into_iter().map(|(_, t)| t).collect();
     let IrExprKind::Block { stmts, .. } = &mut block.kind else { return };
@@ -564,20 +582,20 @@ fn reraise_only(block: &mut IrExpr, vt: &mut VarTable) {
     let span = value.span;
     let mut call = std::mem::replace(value, placeholder());
     let ok_ty = call.ty.clone();
-    call.ty = Ty::result(ok_ty.clone(), err_payload_ty(&bufs));
+    call.ty = Ty::result(ok_ty.clone(), err_payload_ty(chan, &bufs));
     let x = vt.alloc(sym("__mp_ok"), ok_ty.clone(), Mutability::Let, None);
-    let e = vt.alloc(sym("__mp_err"), Ty::String, Mutability::Let, None);
+    let e = vt.alloc(sym("__mp_err"), chan.clone(), Mutability::Let, None);
     let raise = node(
         IrExprKind::Unwrap {
             expr: Box::new(node(
-                IrExprKind::ResultErr { expr: Box::new(var(e, Ty::String)) },
-                Ty::result(ok_ty.clone(), Ty::String),
+                IrExprKind::ResultErr { expr: Box::new(var(e, chan.clone())) },
+                Ty::result(ok_ty.clone(), chan.clone()),
             )),
         },
         ok_ty.clone(),
     );
     let err_inner = IrPattern::Tuple {
-        elements: std::iter::once(IrPattern::Bind { var: e, ty: Ty::String })
+        elements: std::iter::once(IrPattern::Bind { var: e, ty: chan.clone() })
             .chain(bufs.iter().map(|_| IrPattern::Wildcard))
             .collect(),
     };
@@ -602,21 +620,21 @@ fn reraise_only(block: &mut IrExpr, vt: &mut VarTable) {
 /// Convert every recorded site block no `!` reached to the Result-valued form.
 pub(crate) fn settle_sites<'b>(
     bodies: impl Iterator<Item = &'b mut IrExpr>,
-    pending: &HashSet<VarId>,
+    pending: &Sites,
     vt: &mut VarTable,
 ) {
     if pending.is_empty() {
         return;
     }
     struct Settle<'p, 'v> {
-        pending: &'p HashSet<VarId>,
+        pending: &'p Sites,
         vt: &'v mut VarTable,
     }
     impl IrMutVisitor for Settle<'_, '_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if site_key(e).is_some_and(|k| self.pending.contains(&k)) {
-                to_result_block(e, self.vt);
+            if let Some(chan) = site_key(e).and_then(|k| self.pending.get(&k)) {
+                to_result_block(e, self.vt, chan);
             }
         }
     }
@@ -634,7 +652,7 @@ pub(crate) fn settle_sites<'b>(
 ///
 /// A re-raise inside a carry fn is paired afterwards with that fn's buffers,
 /// read after the write-back.
-fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate: bool) {
+fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate: bool, chan: &Ty) {
     let Some((buf_vars, res)) = site_binders(block) else { return };
     let IrExprKind::Block { stmts, expr: Some(tail) } = std::mem::replace(&mut block.kind, IrExprKind::Unit) else {
         unreachable!()
@@ -650,7 +668,7 @@ fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate:
         _ => unreachable!(),
     };
     let buf_tys: Vec<Ty> = buf_vars.iter().map(|(_, t)| t.clone()).collect();
-    call.ty = Ty::result(ok_ty, err_payload_ty(&buf_tys));
+    call.ty = Ty::result(ok_ty, err_payload_ty(chan, &buf_tys));
     // The ok arm keeps the original binders (the write-backs read them).
     let mut ok_binds: Vec<IrPattern> = Vec::new();
     if let Some((v, t)) = &res {
@@ -662,7 +680,7 @@ fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate:
     let ok_body =
         IrExpr { kind: IrExprKind::Block { stmts: wbs.clone(), expr: Some(Box::new(ok_tail)) }, ty: ty.clone(), span: None, def_id: None };
     // The err arm binds fresh buffers and writes them back the same way.
-    let e = vt.alloc(sym("__mp_err"), Ty::String, Mutability::Let, None);
+    let e = vt.alloc(sym("__mp_err"), chan.clone(), Mutability::Let, None);
     let fresh: Vec<(VarId, VarId, Ty)> = buf_vars
         .iter()
         .map(|(v, t)| (*v, vt.alloc(sym("__mp_ebuf"), t.clone(), Mutability::Let, None), t.clone()))
@@ -684,7 +702,7 @@ fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate:
         })
         .collect();
     let err_inner = IrPattern::Tuple {
-        elements: std::iter::once(IrPattern::Bind { var: e, ty: Ty::String })
+        elements: std::iter::once(IrPattern::Bind { var: e, ty: chan.clone() })
             .chain(fresh.iter().map(|(_, n, t)| IrPattern::Bind { var: *n, ty: t.clone() }))
             .collect(),
     };
@@ -692,14 +710,14 @@ fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate:
         node(
             IrExprKind::Unwrap {
                 expr: Box::new(node(
-                    IrExprKind::ResultErr { expr: Box::new(var(e, Ty::String)) },
-                    Ty::result(ty.clone(), Ty::String),
+                    IrExprKind::ResultErr { expr: Box::new(var(e, chan.clone())) },
+                    Ty::result(ty.clone(), chan.clone()),
                 )),
             },
             ty.clone(),
         )
     } else {
-        node(IrExprKind::ResultErr { expr: Box::new(var(e, Ty::String)) }, ty.clone())
+        node(IrExprKind::ResultErr { expr: Box::new(var(e, chan.clone())) }, ty.clone())
     };
     let err_body = IrExpr { kind: IrExprKind::Block { stmts: err_wbs, expr: Some(Box::new(raise)) }, ty: ty.clone(), span: None, def_id: None };
     block.kind = IrExprKind::Match {
