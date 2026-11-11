@@ -285,11 +285,25 @@ impl Helpers<'_> {
 }
 
 /// A bare Map that already has a comparison: the dynamic-value expansion
-/// that runs after this pass, or a runtime call the lowering emits.
+/// that runs after this pass, or a runtime call the lowering emits. The
+/// runtime call compares a Float value by its bits (`-0.0` differs from `0.0`,
+/// a NaN equals itself), so a Map with a Float in its values is compared here,
+/// entry by entry, by the declared type.
 fn routed_map(t: &Ty) -> bool {
     let Ty::Applied(TC::Map, args) = t else { return false };
-    args.len() == 2 && (crate::lower::is_value_ty(&args[1]) || args.contains(&Ty::Float32)
-        || crate::lower::LowerCtx::map_set_eq_module_name(t).is_some())
+    if args.len() != 2 { return false; }
+    if crate::lower::is_value_ty(&args[1]) || args.contains(&Ty::Float32) { return true; }
+    !float_lane(&args[1]) && crate::lower::LowerCtx::map_set_eq_module_name(t).is_some()
+}
+
+fn float_lane(t: &Ty) -> bool {
+    match t {
+        Ty::Float | Ty::Float64 => true,
+        Ty::Applied(_, args) => args.iter().any(float_lane),
+        Ty::Tuple(ts) => ts.iter().any(float_lane),
+        Ty::Record { fields } => fields.iter().any(|(_, t)| float_lane(t)),
+        _ => false,
+    }
 }
 
 fn instantiate(gs: &[Sym], args: &[Ty], fs: &[(Sym, Ty)]) -> Option<Vec<(Sym, Ty)>> {
