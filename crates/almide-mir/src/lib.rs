@@ -95,6 +95,7 @@ mod native_defaults;
 mod native_mutation_places;
 mod native_map_upsert;
 mod native_group_count;
+mod native_reduce_fusion;
 mod native_range_loops;
 mod native_nested_places;
 mod native_display;
