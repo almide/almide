@@ -715,6 +715,7 @@ fn is_option_name(n: &str) -> bool {
 }
 
 include!("native_floor_sig.rs");
+include!("native_floor_slices.rs");
 include!("native_floor_index.rs");
 include!("native_floor_host.rs");
 include!("native_floor_scan.rs");

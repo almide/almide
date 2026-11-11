@@ -109,6 +109,7 @@ fn render_fn(
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
     crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
+    crate::render_native_slices::begin(func, &tys);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
@@ -270,6 +271,10 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     if render_printed_scalar(st, i)? || render_chain_final(st, i)? {
+        return Ok(false);
+    }
+    // A string floor call bound as slices of a borrowed param, and its reads.
+    if crate::render_native_slices::render(i, op, &mut st.tys, &mut st.out, st.indent, &mut *st.used_shims)? {
         return Ok(false);
     }
     let sink = NativeSink {
