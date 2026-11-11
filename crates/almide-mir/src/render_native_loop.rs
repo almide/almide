@@ -110,6 +110,7 @@ fn render_fn(
     crate::render_native_move::set_rebound(func);
     crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
     crate::render_native_slices::begin(func, &tys);
+    crate::render_native_inplace::begin(func);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
@@ -183,6 +184,7 @@ fn render_fn(
         }
         prev_start = st.out.len();
         let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
+        crate::render_native_inplace::rewrite(i, &mut st.out, prev_start, &mut *st.used_shims);
         // A shared cell's in-place borrow ends with its last read.
         for g in crate::render_native_keyed::guards_through(i) {
             for _ in 0..st.indent {
@@ -240,6 +242,10 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    // The rebind of a slot its call edited in place.
+    if crate::render_native_inplace::done(i) {
+        return Ok(false);
+    }
     if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }

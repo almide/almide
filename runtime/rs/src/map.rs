@@ -814,6 +814,21 @@ pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &st
     };
     __almide_v
 }
+// In-place twins of the consuming insert-or-update (render-only, #4661):
+// `m = map.set(m, k, v)` / `m = map.upsert(m, k, init, f)` whose result goes
+// straight back into the slot the map came from. The consuming form moves
+// the map's header into the call and back out on every update (1.5x on a
+// counting loop); these edit the map where it stands. Same entries, same
+// order, same values. Not Almide-visible functions.
+pub fn almide_rt_map_set_mut<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: K, v: V) { m.insert(k, v); }
+pub fn almide_rt_map_upsert_mut<K: PartialEq + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: K, init: V, f: impl Fn(V) -> V) {
+    if let Some(v) = m.get_mut(&k) {
+        let old = std::mem::replace(v, init);
+        *v = f(old);
+    } else {
+        m.insert(k, init);
+    }
+}
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in
 // place instead of cloned.

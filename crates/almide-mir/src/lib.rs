@@ -62,6 +62,7 @@ mod render_native_move;
 mod render_native_cond;
 mod render_native_borrow_read;
 mod render_native_slices;
+mod render_native_inplace;
 mod render_native_keyed;
 mod render_native_str;
 mod render_native_interp;
