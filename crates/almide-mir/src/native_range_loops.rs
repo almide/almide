@@ -17,6 +17,15 @@
 //! A range too long to be a list at all ([`unbuildable`]) is an out-of-memory
 //! abort when built, on every machine. The counted form keeps that abort:
 //! ahead of the loop, such a range is still built ([`build_guard`]).
+//!
+//! `let ys = list.range(a, b) |> list.flat_map((i) => { …; [e1, e2] })` is
+//! the same walk with a result (#4661): spelled literally the eight million
+//! indices of a two-to-the-twenty-third range are a list of their own before
+//! the first element is made. It becomes the counted loop that appends the
+//! literal to the result as each round makes it ([`Counted::flat_mapped`]) —
+//! the elements in the same order, the callback's statements run once per
+//! index in order, and a round that aborts or prints does so where the
+//! callback did. Scalar elements only, bound by a `let` in a statement list.
 use almide_ir::{visit_mut::{walk_expr_mut, IrMutVisitor}, *};
 use almide_lang::{intern::sym, types::{Ty, TypeConstructorId as C}};
 
@@ -60,10 +69,52 @@ impl Counted<'_> {
         guard
     }
 
+    /// The statements that stand for `let var = list.range(a, b) |>
+    /// list.flat_map((i) => { …; [e, …] })`: the guard, the result started
+    /// empty, the counted loop appending each round's literal, and the bind.
+    fn flat_mapped(&mut self, s: &IrStmt) -> Option<Vec<IrStmt>> {
+        let IrStmtKind::Bind { var, mutability, ty, value } = &s.kind else { return None; };
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &value.kind else { return None; };
+        let [source, IrExpr { kind: IrExprKind::Lambda { params, body, .. }, .. }] = args.as_slice() else { return None; };
+        let [(index, Ty::Int)] = params.as_slice() else { return None; };
+        let Ty::Applied(C::List, elem) = ty else { return None; };
+        let scalar = matches!(elem.as_slice(), [Ty::Int | Ty::Float | Ty::Bool]);
+        if module.as_str() != "list" || func.as_str() != "flat_map" || !scalar || value.ty != *ty { return None; }
+        let (start, end) = range_call(source)?;
+        if !self.fixed(start) || !self.fixed(end) { return None; }
+        // The round's statements, then the literal it yields.
+        let (mut round, literal) = match &body.kind {
+            IrExprKind::List { .. } => (Vec::new(), (**body).clone()),
+            IrExprKind::Block { stmts, expr: Some(tail) } if matches!(tail.kind, IrExprKind::List { .. }) => (stmts.clone(), (**tail).clone()),
+            _ => return None,
+        };
+        if !matches!(&literal.kind, IrExprKind::List { elements } if !elements.is_empty()) || literal.ty != *ty { return None; }
+        let mut out = Vec::new();
+        match unbuildable(start, end) {
+            Some(false) => {}
+            Some(true) => return None,
+            None => out.push(build_guard(start, end, self.vars)),
+        }
+        let acc = self.vars.alloc_fresh("flat_mapped", ty.clone(), Mutability::Var, s.span);
+        let read = || node(IrExprKind::Var { id: acc }, ty.clone());
+        out.push(IrStmt { kind: IrStmtKind::Bind { var: acc, mutability: Mutability::Var, ty: ty.clone(), value: node(IrExprKind::List { elements: Vec::new() }, ty.clone()) }, span: s.span });
+        let grown = node(IrExprKind::BinOp { op: BinOp::ConcatList, left: Box::new(read()), right: Box::new(literal) }, ty.clone());
+        round.push(IrStmt { kind: IrStmtKind::Assign { var: acc, value: grown }, span: s.span });
+        let range = node(IrExprKind::Range { start: Box::new(start.clone()), end: Box::new(end.clone()), inclusive: false }, source.ty.clone());
+        let walk = node(IrExprKind::ForIn { var: *index, var_tuple: None, iterable: Box::new(range), body: round }, Ty::Unit);
+        out.push(IrStmt { kind: IrStmtKind::Expr { expr: walk }, span: s.span });
+        out.push(IrStmt { kind: IrStmtKind::Bind { var: *var, mutability: *mutability, ty: ty.clone(), value: read() }, span: s.span });
+        Some(out)
+    }
+
     /// The loops among `stmts` (and `tail`), each behind its guard.
     fn count_all(&mut self, stmts: &mut Vec<IrStmt>, tail: Option<&mut IrExpr>) {
         let mut out = Vec::with_capacity(stmts.len());
         for mut s in std::mem::take(stmts) {
+            if let Some(counted) = self.flat_mapped(&s) {
+                out.extend(counted);
+                continue;
+            }
             if let IrStmtKind::Expr { expr } = &mut s.kind { out.extend(self.count(expr)); }
             out.push(s);
         }
