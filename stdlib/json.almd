@@ -5,6 +5,7 @@
 // surface has exactly one name. Runtime impls stay in `runtime/rs/src/json.rs`.
 /// Strict JSON Value or err; trailing non-whitespace text and nesting over 1000 are errors.
 @intrinsic("almide_rt_json_parse")
+@value_op("parse")
 fn parse(text: String) -> Result[Value, String] = _
 
 // A non-finite Float (NaN, ±inf) is written as `null` by stringify,
@@ -12,6 +13,7 @@ fn parse(text: String) -> Result[Value, String] = _
 // spelling for it, and the output always parses back.
 /// Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 @intrinsic("almide_rt_json_stringify")
+@value_op("text")
 fn stringify(v: Value) -> String = _
 
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.

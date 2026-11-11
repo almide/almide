@@ -48,6 +48,12 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // scalar in place instead of calling it (crates/almide-mir native_floor
     // `declared_scalar_text`, read by the certified render's interpolation)
     "scalar_text",
+    // What a stdlib fn is to a `Value`: the constructor of one JSON kind, a
+    // read of one kind (at a key, or of the value itself), the JSON parse,
+    // the JSON text. Read from the embedded stdlib source only, by the
+    // pass that leaves a `Value` built and consumed once unbuilt
+    // (crates/almide-optimize `value_fuse::declared_value_op`)
+    "value_op",
     // A prim fn's machine op, read by the MIR lowering (crates/almide-mir
     // `prim_ops`); stdlib-only like `@intrinsic` (E085)
     "prim_op",

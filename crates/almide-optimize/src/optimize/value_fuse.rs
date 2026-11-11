@@ -3,7 +3,12 @@
 //!
 //! Two rewrites, both over the ROOT program (one var table, one binding site
 //! per id — the `sink_inline` discipline), both read off the shape of the
-//! code; no user function is named.
+//! code; no user function is named, and no stdlib function either: what a
+//! stdlib function is to a `Value` (a constructor of one kind, a reader of
+//! one kind at a key, the JSON parse, the JSON text) is its `@value_op`
+//! declaration in the embedded stdlib source ([`declared_value_op`]). The
+//! names below (`value.int`, `json.parse`, ..) are the functions that carry
+//! the declaration today.
 //!
 //! **Reader.** `json.parse(t) ?? value.null()` whose only use is
 //! `(value.as_array(_) ?? []) |> list.map(f)`, where `f` reads one Int along
@@ -51,11 +56,13 @@
 //! Ablation: `ALMIDE_VALUE_FUSE_OFF=1` skips the pass.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 use almide_base::intern::{sym, Sym};
 use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
+use almide_lang::ast::{AttrValue, Decl};
 use almide_lang::types::Ty;
 
 pub const ABLATION_ENV: &str = "ALMIDE_VALUE_FUSE_OFF";
@@ -126,6 +133,7 @@ pub fn fuse_value_round_trips(program: &mut IrProgram) {
         writer_live,
         new_funcs: Vec::new(),
         twins_wanted: Vec::new(),
+        text_fn: None,
         counter: 0,
     };
     for f in functions.iter_mut() {
@@ -155,6 +163,120 @@ struct Plan {
     dflt: i64,
 }
 
+/// A JSON kind of a `Value`, as `@value_op` spells it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ValueKind {
+    Null,
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+}
+
+/// What a stdlib fn declared `@value_op(..)` is to a `Value`.
+///
+/// * `@value_op("make", K)`: the `Value` of kind `K` holding its one
+///   argument (none for `"null"`).
+/// * `@value_op("get")`: `some` of the member at the key (2nd argument) when
+///   the 1st is an Object that has it, `none` otherwise.
+/// * `@value_op("get", K)`: that member's payload when it is of kind `K`,
+///   `none` otherwise.
+/// * `@value_op("as", K)`: `ok` of the argument's payload when it is of kind
+///   `K`, `err` otherwise.
+/// * `@value_op("parse")`: the `Value` a JSON text denotes, or `err`.
+/// * `@value_op("text")`: the compact JSON text of a `Value`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ValueOp {
+    Make(ValueKind),
+    Get(Option<ValueKind>),
+    As(ValueKind),
+    Parse,
+    Text,
+}
+
+const VALUE_OP_ATTR: &str = "value_op";
+
+fn value_op_of(args: &[&str]) -> Option<ValueOp> {
+    let kind = |k: &str| {
+        Some(match k {
+            "null" => ValueKind::Null,
+            "bool" => ValueKind::Bool,
+            "int" => ValueKind::Int,
+            "float" => ValueKind::Float,
+            "string" => ValueKind::String,
+            "array" => ValueKind::Array,
+            "object" => ValueKind::Object,
+            _ => return None,
+        })
+    };
+    Some(match args {
+        ["make", k] => ValueOp::Make(kind(k)?),
+        ["get"] => ValueOp::Get(None),
+        ["get", k] => ValueOp::Get(Some(kind(k)?)),
+        ["as", k] => ValueOp::As(kind(k)?),
+        ["parse"] => ValueOp::Parse,
+        ["text"] => ValueOp::Text,
+        _ => return None,
+    })
+}
+
+/// The `@value_op` the embedded stdlib source declares on `module.func`.
+/// Read from the stdlib's own text, so a module of another origin that
+/// carries the attribute declares nothing here.
+pub(crate) fn declared_value_op(module: &str, func: &str) -> Option<ValueOp> {
+    type Table = HashMap<(Sym, Sym), Option<ValueOp>>;
+    static CACHE: OnceLock<Mutex<Table>> = OnceLock::new();
+    let key = (sym(module), sym(func));
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return *hit;
+    }
+    let made = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached).and_then(|program| {
+        program.decls.iter().find_map(|d| match d {
+            Decl::Fn { name, attrs, .. } if name.as_str() == func => {
+                let attr = attrs.iter().find(|a| a.name.as_str() == VALUE_OP_ATTR)?;
+                let args: Option<Vec<&str>> = attr
+                    .args
+                    .iter()
+                    .map(|a| match (&a.name, &a.value) {
+                        (None, AttrValue::String { value }) => Some(value.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                value_op_of(&args?)
+            }
+            _ => None,
+        })
+    });
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(key, made);
+    made
+}
+
+/// The arguments of a call to a stdlib fn declared `@value_op` as `op`.
+fn op_call(e: &IrExpr, op: ValueOp) -> Option<&[IrExpr]> {
+    match &e.kind {
+        IrExprKind::Call { target: CallTarget::Module { module: m, func: f, .. }, args, .. }
+            if declared_value_op(m.as_str(), f.as_str()) == Some(op) =>
+        {
+            Some(args.as_slice())
+        }
+        _ => None,
+    }
+}
+
+fn make_call(e: &IrExpr, kind: ValueKind) -> Option<&[IrExpr]> {
+    op_call(e, ValueOp::Make(kind))
+}
+
+/// `<the declared JSON text fn>(<x>)` → (the fn, `x`).
+fn text_of_call(e: &IrExpr) -> Option<(&CallTarget, &IrExpr)> {
+    let [x] = op_call(e, ValueOp::Text)? else { return None };
+    let IrExprKind::Call { target, .. } = &e.kind else { return None };
+    Some((target, x))
+}
+
 fn module_call<'e>(e: &'e IrExpr, module: &str, func: &str) -> Option<&'e [IrExpr]> {
     match &e.kind {
         IrExprKind::Call { target: CallTarget::Module { module: m, func: f, .. }, args, .. }
@@ -171,7 +293,7 @@ fn is_var(e: &IrExpr, id: VarId) -> bool {
 }
 
 fn is_value_null(e: &IrExpr) -> bool {
-    module_call(e, "value", "null").is_some_and(|a| a.is_empty())
+    make_call(e, ValueKind::Null).is_some_and(|a| a.is_empty())
 }
 
 fn is_value_ty(ty: &Ty) -> bool {
@@ -197,13 +319,14 @@ fn plain_fn(f: &IrFunction) -> bool {
 }
 
 /// `value.get(.. value.get(p, k0) ?? value.null() .., kn) ?? value.null()`
-/// chains down from `p`; the keys are pushed outermost first.
+/// chains down from `p` (each step a declared key read whose fallback is the
+/// declared Null); the keys are pushed outermost first.
 fn path_steps(e: &IrExpr, p: VarId, keys: &mut Vec<String>) -> bool {
     if is_var(e, p) {
         return true;
     }
     let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return false };
-    let (Some([inner, key]), true) = (module_call(expr, "value", "get"), is_value_null(fallback)) else { return false };
+    let (Some([inner, key]), true) = (op_call(expr, ValueOp::Get(None)), is_value_null(fallback)) else { return false };
     let IrExprKind::LitStr { value } = &key.kind else { return false };
     if !path_steps(inner, p, keys) {
         return false;
@@ -215,7 +338,7 @@ fn path_steps(e: &IrExpr, p: VarId, keys: &mut Vec<String>) -> bool {
 /// `value.get_int(<steps from p>, k) ?? <Int literal>`.
 fn int_leaf(e: &IrExpr, p: VarId) -> Option<Plan> {
     let IrExprKind::UnwrapOr { expr, fallback } = &tail(e).kind else { return None };
-    let [inner, key] = module_call(expr, "value", "get_int")? else { return None };
+    let [inner, key] = op_call(expr, ValueOp::Get(Some(ValueKind::Int)))? else { return None };
     let IrExprKind::LitStr { value: key } = &key.kind else { return None };
     // The pass runs before constant folding: `-1` is still a negation.
     let dflt = match &fallback.kind {
@@ -247,7 +370,7 @@ fn reader_fn(f: &IrFunction) -> Option<Plan> {
 /// `json.parse(<Var t>) ?? value.null()` → `t`.
 fn parse_or_null(e: &IrExpr) -> Option<VarId> {
     let IrExprKind::UnwrapOr { expr, fallback } = &e.kind else { return None };
-    let ([text], true) = (module_call(expr, "json", "parse")?, is_value_null(fallback)) else { return None };
+    let ([text], true) = (op_call(expr, ValueOp::Parse)?, is_value_null(fallback)) else { return None };
     match text.kind {
         IrExprKind::Var { id } if matches!(text.ty, Ty::String) => Some(id),
         _ => None,
@@ -259,9 +382,8 @@ fn clean_text(s: &str) -> bool {
 }
 
 fn is_literal_ctor(e: &IrExpr) -> bool {
-    ["object", "array"].iter().any(|c| {
-        module_call(e, "value", c).is_some_and(|a| matches!(a, [l] if matches!(l.kind, IrExprKind::List { .. })))
-    })
+    let literal = |a: &[IrExpr]| matches!(a, [l] if matches!(l.kind, IrExprKind::List { .. }));
+    make_call(e, ValueKind::Object).is_some_and(literal) || make_call(e, ValueKind::Array).is_some_and(literal)
 }
 
 /// A function whose tail is a constructor tree the writer can spell.
@@ -275,7 +397,7 @@ fn writer_fn(f: &IrFunction, writers: &HashSet<Sym>) -> bool {
         _ => &f.body,
     };
     let producer_call = matches!(&t.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. } if writers.contains(name));
-    (is_literal_ctor(t) || producer_call) && renamable(&f.body) && Spell { writers, wanted: None }.text_of(t).is_some()
+    (is_literal_ctor(t) || producer_call) && renamable(&f.body) && Spell { writers, wanted: None, text: None }.text_of(t).is_some()
 }
 
 // ── the writer's spelling of a constructor tree ─────────────────────────
@@ -284,6 +406,9 @@ struct Spell<'a> {
     writers: &'a HashSet<Sym>,
     /// `None` while only asking whether a tree can be spelled.
     wanted: Option<&'a mut Vec<Sym>>,
+    /// The declared JSON text fn the rewritten site called: what a hole the
+    /// writer cannot see through calls. `None` while only asking.
+    text: Option<&'a CallTarget>,
 }
 
 fn twin_name(g: Sym) -> Sym {
@@ -302,16 +427,14 @@ fn str_expr(kind: IrExprKind, span: Option<almide_base::Span>) -> IrExpr {
     IrExpr { kind, ty: Ty::String, span, def_id: None }
 }
 
-fn json_call(func: &str, arg: IrExpr) -> IrExpr {
+fn text_call(target: CallTarget, arg: IrExpr) -> IrExpr {
     let span = arg.span;
-    str_expr(
-        IrExprKind::Call {
-            target: CallTarget::Module { module: sym("json"), func: sym(func), def_id: None },
-            args: vec![arg],
-            type_args: vec![],
-        },
-        span,
-    )
+    str_expr(IrExprKind::Call { target, args: vec![arg], type_args: vec![] }, span)
+}
+
+/// A call to one of this pass's own kernels in the `json` module.
+fn kernel_call(func: &str, arg: IrExpr) -> IrExpr {
+    text_call(CallTarget::Module { module: sym("json"), func: sym(func), def_id: None }, arg)
 }
 
 impl Spell<'_> {
@@ -332,13 +455,13 @@ impl Spell<'_> {
                     p => parts.push(p),
                 }
             }
-        } else {
-            parts.push(IrStringPart::Expr { expr: json_call("stringify", e.clone()) });
+        } else if let Some(text) = self.text {
+            parts.push(IrStringPart::Expr { expr: text_call(text.clone(), e.clone()) });
         }
     }
 
     fn spell(&mut self, e: &IrExpr, parts: &mut Vec<IrStringPart>) -> bool {
-        if let Some([list]) = module_call(e, "value", "object") {
+        if let Some([list]) = make_call(e, ValueKind::Object) {
             let IrExprKind::List { elements } = &list.kind else { return false };
             let mut seen = HashSet::new();
             let mut fields = Vec::new();
@@ -359,7 +482,7 @@ impl Spell<'_> {
             lit(parts, "}");
             return true;
         }
-        if let Some([arg]) = module_call(e, "value", "array") {
+        if let Some([arg]) = make_call(e, ValueKind::Array) {
             if let IrExprKind::List { elements } = &arg.kind {
                 lit(parts, "[");
                 for (i, v) in elements.iter().enumerate() {
@@ -407,17 +530,17 @@ impl Spell<'_> {
                 span: arg.span,
                 def_id: None,
             };
-            parts.push(IrStringPart::Expr { expr: json_call(ARRAY_WRITER, mapped) });
+            parts.push(IrStringPart::Expr { expr: kernel_call(ARRAY_WRITER, mapped) });
             return true;
         }
-        if let Some([x]) = module_call(e, "value", "int") {
+        if let Some([x]) = make_call(e, ValueKind::Int) {
             if !matches!(x.ty, Ty::Int) {
                 return false;
             }
             parts.push(IrStringPart::Expr { expr: x.clone() });
             return true;
         }
-        if let Some([x]) = module_call(e, "value", "bool") {
+        if let Some([x]) = make_call(e, ValueKind::Bool) {
             if !matches!(x.ty, Ty::Bool) {
                 return false;
             }
@@ -428,7 +551,7 @@ impl Spell<'_> {
             lit(parts, "null");
             return true;
         }
-        if let Some([x]) = module_call(e, "value", "string") {
+        if let Some([x]) = make_call(e, ValueKind::String) {
             return match &x.kind {
                 IrExprKind::LitStr { value } if clean_text(value) => {
                     lit(parts, &format!("\"{value}\""));
@@ -481,6 +604,9 @@ struct Fuser<'a> {
     writer_live: bool,
     new_funcs: Vec<IrFunction>,
     twins_wanted: Vec<Sym>,
+    /// The declared JSON text fn of the stringify site being rewritten (and
+    /// of the twins it wants).
+    text_fn: Option<CallTarget>,
     counter: u32,
 }
 
@@ -644,7 +770,7 @@ impl Fuser<'_> {
     fn reader_site<'e>(&self, e: &'e IrExpr) -> Option<(&'e IrExpr, Plan)> {
         let [xs, f] = module_call(e, "list", "map")? else { return None };
         let IrExprKind::UnwrapOr { expr, fallback } = &xs.kind else { return None };
-        let [doc] = module_call(expr, "value", "as_array")? else { return None };
+        let [doc] = op_call(expr, ValueOp::As(ValueKind::Array))? else { return None };
         if !matches!(&fallback.kind, IrExprKind::List { elements } if elements.is_empty()) {
             return None;
         }
@@ -757,7 +883,7 @@ impl Fuser<'_> {
             if !is_value_ty(ty) || occurrences_in(rest, tail.as_deref(), *var) != 1 {
                 continue;
             }
-            let mut probe = StringifyOf { var: *var, text: None, hits: 0 };
+            let mut probe = StringifyOf { var: *var, text: None, hits: 0, target: None };
             for s in rest.iter() {
                 probe.visit_stmt(s);
             }
@@ -767,12 +893,13 @@ impl Fuser<'_> {
             if probe.hits != 1 {
                 continue;
             }
+            self.text_fn = probe.target.take();
             let Some(text) = self.spelled(value, true) else { continue };
             let tv = self.vt.alloc_like(*var, Ty::String, Mutability::Let);
             *var = tv;
             *ty = Ty::String;
             *value = text;
-            let mut swap = StringifyOf { var: probe.var, text: Some(tv), hits: 0 };
+            let mut swap = StringifyOf { var: probe.var, text: Some(tv), hits: 0, target: None };
             for s in rest.iter_mut() {
                 swap.visit_stmt_mut(s);
             }
@@ -789,10 +916,11 @@ impl Fuser<'_> {
     /// trade a few constructor calls for a longer interpolation and gain
     /// nothing. Inside a twin every spelled shape is taken.
     fn spelled(&mut self, e: &IrExpr, site: bool) -> Option<IrExpr> {
-        if site && !module_call(e, "value", "array").is_some_and(|a| matches!(a, [x] if module_call(x, "list", "map").is_some())) {
+        if site && !make_call(e, ValueKind::Array).is_some_and(|a| matches!(a, [x] if module_call(x, "list", "map").is_some())) {
             return None;
         }
-        let parts = Spell { writers: self.writers, wanted: Some(&mut self.twins_wanted) }.text_of(e)?;
+        let text = self.text_fn.as_ref()?;
+        let parts = Spell { writers: self.writers, wanted: Some(&mut self.twins_wanted), text: Some(text) }.text_of(e)?;
         Some(match <[IrStringPart; 1]>::try_from(parts) {
             Ok([IrStringPart::Expr { expr }]) if matches!(expr.ty, Ty::String) => expr,
             Ok([IrStringPart::Lit { value }]) => str_expr(IrExprKind::LitStr { value }, e.span),
@@ -865,12 +993,15 @@ struct StringifyOf {
     var: VarId,
     text: Option<VarId>,
     hits: usize,
+    /// The text fn the counted site calls.
+    target: Option<CallTarget>,
 }
 
 impl IrVisitor for StringifyOf {
     fn visit_expr(&mut self, e: &IrExpr) {
-        if module_call(e, "json", "stringify").is_some_and(|a| matches!(a, [x] if is_var(x, self.var))) {
+        if let Some((target, _)) = text_of_call(e).filter(|(_, x)| is_var(x, self.var)) {
             self.hits += 1;
+            self.target = Some(target.clone());
         }
         walk_expr(self, e);
     }
@@ -878,7 +1009,7 @@ impl IrVisitor for StringifyOf {
 
 impl IrMutVisitor for StringifyOf {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-        if module_call(e, "json", "stringify").is_some_and(|a| matches!(a, [x] if is_var(x, self.var))) {
+        if text_of_call(e).is_some_and(|(_, x)| is_var(x, self.var)) {
             if let Some(t) = self.text {
                 e.kind = IrExprKind::Var { id: t };
                 e.ty = Ty::String;
@@ -902,8 +1033,9 @@ impl IrMutVisitor for Fuser<'_> {
             }
         }
         if self.writer_live {
-            if let Some([v]) = module_call(e, "json", "stringify") {
+            if let Some((target, v)) = text_of_call(e) {
                 if !matches!(v.kind, IrExprKind::Var { .. }) {
+                    self.text_fn = Some(target.clone());
                     if let Some(text) = self.spelled(v, true) {
                         *e = text;
                     }
