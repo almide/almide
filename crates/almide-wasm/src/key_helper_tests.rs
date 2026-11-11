@@ -35,8 +35,25 @@ fn module(function: wasm_encoder::Function, arity: usize) -> Vec<u8> {
     m.finish()
 }
 
+/// The emitted hash, written independently over the payload bytes alone.
+fn reference_hash(bytes: &[u8]) -> u32 {
+    let k = crate::map_index::HASH_STR_MUL;
+    let mut h = bytes.len() as u64;
+    let mut rest = bytes;
+    while rest.len() > 8 {
+        h = (h ^ u64::from_le_bytes(rest[..8].try_into().expect("eight bytes"))).wrapping_mul(k);
+        rest = &rest[8..];
+    }
+    if !rest.is_empty() {
+        let mut w = [0u8; 8];
+        w[..rest.len()].copy_from_slice(rest);
+        h = (h ^ u64::from_le_bytes(w)).wrapping_mul(k);
+    }
+    ((h >> 32) ^ h) as u32
+}
+
 #[test]
-fn emitted_hash_matches_fnv_for_every_short_tail_and_page_edge() {
+fn emitted_hash_reads_only_the_payload_for_every_short_tail_and_page_edge() {
     let engine = wasmtime::Engine::default();
     let mut store = wasmtime::Store::new(&engine, ());
     let m = wasmtime::Module::new(&engine, module(crate::map_index::emit_hash_str(), 1)).expect("the module compiles");
@@ -47,21 +64,23 @@ fn emitted_hash_matches_fnv_for_every_short_tail_and_page_edge() {
         .expect("the export has the expected signature");
     for n in (0..=256).chain([511, 512, 513, 4095, 4096, 4097]) {
         let bytes: Vec<u8> = (0..n).map(|i| ((i * 73 + n * 19) % 256) as u8).collect();
+        // The payload ends at the last byte of memory: nothing to read past it.
         let p = 65536 - n - almide_layout::PAYLOAD as usize;
-        memory
-            .write(&mut store, p + 4, &(n as u32).to_le_bytes())
-            .expect("the write is inside the memory");
-        memory
-            .write(&mut store, p + almide_layout::PAYLOAD as usize, &bytes)
-            .expect("the write is inside the memory");
-        let h = bytes.iter().fold(0x811c9dc5_u32, |h, &b| {
-            (h ^ u32::from(b)).wrapping_mul(0x01000193)
-        });
-        assert_eq!(
-            hash.call(&mut store, p as i32).expect("the call does not trap") as u32,
-            h ^ (h >> 15),
-            "length {n}"
-        );
+        // Two header fills: the rc and cap words must not reach the hash.
+        for fill in [0x00u8, 0xA5] {
+            memory.write(&mut store, p, &[fill; 12]).expect("the write is inside the memory");
+            memory
+                .write(&mut store, p + 4, &(n as u32).to_le_bytes())
+                .expect("the write is inside the memory");
+            memory
+                .write(&mut store, p + almide_layout::PAYLOAD as usize, &bytes)
+                .expect("the write is inside the memory");
+            assert_eq!(
+                hash.call(&mut store, p as i32).expect("the call does not trap") as u32,
+                reference_hash(&bytes),
+                "length {n}, header fill {fill:#x}"
+            );
+        }
     }
 }
 
