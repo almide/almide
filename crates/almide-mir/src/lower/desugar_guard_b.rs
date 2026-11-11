@@ -141,7 +141,15 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                     continue;
                 }
             }
-            if let IrStmtKind::Guard { cond, else_ } = stmt.kind {
+            if let IrStmtKind::Guard { cond, mut else_ } = stmt.kind {
+                // A bare `none` carries no payload type of its own; in an Option
+                // fn it is the fn's `none` (the certified native render).
+                if crate::lower::owned_tco_slots()
+                    && matches!(else_.kind, IrExprKind::OptionNone)
+                    && matches!(ret_ty, Ty::Applied(TypeConstructorId::Option, _))
+                {
+                    else_.ty = ret_ty.clone();
+                }
                 if else_.ty != *ret_ty || contains_call(&else_) { return None; }
                 let exits = vec![
                     IrStmt { kind: IrStmtKind::Assign { var: val, value: else_ }, span: None },
@@ -149,10 +157,15 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                         kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None,
                     } }, span: None },
                 ];
-                stmt.kind = IrStmtKind::Expr { expr: IrExpr {
+                // `guard false else E` (what the front end leaves of a `guard let`
+                // else in a loop) always exits: on the certified native render the
+                // exit stands alone, with no constant `if` around it and none of
+                // the statements it can never reach.
+                let always = crate::lower::owned_tco_slots() && matches!(cond.kind, IrExprKind::LitBool { value: false });
+                stmt.kind = IrStmtKind::Expr { expr: if always { unit_block(exits) } else { IrExpr {
                     kind: IrExprKind::If { cond: Box::new(cond), then: Box::new(unit_block(rest)), else_: Box::new(unit_block(exits)) },
                     ty: Ty::Unit, span: stmt.span, def_id: None,
-                } };
+                } } };
                 rest = vec![stmt];
                 changed = true;
             } else {
@@ -255,6 +268,8 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
             Ty::Float => lit(IrExprKind::LitFloat { value: 0.0 }, Ty::Float),
             Ty::Unit => lit(IrExprKind::Unit, Ty::Unit),
             Ty::String => lit(IrExprKind::LitStr { value: String::new() }, Ty::String),
+            // The certified native render also seeds an Option return with `none`.
+            Ty::Applied(TypeConstructorId::Option, _) if crate::lower::owned_tco_slots() => lit(IrExprKind::OptionNone, ret_ty.clone()),
             _ => None,
         }
     }
@@ -373,6 +388,25 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                 def_id: None,
             };
             return; // later loops were processed in the post-loop continuation
+        }
+        // No loop of this block exits. On the certified native render the fn's
+        // value may still come from a loop further down its tail chain — in an
+        // arm of a tail branch, where the exit lift (arm_exit.rs) puts the rest
+        // of the block.
+        if crate::lower::owned_tco_slots() {
+            rewrite_tail_arms(tail_e, ret_ty, raw, vt);
+        }
+    }
+
+    fn rewrite_tail_arms(e: &mut IrExpr, ret_ty: &Ty, raw: bool, vt: &mut VarTable) {
+        match &mut e.kind {
+            IrExprKind::Block { .. } => rewrite_fn(e, ret_ty, raw, vt),
+            IrExprKind::If { then, else_, .. } => {
+                rewrite_tail_arms(then, ret_ty, raw, vt);
+                rewrite_tail_arms(else_, ret_ty, raw, vt);
+            }
+            IrExprKind::Match { arms, .. } => arms.iter_mut().for_each(|a| rewrite_tail_arms(&mut a.body, ret_ty, raw, vt)),
+            _ => {}
         }
     }
 

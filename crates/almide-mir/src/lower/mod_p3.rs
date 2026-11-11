@@ -691,8 +691,7 @@ impl LowerCtx {
             // leak). `is_err` picks the @16 tag; `value.ty`'s Result repr is the
             // 1-slot DynListStr block materialize_result_str builds.
             IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
-                self.speculate(|ctx| ctx.lower_scalar_loop_result_delivery(value, expr))
-                    .or_else(|| self.lower_owned_binding(value))
+                self.lower_loop_slot_result(value, expr)
             }
             // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
             // first-class lifted combinator (the self-host `list_reduce_str` /
@@ -715,7 +714,7 @@ impl LowerCtx {
                     _ => None,
                 }
             }
-            _ => self.lower_owned_heap_field(value),
+            _ => self.lower_loop_slot_value(value),
         }
     }
 

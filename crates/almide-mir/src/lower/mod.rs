@@ -34,9 +34,11 @@ use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
 pub mod registry_sig;
+mod arm_exit;
 mod crossmod_toplets;
 mod list_rest;
 mod literal_elems;
+pub use arm_exit::lift_stmt_arm_exits;
 pub use list_rest::desugar_list_rest_matches;
 pub use literal_elems::bind_heap_unwrap_or_literal_elems;
 pub use crossmod_toplets::{bind_cross_module_toplets, cross_module_toplet_refs};

@@ -160,7 +160,7 @@ impl LowerCtx {
     // Is `ty` one of the map/set reprs this deep-equality path admits, and if so which
     // self-host MODULE ("set"/"map") the eq call routes to? Named (codopsy cc) — collapses
     // the compound `admitted` boolean (4 ORs) into one predicate call.
-    fn map_set_eq_module_name(ty: &Ty) -> Option<&'static str> {
+    pub(crate) fn map_set_eq_module_name(ty: &Ty) -> Option<&'static str> {
         let is_set_str = matches!(ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Set, a)
                 if a.len() == 1 && matches!(a[0], Ty::String));

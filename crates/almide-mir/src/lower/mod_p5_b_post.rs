@@ -71,28 +71,56 @@ type TcoFieldsOf<'a> = &'a dyn Fn(&Ty) -> Option<(Vec<almide_lang::intern::Sym>,
 /// How deep [`tco_slot_empty`] follows records nested in records.
 const TCO_SLOT_EMPTY_DEPTH: u8 = 8;
 
+/// A declared variant's constructors in declaration order, each with its
+/// instantiated payload types; `None` when the type is not a declared variant.
+type TcoCasesOf<'a> = &'a dyn Fn(&Ty) -> Option<Vec<(almide_lang::intern::Sym, Vec<Ty>)>>;
+
+/// The two declaration lookups [`tco_slot_empty`] reads.
+#[derive(Clone, Copy)]
+pub(crate) struct TcoDecls<'a> {
+    pub(crate) fields_of: TcoFieldsOf<'a>,
+    pub(crate) cases_of: TcoCasesOf<'a>,
+}
+
 /// The in-loop result slot's initial value: [`tco_empty_for`]'s, or — on the
 /// native render's owned slots only — a RECORD built fieldwise from its
-/// declaration, each field at its own empty value. A placeholder like the
-/// others: a base overwrites the slot before the loop ends, and the overwrite
-/// drops it. `None` when a field has no empty value (the fn keeps its wall).
-fn tco_slot_empty(ty: &Ty, fields_of: TcoFieldsOf<'_>, depth: u8) -> Option<IrExpr> {
+/// declaration, each field at its own empty value, or a declared VARIANT at
+/// its shallowest constructor whose payloads all have one. A placeholder like
+/// the others: a base overwrites the slot before the loop ends, and the
+/// overwrite drops it. `None` when a field has no empty value (the fn keeps
+/// its wall).
+fn tco_slot_empty(ty: &Ty, decls: TcoDecls<'_>, depth: u8) -> Option<IrExpr> {
     if let Some(e) = tco_empty_for(ty) {
         return Some(e);
     }
     if !crate::lower::owned_tco_slots() || depth == 0 {
         return None;
     }
+    if let Some(cases) = (decls.cases_of)(ty) {
+        // Shallowest first: a recursive constructor declared before a leaf one
+        // must not be the placeholder's shape.
+        return (0..depth).find_map(|d| {
+            cases.iter().find_map(|(ctor, tys)| {
+                let args = tys.iter().map(|t| tco_slot_empty(t, decls, d)).collect::<Option<Vec<_>>>()?;
+                let target = CallTarget::Named { name: *ctor };
+                Some(tco_ir(IrExprKind::Call { target, args, type_args: vec![] }, ty.clone()))
+            })
+        });
+    }
+    if let Ty::Tuple(tys) = ty {
+        let elements = tys.iter().map(|t| tco_slot_empty(t, decls, depth - 1)).collect::<Option<Vec<_>>>()?;
+        return Some(tco_ir(IrExprKind::Tuple { elements }, ty.clone()));
+    }
     let name = match ty {
         Ty::Named(n, _) => Some(*n),
         Ty::Record { .. } => None,
         _ => return None,
     };
-    let (names, tys) = fields_of(ty)?;
+    let (names, tys) = (decls.fields_of)(ty)?;
     let fields = names
         .into_iter()
         .zip(tys.iter())
-        .map(|(n, t)| Some((n, tco_slot_empty(t, fields_of, depth - 1)?)))
+        .map(|(n, t)| Some((n, tco_slot_empty(t, decls, depth - 1)?)))
         .collect::<Option<Vec<_>>>()?;
     Some(tco_ir(IrExprKind::Record { name, fields }, ty.clone()))
 }

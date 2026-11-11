@@ -446,7 +446,8 @@ fn lower_function_all_impl(
     crate::lower::dump_desugared_ir(func.name.as_str(), func_body, variant_layouts, record_layouts);
     let pre_tco = desugar_heap_branches(func_body, variant_layouts);
     let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(func_body);
-    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref, &|t| ctx.aggregate_field_tys(t));
+    let tco_decls = TcoDecls { fields_of: &|t| ctx.aggregate_field_tys(t), cases_of: &|t| ctx.variant_case_tys(t) };
+    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref, tco_decls);
     let final_body = tco_body.as_ref().unwrap_or(body_ref);
     // SHARED-CELL pre-scan (closures Rung 6, cells.rs): over the FINAL lowered tree,
     // so bind/read/write/capture all classify the same vars as cells. A pure scan —

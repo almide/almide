@@ -427,6 +427,16 @@ impl LowerCtx {
         match &init.kind {
             IrExprKind::LitStr { .. } => Some(init.clone()),
             IrExprKind::List { .. } if crate::lower::is_pure_literal_list(init) => Some(init.clone()),
+            // Native owned slots: a list literal naming immutable globals is the
+            // literal list of what each one folds to.
+            IrExprKind::List { elements } if crate::lower::owned_tco_slots() => {
+                let elements = elements.iter().map(|e| match &e.kind {
+                    IrExprKind::Var { .. } => self.fold_pure_literal_init(e, depth + 1),
+                    _ => Some(e.clone()),
+                }).collect::<Option<Vec<_>>>()?;
+                let folded = IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None };
+                crate::lower::is_pure_literal_list(&folded).then_some(folded)
+            }
             IrExprKind::Var { id } => {
                 if crate::lower::is_mutable_global(*id) {
                     return None;
@@ -476,7 +486,11 @@ impl LowerCtx {
         if !is_pure_literal_list(init) {
             return None;
         }
-        let dst = self.try_lower_str_list_literal(init)?;
+        // Native owned slots: a literal list of Float or Bool elements builds as
+        // the same literal bound to a local does (one `ListLit`, no call).
+        let dst = self.try_lower_str_list_literal(init).or_else(|| {
+            crate::lower::owned_tco_slots().then(|| self.try_lower_scalar_list_construct(init)).flatten()
+        })?;
         self.live_heap_handles.push(dst);
         self.memo_global(var, dst);
         Some(dst)

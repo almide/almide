@@ -129,7 +129,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: eq_param_types(ty),
+                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
                 });
                 true
             }
@@ -158,10 +158,30 @@ impl LowerCtx {
         if !self.ensure_variant_eq_helper(elem_tyname, elem_layout, elem_ty) {
             return false;
         }
+        // An element that reaches this list again has built the helper already.
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
         let elem_call = self.eq_helper_name(elem_tyname);
         let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(elem_ty.clone()));
         self.synth_eq_fns.push(f);
         true
+    }
+
+    /// The helper key and slot types of an anonymous aggregate list element:
+    /// a tuple by its slot types, and on the native render an anonymous
+    /// record by its field names and types.
+    pub(crate) fn anon_aggregate_eq_key(&self, elem: &Ty) -> Option<(String, Vec<Ty>)> {
+        let spell = |parts: Vec<String>| parts.iter().map(|p| sanitize_ty_ident(p)).collect::<Vec<_>>().join("_");
+        match elem {
+            Ty::Tuple(tys) => Some((format!("anontup_{}", spell(tys.iter().map(|t| format!("{t:?}")).collect())), tys.to_vec())),
+            Ty::Record { .. } if crate::lower::owned_tco_slots() => {
+                let (names, ftys) = self.aggregate_field_tys(elem)?;
+                let key = spell(names.iter().zip(&ftys).map(|(n, t)| format!("{n}_{t:?}")).collect());
+                Some((format!("anonrec_{key}"), ftys))
+            }
+            _ => None,
+        }
     }
 
     fn record_eq_helper_name(&self, key: &str) -> String {
@@ -224,7 +244,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(),
-                    aggregate_blocks: eq_param_types(ty),
+                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
                 });
                 true
             }
@@ -291,7 +311,7 @@ impl LowerCtx {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(),
-            aggregate_blocks: eq_param_types(&Ty::option(ty.clone())),
+            aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), &Ty::option(ty.clone())),
         });
         true
     }
@@ -305,6 +325,10 @@ impl LowerCtx {
         }
         if !self.ensure_opt_record_eq_helper(key, ftys, ty) {
             return false;
+        }
+        // An element that reaches this list again has built the helper already.
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
         }
         let elem_call = self.opt_record_eq_helper_name(key);
         let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(Ty::option(ty.clone())));
@@ -322,6 +346,10 @@ impl LowerCtx {
         }
         if !self.ensure_record_eq_helper(key, ftys, ty) {
             return false;
+        }
+        // An element that reaches this list again has built the helper already.
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
         }
         let elem_call = self.record_eq_helper_name(key);
         let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(ty.clone()));
@@ -660,6 +688,13 @@ pub fn scalar_core_eq_module(ty: &Ty) -> Option<&'static str> {
 /// A synthesized comparison has the same borrowed operand type as its
 /// checked equality expression. Preserve it on both MIR parameters, including
 /// recursive helpers that have no source-level function declaration.
+/// A helper's render-only type table: the payload reads its body declared,
+/// under its two parameters' operand type.
+fn eq_helper_types(mut body: std::collections::BTreeMap<ValueId, String>, ty: &Ty) -> std::collections::BTreeMap<ValueId, String> {
+    body.extend(eq_param_types(ty));
+    body
+}
+
 fn eq_param_types(ty: &Ty) -> std::collections::BTreeMap<ValueId, String> {
     let key = crate::render_native_rec::block_key(ty);
     [(ValueId(0), key.clone()), (ValueId(1), key)].into_iter().collect()
