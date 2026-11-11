@@ -137,6 +137,28 @@ impl LowerCtx {
         })
     }
 
+    /// A Result delivered to a loop slot. A heap-Ok Result, and every Result
+    /// off the native owned slots, takes the block builders first; a scalar-Ok
+    /// Result on the native owned slots keeps its declared carrier, which only
+    /// the ordinary bind builds (the len-as-tag block is not it).
+    fn lower_loop_slot_result(&mut self, value: &IrExpr, payload: &IrExpr) -> Option<ValueId> {
+        let declared = crate::lower::owned_tco_slots() && !Self::is_heap_ok_result(&value.ty);
+        (!declared)
+            .then(|| self.speculate(|ctx| ctx.lower_scalar_loop_result_delivery(value, payload)))
+            .flatten()
+            .or_else(|| self.lower_owned_binding(value))
+    }
+
+    /// Any other checked expression delivered to a loop slot: the field
+    /// builders, and on the native owned slots the ordinary mutable bind for
+    /// what they decline (a declined builder leaves nothing behind).
+    fn lower_loop_slot_value(&mut self, value: &IrExpr) -> Option<ValueId> {
+        if !crate::lower::owned_tco_slots() {
+            return self.lower_owned_heap_field(value);
+        }
+        self.speculate(|ctx| ctx.lower_owned_heap_field(value)).or_else(|| self.lower_owned_binding(value))
+    }
+
     /// An attempted expression may replace source bindings before a later
     /// operand declines. Restore those bindings along with its emitted ops.
     fn speculate_bindings<T>(&mut self, f: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {

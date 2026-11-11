@@ -76,6 +76,9 @@ impl LowerCtx {
                         return self.lower_mutable_global_index_assign(target, index, value, g);
                     }
                 }
+                if let Some(&cell) = self.cell_of.get(&target).filter(|_| crate::lower::owned_tco_slots() && !is_heap_ty(&value.ty)) {
+                    return self.lower_cell_index_assign(target, cell, index, value);
+                }
                 // A HEAP String/Value element (`xs[0] = "Z"`, the C-136 case-5 shape) takes
                 // the functional REBIND `xs = list.set(xs, i, v)` BEFORE any COW guard (#2260):
                 // the rc-correct `_str`/`_value` twin copies and the Assign path swaps the
@@ -178,6 +181,41 @@ impl LowerCtx {
         let repr = repr_of(&gty)?;
         let addr = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: addr, value: crate::mg_slot_addr(gindex) as i64 });
+        self.store_scalar_elem_through_slot(addr, (repr, &gty), idx, val);
+        Ok(())
+    }
+
+    /// The shared-cell twin of [`Self::lower_mutable_global_index_assign`]
+    /// (native owned slots): `xs[i] = v` over a cell holding a scalar-element
+    /// list takes the cell's block, makes it unique, stores the element and
+    /// stores the block back — the cell stays the one place the list lives.
+    fn lower_cell_index_assign(
+        &mut self,
+        target: VarId,
+        cell: ValueId,
+        index: &IrExpr,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        let wall = |what: &str| LowerError::at(value.span, format!("index-assign to shared-cell var {target:?} {what}"));
+        if self.in_frame > 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+            return Err(wall("inside a modeled (non-executable) frame"));
+        }
+        let ty = self.var_decl_tys.get(&target).cloned().ok_or_else(|| wall("with no recorded type"))?;
+        if !crate::lower::is_heap_ty(&ty) || crate::lower::is_heap_elem_list_ty(&ty) {
+            return Err(wall("outside the scalar-element subset"));
+        }
+        let (Some(idx), Some(val)) = (self.lower_scalar_value(index), self.lower_scalar_value(value)) else {
+            return Err(wall("with a non-lowerable index/value"));
+        };
+        let repr = repr_of(&ty)?;
+        let addr = self.cell_slot_addr(cell);
+        self.store_scalar_elem_through_slot(addr, (repr, &ty), idx, val);
+        Ok(())
+    }
+
+    /// TAKE the list out of the storage slot at `addr`, make it unique, store
+    /// the scalar element, and STORE the (possibly copied) block BACK.
+    fn store_scalar_elem_through_slot(&mut self, addr: ValueId, (repr, ty): (crate::Repr, &Ty), idx: ValueId, val: ValueId) {
         let taken = self.fresh_value();
         self.ops.push(Op::CallFn {
             dst: Some(taken),
@@ -185,7 +223,7 @@ impl LowerCtx {
             args: vec![crate::CallArg::Scalar(addr)],
             result: Some(repr),
         });
-        self.materialized_call_arg(taken, repr, &gty);
+        self.materialized_call_arg(taken, repr, ty);
         self.ops.push(Op::MakeUnique { v: taken });
         self.ops.push(Op::ListSetScalar { list: taken, idx, val });
         let h2 = self.fresh_value();
@@ -201,7 +239,6 @@ impl LowerCtx {
         });
         self.ops.push(Op::Consume { v: taken });
         self.live_heap_handles.retain(|v| *v != taken);
-        Ok(())
     }
 
     /// Heap element index-assign (String/Value on wasm, typed heaps on native):
@@ -224,7 +261,14 @@ impl LowerCtx {
         index: &IrExpr,
         value: &IrExpr,
     ) -> Result<(), LowerError> {
-        match (self.value_for(target), self.lower_scalar_value(index)) {
+        // A shared-cell list (native owned slots) is read out of its cell for the
+        // guard, as every other reference to it is; the rebind below writes the cell.
+        let guarded = if crate::lower::owned_tco_slots() && self.cell_of.contains_key(&target) {
+            self.value_or_global(target)
+        } else {
+            self.value_for(target)
+        };
+        match (guarded, self.lower_scalar_value(index)) {
             (Ok(list), Some(idx)) => {
                 let h = self.fresh_value();
                 self.ops.push(Op::Prim {

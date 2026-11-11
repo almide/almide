@@ -160,7 +160,9 @@ pub(crate) fn is_anon_tuple_list_elem(ty: &Ty) -> bool {
             tuple_needs_recursive_drop(t)
                 || matches!(t, Ty::Applied(TypeConstructorId::List, a)
                     if a.len() == 1
-                        && (matches!(a[0], Ty::String) || tuple_needs_recursive_drop(&a[0])))
+                        && (matches!(a[0], Ty::String) || tuple_needs_recursive_drop(&a[0])
+                            // The native render frees a list by its element type.
+                            || (crate::lower::owned_tco_slots() && is_heap_ty(&a[0]))))
         })
 }
 
