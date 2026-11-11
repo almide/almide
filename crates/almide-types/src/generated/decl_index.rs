@@ -113,7 +113,7 @@ pub const DECL_INDEX: &[DeclRow] = &[
     ("io_read_line_opt", &["io_read_line_opt"], &[], false),
     ("io_read_n_bytes", &["__read_n_chunked", "io_read_n_bytes"], &[], false),
     ("io_write", &["io_write", "io_write_stderr"], &[], false),
-    ("json", &["parse", "stringify", "stringify_pretty", "__array_text", "__jr_ws", "__jr_simple_esc", "__jr_str", "__jr_digits", "__jr_num", "__jr_int", "__jr_span_eq", "__jr_seen", "__jr_key_is", "__jr_lit", "__jr_scan", "__ints_at"], &[], false),
+    ("json", &["parse", "stringify", "stringify_pretty", "__array_text", "__jr_ws", "__jr_simple_esc", "__jr_hex", "__jr_str", "__jr_digits", "__jr_num", "__jr_int", "__jr_text", "__jr_asked", "__jr_span_eq", "__jr_seen", "__jr_key_is", "__jr_child", "__jr_lit", "__jr_slot", "__jr_scan", "__spans", "__rows", "__leaf_int", "__leaf_float", "__leaf_bool", "__leaf_string"], &[], false),
     ("json_ctor", &["json_stringify"], &[], false),
     ("json_get_typed", &["__r2o_str", "__r2o_int", "__r2o_float", "__r2o_bool", "__r2o_arr", "__r2o_val", "__r2o_obj", "value_get", "value_get_string", "value_get_int", "value_get_float", "value_get_bool", "value_get_array", "value_get_object"], &[], false),
     ("json_parse", &["__json_max_depth", "__json_depth_error", "json_parse", "__jp_cp", "__jp_charpos", "__jp_copy_bytes", "__jp_substr", "__jp_at", "__jp_ws", "__jp_nonchar", "__jp_value", "__jp_string", "__jp_str_fail", "__jp_str_err", "__jp_str_check", "__jp_str_check_u", "__jp_str_fill", "__jp_simple_escape", "__jp_str_u", "__jp_utf8_write", "__jp_hex_digit", "__jp_hex4", "__jp_digits", "__jp_numrun", "__jp_num_end", "__jp_number", "__jp_lit_at", "__jp_bool", "__jp_null", "__jp_array", "__jp_object"], &[], false),

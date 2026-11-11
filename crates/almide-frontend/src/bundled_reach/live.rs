@@ -39,7 +39,12 @@ pub const COMPILER_INSERTED: &[(&str, &str)] = &[
     ("matrix", "__div"),
     ("ffi", "__export_view"),
     ("ffi", "__lend"),
-    ("json", "__ints_at"),
+    ("json", "__spans"),
+    ("json", "__rows"),
+    ("json", "__leaf_int"),
+    ("json", "__leaf_float"),
+    ("json", "__leaf_bool"),
+    ("json", "__leaf_string"),
     ("json", "__array_text"),
 ];
 
