@@ -84,6 +84,7 @@ pub mod native_result_str_rewrite;
 pub mod native_slot_rewrite;
 mod native_slot_takes;
 mod native_slot_order;
+mod native_slot_chain;
 mod native_cell_window;
 mod native_map_entries;
 pub mod native_move_params;

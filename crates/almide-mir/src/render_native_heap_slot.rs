@@ -39,7 +39,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// The value moved out of the cell `s` of a slot, `snap` = held in an `Rc`.
-fn take_text(snap: bool) -> &'static str {
+pub(crate) fn take_text(snap: bool) -> &'static str {
     if snap {
         "{ let mut c = s.borrow_mut(); match std::rc::Rc::get_mut(&mut c) { Some(v) => std::mem::take(v), None => (**c).clone() } }"
     } else {
@@ -48,7 +48,7 @@ fn take_text(snap: bool) -> &'static str {
 }
 
 /// The write of `rhs` into the cell `s` of a slot, `snap` = held in an `Rc`.
-fn store_text(snap: bool, rhs: &str) -> String {
+pub(crate) fn store_text(snap: bool, rhs: &str) -> String {
     if snap {
         format!("{{ let mut c = s.borrow_mut(); match std::rc::Rc::get_mut(&mut c) {{ Some(v) => *v = {rhs}, None => *c = std::rc::Rc::new({rhs}) }} }}")
     } else {

@@ -30,6 +30,7 @@ mod map;
 mod slots;
 #[path = "render_native_heap_slot.rs"]
 mod heap_slot;
+pub(crate) use heap_slot::{store_text, take_text};
 #[path = "render_native_value.rs"]
 mod value;
 #[path = "render_native_byte_slots.rs"]

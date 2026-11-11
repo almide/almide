@@ -207,6 +207,7 @@ fn render_fn(
     }
     crate::render_native_bounds::finish(func);
     crate::render_native_tail_return::finish(func, sigs, is_main, &st.tys, &mut st.out);
+    crate::native_slot_chain::chain(&mut st.out);
     crate::native_slot_order::declare_in_source_order(func, &mut st.out);
     finish_native_fn(func, sigs, is_main, &mut st.tys, st.out)
 }
