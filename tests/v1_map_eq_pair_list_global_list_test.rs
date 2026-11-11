@@ -169,3 +169,37 @@ fn a_fold_builds_a_list_of_pairs_that_hold_a_list_of_heap_values() {
 fn a_module_level_list_literal_names_other_immutable_globals() {
     renders_and_agrees("global_list", GLOBAL_LIST, GLOBAL_LIST_STDOUT);
 }
+
+/// Float values in a Map: `-0.0` equals `0.0` and a NaN equals nothing, bare,
+/// in a list, in a tuple and under a record. The runtime map comparison the
+/// native render called before read the bits and answered the opposite.
+const FLOAT_MAP_EQ: &str = r##"type Weights = { w: Map[String, Float], n: String }
+
+effect fn main() -> Unit = {
+  let nan = 0.0 / 0.0
+  let a: Map[String, Float] = ["k": -0.0, "z": 1.5]
+  let b: Map[String, Float] = ["z": 1.5, "k": 0.0]
+  let c: Map[String, Float] = ["k": nan]
+  println(if a == b then "eq" else "ne")
+  println(if c == c then "eq" else "ne")
+  println(if a != c then "ne" else "eq")
+  let d: Map[String, List[Float]] = ["k": [-0.0, 1.0], "z": [2.0]]
+  let e: Map[String, List[Float]] = ["z": [2.0], "k": [0.0, 1.0]]
+  let f: Map[String, List[Float]] = ["k": [nan]]
+  println(if d == e then "eq" else "ne")
+  println(if f == f then "eq" else "ne")
+  let g: Weights = { w: ["a": -0.0], n: "x" }
+  let h: Weights = { w: ["a": 0.0], n: "x" }
+  println(if g == h then "eq" else "ne")
+  let i: Map[String, (Float, Int)] = ["k": (-0.0, 1)]
+  let j: Map[String, (Float, Int)] = ["k": (0.0, 1)]
+  println(if i == j then "eq" else "ne")
+}
+"##;
+
+const FLOAT_MAP_EQ_STDOUT: &str = "eq\nne\nne\neq\nne\neq\neq\n";
+
+#[test]
+fn a_map_with_float_values_compares_them_as_floats() {
+    renders_and_agrees("float_map_eq", FLOAT_MAP_EQ, FLOAT_MAP_EQ_STDOUT);
+}
