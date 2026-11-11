@@ -89,17 +89,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             IrStmtKind::BindDestructure { pattern: ir_pat, value: ir_val }
         }
         ast::Stmt::Assign { name, value, .. } => {
-            let mut ir_val = lower_expr(ctx, value);
-            let var = ctx.lookup_var(name).unwrap_or(VarId(0));
-            // #3185: the target's declared type is the literal's slot, as an
-            // annotation is for `let` — `V = 254` into a `UInt8` module `var`
-            // emitted `254i64` into the `u8` cell (rustc E0277).
-            let target_ty = ctx.var_table.get(var).ty.clone();
-            coerce_literal_to_sized(&mut ir_val, &target_ty, ctx.env);
-            match lower_self_list_set(ctx, var, &ir_val, span) {
-                Some(in_place) => in_place,
-                None => IrStmtKind::Assign { var, value: ir_val },
-            }
+            let ir_val = lower_expr(ctx, value);
+            assign_lowered(ctx, name, ir_val, span)
         }
         ast::Stmt::IndexAssign { target, path, index, value, .. } => {
             let mut ir_idx = lower_expr(ctx, index);
@@ -268,7 +259,7 @@ fn lower_place_write(
 ///
 /// A comment has no span of its own: it is attached to whatever follows it, so
 /// pointing a diagnostic at the comment would point away from the code.
-fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
+pub(super) fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
     match stmt {
         ast::Stmt::Let { span, .. } | ast::Stmt::Var { span, .. }
         | ast::Stmt::Assign { span, .. } | ast::Stmt::Guard { span, .. }
@@ -277,6 +268,20 @@ fn stmt_span(stmt: &ast::Stmt) -> Option<ast::Span> {
         | ast::Stmt::FieldAssign { span, .. } | ast::Stmt::LetDestructure { span, .. }
         | ast::Stmt::Error { span, .. } => *span,
         ast::Stmt::Comment { .. } => None,
+    }
+}
+
+/// `name = <ir_val>`, the value already lowered.
+pub(super) fn assign_lowered(ctx: &mut LowerCtx, name: &str, mut ir_val: IrExpr, span: Option<ast::Span>) -> IrStmtKind {
+    let var = ctx.lookup_var(name).unwrap_or(VarId(0));
+    // #3185: the target's declared type is the literal's slot, as an
+    // annotation is for `let` — `V = 254` into a `UInt8` module `var`
+    // emitted `254i64` into the `u8` cell (rustc E0277).
+    let target_ty = ctx.var_table.get(var).ty.clone();
+    coerce_literal_to_sized(&mut ir_val, &target_ty, ctx.env);
+    match lower_self_list_set(ctx, var, &ir_val, span) {
+        Some(in_place) => in_place,
+        None => IrStmtKind::Assign { var, value: ir_val },
     }
 }
 
@@ -293,7 +298,19 @@ fn lower_bind(
     mutability: Mutability,
     span: Option<ast::Span>,
 ) -> IrStmtKind {
-    let mut ir_val = lower_expr(ctx, value);
+    let ir_val = lower_expr(ctx, value);
+    bind_lowered(ctx, name, ty, ir_val, mutability, span)
+}
+
+/// [`lower_bind`] over an already lowered value.
+pub(super) fn bind_lowered(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ty: Option<&ast::TypeExpr>,
+    mut ir_val: IrExpr,
+    mutability: Mutability,
+    span: Option<ast::Span>,
+) -> IrStmtKind {
     // An explicit `let x: T = ...` annotation wins over the structurally
     // inferred type of the value. Otherwise two nominal record types with
     // identical fields (`Dog` and `Cat`, both `{ name: String }`) collide at

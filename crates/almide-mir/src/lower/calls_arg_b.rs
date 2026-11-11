@@ -46,12 +46,16 @@ impl LowerCtx {
             // deferred `Const`/`Opaque` = a SILENT MISCOMPILE (`f(int.parse(s)!)` passed 0).
             // The faithful lowering needs early-return-on-Err (a later brick); until then
             // WALL it — NEVER pass a silently-wrong value (the ② cardinal rule).
-            IrExprKind::Unwrap { .. } => Err(LowerError::Unsupported(
-                "unwrap `!` in a call-argument position cannot be faithfully computed \
-                 (needs early-return propagation; a Const/Opaque would be a silently \
-                 wrong value) not in this brick"
-                    .into(),
-            )),
+            IrExprKind::Unwrap { .. } => match self.lower_unwrap_by_return(a)? {
+                Some(v) if is_heap_ty(&a.ty) => Ok(Some(ArgOutcome::Value(CallArg::Handle(v)))),
+                Some(v) => Ok(Some(ArgOutcome::Value(CallArg::Scalar(v)))),
+                None => Err(LowerError::Unsupported(
+                    "unwrap `!` in a call-argument position cannot be faithfully computed \
+                     (needs early-return propagation; a Const/Opaque would be a silently \
+                     wrong value) not in this brick"
+                        .into(),
+                )),
+            },
             // A RANGE argument with SCALAR bounds (`f(0..n)` — the gguf
             // parse_metadata_entries `for _ in 0..count` append-accumulator desugar):
             // materialize the REAL list via the self-hosted `list.range` (a fresh owned

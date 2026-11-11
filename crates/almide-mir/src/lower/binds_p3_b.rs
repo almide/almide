@@ -20,6 +20,14 @@ impl LowerCtx {
                 crate::lower::is_anon_tuple_list_elem(elem_ty)
                     .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
             })
+            // The native render frees a tuple by its slot types: there any heap tuple
+            // whose slots it types is an element, under the same per-shape identity.
+            .or_else(|| {
+                (crate::lower::owned_tco_slots()
+                    && crate::lower::tuple_needs_recursive_drop(elem_ty)
+                    && self.bang_tuple_slots_typed(elem_ty))
+                .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
+            })
     }
 
     /// Rung 1 of the element-drop ladder: record / variant element heads.
@@ -766,13 +774,14 @@ impl LowerCtx {
         if !crate::lower::owned_tco_slots() { return None; }
         let kind = self.classify_list_elem_drop(elem)?;
         self.speculate_bindings(|ctx| {
-            let mut args = Vec::new();
-            for source in [left, right] {
-                // Snapshot the left value before evaluating a right operand
-                // that may replace the same source slot.
-                let handle = ctx.lower_owned_binding(source)?;
-                args.push(CallArg::Handle(handle));
-            }
+            // Snapshot the left value before evaluating a right operand that may
+            // replace the same source slot, unless it can be read in place.
+            let lhs = match ctx.concat_left_in_place(left, right) {
+                Some(slot) => slot,
+                None => ctx.lower_owned_binding(left)?,
+            };
+            let rhs = ctx.lower_owned_binding(right)?;
+            let args = vec![CallArg::Handle(lhs), CallArg::Handle(rhs)];
             let dst = ctx.fresh_value();
             ctx.ops.push(Op::CallFn { dst: Some(dst), name: crate::lower::LIST_CONCAT_RC.into(),
                 args, result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) });

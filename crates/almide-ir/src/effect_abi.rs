@@ -5,7 +5,7 @@
 //!
 //! - **never-err lifted**: effect, declared return not Result, and no exit
 //!   through the err channel (the greatest fixpoint in
-//!   [`crate::mut_param_unpropagated::never_err_effect_fn_keys`], shared with
+//!   [`crate::mut_param_unpropagated::never_err_effect_fn_keys_among`], shared with
 //!   the C-132 move-mode rewrite). The body returns the raw `T` — a declared
 //!   `Option[T]` included, whose Option is then the whole return.
 //! - **auto-wrap**: effect, not `main`, declared return neither Result nor
@@ -54,7 +54,7 @@ fn declares(f: &IrFunction, ctor: TypeConstructorId) -> bool {
 /// Every fn of the program with the spellings a call site may use for it: a
 /// main-scope fn by its bare name and its scope key; a module fn by its
 /// mangled, dotted and scoped keys, and its bare name only when it is a
-/// uniquely spelled `Type.method` (the `never_err_effect_fn_keys` rule — an
+/// uniquely spelled `Type.method` (the `never_err_effect_fn_keys_among` rule — an
 /// ambiguous bare name must not make a raising call look quiet).
 fn fns_with_spellings(program: &IrProgram) -> Vec<(Option<&str>, &IrFunction, Vec<String>)> {
     let mut spelled: HashMap<&str, usize> = HashMap::new();

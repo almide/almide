@@ -137,6 +137,20 @@ impl LowerCtx {
         })
     }
 
+    /// The left list of a `+` read in place: a live local slot of this fn that
+    /// the right operand neither reads nor rebinds (the append then grows it,
+    /// with no copy to free).
+    fn concat_left_in_place(&self, left: &IrExpr, right: &IrExpr) -> Option<ValueId> {
+        let IrExprKind::Var { id } = &left.kind else { return None };
+        let mut rebound = Vec::new();
+        crate::lower::collect_heap_reassign_vars_in_expr(right, &mut rebound);
+        if rebound.contains(id) || expr_reads_var(right, *id) {
+            return None;
+        }
+        self.value_of.get(id).copied()
+            .filter(|v| self.live_heap_handles.contains(v) && !self.param_values.contains(v))
+    }
+
     /// A Result delivered to a loop slot. A heap-Ok Result, and every Result
     /// off the native owned slots, takes the block builders first; a scalar-Ok
     /// Result on the native owned slots keeps its declared carrier, which only

@@ -269,6 +269,36 @@ struct Hoister<'a, 'b> {
     writes: &'b CallWrites<'a>,
     vars: &'b mut VarTable,
     changed: bool,
+    /// The walked fn's own `mut` params. A raise in such a fn hands every one
+    /// of them back to the caller (`mut_param_err_carry`), so an operand that
+    /// can raise reads them: it is bound before a call writes one in place.
+    /// Left where it was, the place was copied ahead of the operand and the
+    /// write landed in the copy (#4668).
+    raise_reads: HashSet<VarId>,
+}
+
+/// Can evaluating `e` propagate an err out of the fn — a `!` / `?` outside
+/// any lambda?
+fn can_raise(e: &IrExpr) -> bool {
+    struct Scan(bool);
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match e.kind {
+                IrExprKind::Lambda { .. } => {}
+                IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => self.0 = true,
+                _ if !self.0 => walk_expr(self, e),
+                _ => {}
+            }
+        }
+    }
+    let mut s = Scan(false);
+    s.visit_expr(e);
+    s.0
+}
+
+/// The `mut` params of `f`, as variables.
+fn mut_param_vars(f: &IrFunction) -> HashSet<VarId> {
+    f.mutated_params.iter().filter_map(|&i| f.params.get(i).map(|p| p.var)).collect()
 }
 
 impl IrMutVisitor for Hoister<'_, '_> {
@@ -288,7 +318,9 @@ impl IrMutVisitor for Hoister<'_, '_> {
             .filter(|(j, _)| !is_place(*j))
             .flat_map(|(_, a)| self.writes.assigned_by(a))
             .collect();
-        if !places.iter().any(|(_, r)| written.contains(&r.0)) {
+        let raise_reads_a_place = places.iter().any(|(_, r)| self.raise_reads.contains(r))
+            && args.iter().enumerate().any(|(j, a)| !is_place(j) && can_raise(a));
+        if !raise_reads_a_place && !places.iter().any(|(_, r)| written.contains(&r.0)) {
             return;
         }
         let IrExprKind::Call { args, .. } = &mut e.kind else { return };
@@ -316,10 +348,12 @@ pub fn hoist_operands_before_mut_places(program: &mut IrProgram) -> bool {
     let mut changed = false;
     {
         let writes = CallWrites::new(None, &program.functions, &program.top_lets, &user);
-        let mut h = Hoister { writes: &writes, vars: &mut program.var_table, changed: false };
+        let mut h = Hoister { writes: &writes, vars: &mut program.var_table, changed: false, raise_reads: HashSet::new() };
         for f in program.functions.iter_mut() {
+            h.raise_reads = mut_param_vars(f);
             h.visit_expr_mut(&mut f.body);
         }
+        h.raise_reads.clear();
         for t in program.top_lets.iter_mut() {
             h.visit_expr_mut(&mut t.value);
         }
@@ -327,10 +361,12 @@ pub fn hoist_operands_before_mut_places(program: &mut IrProgram) -> bool {
     }
     for m in program.modules.iter_mut() {
         let writes = CallWrites::new(Some(m.name), &m.functions, &m.top_lets, &user);
-        let mut h = Hoister { writes: &writes, vars: &mut m.var_table, changed: false };
+        let mut h = Hoister { writes: &writes, vars: &mut m.var_table, changed: false, raise_reads: HashSet::new() };
         for f in m.functions.iter_mut() {
+            h.raise_reads = mut_param_vars(f);
             h.visit_expr_mut(&mut f.body);
         }
+        h.raise_reads.clear();
         for t in m.top_lets.iter_mut() {
             h.visit_expr_mut(&mut t.value);
         }

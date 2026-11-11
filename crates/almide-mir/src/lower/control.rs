@@ -137,9 +137,10 @@ impl LowerCtx {
             )));
         }
         self.record_elided_calls(cond);
-        self.lower_branch_arm(None, then)?;
-        self.lower_branch_arm(None, else_)?;
-        Ok(())
+        self.linearized += 1;
+        let arms = self.lower_branch_arm(None, then).and_then(|()| self.lower_branch_arm(None, else_));
+        self.linearized -= 1;
+        arms
     }
 
     /// Extracted from `Self::lower_branch` (pattern-2 uniform-arm split, cog reduction):
@@ -249,10 +250,10 @@ impl LowerCtx {
                  arm's effects) not in this brick".into(),
             ));
         }
-        for arm in arms {
-            self.lower_branch_arm(Some((&arm.pattern, subject_value)), &arm.body)?;
-        }
-        Ok(())
+        self.linearized += 1;
+        let lowered = arms.iter().try_for_each(|arm| self.lower_branch_arm(Some((&arm.pattern, subject_value)), &arm.body));
+        self.linearized -= 1;
+        lowered
     }
 
     /// Extracted from `Self::lower_branch_match` (second-round split, cog reduction):
