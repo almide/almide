@@ -109,6 +109,9 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
         }
         DTy::List(e) => {
             let value = convert_callback_value(env, e, list_elem(native)?, "__item", into_native)?;
+            // Elements that convert to themselves: the list is the list
+            // (#4661 — a copy here doubled a sixteen-million-element result).
+            if value == "__item" { return Some(code.into()); }
             // The copy is a list as long as its source: it reserves the way
             // every list this render builds does (C-197's abort), never
             // through a sized `collect`'s capacity panic.
