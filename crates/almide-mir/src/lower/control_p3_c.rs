@@ -376,15 +376,10 @@ impl LowerCtx {
         // synthesized per-element helper serves, keyed by a deterministic
         // spelling of its slot types. A slot the engine cannot compare fails
         // the `ensure` and the site walls — honest refusal, never wrong bytes.
-        if let Ty::Tuple(tys) = elem {
-            let key = format!(
-                "anontup_{}",
-                tys.iter()
-                    .map(|t| crate::lower::sanitize_ty_ident(&format!("{t:?}")))
-                    .collect::<Vec<_>>()
-                    .join("_")
-            );
-            if !self.ensure_list_record_eq_helper(&key, tys, elem) {
+        // An anonymous RECORD element (`List[{ name: String, value: T }]`)
+        // takes the same route on the native render, in its layout's slot order.
+        if let Some((key, ftys)) = self.anon_aggregate_eq_key(elem) {
+            if !self.ensure_list_record_eq_helper(&key, &ftys, elem) {
                 return Some(None);
             }
             let name = self.list_record_eq_helper_name(&key);
