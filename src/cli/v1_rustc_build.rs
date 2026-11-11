@@ -56,6 +56,7 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
         // Pinned to what rustc's default gives the standard build above
         // opt-level 0 (owner ruling 2026-11-09).
         args.extend(["-C".into(), "opt-level=1".into(), "-C".into(), "debug-assertions=off".into()]);
+        args.extend(super::native_target::native_llvm_rustc_args());
     }
     args
 }
@@ -75,6 +76,7 @@ fn runtime_profile_args(rs_code: &str, release: bool) -> Vec<String> {
         }
     } else {
         args.extend(["-C".into(), "opt-level=1".into()]);
+        args.extend(super::native_target::native_llvm_rustc_args());
     }
     args
 }
@@ -229,6 +231,23 @@ mod tests {
         let r = runtime_profile_args("fn main() {}", false);
         assert!(r.windows(2).any(|w| w == ["-C", "opt-level=1"]));
         assert!(r.windows(2).any(|w| w == ["-C", "debug-assertions=off"]));
+    }
+
+    /// #4674: every crate of every bare-rustc build — the program of either
+    /// render and the v1 runtime, at both levels — is compiled with the
+    /// unroller held to one accumulator.
+    #[test]
+    fn every_crate_of_every_level_keeps_the_unroller_to_one_accumulator() {
+        let off = ["-C", "llvm-args=-unroll-add-parallel-reductions=false"];
+        for release in [false, true] {
+            for (what, args) in [
+                ("v1 program", program_profile_args("fn main() {}", release)),
+                ("v1 runtime", runtime_profile_args("fn main() {}", release)),
+                ("standard program", rlib_fast_program_profile_args("fn main() {}", release)),
+            ] {
+                assert!(args.windows(2).any(|w| w == off), "{what} release={release}: {args:?}");
+            }
+        }
     }
 
     /// A release program links with fat LTO and one codegen unit.
