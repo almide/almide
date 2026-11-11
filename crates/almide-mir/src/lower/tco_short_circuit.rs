@@ -43,7 +43,13 @@ fn expose_guard_tails(e: &mut IrExpr) {
         }
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             let ty = tail.ty.clone();
-            let at = stmts.iter().position(|s| matches!(&s.kind, IrStmtKind::Guard { else_, .. } if else_.ty == ty));
+            // (A bare `err(e)` else may still carry a Result type of its own
+            // spelling; the tail-err retyping that follows gives it the
+            // function's.)
+            let fits = |else_: &IrExpr| {
+                else_.ty == ty || (matches!(else_.kind, IrExprKind::ResultErr { .. }) && is_result_ty(&ty))
+            };
+            let at = stmts.iter().position(|s| matches!(&s.kind, IrStmtKind::Guard { else_, .. } if fits(else_)));
             let Some(at) = at else { return expose_guard_tails(tail) };
             let rest: Vec<IrStmt> = stmts.drain(at + 1..).collect();
             let Some(IrStmt { kind: IrStmtKind::Guard { cond, else_ }, .. }) = stmts.pop() else { unreachable!() };
