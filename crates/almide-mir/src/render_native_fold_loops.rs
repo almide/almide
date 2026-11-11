@@ -130,3 +130,7 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
     out.extend(lines[e + 1..].iter().cloned());
     Some(out)
 }
+
+#[cfg(test)]
+#[path = "render_native_fold_loops_test.rs"]
+mod tests;

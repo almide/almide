@@ -239,3 +239,40 @@ fn a_string_key_read_from_a_list_is_not_copied_per_update() {
     let n = net_allocs("keyed-alloc", KEYED_COUNT);
     assert!(n < 100, "the keyed counts allocate {n} blocks: a key block per update is back");
 }
+
+/// Reductions over ranges whose accumulator is kept or stepped per element,
+/// Int and Float, over NaN, a negative zero, an overflow to infinity, an
+/// underflow through the subnormals, and sums whose value depends on order.
+const RANGE_FOLDS: &str = r#"fn main() -> Unit = {
+  let a = list.range(0, 50) |> list.filter((x) => x % 3 == 0) |> list.map((x) => x * 5) |> list.fold(1, (acc, x) => acc + x % 7)
+  let f = list.range(0, 40) |> list.map((x) => float.from(x) * 0.1) |> list.filter((x) => x > 0.25) |> list.fold(0.0, (acc, x) => acc + x)
+  let nan = list.range(0, 5) |> list.map((x) => float.from(x)) |> list.fold(0.0, (acc, x) => acc + (x - 2.0) / (x - 2.0))
+  let negz = list.range(0, 4) |> list.map((x) => float.from(x)) |> list.fold(-1.0, (acc, x) => acc * x)
+  let inf = list.range(1, 400) |> list.map((x) => float.from(x)) |> list.fold(1.0, (acc, x) => acc * x * 1.0e10)
+  let tiny = list.range(0, 1070) |> list.map((x) => float.from(x)) |> list.fold(1.0, (acc, _) => acc / 2.0)
+  let order = list.range(0, 1000) |> list.map((x) => 1.0 / float.from(x + 1)) |> list.fold(0.0, (acc, x) => acc + x)
+  let kept = list.range(0, 1000) |> list.filter((x) => x % 7 != 3) |> list.map((x) => 0.1 * float.from(x)) |> list.fold(0.0, (acc, x) => acc - x * x)
+  let empty = list.range(5, 5) |> list.filter((x) => x > 0) |> list.sum
+  let rev = list.range(9, 3) |> list.map((x) => x * 2) |> list.sum
+  let n = list.range(-4, 9) |> list.map((x) => x * x) |> list.filter((x) => x % 2 == 1) |> list.len
+  println("${a} ${f} ${nan} ${negz} ${1.0 / negz} ${inf} ${tiny} ${order} ${kept} ${empty} ${rev} ${n}")
+}
+"#;
+
+#[test]
+fn a_reduction_over_a_range_is_the_ranges_fold_and_steps_in_order() {
+    // The render folds the range (`render_native_fold_loops`): no counted
+    // `loop` is left for these eleven reductions.
+    let rust = almide_mir::pipeline::try_render_rust_source(RANGE_FOLDS).expect("the certified render");
+    assert_eq!(rust.matches(").fold(v").count(), 11, "{rust}");
+    // Bit for bit what wasm computes, element by element in order.
+    let dir = scratch("range-folds");
+    let src = dir.join("prog.almd");
+    std::fs::write(&src, RANGE_FOLDS).unwrap();
+    let (native, _) = run(&src, None, false);
+    let (wasm, stderr) = run(&src, Some("wasm"), false);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(native, wasm, "{stderr}");
+    assert!(native.starts_with("46 77.7 NaN -0 -inf inf 0.000"), "{native}");
+    assert!(native.ends_with("8 7.485470860550343 -2851435.7200000007 0 0 6\n"), "{native}");
+}
