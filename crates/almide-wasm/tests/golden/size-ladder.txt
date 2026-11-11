@@ -2,7 +2,7 @@
 # Regenerate (claims every move): ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder
 # shipped<TAB>rung<TAB>program; the last row is the ladder's total.
 325	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
-489	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
+543	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
 7437	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
 9353	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
 6325	T3 String	research/benchmark/perf/strchurn/strchurn.almd
@@ -16,4 +16,4 @@
 42679	T6 JSON	research/benchmark/perf/decode/decode.almd
 36584	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 43153	T7 regex	spec/wasm_cross/regex_engine.almd
-239943	Σ	total
+239997	Σ	total

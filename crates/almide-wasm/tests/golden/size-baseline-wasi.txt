@@ -1,5 +1,5 @@
 6361	spec/wasm_cross/accum_recursion_declined.almd
-1084	spec/wasm_cross/accum_recursion_int.almd
+1496	spec/wasm_cross/accum_recursion_int.almd
 3577	spec/wasm_cross/adr0005_operator_equivalence.almd
 5609	spec/wasm_cross/alias_combinator_rc.almd
 10540	spec/wasm_cross/alias_cow.almd
@@ -132,7 +132,7 @@
 3576	spec/wasm_cross/cons_map_rebuild_swap.almd
 4959	spec/wasm_cross/const_fold_nonfinite_float.almd
 2488	spec/wasm_cross/container_alias_return.almd
-1963	spec/wasm_cross/control_flow.almd
+2017	spec/wasm_cross/control_flow.almd
 5868	spec/wasm_cross/count_domain_nonbytes.almd
 2826	spec/wasm_cross/cross_dep_accumulator.almd
 5883	spec/wasm_cross/cross_module_spread.almd
