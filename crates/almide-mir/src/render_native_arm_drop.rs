@@ -126,3 +126,7 @@ pub(crate) fn release_line(text: &str, name: &str) -> Option<String> {
     }
     bound.then(|| format!("drop({name});"))
 }
+
+#[cfg(test)]
+#[path = "render_native_arm_drop_test.rs"]
+mod tests;
