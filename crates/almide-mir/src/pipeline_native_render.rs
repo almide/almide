@@ -511,6 +511,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     crate::native_display::expand(&mut ir, &record_layouts, &variant_layouts);
     crate::native_patterns::expand(&mut ir, &variant_layouts);
+    crate::native_eq_helpers::expand(&mut ir, &record_layouts, &variant_layouts);
     crate::native_map_eq::expand(&mut ir);
     // #4006 A5: the generated record structs, derived from the declared layouts.
     let _order = crate::render_native_rec::install_declared_order(&ir.type_decls);

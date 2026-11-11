@@ -99,6 +99,7 @@ mod native_nested_places;
 mod native_display;
 mod native_structural_records;
 mod native_patterns;
+mod native_eq_helpers;
 mod native_map_eq;
 mod native_propagation;
 mod native_fusion;
