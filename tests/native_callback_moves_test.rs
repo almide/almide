@@ -10,6 +10,9 @@
 //!   (`render_native_slices`): each call built its halves as owned blocks.
 //! - A chain of propagations returns from each arm
 //!   (`render_native_tail_return`).
+//! - A buffer cleared in its slot is refilled, not built afresh
+//!   (`render_native_inplace`): a line buffer cleared per line was freed and
+//!   regrown per line.
 //!
 //! Each program prints a fixed text on the native render (with the ownership
 //! certificate required, and rendered by the certified render itself) and on
@@ -311,6 +314,57 @@ fn main() -> Unit = {
 }
 "#;
 
+const BUFFERS: &str = r#"import bytes
+
+fn total(b: Bytes) -> Int = bytes.to_list(b) |> list.fold(0, (a, x) => a + x)
+
+fn keep(b: Bytes) -> Bytes = b
+
+fn reset(mut b: Bytes) -> Unit = {
+  bytes.clear(b)
+  bytes.push(b, 9)
+}
+
+fn main() -> Unit = {
+  // A line buffer cleared and refilled per line.
+  var buf = bytes.zeros(64)
+  var sum = 0
+  for line in 0..<3000 {
+    bytes.clear(buf)
+    for i in 0..<60 {
+      bytes.push(buf, (line + i) % 251)
+    }
+    sum = sum + bytes.len(buf) + (bytes.get(buf, 59) ?? 0)
+  }
+  println("${sum} ${bytes.len(buf)}")
+
+  // A copy taken before the clear keeps what it held.
+  var a = bytes.from_string("abc")
+  let before = a
+  bytes.clear(a)
+  bytes.push(a, 122)
+  println("${bytes.len(before)} ${total(before)} ${bytes.len(a)} ${total(a)}")
+
+  // Handed on, stored, and cleared through a mut parameter.
+  var held: List[Bytes] = []
+  var b = bytes.zeros(2)
+  for r in 0..<4 {
+    bytes.push(b, r + 1)
+    held = held + [b]
+    if r % 2 == 0 then { bytes.clear(b) } else { reset(b) }
+    b = keep(b)
+  }
+  println("${bytes.len(b)} ${total(b)} ${held |> list.map((h) => bytes.len(h)) |> list.fold(0, (x, y) => x * 10 + y)}")
+
+  // Rebound to a longer zeroed buffer than the slot holds, then a shorter.
+  var c = bytes.zeros(1)
+  c = bytes.zeros(40)
+  bytes.push(c, 5)
+  c = bytes.zeros(3)
+  println("${bytes.len(c)} ${total(c)}")
+}
+"#;
+
 #[test]
 fn an_accumulator_moves_through_its_callback_and_prints_the_same_on_both_targets() {
     // Returned unchanged, rebuilt, from one arm only, read after the call
@@ -351,4 +405,16 @@ fn a_fold_step_does_not_copy_its_accumulator() {
     prints("fold-loop", FOLD_LOOP, "10 600\n");
     let n = net_allocs("fold-loop-alloc", FOLD_LOOP);
     assert!(n < 5000, "the fold allocates {n} blocks over 3600 steps: the accumulator is copied per step");
+}
+
+#[test]
+fn a_cleared_buffer_keeps_its_block_and_prints_the_same_on_both_targets() {
+    // A copy taken before the clear keeps what it held; a buffer handed on,
+    // stored, cleared through a `mut` parameter, and rebound to a longer
+    // zeroed buffer than its slot holds all print as wasm does.
+    prints("buffers", BUFFERS, "555870 60\n3 294 1 122\n1 9 3121\n3 0\n");
+    // 3,000 lines: a fresh buffer per clear was a block per line, regrown
+    // three times before it held its sixty bytes.
+    let n = net_allocs("buffers-alloc", BUFFERS);
+    assert!(n < 100, "the line buffer allocates {n} blocks over 3000 lines: it is built afresh per clear");
 }

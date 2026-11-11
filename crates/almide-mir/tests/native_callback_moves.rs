@@ -10,6 +10,8 @@
 //!   (`render_native_slices`).
 //! - A `map.set` / `map.upsert` whose result goes straight back into its
 //!   slot edits the map in place (`render_native_inplace`).
+//! - A slot rebound to a freshly built buffer is refilled, and a runtime
+//!   list whose elements convert to themselves is not copied.
 //! - A branch value that is the function's result returns where it is made
 //!   (`render_native_tail_return`), and a small straight-line function is
 //!   inlined (`render_native_inline`).
@@ -190,4 +192,32 @@ fn a_small_helper_is_inlined_and_a_loop_or_a_recursion_is_not() {
     assert!(rust.contains("#[inline(always)]\nfn almd_twice("), "{rust}");
     assert!(!rust.contains("#[inline(always)]\nfn almd_down("), "a recursive function is forced inline");
     assert!(!rust.contains("#[inline(always)]\nfn almd_total("), "a loop is forced inline");
+}
+
+#[test]
+fn a_buffer_cleared_in_its_slot_is_refilled() {
+    let (rust, _) = certified(
+        "import bytes\n\nfn main() -> Unit = {\n  var buf = bytes.zeros(8)\n  var n = 0\n  for i in 0..<9 {\n    bytes.clear(buf)\n    bytes.push(buf, i)\n    n = n + bytes.len(buf)\n  }\n  println(int.to_string(n))\n}\n",
+    );
+    let main = &rust[rust.find("fn main() {").expect("main")..];
+    assert_eq!(main.matches("almide_rt_bytes_zeros_into(&mut ").count(), 1, "the clear builds a fresh buffer:\n{main}");
+    assert_eq!(main.matches("almide_rt_bytes_zeros(").count(), 1, "more than the first buffer is built:\n{main}");
+}
+
+#[test]
+fn a_fresh_buffer_bound_to_a_new_name_is_built() {
+    // Nothing is rebound: there is no slot to refill.
+    let (rust, _) = certified(
+        "import bytes\n\nfn main() -> Unit = {\n  let a = bytes.zeros(8)\n  let b = bytes.zeros(0)\n  println(int.to_string(bytes.len(a) + bytes.len(b)))\n}\n",
+    );
+    assert!(!rust[rust.find("fn main() {").expect("main")..].contains("_into(&mut "), "a new binding was refilled");
+}
+
+#[test]
+fn a_flat_map_result_of_scalars_is_not_copied() {
+    let (rust, _) = certified(
+        "fn main() -> Unit = {\n  let data = list.range(0, 9) |> list.flat_map((i) => [float.from(i) * 0.5, float.from(i)])\n  println(int.to_string(list.len(data)))\n}\n",
+    );
+    let main = &rust[rust.find("fn main() {").expect("main")..];
+    assert!(!main.contains("let mut __copy"), "the result list is copied element by element:\n{main}");
 }
