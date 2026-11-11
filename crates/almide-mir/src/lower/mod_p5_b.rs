@@ -186,6 +186,7 @@ pub(crate) fn try_tco_rewrite(
     // type, so give every tail `err` base the function's return type.
     let retyped = crate::lower::owned_tco_slots().then(|| {
         let mut b = work_body.clone();
+        expose_guard_tails(&mut b);
         retype_tail_err_bases(&mut b, &body.ty);
         expose_short_circuit_tails(&mut b);
         b
