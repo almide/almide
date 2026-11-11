@@ -185,7 +185,7 @@ fn render_fn(
         }
         prev_start = st.out.len();
         let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
-        crate::render_native_inplace::rewrite(i, &mut st.out, prev_start, &mut *st.used_shims);
+        crate::render_native_inplace::rewrite(i, &st.tys, &mut st.out, prev_start, &mut *st.used_shims);
         crate::render_native_tail_return::mark(i, &mut st.out, prev_start);
         // A shared cell's in-place borrow ends with its last read.
         for g in crate::render_native_keyed::guards_through(i) {

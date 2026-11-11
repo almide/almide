@@ -266,7 +266,8 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
         // A rebind writes the binding from a value not viewing it.
         match op {
             Op::SetLocal { local, src } if *local == v => {
-                if refs.contains(src) {
+                // A rebind the render may make by refilling the slot reads it.
+                if refs.contains(src) || crate::render_native_inplace::refills(func, i) {
                     return false;
                 }
                 continue;

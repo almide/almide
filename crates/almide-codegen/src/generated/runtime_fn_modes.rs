@@ -170,6 +170,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_bytes_write_bool" => &[true, false],
         "almide_rt_bytes_xor" => &[false, false],
         "almide_rt_bytes_zeros" => &[false],
+        "almide_rt_bytes_zeros_into" => &[true, false],
         "almide_rt_datetime_add_days" => &[false, false],
         "almide_rt_datetime_add_hours" => &[false, false],
         "almide_rt_datetime_add_minutes" => &[false, false],

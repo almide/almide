@@ -1,5 +1,6 @@
 // Included from native_floor.rs: runtime twins paired from the signatures —
-// the slicing twin of a string body, the in-place twin of a consuming one.
+// the slicing twin of a string body, the in-place twin of a consuming one,
+// the refilling twin of a building one.
 
 /// The slicing twin of the floor body `symbol`: the runtime fn `<symbol>_ref`,
 /// paired from the signatures. Both take the same number of `&str` params;
@@ -51,4 +52,32 @@ pub(crate) fn in_place_twin(symbol: &str) -> Option<(String, Vec<&'static str>)>
         && rest.len() == twin_rest.len()
         && rest.iter().zip(twin_rest).all(|(a, b)| plain(a) == plain(b));
     paired.then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
+}
+
+/// The refilling twin of the building runtime body `symbol`: the runtime fn
+/// `<symbol>_into`, paired from the signatures — a `&mut` of the body's
+/// result type, then the body's own params, and nothing returned. It leaves
+/// in the place it is handed what the body returns. Returns the twin and its
+/// items. `None` when the runtime carries no such fn.
+pub(crate) fn refill_twin(symbol: &str) -> Option<(String, Vec<&'static str>)> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<(String, Vec<&'static str>)>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(symbol) {
+        return hit.clone();
+    }
+    let made = (|| {
+        let rt = runtime_index();
+        let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
+        let twin = format!("{symbol}_into");
+        let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
+        let (place, rest) = twin_params.split_first()?;
+        let paired = !body_ret.is_empty()
+            && squash(place) == format!("&mut{}", squash(&body_ret))
+            && twin_ret.is_empty()
+            && rest.len() == body_params.len()
+            && rest.iter().zip(&body_params).all(|(a, b)| squash(a) == squash(b));
+        paired.then(|| Some((twin.clone(), closure(&twin, rt).ok()?)))?
+    })();
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(symbol.to_string(), made.clone());
+    made
 }
