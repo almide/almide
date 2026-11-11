@@ -1526,6 +1526,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SCOPED_CLOSURE_OFF` | ablation | make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule |
 | `ALMIDE_SELF_INLINE_OFF` | ablation | turn OFF the native legs' one-level self-recursive inlining (`almide_ir::self_inline`, #4456), so a pure scalar recursion gets the accumulator loop again: the ablation leg of the fib row in scripts/check-perf-ratio.sh |
+| `ALMIDE_SELF_PEEL_OFF` | ablation | turn OFF the wasm legs' one-level inlining of an accumulator loop's own call (`almide_ir::self_peel`), so a binary recursion keeps the plain accumulator loop: the ablation leg of the peeled/unpeeled differential |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |

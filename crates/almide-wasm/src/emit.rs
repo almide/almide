@@ -146,12 +146,19 @@ fn accumulate_binary_recursion(ir: &IrProgram) -> Option<IrProgram> {
         return None;
     }
     let mut out = ir.clone();
+    // Each rewritten loop then takes one level of its own call inline
+    // (`self_peel`): half the calls again, for one copy of the body.
+    let peel = !almide_base::env::flag("ALMIDE_SELF_PEEL_OFF");
     for f in out.functions.iter_mut() {
-        accum_tre::rewrite(f, &mut out.var_table);
+        if accum_tre::rewrite(f, &mut out.var_table) && peel {
+            almide_ir::self_peel::peel(f, &mut out.var_table);
+        }
     }
     for m in out.modules.iter_mut() {
         for f in m.functions.iter_mut() {
-            accum_tre::rewrite(f, &mut m.var_table);
+            if accum_tre::rewrite(f, &mut m.var_table) && peel {
+                almide_ir::self_peel::peel(f, &mut m.var_table);
+            }
         }
     }
     Some(out)
