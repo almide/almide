@@ -281,13 +281,18 @@ pub(crate) fn emit_hash_int() -> Function {
 }
 
 /// The odd multiplier of the string hash: the 32-bit Fibonacci constant
-/// (it encodes in half the bytes of the 64-bit one, twice per module).
+/// (it encodes in half the bytes of the 64-bit one, three times per module).
 pub(crate) const HASH_STR_MUL: u64 = 0x9E37_79B1;
 
 /// `$mapidx_hash_str(block) -> i32`: a multiplicative hash over the payload
-/// taken eight bytes at a time, seeded with the length and folded once so
-/// the low bits carry the whole word (a short key's low product word is its
-/// Fibonacci hash; a long key's high word carries every byte). The last
+/// taken eight bytes at a time, seeded with the length. A multiply only
+/// carries a bit upwards, so the state's two halves are folded, multiplied
+/// once more and the HIGH word answered: every payload bit reaches every
+/// bit of the answer. (Answering the fold alone let the upper four bytes of
+/// each word reach bit j of the slot only through their own bits <= j:
+/// keys that differ in a zero-padded decimal tail — `user0001`, `00000042`
+/// — shared a few hundred starting slots and walked into the flood bound.)
+/// The last
 /// 1..=8 bytes are read as the eight-byte word ENDING at the payload's end,
 /// shifted so only payload bytes remain: for a payload shorter than eight
 /// bytes that word starts in the block's own `len`/`cap` words (never
@@ -316,7 +321,8 @@ pub(crate) fn emit_hash_str() -> Function {
     i.local_get(len).i32_const(-8).i32_mul().i64_extend_i32_u().i64_shr_u();
     i.i64_xor().i64_const(HASH_STR_MUL as i64).i64_mul().local_set(h);
     i.end();
-    i.local_get(h).i64_const(32).i64_shr_u().local_get(h).i64_xor().i32_wrap_i64();
+    i.local_get(h).i64_const(32).i64_shr_u().local_get(h).i64_xor();
+    i.i64_const(HASH_STR_MUL as i64).i64_mul().i64_const(32).i64_shr_u().i32_wrap_i64();
     i.end();
     f
 }
