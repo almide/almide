@@ -755,7 +755,7 @@ fn new_fn(name: Sym, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr) -> IrFuncti
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: a reader helper takes one owned `text`, a writer twin the params of a producer `plain_fn` admits only without `mut`
         module_origin: None,
     }
 }
