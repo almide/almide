@@ -299,7 +299,11 @@ impl LowerCtx {
         // the callee; the match then dispatches on a tracked VAR seeded BY TYPE.
         // The call still runs exactly once, before the arms. `speculate` rolls
         // every side effect back on a decline.
-        if !matches!(subject.kind, IrExprKind::Call { .. }) || !crate::lower::is_variant_ty(&subject.ty) {
+        // A variant-valued `match` subject (a `??` over a match — the shape the
+        // value reader leaves) binds the same way: evaluated once, before the arms.
+        if !matches!(subject.kind, IrExprKind::Call { .. } | IrExprKind::Match { .. })
+            || !crate::lower::is_variant_ty(&subject.ty)
+        {
             return None;
         }
         self.speculate(|ctx| {
