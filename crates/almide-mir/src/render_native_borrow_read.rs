@@ -9,7 +9,7 @@
 //!
 //! A read qualifies when, after it:
 //! * the loaded value is only handed to a user call (a record param is taken
-//!   by reference), copied with `Dup` (that copy is an owned clone, made only
+//!   by reference) or to a closure call it is not moved into, copied with `Dup` (that copy is an owned clone, made only
 //!   where the program asks for one), read through its own slots (its handle
 //!   feeds address arithmetic and loads only), or dropped;
 //! * nothing writes, rebinds or moves the block it was read from while the
@@ -200,6 +200,11 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
                     CallArg::Handle(v) if *v == d => !crate::native_hof::mutable_argument(name, k),
                     _ => true,
                 }),
+                // A closure takes a heap argument by reference unless the
+                // call site hands the value over.
+                Op::CallIndirect { args, .. } => {
+                    !handed_over(func, j, d) && !args.iter().any(|a| matches!(a, CallArg::Scalar(v) if *v == d))
+                }
                 Op::Dup { src, .. } => *src == d,
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
                 // An address into `d`'s own block, or a load through one.
@@ -220,6 +225,16 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
         last = j;
     }
     Some(last)
+}
+
+/// A call-site move right after op `at` of `func` hands `d` over.
+fn handed_over(func: &MirFunction, at: usize, d: ValueId) -> bool {
+    let mut reads = Vec::new();
+    (at + 1..func.ops.len()).take_while(|k| func.call_moves.contains(k)).any(|k| {
+        reads.clear();
+        crate::mir_ops::op_reads(&func.ops[k], &mut reads);
+        reads.contains(&d)
+    })
 }
 
 /// `last` pushed out to the end of the outermost loop that holds it but not
