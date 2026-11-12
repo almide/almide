@@ -24,12 +24,11 @@ pub struct LiveBundled {
 /// The bundled functions the compiler's own lowering calls without any
 /// source spelling them (the derived codec's key listing, field read and
 /// error text, `+` on `Bytes`, the matrix operators, the wasm emitter's
-/// region-export wrapper, the optimizer's directed JSON reader and array
-/// writer — stamped `@on_demand` by that pass, so a program no rewrite fired
-/// in drops them after mono). A module that is loaded keeps these live.
+/// region-export wrapper). A module that is loaded keeps these live.
 /// `tests/compiler_inserted_calls_test.rs` scans the lowering and the wasm
 /// emitter for every literal `module.__name` call they build and refuses one
-/// that neither table lists.
+/// that neither this table, [`REWRITE_INSERTED`] nor [`TEST_SYNTHESIZED`]
+/// lists.
 pub const COMPILER_INSERTED: &[(&str, &str)] = &[
     ("value", "__keys"),
     ("value", "__field"),
@@ -39,14 +38,31 @@ pub const COMPILER_INSERTED: &[(&str, &str)] = &[
     ("matrix", "__div"),
     ("ffi", "__export_view"),
     ("ffi", "__lend"),
-    ("json", "__spans"),
-    ("json", "__rows"),
-    ("json", "__leaf_int"),
-    ("json", "__leaf_float"),
-    ("json", "__leaf_bool"),
-    ("json", "__leaf_string"),
-    ("json", "__array_text"),
 ];
+
+/// `(module, function, trigger)`: a bundled function an optimizer rewrite
+/// calls in place of a call to `module.trigger`, and only there (the
+/// directed JSON reader replaces a `json.parse` site, the array writer a
+/// `json.stringify` site; stamped `@on_demand`, so a program no rewrite fired
+/// in drops them after mono). It becomes live once its trigger is live, not
+/// whenever its module loads: the reader's body names `bytes`, `float` and
+/// more, and a program that loads `json` without parsing must not load them.
+pub const REWRITE_INSERTED: &[(&str, &str, &str)] = &[
+    ("json", "__spans", "parse"),
+    ("json", "__rows", "parse"),
+    ("json", "__leaf_int", "parse"),
+    ("json", "__leaf_float", "parse"),
+    ("json", "__leaf_bool", "parse"),
+    ("json", "__leaf_string", "parse"),
+    ("json", "__array_text", "stringify"),
+];
+
+/// Is `d` of `module` a [`REWRITE_INSERTED`] function whose trigger is in
+/// `live` (the live functions of `module`)?
+fn rewrite_triggered(module: &str, d: &Decl, live: Option<&HashSet<String>>) -> bool {
+    let (Some(name), Some(live)) = (decl_name(d), live) else { return false };
+    REWRITE_INSERTED.iter().any(|(m, f, t)| *m == module && *f == name && live.contains(*t))
+}
 
 /// The bundled functions a TEST build calls without any source spelling
 /// them: a `testing.assert_aborts` site's verdict (the lowering) and the
@@ -226,6 +242,7 @@ impl<'p> Reach<'p> {
     fn is_reached(&self, i: usize, d: &Decl) -> bool {
         let m = self.cands[i].name;
         fn_is_named(&self.spelled, m, d)
+            || rewrite_triggered(m, d, self.live.get(m))
             || decl_name(d).and_then(|n| n.strip_prefix("__fallible_")).is_some_and(|h| {
                 almide_lang::fallible_hofs::is_fallible_hof(m, h)
                     && (self.live.get(m).is_some_and(|fs| fs.contains(h)) || hof_is_named(&self.spelled, m, h))
@@ -305,7 +322,9 @@ pub fn reach_within(module: &str, prog: &Program, roots: &HashSet<String>) -> Ha
             live.extend(decl_name(d).map(str::to_string));
         }
         spell_unit(prog, named.into_iter(), &mut spelled);
-        (named, dormant) = dormant.into_iter().partition(|d| fn_is_named(&spelled, module, d));
+        (named, dormant) = dormant
+            .into_iter()
+            .partition(|d| fn_is_named(&spelled, module, d) || rewrite_triggered(module, d, Some(&live)));
     }
     live
 }

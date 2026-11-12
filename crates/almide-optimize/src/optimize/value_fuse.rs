@@ -32,7 +32,8 @@
 //! A lone tree written once is left alone: nothing per element to save.
 //!
 //! Both kernels are functions of the `json` module, kept live by
-//! `bundled_reach::COMPILER_INSERTED`, stamped `@on_demand` here and so
+//! `bundled_reach::REWRITE_INSERTED` once the call they replace
+//! (`json.parse`, `json.stringify`) is live, stamped `@on_demand` here and so
 //! dropped after mono when no rewrite named them.
 //!
 //! Ablation: `ALMIDE_VALUE_FUSE_OFF=1` skips the pass.
@@ -59,7 +60,8 @@ fn is_kernel(name: &str) -> bool {
 }
 
 /// Stamps the kernels `@on_demand`: `bundled_reach` keeps them live for
-/// every program that loads `json`, and `on_demand::prune_unreached` drops
+/// every program whose `json.parse` / `json.stringify` is live, and
+/// `on_demand::prune_unreached` drops
 /// them after mono unless a rewrite named them. Runs whether or not the
 /// rewrites do.
 pub fn stamp_kernels(program: &mut IrProgram) {
