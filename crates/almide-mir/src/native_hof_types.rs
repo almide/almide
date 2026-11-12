@@ -200,7 +200,9 @@ mod type_tests {
             assert_eq!(bind_param(&mut binding, &declared, value), None);
         }
         assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Float))), None);
-        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Value))), None);
+        // Value's runtime equality is the language's `==` (#4687), so a Set of
+        // Values is the runtime's own set of them; Float members still refuse.
+        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Value))), Some(NTy::Rec(rec::set_type_of(value))));
     }
 
     #[test]

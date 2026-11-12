@@ -146,12 +146,19 @@ fn accumulate_binary_recursion(ir: &IrProgram) -> Option<IrProgram> {
         return None;
     }
     let mut out = ir.clone();
+    // Each rewritten loop then takes one level of its own call inline
+    // (`self_peel`): half the calls again, for one copy of the body.
+    let peel = !almide_base::env::flag("ALMIDE_SELF_PEEL_OFF");
     for f in out.functions.iter_mut() {
-        accum_tre::rewrite(f, &mut out.var_table);
+        if accum_tre::rewrite(f, &mut out.var_table) && peel {
+            almide_ir::self_peel::peel(f, &mut out.var_table);
+        }
     }
     for m in out.modules.iter_mut() {
         for f in m.functions.iter_mut() {
-            accum_tre::rewrite(f, &mut m.var_table);
+            if accum_tre::rewrite(f, &mut m.var_table) && peel {
+                almide_ir::self_peel::peel(f, &mut m.var_table);
+            }
         }
     }
     Some(out)
@@ -249,6 +256,7 @@ fn emit_program_pass(
             param_mut_decl: f.params.iter().map(|p| p.is_mut).collect(),
             import,
             scoped_entry: f.is_scoped_block_entry(),
+            diverges: false,
         });
     }
     // Which params each callee owns (#2028): computed once, over the whole
@@ -260,6 +268,9 @@ fn emit_program_pass(
     // #3420: which fns hand out an address their caller's blocks back.
     for (i, y) in crate::exit_plan::address_yielders(&program_fns, &table).into_iter().enumerate() {
         table.infos[i].yields_address = y;
+    }
+    for (i, d) in crate::emitter::diverge::diverging_fns(&program_fns, &table).into_iter().enumerate() {
+        table.infos[i].diverges = d;
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);

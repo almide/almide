@@ -47,8 +47,8 @@ fi
 # A change to the SHARED KILLER INFRASTRUCTURE puts EVERY mutant in scope: a
 # PR cannot un-kill a mutant whose code and killers it did not touch, and
 # this rule is what closes the "except through the shared test
-# infrastructure" hole. The infrastructure is what the five net suites
-# (below) compile and read: their four integration-test sources, the
+# infrastructure" hole. The infrastructure is what the six net suites
+# (below) compile and read: their five integration-test sources, the
 # harness/ and gen/ modules they include, the crate manifest, and this
 # runner. It is NOT every file under crates/almide-wasm/tests/ (#2814): the
 # golden baselines there (alloc / size / witness ledgers) belong to other
@@ -58,7 +58,7 @@ fi
 SCOPE="${ALMIDE_MUTATION_SCOPE:-full}"
 CHANGED=""
 RANGE=""
-INFRA='^(crates/almide-wasm/tests/(backend_parity|fuzz_differential|alias_semantics|tail_calls)\.rs$|crates/almide-wasm/tests/(harness|gen)/|crates/almide-wasm/Cargo\.toml$|scripts/check-mutation-gate\.sh$)'
+INFRA='^(crates/almide-wasm/tests/(backend_parity|fuzz_differential|alias_semantics|tail_calls|literal_globals)\.rs$|crates/almide-wasm/tests/(harness|gen)/|crates/almide-wasm/Cargo\.toml$|scripts/check-mutation-gate\.sh$)'
 if [ "$SCOPE" = "incremental" ]; then
   if [ -n "${ALMIDE_MUTATION_BASE:-}" ]; then
     RANGE="${ALMIDE_MUTATION_BASE}...HEAD"
@@ -98,7 +98,7 @@ BUDGET="${ALMIDE_MUTATION_BUDGET_SECS:-0}"
 # time and the loop stops at the FIRST red, so a caught mutant links only
 # the suites up to its killer. The verdict is unchanged: "caught" still
 # means "the net goes red", because ANY suite failing IS the net failing;
-# only a SURVIVOR pays for all five. The ORDER is the recorded killer
+# only a SURVIVOR pays for all six. The ORDER is the recorded killer
 # first (#2814): the suites named in proofs/mutation-score.toml's
 # `killers` field — the sweep's own measured tally, re-checked against
 # every sweep by its score job, not a hand-maintained map — by kill count,
@@ -108,7 +108,7 @@ BUDGET="${ALMIDE_MUTATION_BUDGET_SECS:-0}"
 # because the backend_parity rebuild and run dominate. The ordering is
 # kept because it costs nothing. The killer is still rediscovered and
 # PRINTED on every run, so the evidence stays live.
-SUITES_ALL="lib backend_parity fuzz_differential alias_semantics tail_calls"
+SUITES_ALL="lib backend_parity fuzz_differential alias_semantics tail_calls literal_globals"
 recorded=""
 if [ -f proofs/mutation-score.toml ]; then
   recorded=$(sed -n 's/^killers *= *"\(.*\)"$/\1/p' proofs/mutation-score.toml \
