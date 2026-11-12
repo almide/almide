@@ -74,6 +74,24 @@ pub(crate) fn positions(name: &str) -> Option<Vec<usize>> {
     INOUT.with(|m| m.borrow().get(name).cloned())
 }
 
+/// The registry the render reads: each lowered fn's own in-out params
+/// (`MirFunction::inout_params`, what a call lends `&mut` by), whatever a
+/// prepare nested in this one left behind. With the registry emptied, a
+/// render-time reader (a lent buffer is rebound, never a stack literal, a
+/// mutable argument) took a lent buffer for unchanged: `var s = "  hi  "` lent
+/// to `f(mut s)` printed the literal after the call.
+pub(crate) fn register_lowered(functions: &[crate::MirFunction]) {
+    let lowered = functions
+        .iter()
+        .filter(|f| !f.inout_params.is_empty())
+        .map(|f| {
+            let ks = f.params.iter().enumerate().filter(|(_, p)| f.inout_params.contains(&p.value)).map(|(k, _)| k).collect();
+            (f.name.to_string(), ks)
+        })
+        .collect();
+    INOUT.with(|m| *m.borrow_mut() = lowered);
+}
+
 /// Is position `k` of a call to `name` an in-out param?
 pub(crate) fn is_inout_position(name: &str, k: usize) -> bool {
     positions(name).is_some_and(|ks| ks.contains(&k))
@@ -309,10 +327,8 @@ fn lendable_vars(f: &IrFunction) -> HashSet<VarId> {
     struct Vars(HashSet<VarId>, HashSet<VarId>);
     impl IrVisitor for Vars {
         fn visit_stmt(&mut self, s: &IrStmt) {
-            // A var bound to a string literal stays out: the lowering may read
-            // its interpolations off the literal, which a lend would rewrite.
-            if let IrStmtKind::Bind { var, mutability: Mutability::Var, ty, value } = &s.kind {
-                if lendable(ty) && !matches!(value.kind, IrExprKind::LitStr { .. }) {
+            if let IrStmtKind::Bind { var, mutability: Mutability::Var, ty, .. } = &s.kind {
+                if lendable(ty) {
                     self.0.insert(*var);
                 }
             }

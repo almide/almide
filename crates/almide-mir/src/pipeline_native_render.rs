@@ -570,6 +570,8 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     );
     let _entry = crate::native_entry::EntryGuard::set(ir.functions.iter().any(|f| f.name.as_str() == "main" && f.is_effect));
     let initial_records = crate::render_native_rec::snapshot();
+    // The render lends by the lowered fns' own in-out params.
+    crate::native_inout::register_lowered(&program.functions);
     let mut rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
     // Runtime adapters can make linked indirect callers unreachable. Such
     // callers must not keep pinning the surviving callbacks to borrowing:
