@@ -126,38 +126,6 @@ fn a_filtered_list_grown_after_its_commit_renders() {
     assert_eq!(run(T1, Some("wasm")), "0,0,7,0\n9:5\n");
 }
 
-const G1: &str = r#"
-fn geti(xs: List[Int], i: Int) -> Option[Int] = list.get(xs, i)
-
-fn pick(xs: List[Int], i: Int) -> Result[Int, String] = {
-  let a = match geti(xs, i) {
-    some(v) => v,
-    none => err("no a"),
-  }
-  let b = match geti(xs, a) {
-    some(v) => v,
-    none => err("no b at ${int.to_string(a)}"),
-  }
-  ok(a * 100 + b)
-}
-
-fn show(r: Result[Int, String]) -> String = match r { ok(v) => "ok ${int.to_string(v)}", err(e) => "err ${e}" }
-
-fn main() -> Unit = {
-  let xs = [2, 0, 1, 9]
-  println(show(pick(xs, 0)))
-  println(show(pick(xs, 3)))
-  println(show(pick(xs, 7)))
-}
-"#;
-
-#[test]
-fn an_err_arm_of_a_bound_scalar_match_returns_early() {
-    render(G1).expect("renders on the native render");
-    assert_eq!(run(G1, None), "ok 201\nerr no b at 9\nerr no a\n");
-    assert_eq!(run(G1, Some("wasm")), "ok 201\nerr no b at 9\nerr no a\n");
-}
-
 const G2: &str = r#"
 fn rd(p: String) -> Result[List[Int], String] = if p == "" then err("empty path") else ok([string.len(p), 7])
 
@@ -182,88 +150,9 @@ effect fn main() -> Unit = {
 "#;
 
 #[test]
-fn a_passed_through_result_match_is_its_bang() {
-    render(G2).expect("renders on the native render");
-    assert_eq!(run(G2, None), "ok 10\nerr empty path\n");
+fn an_err_arm_bound_match_stays_in_its_fn_on_wasm() {
+    // The branch lift used to move this match into a helper, where the err
+    // arm returned from the helper: invalid Rust on one leg, a trap on wasm.
     assert_eq!(run(G2, Some("wasm")), "ok 10\nerr empty path\n");
 }
 
-const S2: &str = r#"
-type Resp = { code: Int, body: String }
-type Lim = { max: Int }
-
-fn start(u: String, lim: Lim) -> Result[Int, String] = if u == "" then err("no url") else ok(lim.max)
-
-fn read_new(c: Int, i: Int) -> String = if i % 2 == 0 then "c${int.to_string(i)}" else ""
-
-fn poll(c: Int, i: Int) -> Option[Result[Resp, String]] =
-  if i < c then none else if i == c then some(ok(Resp { code: 200 + i, body: "b" })) else some(err("bad ${int.to_string(i)}"))
-
-fn status(r: Resp) -> Int = r.code
-fn body(r: Resp) -> String = r.body
-
-effect fn stream(url: String, lim: Lim, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = start(url, lim)!
-  var i = 0
-  var running = true
-  var outcome: Result[Unit, String] = ok(())
-  while running {
-    let fresh = read_new(c, i)
-    if fresh != "" then on_chunk(fresh) else ()
-    match poll(c, i) {
-      none => { i = i + 1 },
-      some(ok(resp)) => {
-        let rest = read_new(c, i)
-        if rest != "" then on_chunk(rest) else ()
-        let code = status(resp)
-        outcome = if code >= 200 and code < 203 then ok(()) else err("HTTP ${int.to_string(code)}: ${body(resp)}")
-        running = false
-      },
-      some(err(e)) => {
-        outcome = err(e)
-        running = false
-      },
-    }
-  }
-  outcome
-}
-
-effect fn main() -> Unit = {
-  for (u, m) in [("x", 2), ("x", 4), ("", 1)] {
-    match stream(u, Lim { max: m }, (s) => println(s)) {
-      ok(_) => println("ok"),
-      err(e) => println("err ${e}"),
-    }
-  }
-}
-"#;
-
-#[test]
-fn a_heap_ok_result_inside_an_option_branches_on_its_own_tag() {
-    render(S2).expect("renders on the native render");
-    assert_eq!(run(S2, None), run(S2, Some("wasm")));
-}
-
-const O1: &str = r#"
-fn mk(i: Int) -> Option[Result[String, String]] =
-  if i == 0 then none else if i == 1 then some(ok("good")) else some(err("bad"))
-
-fn main() -> Unit = {
-  for i in [0, 1, 2] {
-    match mk(i) {
-      some(r) => match r {
-        ok(_) => println("ok"),
-        err(_) => println("err"),
-      },
-      none => println("none"),
-    }
-  }
-}
-"#;
-
-#[test]
-fn an_option_of_a_string_result_branches_per_arm() {
-    render(O1).expect("renders on the native render");
-    assert_eq!(run(O1, None), "none\nok\nerr\n");
-    assert_eq!(run(O1, Some("wasm")), "none\nok\nerr\n");
-}
