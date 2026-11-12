@@ -434,6 +434,12 @@ impl LowerCtx {
             }
             return;
         }
+        // A heap-Ok Result payload (`Option[Result[R, String]]`) carries its tag
+        // in the cap-as-tag slot, not the length word: the canonical seeder.
+        if matches!(bind_ty, Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])) {
+            self.seed_variant_param(payload, bind_ty);
+            return;
+        }
         if crate::lower::is_result_ty(bind_ty) {
             self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
             if crate::lower::is_lenlist_list_ty(bind_ty) {

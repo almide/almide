@@ -597,6 +597,7 @@ include!("desugar_continue.rs");
 include!("desugar_b.rs");
 include!("desugar_known_ctor.rs");
 include!("desugar_c.rs");
+include!("desugar_err_arm_bind.rs");
 include!("desugar_call_arg_anf.rs");
 include!("desugar_heap_qq_operands.rs");
 include!("desugar_stmt_lists.rs");

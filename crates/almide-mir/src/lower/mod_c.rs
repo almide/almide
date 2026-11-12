@@ -586,6 +586,8 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
         // BEFORE the branch/unwrap desugars: the rewrite moves the fallback's `!` OUT of the
         // conditional arm into the `let x = e!` position `desugar_let_unwrap` then handles.
         desugar_unwrap_or_unwrap_fallback,
+        // Also into the `let x = e!` position: an `err(..)` arm of a bound match.
+        desugar_err_arm_binds,
     ];
     let mut cur: Option<IrExpr> = None;
     for pass in PASSES {

@@ -366,6 +366,14 @@ fn holds_error_op(e: &IrExpr) -> bool {
                 self.found = true;
                 return;
             }
+            // An `err(..)` arm of a match whose value is not a Result is an
+            // early return of the enclosing fn (the checker joins it as Never).
+            if let IrExprKind::Match { arms, .. } = &e.kind {
+                if !e.ty.is_result() && arms.iter().any(|a| matches!(a.body.kind, IrExprKind::ResultErr { .. })) {
+                    self.found = true;
+                    return;
+                }
+            }
             visit::walk_expr(self, e);
         }
         fn visit_stmt(&mut self, s: &IrStmt) {
