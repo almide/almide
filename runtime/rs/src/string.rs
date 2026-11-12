@@ -208,20 +208,15 @@ pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { let mut it = s.chars
 pub fn almide_rt_string___from_codepoint(cp: i64) -> AlmideString { let __almide_out: String = u32::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default(); __almide_out.into() }
 
 pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {
-    // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
-    // default degrades to "to the end". The slice is copied once, straight
-    // into the result's block, from the byte range of those codepoints.
-    let s_idx = start.max(0) as usize;
-    let e_idx = end.max(0) as usize;
-    if s_idx >= e_idx { return AlmideString::from(""); }
-    // An ASCII prefix of `n` bytes is `n` codepoints.
-    let byte_at = |t: &str, n: usize| {
-        let p = n.min(t.len());
-        if t.as_bytes()[..p].is_ascii() { p } else { t.char_indices().nth(n).map_or(t.len(), |(i, _)| i) }
+    let __almide_out: String = {
+        // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
+        // default degrades to "to the end".
+        let s_idx = start.max(0) as usize;
+        let e_idx = end.max(0) as usize;
+        if s_idx >= e_idx { String::new() }
+        else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }
     };
-    let a = byte_at(s, s_idx);
-    let b = a + byte_at(&s[a..], e_idx - s_idx);
-    AlmideString::from(&s[a..b])
+    __almide_out.into()
 }
 
 // str::get checks UTF-8 boundaries without scanning or copying the source.
