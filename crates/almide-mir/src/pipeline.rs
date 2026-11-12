@@ -626,7 +626,10 @@ fn prepare_checked_ir(
 }
 
 /// Single-file convenience (no cross-module siblings) — the bundled-runtime / drop-source
-/// re-lowering paths, which never carry `import self.*`.
+/// re-lowering paths, which never carry `import self.*`. Test-only since the
+/// registry signature lookup reads declarations instead (#4682); its gate
+/// still lowers through here.
+#[cfg(test)]
 pub(crate) fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
     source_to_ir_with(source, &[])
 }
