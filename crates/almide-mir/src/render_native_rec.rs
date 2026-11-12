@@ -357,6 +357,26 @@ pub(crate) fn field_count(i: u16) -> usize {
     RECS.with(|r| r.borrow().get(i as usize).map_or(0, |d| d.fields.len()))
 }
 
+/// No value of kind `t` holds a closure or a shared cell anywhere inside it.
+pub(crate) fn holds_no_closure(t: NTy) -> bool {
+    fn go(t: NTy, seen: &mut std::collections::BTreeSet<u16>) -> bool {
+        let (NTy::Rec(i) | NTy::RecRef(i)) = t else { return true };
+        if !seen.insert(i) {
+            return true;
+        }
+        let Some(d) = RECS.with(|r| r.borrow().get(i as usize).cloned()) else { return false };
+        if d.closure_of.is_some() || d.cell_of.is_some() {
+            return false;
+        }
+        let mut parts: Vec<NTy> = d.fields.clone();
+        parts.extend(d.cases.iter().flatten().flat_map(|(_, p)| p.iter().copied()));
+        parts.extend(d.list_of.into_iter().chain(d.option_of).chain(d.set_of));
+        parts.extend(d.result_of.into_iter().chain(d.map_of).flat_map(|(a, b)| [a, b]));
+        parts.into_iter().all(|p| go(p, seen))
+    }
+    go(t, &mut std::collections::BTreeSet::new())
+}
+
 /// The element kind of a generated list type (`None` for a struct or enum).
 pub(crate) fn list_elem(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.list_of))

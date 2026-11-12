@@ -13,9 +13,12 @@
 //! "Nothing can look at the cell" is judged from the ops between the two,
 //! with the render's value kinds:
 //! * no control flow (every path from the read reaches the take), no return;
-//! * no call that can run program code: no closure call, no call of a
-//!   program function, no runtime call given a closure (the only way the
-//!   runtime runs program code) or a value of unknown kind, no closure built;
+//! * no call that can run program code: no closure call, no runtime call
+//!   given a closure (the only way the runtime runs program code) or a value
+//!   of unknown kind, no closure built; a program function only when no
+//!   argument holds a closure or a cell anywhere inside it and no mutable
+//!   global can hold a closure (a cell is reachable only through a closure
+//!   that captured it), its result then being plain;
 //! * every block read or written is one the window made, or one of a known
 //!   kind that is neither a cell nor a closure — never the cell itself, nor a
 //!   value whose kind is unknown (a cell alias read out of a record);
@@ -46,11 +49,14 @@ struct Window<'a> {
     root: BTreeMap<ValueId, ValueId>,
     funcrefs: BTreeSet<ValueId>,
     /// The blocks the window made (and the read itself): none is a cell or
-    /// a closure.
+    /// a closure, or (`clean`) none can reach the cell.
     fresh: BTreeSet<ValueId>,
     /// The kinds of the fresh values known here (the read's payload, its
     /// copies): a read out of one is fresh when its element kind is plain.
     kinds: BTreeMap<ValueId, NTy>,
+    /// The results of the admitted program-function calls and every value
+    /// read out of one: none can reach the cell, whatever its kind.
+    clean: BTreeSet<ValueId>,
     cell: ValueId,
     tys: &'a BTreeMap<ValueId, NTy>,
     program_fn: &'a dyn Fn(&str) -> bool,
@@ -61,6 +67,12 @@ impl Window<'_> {
         self.fresh.contains(v) || self.tys.get(v).is_some_and(|t| !is_cell(*t) && !crate::render_native_rec::is_closure(*t))
     }
 
+    /// `v`'s kind is known here and nothing inside a value of it is a
+    /// closure or a cell.
+    fn holds_no_closure(&self, v: &ValueId) -> bool {
+        self.kinds.get(v).or_else(|| self.tys.get(v)).is_some_and(|t| crate::render_native_rec::holds_no_closure(*t))
+    }
+
     fn block_ok(&self, a: &ValueId) -> bool {
         self.root.get(a).is_some_and(|b| *b != self.cell && self.plain(b))
     }
@@ -68,9 +80,19 @@ impl Window<'_> {
     /// `op` cannot look at the cell.
     fn admits(&mut self, op: &Op) -> bool {
         match op {
-            Op::CallFn { name, args, .. } => {
-                name != "__mg_take" && !(self.program_fn)(name) && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v)))
+            Op::CallFn { name, .. } if name == "__mg_take" => false,
+            Op::CallFn { name, args, dst, .. } if (self.program_fn)(name) => {
+                // A program function reaches a cell only through a closure:
+                // one inside an argument, or one a mutable global holds.
+                let ok = crate::lower::mutable_globals_hold_no_closure()
+                    && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.holds_no_closure(v)));
+                if let (true, Some(x)) = (ok, dst) {
+                    self.fresh.insert(*x);
+                    self.clean.insert(*x);
+                }
+                ok
             }
+            Op::CallFn { args, .. } => args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v))),
             Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
             Op::Prim { kind: PrimKind::LoadHandle, args, dst } => {
                 let ok = args.first().is_some_and(|a| self.block_ok(a));
@@ -85,6 +107,10 @@ impl Window<'_> {
                         self.fresh.insert(*x);
                     }
                 }
+                if let (true, Some(x)) = (ok && args.first().and_then(|a| self.root.get(a)).is_some_and(|b| self.clean.contains(b)), dst) {
+                    self.fresh.insert(*x);
+                    self.clean.insert(*x);
+                }
                 ok
             }
             Op::Prim { kind: PrimKind::Load { .. } | PrimKind::Store { .. } | PrimKind::ElemAddr, args, .. } => {
@@ -94,6 +120,9 @@ impl Window<'_> {
             Op::Dup { dst, src } => {
                 if let Some(t) = self.kinds.get(src).copied() {
                     self.kinds.insert(*dst, t);
+                }
+                if self.clean.contains(src) {
+                    self.clean.insert(*dst);
                 }
                 self.plain(src) && self.fresh.insert(*dst)
             }
@@ -109,7 +138,7 @@ fn window<'a>(func: &MirFunction, (d, cell, kind): (ValueId, ValueId, NTy), tys:
         Op::FuncRef { dst, .. } => Some(*dst),
         _ => None,
     }).collect();
-    Window { root: crate::render_native_borrow_read::roots(func), funcrefs, fresh: BTreeSet::from([d]), kinds: BTreeMap::from([(d, kind)]), cell, tys, program_fn }
+    Window { root: crate::render_native_borrow_read::roots(func), funcrefs, fresh: BTreeSet::from([d]), kinds: BTreeMap::from([(d, kind)]), clean: BTreeSet::new(), cell, tys, program_fn }
 }
 
 /// The `__mg_take` result that ends the window of the cell read `d` (op `at`
