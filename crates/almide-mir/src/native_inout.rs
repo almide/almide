@@ -100,10 +100,41 @@ impl Drop for LoweringScope {
     }
 }
 
-/// A buffer type a caller can lend: a list, string, bytes, map or set.
+/// A buffer type a caller can lend: a list, string, map or set. (Bytes keep
+/// the move-mode convention: their in-place appends render through floor
+/// calls that answer no value.)
 fn lendable(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Bytes)
+    matches!(ty, Ty::String)
         || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set, _))
+}
+
+/// Does `body` write `p` — an assignment, an in-place mutator, or a lend to
+/// an in-out position of a candidate? A `mut` param the body never writes
+/// has nothing to lend back and keeps the move-mode convention.
+fn writes(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>) -> bool {
+    struct W<'a>(VarId, &'a BTreeMap<String, usize>, bool);
+    impl IrVisitor for W<'_> {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if matches!(s.kind, IrStmtKind::Assign { var, .. } if var == self.0) {
+                self.2 = true;
+            }
+            walk_stmt(self, s);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if rebinds(e, self.0) {
+                self.2 = true;
+            }
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
+                if self.1.get(name.as_str()).is_some_and(|&k| args.get(k).is_some_and(|a| is_var(a, self.0))) {
+                    self.2 = true;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut w = W(p, cands, false);
+    w.visit_expr(body);
+    w.2
 }
 
 /// The in-place mutator call (`list.push(p, x)`, `string.push`, the clears,
@@ -418,6 +449,28 @@ fn calls_named(e: &IrExpr, name: &str) -> bool {
     n.1
 }
 
+/// The vars `e` passes to a `mut` position of a user fn outside `cands`.
+fn tuple_written_vars(e: &IrExpr, writes: &HashMap<String, Vec<usize>>, cands: &BTreeMap<String, usize>) -> HashSet<VarId> {
+    struct T<'a>(&'a HashMap<String, Vec<usize>>, &'a BTreeMap<String, usize>, HashSet<VarId>);
+    impl IrVisitor for T<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
+                if !self.1.contains_key(name.as_str()) {
+                    for &k in self.0.get(name.as_str()).into_iter().flatten() {
+                        if let Some(v) = args.get(k).and_then(almide_ir::mut_args::place_root) {
+                            self.2.insert(v);
+                        }
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut t = T(writes, cands, HashSet::new());
+    t.visit_expr(e);
+    t.2
+}
+
 /// Choose the program's in-out functions (see the module doc), record them,
 /// and take them out of the move-mode rewrite (their `mutated_params` are
 /// cleared; the param keeps `is_mut`).
@@ -459,11 +512,18 @@ pub(crate) fn select(ir: &mut IrProgram) {
         let mut refused: BTreeSet<String> = BTreeSet::new();
         for f in &ir.functions {
             if let Some(&k) = cands.get(f.name.as_str()) {
-                if !body_uses_ok(&f.body, f.params[k].var, &cands, &writes) {
+                let p = f.params[k].var;
+                if !body_uses_ok(&f.body, p, &cands, &writes) || !self::writes(&f.body, p, &cands) {
                     refused.insert(f.name.to_string());
                 }
             }
-            let ok_vars = lendable_vars(f);
+            // A var the move-mode convention writes back (a `mut` position of
+            // a non-candidate) holds a borrowed payload of the returned tuple
+            // afterwards, not a buffer of its own to lend.
+            let mut ok_vars = lendable_vars(f);
+            for v in tuple_written_vars(&f.body, &writes, &cands) {
+                ok_vars.remove(&v);
+            }
             refused_sites(&f.body, &cands, &ok_vars, &mut refused);
         }
         for t in &ir.top_lets {
