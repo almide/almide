@@ -206,10 +206,9 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
         }
         _ => {
             let mut body = rewrite_body(&body);
-            let moving = source.as_ref().is_some_and(|(src, _)| moves_out_of_dying_source(lines, (s, e), src, &elem, &mut body));
+            let iter = source_iter(lines, (s, e), source.as_ref(), &elem, &mut body);
             let head = match &source {
-                Some((src, _)) if moving => format!("{pad}for ({i}, {elem}) in {src}.iter_mut().enumerate() {{"),
-                Some((src, _)) => format!("{pad}for ({i}, {elem}) in {src}.iter().enumerate() {{"),
+                Some((src, _)) => format!("{pad}for ({i}, {elem}) in {src}.{iter}().enumerate() {{"),
                 None => format!("{pad}for {i} in 0i64..{len} {{"),
             };
             out.push(head);
@@ -222,6 +221,15 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
     }
     out.extend(lines[e + 1..].iter().cloned());
     Some(out)
+}
+
+/// The iterator over the loop's source: by `iter_mut` where the body moves
+/// out of a dying source ([`moves_out_of_dying_source`]), else by `iter`.
+fn source_iter(lines: &[String], at: (usize, usize), source: Option<&(String, String)>, elem: &str, body: &mut [String]) -> &'static str {
+    match source {
+        Some((src, _)) if moves_out_of_dying_source(lines, at, src, elem, body) => "iter_mut",
+        _ => "iter",
+    }
 }
 
 /// A loop over an owned list `src` that is dropped right after it, whose body
