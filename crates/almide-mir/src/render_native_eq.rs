@@ -229,4 +229,49 @@ mod equality_tests {
         }
     }
 
+    /// #4687: a comparison over a struct holding a Value, a Map or a Float has
+    /// the language's equality — derived where Rust's agrees, generated per
+    /// field where a Float rides its bit lane — or none at all.
+    #[test]
+    fn value_map_and_float_fields_get_their_source_equality() {
+        use almide_lang::capability_bounds::Cap;
+        let layouts = crate::lower::RecordLayouts::from([
+            ("Reading".into(), (vec![], vec![(sym("s"), Ty::String), (sym("f"), Ty::Float)])),
+        ]);
+        let value = Ty::Named(sym("Value"), Default::default());
+        let tuple = |ts: Vec<Ty>| Ty::Tuple(ts.into());
+        let reading = Ty::Named(sym("Reading"), Default::default());
+        let with_value = tuple(vec![Ty::String, value.clone()]);
+        let with_map = tuple(vec![Ty::String, Ty::Applied(C::Map, vec![Ty::String, Ty::Int].into())]);
+        let with_float = tuple(vec![Ty::String, Ty::Float]);
+        let floats = tuple(vec![Ty::String, Ty::list(Ty::Float)]);
+        let nested = tuple(vec![reading.clone(), Ty::Int]);
+        let float_map = tuple(vec![Ty::String, Ty::Applied(C::Map, vec![Ty::String, Ty::Float].into())]);
+        let mut roots = vec![value];
+        for t in [&with_value, &with_map, &with_float, &floats, &nested, &float_map, &reading] {
+            collect_tuples(&Ty::list(t.clone()), &mut roots);
+        }
+        let _guard = install(derive_records(&layouts, &Default::default(), &roots));
+        let decl = |t: &Ty| RECS.with(|r| r.borrow()[rec_index(&block_key(t)).expect("registered") as usize].clone());
+        for t in [&with_value, &with_map] {
+            assert!(decl(t).eq_safe, "{t:?}");
+        }
+        use FieldEq::*;
+        for (t, eqs) in [(&with_float, vec![Exact, F64Bits]), (&floats, vec![Exact, VecF64Bits]), (&reading, vec![Exact, F64Bits]), (&nested, vec![Exact, Exact])] {
+            let d = decl(t);
+            assert!(!d.eq_safe, "{t:?}");
+            assert_eq!(d.eq_fields, Some(vec![eqs]), "{t:?}");
+        }
+        for t in [&with_value, &with_map, &with_float, &floats, &nested, &reading] {
+            assert!(source_comparison_agrees(t, Cap::Eq, false), "{t:?}");
+        }
+        assert!(!source_comparison_agrees(&with_float, Cap::Ord, false));
+        let d = decl(&float_map);
+        assert!(!d.eq_safe && d.eq_fields.is_none());
+        assert!(!source_comparison_agrees(&float_map, Cap::Eq, false));
+        let rendered = struct_defs();
+        let i = rec_index(&block_key(&with_float)).unwrap();
+        assert!(rendered.contains(&format!("impl PartialEq for {}", struct_name(i))), "{rendered}");
+        assert!(rendered.contains("f64::from_bits(self.f1 as u64) == f64::from_bits(o.f1 as u64)"), "{rendered}");
+    }
 }
