@@ -677,13 +677,37 @@ pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) ->
 
 /// The expression that moves a payload out of its dying carrier `base` at
 /// `ops[at]`: the noted `take`, or for a String-Ok carrier that moves whole
-/// ([`carrier_moves_whole`]) the binding itself, matched by value.
+/// ([`carrier_moves_whole`]) the binding itself, matched by value. A Result
+/// carrier that moves whole is matched by value too: the side's payload is
+/// the binding's own, and no `Default` is written back into a carrier about
+/// to be dropped (`match &mut` kept the carrier's address taken, so its dead
+/// stores stayed: T0ok's err side, 1.26x against the by-value match).
 pub(crate) fn payload_move(func: &MirFunction, at: usize, base: ValueId, kind: Option<NTy>, take: String) -> String {
-    if kind == Some(NTy::ResStr) && carrier_moves_whole(func, at, base) {
-        format!("match {} {{ Ok(s) | Err(s) => s }}", crate::render_native::var(base))
-    } else {
-        take
+    let b = crate::render_native::var(base);
+    match kind {
+        Some(NTy::ResStr) if carrier_moves_whole(func, at, base) => format!("match {b} {{ Ok(s) | Err(s) => s }}"),
+        Some(NTy::Rec(_)) => match by_value_side(&take, &b) {
+            Some(by_value) if carrier_moves_whole(func, at, base) => by_value,
+            _ => take,
+        },
+        _ => take,
     }
+}
+
+/// `match &mut b { S(v) => std::mem::take(v), O(_) => X }` (a Result side
+/// taken out of carrier `b`, render_native_carrier) as the by-value match
+/// `match b { S(v) => v, O(_) => X }`; any other take is not one.
+fn by_value_side(take: &str, b: &str) -> Option<String> {
+    let rest = take.strip_prefix(&format!("match &mut {b} {{ "))?;
+    let (side, rest) = rest.split_once("(v) => std::mem::take(v), ")?;
+    if !matches!(side, "Ok" | "Err") {
+        return None;
+    }
+    let (other, absent) = rest.strip_suffix(" }")?.split_once("(_) => ")?;
+    if !matches!(other, "Ok" | "Err") || other == side || !matches!(absent, "unreachable!()" | "Default::default()") {
+        return None;
+    }
+    Some(format!("match {b} {{ {side}(v) => v, {other}(_) => {absent} }}"))
 }
 
 /// The carrier `base` is bound once, in the same loop round as the copy at

@@ -190,6 +190,8 @@ fn render_fn(
                 }
                 st.out.push_str(&line);
                 st.out.push('\n');
+                // No later early release names it again.
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(*c));
             }
         }
         prev_start = st.out.len();
