@@ -46,7 +46,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], sigs: &NativeSigs) {
     SLOTS.with(|m| m.borrow_mut().clear());
     for f in functions.iter_mut() {
         let Some((kinds, _)) = sigs.get(&f.name) else { continue };
-        if !f.owned_params.is_empty() || kinds.len() != f.params.len() {
+        if !f.owned_params.is_empty() || !f.inout_params.is_empty() || kinds.len() != f.params.len() {
             continue;
         }
         for (k, kind) in kinds.iter().enumerate() {

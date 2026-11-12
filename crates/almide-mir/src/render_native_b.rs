@@ -93,6 +93,15 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
+    // An in-out param's slot is the caller's buffer (`crate::native_inout`).
+    if crate::native_inout::is_rendering_inout(*local) {
+        let prev = tys.get(local).copied();
+        if prev != Some(crate::render_native::owned_nty(t)) {
+            return Err(wall(format!("native: in-out slot rebound to another type ({prev:?} <- {t:?})")));
+        }
+        line!("*{} = {};", var(*local), end_if_copy_rhs(*src, t));
+        return Ok(());
+    }
     // A borrowed slot re-pointed at a payload of the same record kind.
     if let (Some(NTy::RecRef(a)), NTy::RecRef(b)) = (tys.get(local), t) {
         if *a == b {
@@ -203,6 +212,19 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     }
 }
 
+/// The argument of an in-out param (`crate::native_inout`): the caller's own
+/// buffer, lent `&mut` — re-lent when it is the caller's own in-out param.
+/// Anything but an owned buffer of the param's type is refused.
+fn inout_arg(name: &str, a: &CallArg, want: NTy, got: NTy) -> Result<String, LowerError> {
+    let CallArg::Handle(v) = a else {
+        return Err(wall(format!("native: in-out argument of `{name}` is not a handle")));
+    };
+    if got != crate::render_native::owned_nty(want) || crate::render_native_move::is_stack_lit(*v) {
+        return Err(wall(format!("native: in-out argument of `{name}` is not an owned buffer ({got:?})")));
+    }
+    Ok(if crate::native_inout::is_rendering_inout(*v) { format!("&mut *{}", var(*v)) } else { format!("&mut {}", var(*v)) })
+}
+
 /// A user fn call (by declared sig table): each arg rendered in the callee's
 /// declared param mode, then the result bound from the declared return.
 /// Extracted verbatim from `render_call_fn` (codopsy r2, #852).
@@ -221,7 +243,10 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        let arg = if callee.owned_params.contains(&p.value) {
+        let arg = if callee.inout_params.contains(&p.value) {
+            // The caller lends its own buffer (`crate::native_inout`).
+            inout_arg(name, a, want, got)?
+        } else if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
         } else if matches!(want, NTy::Res | NTy::ResStr)
             && got == want

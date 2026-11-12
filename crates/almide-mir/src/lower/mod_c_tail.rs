@@ -414,6 +414,17 @@ fn lower_function_all_impl(
     }
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
     let params = ctx.bind_params(&func.params)?;
+    // An IN-OUT param (`crate::native_inout`) is the body's own slot: not a
+    // borrow, never released here — every exit hands it back (below).
+    let inout_positions = crate::native_inout::positions(func.name.as_str()).unwrap_or_default();
+    let inout_params: std::collections::BTreeSet<ValueId> =
+        inout_positions.iter().filter_map(|&k| params.get(k)).map(|p| p.value).collect();
+    for v in &inout_params {
+        ctx.param_values.remove(v);
+    }
+    let _inout = crate::native_inout::LoweringScope::enter(
+        inout_positions.iter().filter_map(|&k| func.params.get(k)).map(|p| p.var).collect(),
+    );
     // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
     // dispatch (the existing self-rec guard would otherwise wall it). The rewritten body lowers
     // through the ordinary statements+tail path; if it is out of the TCO subset, `None` keeps the
@@ -508,15 +519,17 @@ fn lower_function_all_impl(
     crate::native_foreign::extend_bound(&mut declared_caps, func.is_effect);
     let lifted = std::mem::take(&mut ctx.lifted);
     let heap_slot_masks = ctx.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect();
+    let ops = crate::native_inout::hand_back(ctx.ops, &inout_params);
     let main = MirFunction {
         name: func.name.as_str().to_string(),
         params,
-        ops: ctx.ops,
+        ops,
         ret,
         declared_caps,
         heap_slot_masks,
         owned_params: Default::default(),
         call_moves: Default::default(),
+        inout_params,
         aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks),
     };
     let mut all = vec![main];

@@ -466,6 +466,13 @@ impl LowerCtx {
                 return self.lower_mutable_global_assign(var, index, &gty, value);
             }
         }
+        // An IN-OUT param (`crate::native_inout`) is one stable slot on every
+        // path: each rebind releases the old object and `SetLocal`s the slot in
+        // place — the loop-carried slot discipline, in or out of a loop — so
+        // the exit hands back whatever the path left there.
+        if crate::native_inout::is_lowering_inout_var(var) && is_heap_ty(&value.ty) {
+            return self.lower_scalar_loop_heap_reassign(var, value);
+        }
         // Inside a scalar-marker loop, a reassignment mutates the var's STABLE
         // local (the loop-carried state) — `SetLocal`, not a fresh rebind. A heap
         // reassignment cannot run this way (the accumulator would need real heap

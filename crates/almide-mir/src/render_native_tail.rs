@@ -196,6 +196,10 @@ fn render_native_fn_sig(
         .iter()
         .map(|p| {
             let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
+            // An IN-OUT param (`crate::native_inout`) is the caller's buffer, lent.
+            if func.inout_params.contains(&p.value) {
+                return format!("{}: &mut {}", var(p.value), crate::render_native_rec::owned_ty(t));
+            }
             // A MOVE param (#4006 class P) takes the caller's value itself.
             let owned = func.owned_params.contains(&p.value);
             let spelled = match t {

@@ -464,6 +464,7 @@ pub fn try_render_rust_checked_tests_certified(
 
 fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>, test_harness: bool) -> Result<NativeRenderParts, LowerError> {
     let _foreign_originals = crate::native_foreign::OriginalScope::enter();
+    let _inout = crate::native_inout::ProgramScope::enter();
     let _error_displays = crate::native_display::ErrorDisplayScope::enter();
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();

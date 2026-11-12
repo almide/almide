@@ -232,6 +232,13 @@ fn refresh_declared_reprs(ir: &mut IrProgram, checker: &Checker) {
 /// Call sites and signatures change together before MIR ownership lowering.
 pub(super) fn prepare_mutable_values(ir: &mut IrProgram) {
     crate::native_foreign::prepare_mutable(ir);
+    // The in-out fns (`crate::native_inout`) keep their signatures; the
+    // move-mode rewrite takes the rest.
+    // The `mut`-place operand hoist reads `mutated_params`, which the
+    // selection clears: run it first (it is idempotent; the rewrite runs it
+    // again).
+    almide_ir::call_writes::hoist_operands_before_mut_places(ir);
+    crate::native_inout::select(ir);
     almide_ir::mut_param::lower_mut_params_move_mode(ir);
     crate::native_propagation::expand(ir);
     own_written_params(ir);
@@ -254,8 +261,14 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         }
 
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
                 self.3.insert(*name);
+                // A var lent to an in-out param is written through it.
+                for (k, a) in args.iter().enumerate() {
+                    if crate::native_inout::is_inout_position(name.as_str(), k) {
+                        if let Some(v) = almide_ir::mut_args::place_root(a) { self.0.insert(v); }
+                    }
+                }
             }
             if let IrExprKind::Lambda { params, body, .. } = &e.kind {
                 let bound = params.iter().map(|(v, _)| *v).collect();
@@ -273,7 +286,10 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         let mut writes = Writes(HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new());
         writes.visit_expr(&f.body);
         let mut bindings = Vec::new();
-        for p in &mut f.params {
+        let inout = crate::native_inout::positions(f.name.as_str()).unwrap_or_default();
+        for (k, p) in f.params.iter_mut().enumerate() {
+            // An in-out param is the body's own slot (`crate::native_inout`).
+            if inout.contains(&k) { continue; }
             // The self-tail-call rewrite already creates owned carry slots.
             // Renaming its reassigned parameter first hides that recurrence.
             let assigned_local = writes.1.contains(&p.var) && !writes.3.contains(&f.name);

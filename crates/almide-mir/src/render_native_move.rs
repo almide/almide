@@ -510,10 +510,12 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
         }
         let allowed: Vec<ValueId> = match op {
             Op::ListLit { dst, .. } | Op::Alloc { dst, init: crate::Init::IntList(_), .. } => vec![*dst],
+            // (A buffer lent to an in-out param is written, not borrowed.)
             Op::CallFn { name, args, .. } if user_fns.contains(name.as_str()) => args
                 .iter()
-                .filter_map(|a| match a {
-                    crate::CallArg::Handle(v) => Some(*v),
+                .enumerate()
+                .filter_map(|(k, a)| match a {
+                    crate::CallArg::Handle(v) if !crate::native_inout::is_inout_position(name, k) => Some(*v),
                     _ => None,
                 })
                 .collect(),
@@ -746,6 +748,9 @@ pub(crate) fn set_rebound(func: &MirFunction) {
         Op::SetLocal { local, .. } => Some(*local),
         _ => None,
     }));
+    // A buffer lent to an in-out param (`crate::native_inout`) is rewritten
+    // in place by the call: it holds other contents after it.
+    set.extend(crate::native_inout::lent_values(func));
     REBOUND.with(|m| *m.borrow_mut() = set);
     CARRIER_PARAMS.with(|m| m.borrow_mut().clear());
 }
