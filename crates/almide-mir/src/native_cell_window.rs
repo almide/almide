@@ -30,6 +30,16 @@ fn is_cell(t: NTy) -> bool {
     matches!(t, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::cell_inner(i).is_some())
 }
 
+/// A plain stand-in kind for a field of struct `i` when none of its fields is
+/// a cell or a closure (`None` for a non-struct, or a struct holding one).
+fn plain_struct(i: u16) -> Option<NTy> {
+    let n = crate::render_native_rec::field_count(i);
+    let fields: Option<Vec<NTy>> = (0..n).map(|k| crate::render_native_rec::rec_field(i, k)).collect();
+    fields
+        .filter(|f| !f.is_empty() && f.iter().all(|t| !is_cell(*t) && !crate::render_native_rec::is_closure(*t)))
+        .map(|_| NTy::I64)
+}
+
 /// The ops between a cell read and the end of its window, judged one by one
 /// in order (see the module docs).
 struct Window<'a> {
@@ -64,9 +74,10 @@ impl Window<'_> {
             Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
             Op::Prim { kind: PrimKind::LoadHandle, args, dst } => {
                 let ok = args.first().is_some_and(|a| self.block_ok(a));
-                // An element of a list of a plain kind read out of a known block.
+                // An element of a list of a plain kind read out of a known
+                // block, or a field of a struct whose fields are all plain.
                 let elem = args.first().and_then(|a| self.root.get(a)).and_then(|b| self.kinds.get(b)).and_then(|t| match t {
-                    NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i),
+                    NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i).or_else(|| plain_struct(*i)),
                     _ => None,
                 });
                 if let (true, Some(e), Some(x)) = (ok, elem, dst) {
