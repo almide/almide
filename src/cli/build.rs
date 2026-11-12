@@ -293,6 +293,19 @@ pub fn cmd_build(args: BuildArgs) {
         std::process::exit(1)
     });
 
+    // #4683: the cache key's `rustc -vV` (~10 ms) runs beside the frontend.
+    // Joined before anything below writes the environment: the `env::arm`
+    // sites rely on no other thread being alive.
+    let toolchain_probe = std::thread::Builder::new()
+        .name("almide-rustc-probe".into())
+        .spawn(super::crate_inputs::prefetch_toolchain_identity)
+        .ok();
+    let join_probe = || {
+        if let Some(h) = toolchain_probe {
+            let _ = h.join();
+        }
+    };
+
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
     let (pending, metered, outside_guarantee) = crate::try_compile_pending(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
@@ -300,6 +313,7 @@ pub fn cmd_build(args: BuildArgs) {
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
+        join_probe();
         let rs_code = pending.generate();
         let rs_code = match heap_cap {
             Some(n) => inject_heap_cap(&rs_code, n),
@@ -320,6 +334,8 @@ pub fn cmd_build(args: BuildArgs) {
         pending.generate()
     };
     super::phase_lap("v1-render");
+    join_probe();
+    super::phase_lap("rustc-probe-wait");
 
     // --heap-cap (#1530): wrap the binary's allocator AFTER the v1/v0 source
     // decision so both native paths carry the same ceiling.

@@ -82,7 +82,7 @@ fn assert_named(laps: &[(String, f64, f64)], want: &[&str]) {
 fn a_native_build_names_every_phase_through_the_install() {
     let dir = scratch("native");
     let laps = laps(&build(&program(&dir), &[], &dir.join("proj"), &dir.join("out")));
-    assert_named(&laps, &["cli", "parse+resolve", "check+lower", "optimize+link", "v1-render", "cache-key", "rustc", "digest", "install"]);
+    assert_named(&laps, &["cli", "parse+resolve", "check+lower", "optimize+link", "v1-render", "rustc-probe-wait", "cache-key", "rustc", "digest", "install"]);
     assert_eq!(unaccounted(&laps), None);
 }
 
