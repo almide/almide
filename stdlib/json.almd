@@ -76,7 +76,7 @@ fn __jr_hex(c: Int) -> Bool = (c >= 48 and c <= 57) or (c >= 65 and c <= 70) or 
 // The string opened at p0 as `end * 4 + (1 if it holds an escape) + (2 if
 // the parser must be asked)`, end past the closing quote, or -1. `esc`
 // admits escapes (a value); a key admits none.
-fn __jr_str(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
+fn __jr_quoted(b: Bytes, p0: Int, e: Int, esc: Bool) -> Int = {
   var p = p0 + 1
   var r = -2
   var flags = 0
@@ -360,7 +360,7 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int
         else pending
         let at = if pn >= 0 then slot[pn] else -1
         if c == 34 then {
-          let r = __jr_str(b, p, e, true)
+          let r = __jr_quoted(b, p, e, true)
           if r < 0 or (r % 4 >= 2 and not __jr_asked(b, p, r / 4, 0)) then {
             state = -1
           } else {
@@ -442,7 +442,7 @@ fn __jr_scan(b: Bytes, e: Int, keys: List[Bytes], par: List[Int], slot: List[Int
       if p >= e or b[p] != 34 then {
         state = -1
       } else {
-        let r = __jr_str(b, p, e, false)
+        let r = __jr_quoted(b, p, e, false)
         let ke = r / 4
         let ks = p + 1
         let kl = ke - p - 2
