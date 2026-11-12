@@ -1,8 +1,11 @@
-//! Literal immutable globals are hints for guarded integer division, not
-//! substitutions. Exported functions may run before main initializes the
-//! globals; the emitter must compare the actual value before taking a
-//! constant-divisor fast path. Zero and every other value retain the old
-//! runtime guards and operation, including before initialization.
+//! Literal immutable Int globals as known divisors. Such a global holds
+//! exactly two values over a module's life: zero until main's prelude
+//! stores it (an exported function may run before that), and its literal
+//! ever after. So a division by one tests the global for zero — the
+//! pre-initialization abort, unchanged — and otherwise divides by the
+//! literal itself, with the literal's strength reductions and without the
+//! overflow guard a nonzero non-minus-one divisor makes dead. The literals
+//! 0, -1 and MIN stay on the guarded runtime path.
 use almide_ir::top_let_storage::{GVar, build_global_tables_spaced};
 use almide_ir::{IrExprKind, IrProgram};
 use almide_types::types::Ty;
@@ -20,8 +23,7 @@ pub(crate) fn literal_divisors(ir: &IrProgram) -> HashMap<GVar, i64> {
             if !tl.mutable
                 && matches!(tl.ty, Ty::Int)
                 && let IrExprKind::LitInt { value } = tl.value.kind
-                && value >= 2
-                && (value as u64).is_power_of_two()
+                && !matches!(value, 0 | -1 | i64::MIN)
             {
                 values.insert((space, tl.var), value);
             }

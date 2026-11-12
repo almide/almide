@@ -137,6 +137,7 @@ mod net_call;
 mod calls_modules;
 pub mod cells;
 mod global_reach;
+mod stride;
 mod unroll;
 mod collect;
 mod collections;
@@ -228,6 +229,7 @@ mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 pub use exit_plan::test_omit_first_release;
+pub use inline_calls::writer_sites;
 pub use fs_meta::{ABORT_SITE_OPS, OP_ABORT_SITE_RUN, OP_ABORT_SITE_SELECTED};
 mod fuel;
 mod inline_calls;
@@ -610,6 +612,12 @@ fn slot_memarg(payload_relative: u32) -> MemArg {
     }
 }
 
+/// The strided range loops the emitter has produced so far in this process
+/// (src/stride.rs) — what tests/strided_range.rs reads.
+pub fn strided_loops_emitted() -> u64 {
+    stride::fired()
+}
+
 // ── program-function table ──────────────────────────────────────────────
 
 struct FnInfo {
@@ -639,6 +647,8 @@ struct FnInfo {
     /// there unconditionally, tail position and `ALMIDE_REGION_OFF`
     /// notwithstanding, or reports a compiler defect.
     scoped_entry: bool,
+    /// Control never comes back from a call to it (diverge.rs `diverging_fns`).
+    diverges: bool,
 }
 
 struct FnTable {

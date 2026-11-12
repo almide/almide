@@ -244,9 +244,11 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # on a CI runner (develop e4fcced11), under the floor that relation enforces.
     "wordfreq": "8000000",
     "wordfreq-group": "8000000",
-    # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
-    # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
-    "jsonround": "100000",
+    # 300k records, not 100k: with the document read and written without the
+    # tree (the Value fusion) 100k read 0.0427s native on the ubuntu runner
+    # (PR #4671, 2026-11-11), under the 0.08s spawn-noise floor. 300k reads
+    # ~0.12s native / ~0.25s wasm on a GCE c4-standard-8.
+    "jsonround": "300000",
     # 31, not 30: 30:300 read ~95 ms native on a GCE n2-standard-8 but 78.5 ms
     # on the ubuntu runner (2026-11-04, PR #4468), under the 0.08s floor; 31
     # is ~1.47x the native work (~1.6x on the reference and ablated legs).

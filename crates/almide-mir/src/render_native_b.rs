@@ -93,6 +93,13 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
+    // A borrowed slot re-pointed at a payload of the same record kind.
+    if let (Some(NTy::RecRef(a)), NTy::RecRef(b)) = (tys.get(local), t) {
+        if *a == b {
+            line!("{} = {};", var(*local), var(*src));
+            return Ok(());
+        }
+    }
     let rhs = end_if_copy_rhs(*src, t);
     let store_t = crate::render_native::owned_nty(t);
     if let Some(prev) = tys.get(local) {
