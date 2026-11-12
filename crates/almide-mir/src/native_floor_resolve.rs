@@ -7,13 +7,33 @@ fn runtime_index() -> &'static RuntimeIndex {
 /// The runtime body of `symbol` and every item it reaches, or `None` when it
 /// reaches something the native header cannot carry.
 fn closure(symbol: &str, rt: &'static RuntimeIndex) -> Result<Vec<&'static str>, String> {
-    closure_using(symbol, rt, references)
+    closure_using(symbol, rt, item_references)
+}
+
+/// [`references`] of one runtime item's text, once per process (#4682). A
+/// closure walk re-reads every item it reaches, and the walks of different
+/// symbols reach the same shared helpers, so the same body used to be lexed
+/// again for each walk. The key is the text's address and length: an item
+/// text is `&'static` (it lives in the embedded runtime), so the address
+/// always names the same bytes. `references` itself reads only the global
+/// runtime index, so the answer is a function of the text alone.
+fn item_references(text: &'static str) -> Result<Vec<String>, String> {
+    type Memo = std::sync::Mutex<std::collections::HashMap<(usize, usize), Result<Vec<String>, String>>>;
+    static MEMO: OnceLock<Memo> = OnceLock::new();
+    let key = (text.as_ptr() as usize, text.len());
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some(hit) = memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&key) {
+        return hit.clone();
+    }
+    let answer = references(text);
+    memo.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(key, answer.clone());
+    answer
 }
 
 fn closure_using(
     symbol: &str,
     rt: &'static RuntimeIndex,
-    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+    refs: impl Fn(&'static str) -> Result<Vec<String>, String>,
 ) -> Result<Vec<&'static str>, String> {
     let out = closure_contents_using(symbol, rt, refs)?;
     fs_host_gate(symbol, &out)?;
@@ -25,7 +45,7 @@ fn closure_using(
 fn closure_contents_using(
     symbol: &str,
     rt: &'static RuntimeIndex,
-    refs: impl Fn(&str) -> Result<Vec<String>, String>,
+    refs: impl Fn(&'static str) -> Result<Vec<String>, String>,
 ) -> Result<Vec<&'static str>, String> {
     let mut taken: BTreeSet<&'static str> = BTreeSet::new();
     let mut texts: BTreeSet<&'static str> = BTreeSet::new();
