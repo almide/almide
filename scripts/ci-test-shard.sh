@@ -364,7 +364,18 @@ for bid, v in sorted(d["rust-suites"].items()):
       ENUM=file ROWS_FILE="$out/all-rows.tsv" SHARD=$((k - 1)) TOTAL="$total" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS partition > "$d/rows.tsv"
       cp "$d/rows.tsv" "$out/rows/shard-$k.tsv"
       echo "== pack shard $k/$total: $(grep -c . "$d/rows.tsv") target(s) =="
-      cargo nextest archive --workspace --cargo-profile ci-test -E "$(rows_expr "$d/rows.tsv")" --archive-file "$d/almide-tests.tar.zst"
+      # The root lib's checked-native tests run the independent verifier
+      # binary (target/<profile>/almide-verify) and fail under
+      # ALMIDE_EXPECT_TOOLS when it is absent. The executable lands in a shard
+      # archive only when the verifier's bin target is archived there, which
+      # used to hold by partition luck alone; so whichever shard holds the
+      # root lib also archives that bin target. Only the archive grows;
+      # rows.tsv still decides what runs.
+      expr="$(rows_expr "$d/rows.tsv")"
+      if grep -q "^almide	lib	almide$" "$d/rows.tsv"; then
+        expr="$expr | binary_id(=almide-verify::bin/almide-verify)"
+      fi
+      cargo nextest archive --workspace --cargo-profile ci-test -E "$expr" --archive-file "$d/almide-tests.tar.zst"
     done
     for leg in $SOLO_LEGS; do
       d="$out/solo-$leg"; mkdir -p "$d"
