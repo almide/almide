@@ -181,3 +181,43 @@ fn a_branch_operand_beside_the_place_keeps_the_move_mode_convention() {
     assert!(!header_of(&out, "put").contains("&mut"), "{out}");
     assert_eq!(run_native(SNAPSHOT), "7 xbca x\n");
 }
+
+const LITERAL: &str = r#"
+type W = { id: Int, name: String }
+
+fn show(ws: List[W]) -> String = ws |> list.map((w) => "${w.id}${w.name}") |> list.join(",")
+
+fn shout(mut s: String) -> Unit = {
+  s = string.to_upper(string.trim(s)) + "!"
+}
+
+fn tag(mut s: String, n: Int) -> Unit = {
+  s = s + int.to_string(n)
+}
+
+effect fn main() -> Unit = {
+  // The sort links a bundled module, whose own preparation ran the in-out
+  // selection again and left the registry empty for this render.
+  let ws = [W { id: 2, name: "b" }, W { id: 1, name: "a" }]
+  println(show(list.sort_by(ws, (w) => w.id)))
+  var s = "  hi  "
+  shout(s)
+  println("string [${s}]")
+  var t = "x"
+  for i in 0..<3 {
+    tag(t, i)
+  }
+  println("t=${t} len=${string.len(t)}")
+}
+"#;
+
+#[test]
+fn a_var_bound_to_a_string_literal_is_lent_and_read_back_after_the_call() {
+    // The render reads the lowered fns' own in-out params: a lent literal is
+    // rebound by the call, never printed as the literal it started at.
+    let out = render(LITERAL).expect("renders");
+    for name in ["shout", "tag"] {
+        assert!(header_of(&out, name).contains("&mut AlmideString"), "{name} borrows the caller's string:\n{out}");
+    }
+    assert_eq!(run_native(LITERAL), "1a,2b\nstring [HI!]\nt=x012 len=4\n");
+}
