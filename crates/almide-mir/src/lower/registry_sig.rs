@@ -14,9 +14,9 @@
 //! the call's repr classes is rewritten to the module's `_x` refusal twin
 //! (unlinked by construction → an honest render wall, the C-147 spelling).
 //!
-//! The signature comes from the registry source itself — the same
-//! `source_to_ir` the linker runs on the same text — so the check cannot
-//! drift from what is linked. A name the registry does not serve is left
+//! The signature comes from the registry source itself — its registered
+//! declarations, gated equal to what `source_to_ir` (the linker's route on
+//! the same text) lowers — so the check cannot drift from what is linked. A name the registry does not serve is left
 //! alone: the render's unlinked-call wall already refuses it. The gate that
 //! drives every router over a type lattice is `tests/router_signature_gate.rs`.
 
@@ -96,6 +96,38 @@ fn registry_entry(call_name: &str) -> Option<(usize, &'static str)> {
     })
 }
 
+/// The source's signature table read from its declarations alone (#4682):
+/// parse and register, as the checker does before it infers any body, and
+/// take each fn's registered `FnSig`. `lower_fn` types an IR function's
+/// return from that same registered sig and its parameters from the same
+/// declared annotations, so this agrees with [`lower_source_sigs`] without
+/// inferring and lowering the whole source (value_core is 66 KB, about 26 ms
+/// of every build that reaches it). The agreement is gated entry by entry
+/// over the whole registry (`declared_sigs_gate` below), so the "cannot drift
+/// from what is linked" promise in the module doc still holds.
+fn declared_source_sigs(idx: usize) -> Option<SourceSigs> {
+    let (source, _) = crate::mir_ops::self_host_runtime()[idx];
+    let prog = almide_lang::parse_cached(source)?;
+    let canon = almide_frontend::canonicalize::canonicalize_program(prog, std::iter::empty());
+    let sigs = prog
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            almide_lang::ast::Decl::Fn { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .filter_map(|name| {
+            let sig = canon.env.functions.get(&almide_lang::intern::sym(name))?;
+            let params = sig.params.iter().map(|(_, t)| t.clone()).collect();
+            Some((name.to_string(), RegistrySig { params, ret: sig.ret.clone() }))
+        })
+        .collect();
+    Some(Arc::new(sigs))
+}
+
+/// The table as the linker sees it: the whole source inferred and lowered.
+/// The reference [`declared_source_sigs`] is gated against.
+#[cfg(test)]
 fn lower_source_sigs(idx: usize) -> Option<SourceSigs> {
     let (source, _) = crate::mir_ops::self_host_runtime()[idx];
     // Lowering this source installs its own ABI facts; the caller's stay (#3058).
@@ -113,12 +145,12 @@ fn lower_source_sigs(idx: usize) -> Option<SourceSigs> {
 }
 
 /// The declared signature of the impl registered under `call_name`, or `None`
-/// when the registry does not serve that name (or its source does not lower).
+/// when the registry does not serve that name (or its source does not parse).
 pub fn registry_signature(call_name: &str) -> Option<RegistrySig> {
     let (idx, impl_fn) = registry_entry(call_name)?;
     let sigs = {
         let mut cache = source_cache().lock().unwrap_or_else(|e| e.into_inner());
-        cache.entry(idx).or_insert_with(|| lower_source_sigs(idx)).clone()
+        cache.entry(idx).or_insert_with(|| declared_source_sigs(idx)).clone()
     }?;
     sigs.get(impl_fn).cloned()
 }
@@ -246,5 +278,51 @@ mod declared_route_tests {
             assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
         }
         assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+    }
+}
+
+#[cfg(test)]
+mod declared_sigs_gate {
+    use super::*;
+
+    /// One entry's disagreement, or `None` when both routes give the same sig.
+    fn disagreement(what: &str, declared: Option<&RegistrySig>, lowered: Option<&RegistrySig>) -> Option<String> {
+        match (declared, lowered) {
+            (Some(d), Some(l)) if d.params == l.params && d.ret == l.ret => None,
+            (None, None) => None,
+            _ => Some(format!("{what}: declared {declared:?}, lowered {lowered:?}")),
+        }
+    }
+
+    /// #4682: the declaration-only table must equal the lowered one for every
+    /// registered entry. A source that does not lower at all is a mismatch
+    /// too: the lowered route served nothing for it.
+    #[test]
+    fn declared_signatures_equal_lowered_ones_for_every_registry_entry() {
+        let mut compared = 0usize;
+        let mut bad = Vec::new();
+        for (idx, (_, entries)) in crate::mir_ops::self_host_runtime().iter().enumerate() {
+            let declared = declared_source_sigs(idx);
+            let lowered = lower_source_sigs(idx);
+            for (impl_fn, call) in entries.iter() {
+                compared += 1;
+                let d = declared.as_ref().and_then(|s| s.get(*impl_fn));
+                let l = lowered.as_ref().and_then(|s| s.get(*impl_fn));
+                bad.extend(disagreement(&format!("{call} ({impl_fn})"), d, l));
+            }
+        }
+        assert!(compared >= 200, "the sweep compared only {compared} entries; the registry enumeration broke");
+        assert!(bad.is_empty(), "{} of {compared} entries disagree:\n{}", bad.len(), bad.join("\n"));
+    }
+
+    /// Negative control: the comparison is not vacuous.
+    #[test]
+    fn a_different_return_or_a_missing_side_is_a_disagreement() {
+        let a = RegistrySig { params: vec![Ty::Int], ret: Ty::Int };
+        let b = RegistrySig { params: vec![Ty::Int], ret: Ty::String };
+        assert!(disagreement("x", Some(&a), Some(&a)).is_none());
+        assert!(disagreement("x", Some(&a), Some(&b)).is_some());
+        assert!(disagreement("x", Some(&a), None).is_some());
+        assert!(disagreement("x", None, Some(&a)).is_some());
     }
 }
