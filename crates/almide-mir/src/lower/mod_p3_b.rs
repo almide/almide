@@ -332,6 +332,10 @@ impl LowerCtx {
                         return self.lower_mutable_global_field_assign(target, global, field, value);
                     }
                 }
+                // A native shared-cell record: take, write in place, store back.
+                if self.try_lower_cell_field_assign(target, field, value)? {
+                    return Ok(());
+                }
                 // A HEAP-typed field write takes the functional REBIND `r.f = v` ≡
                 // `r = { ...r, f: v }` — the same value-semantics treatment `m[k] = v`
                 // gets: the spread construct reads the old record (a borrow), and the
