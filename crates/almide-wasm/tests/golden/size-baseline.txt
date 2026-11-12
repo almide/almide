@@ -352,7 +352,7 @@
 7624	spec/wasm_cross/guard_jump_in_value_fn.almd
 3849	spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
 13732	spec/wasm_cross/guard_let_forms.almd
-10016	spec/wasm_cross/guard_let_forms_typed_err.almd
+10063	spec/wasm_cross/guard_let_forms_typed_err.almd
 3566	spec/wasm_cross/guard_let_in_bound_block.almd
 3534	spec/wasm_cross/guard_let_statement.almd
 3027	spec/wasm_cross/guard_only_use_liveness.almd
