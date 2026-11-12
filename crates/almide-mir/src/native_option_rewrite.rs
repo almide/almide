@@ -141,6 +141,16 @@ impl OptionTracker {
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
             }
+            // A module slot holding a scalar Option (native_slot_rewrite): its
+            // read is the Option value itself, owning no object.
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args }
+                if args.len() == 1
+                    && self.const_vals.get(&args[0]).is_some_and(|a| crate::native_slot_rewrite::scalar_option_slot_at(*a)) =>
+            {
+                self.opt_vals.insert(*d);
+                self.minted.insert(*d);
+                out.push(op);
+            }
             Op::Drop { v } | Op::DropListStr { v } if self.minted.contains(v) => {}
             Op::Consume { v } if self.minted.contains(v) => {}
             Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } if args.len() == 1 && self.opt_vals.contains(&args[0]) => {

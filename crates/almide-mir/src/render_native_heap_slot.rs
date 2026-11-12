@@ -138,13 +138,18 @@ pub(super) fn render_heap_slot_op(
         }
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
             let (slot, t) = slot_of(st, &args[0])?;
-            let Some(h) = st.addrs.get(&args[1]).copied().filter(|h| h.off == 0 && h.idx.is_none()) else {
+            // A scalar Option slot stores the Option value itself (the option
+            // rewrite replaced its handle with it): a copy, no block.
+            let value = (t == NTy::Opt && tys.get(&args[1]) == Some(&NTy::Opt)).then_some(args[1]);
+            let Some(base) = value.or_else(|| st.addrs.get(&args[1]).copied().filter(|h| h.off == 0 && h.idx.is_none()).map(|h| h.base)) else {
                 return Some(Err(wall("native: a heap slot stored with something other than a block's handle")));
             };
-            let got = tys.get(&h.base).copied();
-            let rhs = if got == Some(t) {
-                crate::render_native_move::take_expr(&var(h.base))
-            } else if got.is_some() && st.empty_lists.contains(&h.base) {
+            let got = tys.get(&base).copied();
+            let rhs = if value.is_some() {
+                var(base).to_string()
+            } else if got == Some(t) {
+                crate::render_native_move::take_expr(&var(base))
+            } else if got.is_some() && st.empty_lists.contains(&base) {
                 // An empty list literal is every list type's empty list.
                 format!("<{}>::default()", crate::render_native_rec::owned_ty(t))
             } else {
