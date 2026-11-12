@@ -156,6 +156,8 @@ fn a_lent_buffer_rebound_in_one_arm_and_lent_on_reaches_the_caller() {
     assert!(header_of(&out, "step").contains("&mut Vec<i64>"), "{out}");
     assert!(out.contains("almd_note(&mut *"), "the lent buffer is lent on:\n{out}");
     assert!(out.contains("*v0 = "), "the rebind writes the caller's buffer:\n{out}");
+    // The fallible join is declared unset: no `Ok(0)` built and dropped per call.
+    assert!(!body_of(&out, "step").contains("= Ok(0);"), "{out}");
     assert_eq!(run_native(RESET), "156 4 6\n");
 }
 
