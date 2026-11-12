@@ -49,8 +49,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], sigs: &NativeSigs) {
         if !f.owned_params.is_empty() || kinds.len() != f.params.len() {
             continue;
         }
-        for k in 0..f.params.len() {
-            if !matches!(kinds[k], NativeSigKind::Rec(_)) {
+        for (k, kind) in kinds.iter().enumerate() {
+            if !matches!(kind, NativeSigKind::Rec(_)) {
                 continue;
             }
             let Some((g, s, payloads)) = borrow_slot(f, k) else { continue };
