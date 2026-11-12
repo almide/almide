@@ -207,6 +207,7 @@ fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps:
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
+            super::phase_lap("install");
             err(&format!("Built {}{}", output, note));
         }
         Err(e) => {
@@ -224,6 +225,7 @@ pub fn cmd_build(args: BuildArgs) {
         no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host, debug,
     } = args;
     reject_removed_target(target);
+    super::phase_lap("cli");
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
     let heap_cap = heap_cap.filter(|n| *n > 0);
@@ -294,6 +296,7 @@ pub fn cmd_build(args: BuildArgs) {
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
     let (pending, metered, outside_guarantee) = crate::try_compile_pending(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
+    super::phase_lap("frontend-tail");
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
@@ -316,6 +319,7 @@ pub fn cmd_build(args: BuildArgs) {
     } else {
         pending.generate()
     };
+    super::phase_lap("v1-render");
 
     // --heap-cap (#1530): wrap the binary's allocator AFTER the v1/v0 source
     // decision so both native paths carry the same ceiling.
@@ -345,6 +349,7 @@ pub fn cmd_build(args: BuildArgs) {
     // containing almide.toml (where native/ lives).
     let use_release = release || fast;
     let (native_deps, source_root) = super::load_native_build_config(file);
+    super::phase_lap("source-prep");
 
     // cdylib target: build shared library (.dylib/.so)
     if cdylib {

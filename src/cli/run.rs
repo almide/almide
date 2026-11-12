@@ -77,28 +77,48 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
 /// phases as separate commands and summing them: the parts came to 0.86s against a 3.98s
 /// whole, because a separately-invoked phase can hit a cache the real pipeline misses. This
 /// measures the pipeline itself, which is the only thing that can be wrong about it.
+///
+/// Every timer reads ONE process-wide clock (#4683): the first timer started
+/// sets its origin, and each lap is the time since the previous lap anywhere
+/// in the process. So nested timers and [`phase_lap`] calls deep in the build
+/// partition one timeline, and the laps sum to the cumulative figure. Before
+/// that, each timer kept its own origin, and everything after the frontend's
+/// last lap (the v1 render, the crate write, rustc, the digest) was in no lap.
 pub(crate) struct PhaseTimer {
     on: bool,
-    start: std::time::Instant,
-    last: std::cell::Cell<std::time::Instant>,
 }
+
+/// The process's phase clock: (origin, previous lap). Set by the first timer
+/// started while `ALMIDE_TIME_PHASES` is on.
+static PHASE_CLOCK: std::sync::Mutex<Option<(std::time::Instant, std::time::Instant)>> = std::sync::Mutex::new(None);
 
 impl PhaseTimer {
     pub(crate) fn start() -> Self {
-        let now = std::time::Instant::now();
-        Self { on: almide_base::env::flag("ALMIDE_TIME_PHASES"), start: now, last: std::cell::Cell::new(now) }
+        let on = almide_base::env::flag("ALMIDE_TIME_PHASES");
+        if on {
+            let now = std::time::Instant::now();
+            PHASE_CLOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert((now, now));
+        }
+        Self { on }
     }
     pub(crate) fn lap(&self, label: &str) {
         if !self.on { return; }
         let now = std::time::Instant::now();
+        let mut clock = PHASE_CLOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (origin, last) = clock.get_or_insert((now, now));
         eprintln!(
             "[phase] {:<18} {:>7.0}ms   (cumulative {:>7.0}ms)",
             label,
-            now.duration_since(self.last.get()).as_secs_f64() * 1000.0,
-            now.duration_since(self.start).as_secs_f64() * 1000.0,
+            now.duration_since(*last).as_secs_f64() * 1000.0,
+            now.duration_since(*origin).as_secs_f64() * 1000.0,
         );
-        self.last.set(now);
+        *last = now;
     }
+}
+
+/// One lap on the process clock, from a site that holds no timer (#4683).
+pub(crate) fn phase_lap(label: &str) {
+    PhaseTimer::start().lap(label);
 }
 
 /// Build a native binary from GENERATED Rust source through a content-addressed
@@ -187,6 +207,7 @@ fn build_native_cached_in(
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };
     let bin_path = project_dir.join("target").join(profile_dir).join(format!("almide-{}", code_hash));
+    phase_lap("cache-key");
 
     // The binary's NAME is its full content key and it lands via atomic rename
     // (below). A hit is a binary whose bytes still hash to the digest recorded
@@ -220,6 +241,7 @@ fn build_native_cached_in(
         Some(_) => None,
         None => Some(BuildDirLock::acquire(&project_dir)?),
     };
+    phase_lap("lock");
 
     // Re-check the cache under the lock: another process/thread may have built
     // this exact binary while we waited, making a rebuild redundant. A binary
@@ -276,7 +298,9 @@ fn build_native_cached_in(
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
+            phase_lap("stage");
             record_binary_digest(&bin_path)?;
+            phase_lap("digest");
             Ok(bin_path)
         }
         Err(e) => Err(e),

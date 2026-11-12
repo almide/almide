@@ -383,11 +383,12 @@ pub(super) fn cargo_build_generated_with_native(
 
     // The rlib fast path links a HOST-built runtime with a bare host rustc, so a
     // cross build (#2772) always takes the cargo path.
-    if !almide_base::env::flag("ALMIDE_NO_RTLIB")
+    let bare_rustc = !almide_base::env::flag("ALMIDE_NO_RTLIB")
         && super::native_target::cross_target().is_none()
         && !uses_matrix && !needs_runtime_crates(rs_code)
-        && native_deps.is_empty() && source_root.is_none()
-    {
+        && native_deps.is_empty() && source_root.is_none();
+    super::phase_lap("route-scan");
+    if bare_rustc {
         if let Some(built) = try_rlib_fast_build(rs_code, project_dir, release) {
             return built;
         }

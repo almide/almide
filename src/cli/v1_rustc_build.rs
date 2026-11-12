@@ -135,6 +135,7 @@ pub(super) fn try_build(rs_code: &str, project_dir: &Path, release: bool) -> Opt
     let rs_path = src_dir.join("main.rs");
     std::fs::write(&rs_path, &program).ok()?;
     let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
+    super::phase_lap("write-crate");
 
     let mut cmd = std::process::Command::new(crate::find_rustc());
     cmd.arg(&rs_path)
@@ -149,14 +150,18 @@ pub(super) fn try_build(rs_code: &str, project_dir: &Path, release: bool) -> Opt
         cmd.arg("--extern").arg(format!("{RT_CRATE}={}", rlib.display()));
         cmd.arg("-L").arg(rlib.parent()?);
         record.insert("runtime".into(), runtime_argv);
+        super::phase_lap("runtime-rlib");
     }
     record.insert("program".into(), argv(&cmd));
     std::fs::write(project_dir.join(RECORD), serde_json::Value::Object(record).to_string()).ok()?;
     let out = cmd.output().ok()?;
+    super::phase_lap("rustc");
     if !out.status.success() {
         return None;
     }
-    Some(source_still_ours(&rs_path, &program).map(|()| bin_path))
+    let built = source_still_ours(&rs_path, &program).map(|()| bin_path);
+    super::phase_lap("source-recheck");
+    Some(built)
 }
 
 #[cfg(test)]
