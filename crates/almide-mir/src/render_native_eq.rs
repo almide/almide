@@ -270,7 +270,7 @@ mod equality_tests {
         assert!(!d.eq_safe && d.eq_fields.is_none());
         assert!(!source_comparison_agrees(&float_map, Cap::Eq, false));
         let rendered = struct_defs();
-        let i = rec_index(&block_key(&with_float)).unwrap();
+        let i = rec_index(&block_key(&with_float)).expect("registered");
         assert!(rendered.contains(&format!("impl PartialEq for {}", struct_name(i))), "{rendered}");
         assert!(rendered.contains("f64::from_bits(self.f1 as u64) == f64::from_bits(o.f1 as u64)"), "{rendered}");
     }
