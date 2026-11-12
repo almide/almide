@@ -90,6 +90,16 @@
 # check 14.4, wasm 25.7, jsonround 2.20. Their ceilings (17.3, 30.9, 2.64)
 # sit far below develop-before's readings, and this tree reads above the
 # half-anchor floors. The readings above for older trees are in the old unit.
+#
+# jsonround raised to 2.80 for a limited time (2026-11-12, owner-approved).
+# The directed JSON reader (value fusion, wasm-r5) is live for a program that
+# parses JSON, and its body enters bytes' and float's self-hosted sources:
+# jsonround reads 98 sources / 281 KB instead of 90 / 197 KB. On one
+# n2-standard (asia-northeast1-b), min of 9 interleaved `build --target wasm`:
+# develop 3dff2f16a 86 ms, this tree 114 ms (+32%). CI read 2.564 and 2.755
+# against the 2.64 ceiling. A program that loads json without parsing reads as
+# develop does (37 sources, not 78), since the reader waits for json.parse.
+# The anchor returns to 2.20 once the reader stops pulling those sources.
 check 14.4
 wasm 25.7
-jsonround 2.20
+jsonround 2.80
