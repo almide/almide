@@ -93,6 +93,31 @@ fn a_mut_list_param_is_lent_and_pushed_in_place() {
     assert_eq!(run_native(PUSH), "435 11 29\n");
 }
 
+/// The body of the rendered fn named `almd_<name>`, up to the next fn.
+fn body_of(out: &str, name: &str) -> String {
+    let head = format!("fn almd_{name}(");
+    let mut lines = out.lines().skip_while(|l| !l.trim_start().starts_with(&head));
+    let first = lines.next().unwrap_or_else(|| panic!("{name} is rendered:\n{out}"));
+    std::iter::once(first).chain(lines.take_while(|l| !l.starts_with("fn "))).collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn a_dying_result_gives_up_its_err_by_value_and_its_consumer_frees_it_in_each_arm() {
+    let out = render(PUSH).expect("renders");
+    for name in ["add", "add_arg"] {
+        let body = body_of(&out, name);
+        // The err payload leaves the carrier with it: no `Default` written back
+        // through `&mut` into a carrier about to be dropped.
+        assert!(!body.contains("std::mem::take(v)"), "{name} moves the err out by value:\n{body}");
+        assert!(body.contains("{ Err(v) => v, Ok(_) => unreachable!() }"), "{name}:\n{body}");
+    }
+    // main's two consumers each free their Result in both arms of its match,
+    // not at the end of the round past the other call.
+    let main = out.lines().skip_while(|l| !l.starts_with("fn main(")).collect::<Vec<_>>().join("\n");
+    assert_eq!(main.matches("drop(v").count(), 4, "{main}");
+    assert_eq!(run_native(PUSH), "435 11 29\n");
+}
+
 const RESET: &str = r#"
 fn note(mut log: List[Int], v: Int) -> Unit = {
   if v % 5 == 0 then list.push(log, v * 2) else list.push(log, v)
