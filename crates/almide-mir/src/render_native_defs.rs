@@ -45,6 +45,6 @@ pub(crate) fn struct_defs() -> String {
             out.push_str("}\n\n");
         }
         out
-    })
+    }) + &deep_drop_impls()
 }
 
