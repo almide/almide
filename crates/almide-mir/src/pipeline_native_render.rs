@@ -548,6 +548,8 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
+    // A loop slot that only re-points at its own payloads borrows the param.
+    crate::native_borrowed_slots::rewrite(&mut functions, &sigs);
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
     let before_modes = functions.clone();
