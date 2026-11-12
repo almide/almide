@@ -77,55 +77,62 @@ impl Window<'_> {
         self.root.get(a).is_some_and(|b| *b != self.cell && self.plain(b))
     }
 
+    /// A program function reaches a cell only through a closure: one inside
+    /// an argument, or one a mutable global holds. Its result is clean.
+    fn program_call(&mut self, args: &[CallArg], dst: Option<ValueId>) -> bool {
+        let ok = crate::lower::mutable_globals_hold_no_closure()
+            && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.holds_no_closure(v)));
+        if let (true, Some(x)) = (ok, dst) {
+            self.fresh.insert(x);
+            self.clean.insert(x);
+        }
+        ok
+    }
+
+    /// A handle read out of `addr`: fresh when it is an element of a list of
+    /// a plain kind, a field of a struct whose fields are all plain, or
+    /// anything read out of a clean block.
+    fn load_handle(&mut self, addr: Option<&ValueId>, dst: Option<ValueId>) -> bool {
+        let ok = addr.is_some_and(|a| self.block_ok(a));
+        let block = addr.and_then(|a| self.root.get(a)).copied();
+        let elem = block.and_then(|b| self.kinds.get(&b)).and_then(|t| match t {
+            NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i).or_else(|| plain_struct(*i)),
+            _ => None,
+        });
+        let plain_elem = elem.is_some_and(|e| !is_cell(e) && !crate::render_native_rec::is_closure(e));
+        let clean = block.is_some_and(|b| self.clean.contains(&b));
+        if let (true, Some(x)) = (ok && (plain_elem || clean), dst) {
+            self.fresh.insert(x);
+            if clean {
+                self.clean.insert(x);
+            }
+        }
+        ok
+    }
+
+    fn dup(&mut self, dst: ValueId, src: ValueId) -> bool {
+        if let Some(t) = self.kinds.get(&src).copied() {
+            self.kinds.insert(dst, t);
+        }
+        if self.clean.contains(&src) {
+            self.clean.insert(dst);
+        }
+        self.plain(&src) && self.fresh.insert(dst)
+    }
+
     /// `op` cannot look at the cell.
     fn admits(&mut self, op: &Op) -> bool {
         match op {
             Op::CallFn { name, .. } if name == "__mg_take" => false,
-            Op::CallFn { name, args, dst, .. } if (self.program_fn)(name) => {
-                // A program function reaches a cell only through a closure:
-                // one inside an argument, or one a mutable global holds.
-                let ok = crate::lower::mutable_globals_hold_no_closure()
-                    && args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.holds_no_closure(v)));
-                if let (true, Some(x)) = (ok, dst) {
-                    self.fresh.insert(*x);
-                    self.clean.insert(*x);
-                }
-                ok
-            }
+            Op::CallFn { name, args, dst, .. } if (self.program_fn)(name) => self.program_call(args, *dst),
             Op::CallFn { args, .. } => args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v))),
             Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
-            Op::Prim { kind: PrimKind::LoadHandle, args, dst } => {
-                let ok = args.first().is_some_and(|a| self.block_ok(a));
-                // An element of a list of a plain kind read out of a known
-                // block, or a field of a struct whose fields are all plain.
-                let elem = args.first().and_then(|a| self.root.get(a)).and_then(|b| self.kinds.get(b)).and_then(|t| match t {
-                    NTy::Rec(i) | NTy::RecRef(i) => crate::render_native_rec::list_elem(*i).or_else(|| plain_struct(*i)),
-                    _ => None,
-                });
-                if let (true, Some(e), Some(x)) = (ok, elem, dst) {
-                    if !is_cell(e) && !crate::render_native_rec::is_closure(e) {
-                        self.fresh.insert(*x);
-                    }
-                }
-                if let (true, Some(x)) = (ok && args.first().and_then(|a| self.root.get(a)).is_some_and(|b| self.clean.contains(b)), dst) {
-                    self.fresh.insert(*x);
-                    self.clean.insert(*x);
-                }
-                ok
-            }
+            Op::Prim { kind: PrimKind::LoadHandle, args, dst } => self.load_handle(args.first(), *dst),
             Op::Prim { kind: PrimKind::Load { .. } | PrimKind::Store { .. } | PrimKind::ElemAddr, args, .. } => {
                 args.first().is_some_and(|a| self.block_ok(a))
             }
             Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => *list != self.cell && self.plain(list),
-            Op::Dup { dst, src } => {
-                if let Some(t) = self.kinds.get(src).copied() {
-                    self.kinds.insert(*dst, t);
-                }
-                if self.clean.contains(src) {
-                    self.clean.insert(*dst);
-                }
-                self.plain(src) && self.fresh.insert(*dst)
-            }
+            Op::Dup { dst, src } => self.dup(*dst, *src),
             Op::Alloc { dst, .. } => self.fresh.insert(*dst),
             Op::ListLit { dst, elems } => !elems.iter().any(|e| self.funcrefs.contains(e)) && self.fresh.insert(*dst),
             op => crate::render_native_move::bookkeeping(op),
