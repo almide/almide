@@ -47,6 +47,8 @@ pub fn rewrite_option_ops(
     // Its checked carrier type still excludes the scalar Option rewrite.
     heap_payloads.extend(carriers.iter().copied());
     t.opt_vals.extend(opt_params.iter().copied());
+    // A slot reassigned anywhere is no constant, whatever its first value.
+    t.reassigned = ops.iter().filter_map(|op| match op { Op::SetLocal { local, .. } => Some(*local), _ => None }).collect();
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
         t.flow_op(op, &mut out, option_fns, &heap_payloads);
@@ -82,6 +84,22 @@ impl OptionTracker {
                         Some(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(ValueId(self.fresh)), args: vec![] })
                     }
                     Some(1) => self.pending.remove(&o).map(|p| Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(ValueId(self.fresh)), args: vec![p] }),
+                    // A tag computed at run time (a fold's carried tag local):
+                    // the length word is the tag, so a nonzero one is Some.
+                    None if self.pending.contains_key(&o) => {
+                        let p = self.pending.remove(&o).expect("the guard saw the payload");
+                        let (j, s, n) = (ValueId(self.fresh), ValueId(self.fresh + 1), ValueId(self.fresh + 2));
+                        self.fresh += 3;
+                        out.push(Op::IfThen { cond: args[1], dst: Some(j) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(s), args: vec![p] });
+                        out.push(Op::Else { val: Some(s) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(n), args: vec![] });
+                        out.push(Op::EndIf { val: Some(n) });
+                        self.opt_vals.extend([j, s, n]);
+                        self.minted.extend([j, s, n]);
+                        out.push(Op::SetLocal { local: o, src: j });
+                        return true;
+                    }
                     _ => None,
                 };
                 let Some(made) = made else { return false };
@@ -103,7 +121,9 @@ impl OptionTracker {
         }
         match &op {
             Op::ConstInt { dst, value } => {
-                self.const_vals.insert(*dst, *value);
+                if !self.reassigned.contains(dst) {
+                    self.const_vals.insert(*dst, *value);
+                }
                 out.push(op);
             }
             Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
@@ -230,6 +250,8 @@ pub(crate) fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> 
 #[derive(Default)]
 struct OptionTracker {
     const_vals: BTreeMap<ValueId, i64>,
+    /// Slots some `SetLocal` reassigns: never read as their first constant.
+    reassigned: BTreeSet<ValueId>,
     /// Values known to be scalar Options.
     opt_vals: BTreeSet<ValueId>,
     /// Carriers this pass minted (no object of their own).
