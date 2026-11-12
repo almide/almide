@@ -517,7 +517,7 @@ impl CarrierCx<'_> {
                 // does, so the carrier still reads `Some`. The copy was the
                 // whole rest of a chain on every step.
                 (p, format!("match &mut {b} {{ Some(v) => std::mem::take(v), None => {absent} }}"))
-            } else if guarded_some && self.borrowed_option_read(d, &b, p) {
+            } else if self.borrowed_option_read(d, &b, p, guarded_some) {
                 return Some(Ok(true));
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
@@ -571,8 +571,8 @@ impl CarrierCx<'_> {
     /// the whole payload (a `width(o: Bytes?)` match arm copied the buffer on
     /// every call). `false` when the read needs an owned value or the payload
     /// kind has no reference form.
-    fn borrowed_option_read(&mut self, d: ValueId, b: &str, p: NTy) -> bool {
-        if !self.st.borrow_reads.contains(&d) {
+    fn borrowed_option_read(&mut self, d: ValueId, b: &str, p: NTy, guarded_some: bool) -> bool {
+        if !guarded_some || !self.st.borrow_reads.contains(&d) {
             return false;
         }
         let (t, ty, val) = match p {
