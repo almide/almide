@@ -438,6 +438,8 @@ fn lower_function_all_impl(
     // rewrites introduce.
     let desugared = apply_pre_lower_desugars(func_body, &func.params);
     let func_body: &IrExpr = desugared.as_ref().unwrap_or(func_body);
+    let continued = desugar_err_arm_continuations(func_body, &func.ret_ty);
+    let func_body: &IrExpr = continued.as_ref().unwrap_or(func_body);
     // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
     // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
     // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
@@ -617,3 +619,4 @@ include!("desugar_match_b.rs");
 include!("desugar_match_c.rs");
 include!("desugar_match_subject.rs");
 include!("synth_eq.rs");
+include!("desugar_err_arm_cont.rs");
