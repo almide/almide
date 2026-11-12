@@ -202,16 +202,30 @@ fn deep_plan(r: &[RecDecl]) -> DeepPlan {
     plan
 }
 
-/// The statements detaching edge `e` of the field at the place `p`.
+/// The statements detaching edge `e` of the field at the place `p`: only a
+/// value that itself holds more of the cycle leaves; a bare one is released
+/// where it is, one level down.
 fn deep_detach(p: &str, e: DeepEdge) -> String {
+    let deep = deep_shallow(&format!("(&{p})"), e);
     match e {
-        DeepEdge::List(k) => format!("if !{p}.is_empty() {{ w.push(__AlmdDeep::V{k}(std::mem::take(&mut {p}))); }}"),
-        DeepEdge::Opt(k) => format!("if let Some(x) = {p}.take() {{ w.push(__AlmdDeep::N{k}(x)); }}"),
+        DeepEdge::List(k) => format!("if !{deep} {{ w.push(__AlmdDeep::V{k}(std::mem::take(&mut {p}))); }}"),
+        DeepEdge::Opt(k) => format!("if !{deep} {{ if let Some(x) = {p}.take() {{ w.push(__AlmdDeep::N{k}(x)); }} }}"),
         DeepEdge::Boxed(k, t) => {
             let n = struct_name(k);
-            format!("if !matches!(*{p}, {n}::C{t}) {{ w.push(__AlmdDeep::N{k}(std::mem::replace(&mut *{p}, {n}::C{t}))); }}")
+            format!("if !{deep} {{ w.push(__AlmdDeep::N{k}(std::mem::replace(&mut *{p}, {n}::C{t}))); }}")
         }
         DeepEdge::InPlace(_) => format!("{p}.__almd_detach(w);"),
+    }
+}
+
+/// The value(s) edge `e` of the field `p` (a reference) holds are bare:
+/// releasing them recurses one level and no further.
+fn deep_shallow(p: &str, e: DeepEdge) -> String {
+    match e {
+        DeepEdge::List(_) => format!("{p}.iter().all(|x| x.__almd_bare())"),
+        DeepEdge::Opt(_) => format!("Option::as_ref({p}).map_or(true, |x| x.__almd_bare())"),
+        DeepEdge::Boxed(..) => format!("{p}.__almd_bare()"),
+        DeepEdge::InPlace(_) => format!("{p}.__almd_shallow()"),
     }
 }
 
@@ -240,7 +254,7 @@ pub(crate) fn deep_drop_impls() -> String {
     let mut items = std::collections::BTreeSet::new();
     for (k, rows) in plan.iter() {
         let n = struct_name(*k);
-        let (mut detach, mut bare) = (String::new(), String::new());
+        let (mut detach, mut bare, mut shallow) = (String::new(), String::new(), String::new());
         for (tag, edges) in rows {
             for (_, e) in edges {
                 match e {
@@ -256,6 +270,8 @@ pub(crate) fn deep_drop_impls() -> String {
                     }
                     let all = edges.iter().map(|(f, e)| deep_bare(&format!("(&self.f{f})"), *e)).collect::<Vec<_>>().join(" && ");
                     bare.push_str(&format!("        {all}\n"));
+                    let all = edges.iter().map(|(f, e)| deep_shallow(&format!("(&self.f{f})"), *e)).collect::<Vec<_>>().join(" && ");
+                    shallow.push_str(&format!("        {all}\n"));
                 }
                 Some(t) => {
                     let width = r_case_width(*k, *t);
@@ -267,13 +283,16 @@ pub(crate) fn deep_drop_impls() -> String {
                     detach.push_str("        }\n");
                     let all = edges.iter().map(|(f, e)| deep_bare(&format!("f{f}"), *e)).collect::<Vec<_>>().join(" && ");
                     bare.push_str(&format!("            Self::C{t}({binds}) => {all},\n"));
+                    let all = edges.iter().map(|(f, e)| deep_shallow(&format!("f{f}"), *e)).collect::<Vec<_>>().join(" && ");
+                    shallow.push_str(&format!("            Self::C{t}({binds}) => {all},\n"));
                 }
             }
         }
-        let bare = if rows.iter().any(|(t, _)| t.is_some()) { format!("        match self {{\n{bare}            _ => true,\n        }}\n") } else { bare };
+        let arms = |b: String| if rows.iter().any(|(t, _)| t.is_some()) { format!("        match self {{\n{b}            _ => true,\n        }}\n") } else { b };
+        let (bare, shallow) = (arms(bare), arms(shallow));
         out.push_str(&format!(
-            "impl {n} {{\n    #[inline]\n    fn __almd_detach(&mut self, w: &mut __AlmdWork) {{\n{detach}    }}\n    #[inline]\n    #[allow(unreachable_patterns)]\n    fn __almd_bare(&self) -> bool {{\n{bare}    }}\n}}\n\
-             impl Drop for {n} {{\n    #[inline]\n    fn drop(&mut self) {{\n        if !self.__almd_bare() {{\n            let mut w = __AlmdWork::new();\n            self.__almd_detach(&mut w);\n            __almd_deep_drain(&mut w);\n        }}\n    }}\n}}\n\n"
+            "impl {n} {{\n    #[inline]\n    fn __almd_detach(&mut self, w: &mut __AlmdWork) {{\n{detach}    }}\n    #[inline]\n    #[allow(unreachable_patterns)]\n    fn __almd_bare(&self) -> bool {{\n{bare}    }}\n    #[inline]\n    #[allow(unreachable_patterns)]\n    fn __almd_shallow(&self) -> bool {{\n{shallow}    }}\n}}\n\
+             impl Drop for {n} {{\n    #[inline]\n    fn drop(&mut self) {{\n        if !self.__almd_shallow() {{\n            let mut w = __AlmdWork::new();\n            self.__almd_detach(&mut w);\n            __almd_deep_drain(&mut w);\n        }}\n    }}\n}}\n\n"
         ));
     }
     let arms = items.iter().map(|it| {
