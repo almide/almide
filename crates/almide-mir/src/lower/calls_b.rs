@@ -380,6 +380,10 @@ impl LowerCtx {
             // …unless the callee hands back a real carrier: running it for effect
             // only would receive the err and drop it.
             if crate::lower::owned_tco_slots() && (expr.ty.is_result() || expr.ty.is_option()) {
+                // Where the err belongs to a caller it leaves through the return rule.
+                if !self.bang_dies && self.lower_unwrap_by_return(call)?.is_some() {
+                    return Ok(());
+                }
                 return self.lower_discarded_unwrap(expr);
             }
             return self.lower_effect_call(expr);

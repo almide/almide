@@ -156,7 +156,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
             let pos = if stmt_pos { BlockPos::Stmt } else { BlockPos::Value };
-            let body = lower_block_body_in(ctx, stmts, expr.as_deref(), &ty, span, pos);
+            let body = lower_block_body_in(ctx, stmts, expr.as_deref(), &ty, span, pos, None);
             ctx.pop_scope();
             body
         }

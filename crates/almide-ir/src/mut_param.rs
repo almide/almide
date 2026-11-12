@@ -37,9 +37,11 @@
 //! Result-typed tail is `!`-unwrapped) so the tuple pairs `T` — not the
 //! Result — with the buffer; the previous `(Result, Buf)` pairing double-
 //! layered the carrier (structural `ok(22)` where native printed `22`, an
-//! invalid module on the incumbent). A declared-Result fn whose err type is
-//! not the default `String` carrier stays excluded (honest wall): the lifted
-//! carrier the wasm ABI builds for a raw tuple is `Result[_, String]`.
+//! invalid module on the incumbent). The err type is the fn's own (#4668):
+//! a typed-err fn always takes the err-carrying form, `Result[(T, Buf), (E,
+//! Buf)]`, since the lifted carrier the wasm ABI builds for a raw tuple is
+//! `Result[_, String]`. Only one whose raises cannot all be paired
+//! (`mut_param_err_carry::pairable`) stays excluded (honest wall).
 //! A rewritten fn's `mutated_params` is CLEARED:
 //! the convention is now explicit in the tree (the v1 C-132 wall keys on it,
 //! and LICM's conservatism is subsumed by the call-site Assign).
@@ -64,7 +66,12 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
         return hoisted;
     }
     // Read before `rewrite_signatures` strips a declared-Result body's ok layer.
-    let never_err_fns = crate::mut_param_unpropagated::never_err_effect_fn_keys(program);
+    // Only on the `String` channel: a never-err fn returns its raw tuple
+    // through the lifted `Result[_, String]` carrier, which a typed channel
+    // is not — a typed-err fn always takes the err-carrying form (#4668).
+    let never_err_fns = crate::mut_param_unpropagated::never_err_effect_fn_keys_among(program, &|f| {
+        matches!(crate::mut_param_err_carry::channel_err_ty(f), Ty::String)
+    });
     let never_err: std::collections::HashSet<String> =
         never_err_fns.iter().filter(|k| mut_fns.contains_key(k.as_str())).cloned().collect();
     // The can-err ones carry their buffer on the err arm too (#2917).
@@ -756,12 +763,14 @@ fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<MutEntry> 
 /// return, except for a declared-Result EFFECT fn (`-> T!`), whose Result is
 /// the single-layer effect channel rather than a value: there the payload is
 /// the ok type `T`, and the body is stripped to it by [`strip_ok_layer`].
-/// `None` for a declared-Result effect fn whose err type is not the default
-/// `String` carrier — the lifted `Result[(T, Buf), String]` the wasm ABI
-/// builds for a raw tuple could not carry it, so the fn stays excluded.
+/// `None` for a declared-Result effect fn with a typed err whose raises
+/// cannot all be paired — the lifted `Result[(T, Buf), String]` the wasm ABI
+/// builds for a raw tuple could not carry its err, so the fn stays excluded.
 fn value_payload_ty(func: &IrFunction) -> Option<Ty> {
     match single_layer_ok_ty(func) {
-        Some((ok_ty, err_ty)) => matches!(err_ty, Ty::String).then_some(ok_ty),
+        Some((ok_ty, err_ty)) => {
+            (matches!(err_ty, Ty::String) || crate::mut_param_err_carry::pairable(&func.body, &err_ty)).then_some(ok_ty)
+        }
         None => Some(func.ret_ty.clone()),
     }
 }
@@ -778,7 +787,7 @@ fn single_layer_ok_ty(func: &IrFunction) -> Option<(Ty, Ty)> {
 
 /// Does `func` raise through the single-layer effect channel — the one the
 /// move-mode carrier pairs its buffer with (#2917)? An effect fn does. So
-/// does a PURE fn declared `-> T!` / `-> Result[T, String]` whose raises can
+/// does a PURE fn declared `-> T!` / `-> Result[T, E]` whose raises can
 /// all be paired: its `x!` propagates through that Result exactly as an
 /// effect fn's does (#4274). Treated as a plain value instead, its body was
 /// wrapped in the `(Result, Buf)` tuple, a `!` inside had no Result to
@@ -787,8 +796,10 @@ fn single_layer_ok_ty(func: &IrFunction) -> Option<(Ty, Ty)> {
 /// call it before a rewrite replaces either.
 pub(crate) fn err_channel(func: &IrFunction) -> bool {
     func.is_effect
-        || (func.ret_ty.result_err_ty().is_some_and(|e| matches!(e, Ty::String))
-            && crate::mut_param_err_carry::pairable(&func.body))
+        || func
+            .ret_ty
+            .result_err_ty()
+            .is_some_and(|e| !matches!(e, Ty::Unknown) && crate::mut_param_err_carry::pairable(&func.body, &e))
 }
 
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
@@ -1105,7 +1116,7 @@ fn unit_placeholder() -> IrExpr {
 /// and the writeback targets the argument PLACE: a bare var assigns it,
 /// a `b.items` field FieldAssigns it, and a temp (no named place) skips
 /// the writeback — native mutates an invisible temp there too.
-fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns, carry: &std::collections::HashSet<String>) {
+fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns, carry: &crate::mut_param_err_carry::Carry) {
     use crate::mut_param_err_carry::{own_buffers, settle_sites};
     {
         let vt = &mut program.var_table;
@@ -1165,11 +1176,11 @@ struct CallSiteRewriter<'a> {
     scope: String,
     /// The can-err callees that carry their buffer on the err arm (#2917,
     /// `mut_param_err_carry`).
-    carry: &'a std::collections::HashSet<String>,
+    carry: &'a crate::mut_param_err_carry::Carry,
     /// The site blocks of those callees, by their first bound var: a `!`
     /// over one is lowered where it is met, the rest take the Result-valued
     /// form once the walk is done.
-    carry_blocks: std::collections::HashSet<VarId>,
+    carry_blocks: crate::mut_param_err_carry::Sites,
     /// The buffers the fn being walked carries on its own err arm.
     own_bufs: std::collections::HashSet<VarId>,
 }
@@ -1216,7 +1227,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let Some((idx, mut_ty, was_unit, callee_ret, extra)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };
-        let carries = self.carry.contains(&name) || self.carry.contains(&scope_key(&self.scope, &name));
+        let carries = self.carry.get(&name).or_else(|| self.carry.get(&scope_key(&self.scope, &name))).cloned();
         if !extra.is_empty() {
             self.rewrite_multi_call(expr, idx, mut_ty, was_unit, callee_ret, &extra);
             self.carry_site(&*expr, carries);
@@ -1306,15 +1317,17 @@ impl<'a> CallSiteRewriter<'a> {
         mut_fns: &'a MutFns,
         vt: &'a mut VarTable,
         scope: String,
-        carry: &'a std::collections::HashSet<String>,
+        carry: &'a crate::mut_param_err_carry::Carry,
     ) -> Self {
         CallSiteRewriter { mut_fns, vt, scope, carry, carry_blocks: Default::default(), own_bufs: Default::default() }
     }
 
     /// Record a can-err callee's site block (#2917).
-    fn carry_site(&mut self, expr: &IrExpr, carries: bool) {
-        if carries && let Some(v) = crate::mut_param_err_carry::site_key(expr) {
-            self.carry_blocks.insert(v);
+    fn carry_site(&mut self, expr: &IrExpr, carries: Option<Ty>) {
+        if let Some(chan) = carries
+            && let Some(v) = crate::mut_param_err_carry::site_key(expr)
+        {
+            self.carry_blocks.insert(v, chan);
         }
     }
 

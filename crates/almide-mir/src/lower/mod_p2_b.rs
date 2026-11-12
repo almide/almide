@@ -406,12 +406,20 @@ pub(crate) struct LowerCtx {
     /// components match — v0 coerces a mismatch with `.map_err(...)` at the `?` site, so the
     /// unchecked pass-through type-punned the err payload (the collect_map! class, 2026-07-17).
     decl_fn_err: Option<Ty>,
+    /// The carrier type this fn's compiled ABI returns: the declared `Result`/`Option`, or
+    /// the synthetic `Result[<declared>, String]` of a lifted effect fn; `None` without one.
+    /// The native render types a carrier by its declaration, so an early exit may hand a
+    /// callee's carrier back as it stands only when the two types are this same one.
+    decl_ret_carrier: Option<Ty>,
     /// An err that leaves this fn ends the process with the `Error: <msg>` line: the void
     /// `main`, a native test entry, an abort-site body, or a channel-less lambda lifted out
     /// of one. Only here may a `!` that no rewrite gave a continuation die where it stands;
     /// in any other fn the err belongs to a caller, so the native render refuses the fn
     /// rather than end the process or drop the err (see [`Self::unrewritten_bang_wall`]).
     bang_dies: bool,
+    /// Raised while an arm of the both-arms linearization is lowered: its ops run whether
+    /// or not the arm is taken, so nothing in it may leave the function.
+    linearized: u32,
     /// Set when [`Self::unrewritten_bang_wall`] refused a `!` in this fn. The refusal is
     /// raised inside attempts that roll back and try another route, and no later route
     /// gives that `!` its propagation, so the fn is refused once its body is lowered.

@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 1056 of 1056
+# rendered: 1058 of 1058
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -360,6 +360,7 @@ spec/wasm_cross/guard_jump_in_value_fn.almd
 spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
 spec/wasm_cross/guard_let_forms.almd
 spec/wasm_cross/guard_let_forms_typed_err.almd
+spec/wasm_cross/guard_let_in_bound_block.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_only_use_liveness.almd
 spec/wasm_cross/guard_statement.almd
@@ -632,6 +633,7 @@ spec/wasm_cross/mut_param_pure_result_fn_propagates.almd
 spec/wasm_cross/mut_param_reassign_from_hof.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mut_param_tail_recursion.almd
+spec/wasm_cross/mut_param_typed_err_propagates.almd
 spec/wasm_cross/mut_param_writeback_growth.almd
 spec/wasm_cross/mut_scalar_param_reassign.almd
 spec/wasm_cross/mutable_global_bytes_arena.almd

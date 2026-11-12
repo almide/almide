@@ -105,6 +105,8 @@ fn render_fn(
     // Tail-recursion loops whose exit flag is raised as an arm's last act:
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
+    // A Result carrier whose tag dispatch is its last use goes at each arm's end.
+    let arm_releases = crate::render_native_arm_drop::arm_releases(func, &flag_exits);
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
@@ -178,6 +180,15 @@ fn render_fn(
                 }
                 let _ = writeln!(st.out, "drop({});", var(*v));
                 EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
+            }
+        }
+        if let (Some(c), Op::Else { .. } | Op::EndIf { .. }) = (arm_releases.get(&i), op) {
+            if let Some(line) = crate::render_native_arm_drop::release_line(&st.out, &var(*c)) {
+                for _ in 0..st.indent {
+                    st.out.push_str("    ");
+                }
+                st.out.push_str(&line);
+                st.out.push('\n');
             }
         }
         prev_start = st.out.len();
@@ -543,6 +554,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                         && crate::render_native_addr::reads_of_place(&place)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
+                        // The take below leaves the field's `Default` behind:
+                        // a field with none (a typed Result) is copied instead.
+                        && (crate::render_native_addr::rebound_next(func, i, base)
+                            || crate::render_native_rec::has_default(owned_of_ref(st.tys[src])))
                 }) =>
         {
             let (base, place) = crate::render_native_addr::field_of(*src).expect("a field read");
@@ -569,9 +584,32 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))
                 }) =>
         {
-            let (_, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
+            let (base, take) = crate::render_native_addr::payload_take_of(*src).expect("a payload read");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
+            // A String-Ok carrier bound once and read on no path after the copy
+            // gives its string up by a plain move: nothing is written back into
+            // a carrier about to be dropped.
+            let take = crate::render_native_move::payload_move(func, i, base, st.tys.get(&base).copied(), take);
+            line!("let mut {} = {take};", var(*dst));
+        }
+        // The same move for a field of a borrowed payload: the carrier dies
+        // at the copy, so the payload leaves it and the field the payload.
+        Op::Dup { dst, src }
+            if !crate::render_native_move::drill_no_moves()
+                && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
+                && crate::render_native_rec::has_default(owned_of_ref(st.tys[src]))
+                && crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
+                    .is_some() =>
+        {
+            let take = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
+                .expect("a field of a payload");
+            let owned = owned_of_ref(st.tys[src]);
+            st.tys.insert(*dst, owned);
+            // A by-value move consumed the carrier: no early release names it.
+            if let Some(carrier) = crate::render_native_addr::consumed_carrier(*src, &take) {
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(carrier));
+            }
             line!("let mut {} = {take};", var(*dst));
         }
         // The same move out of a String-Ok Result param (the callee's own,
