@@ -105,6 +105,8 @@ fn render_fn(
     // Tail-recursion loops whose exit flag is raised as an arm's last act:
     // the render breaks there (crate::render_native_addr::flag_exits).
     let flag_exits = crate::render_native_addr::flag_exits(func);
+    // A Result carrier whose tag dispatch is its last use goes at each arm's end.
+    let arm_releases = crate::render_native_arm_drop::arm_releases(func, &flag_exits);
     crate::render_native_move::set_static_strs(func);
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
@@ -178,6 +180,15 @@ fn render_fn(
                 }
                 let _ = writeln!(st.out, "drop({});", var(*v));
                 EARLY_DROPPED.with(|e| e.borrow_mut().insert(*v));
+            }
+        }
+        if let (Some(c), Op::Else { .. } | Op::EndIf { .. }) = (arm_releases.get(&i), op) {
+            if let Some(line) = crate::render_native_arm_drop::release_line(&st.out, &var(*c)) {
+                for _ in 0..st.indent {
+                    st.out.push_str("    ");
+                }
+                st.out.push_str(&line);
+                st.out.push('\n');
             }
         }
         prev_start = st.out.len();
@@ -595,6 +606,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 .expect("a field of a payload");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
+            // A by-value move consumed the carrier: no early release names it.
+            if let Some(carrier) = crate::render_native_addr::consumed_carrier(*src, &take) {
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(carrier));
+            }
             line!("let mut {} = {take};", var(*dst));
         }
         // The same move out of a String-Ok Result param (the callee's own,

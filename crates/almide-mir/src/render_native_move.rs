@@ -688,13 +688,21 @@ pub(crate) fn payload_move(func: &MirFunction, at: usize, base: ValueId, kind: O
 /// `ops[at]`, and neither it nor anything borrowed from it is read on a path
 /// after the copy: the whole binding can move there.
 fn carrier_moves_whole(func: &MirFunction, at: usize, base: ValueId) -> bool {
+    bound_once_this_round(func, at, base).is_some() && !crate::mir_liveness::live_after(func, at, base)
+}
+
+/// The one op that binds `base`, when it sits before `ops[at]` in the same
+/// loop round and `base` is never rebound.
+pub(crate) fn bound_once_this_round(func: &MirFunction, at: usize, base: ValueId) -> Option<usize> {
     if drill_no_moves() || REBOUND.with(|m| m.borrow().contains(&base)) {
-        return false;
+        return None;
     }
     let loops = loop_of(func);
     let mut defs = (0..func.ops.len()).filter(|d| crate::mir_ops::defined_value(&func.ops[*d]) == Some(base));
-    matches!((defs.next(), defs.next()), (Some(d), None) if d < at && loops[d] == loops[at])
-        && !crate::mir_liveness::live_after(func, at, base)
+    match (defs.next(), defs.next()) {
+        (Some(d), None) if d < at && loops[d] == loops[at] => Some(d),
+        _ => None,
+    }
 }
 
 /// An owned carrier a borrowed payload read can be moved out of when it

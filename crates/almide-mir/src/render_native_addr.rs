@@ -418,7 +418,67 @@ pub(crate) fn nested_field_take(
     refs.iter()
         .filter(|r| **r != src && !checked.contains(r))
         .all(|r| dies(*r) || !named_later(*r))
-        .then(|| format!("{{ let mut p = {take}; std::mem::take(&mut p{field}) }}"))
+        .then(|| {
+            // A carrier bound once in this loop round and read on no path
+            // after the copy gives the field up by a plain move: no `Default`
+            // is written into a block about to be dropped, which kept the
+            // whole carrier in memory on every call (#4640).
+            unnamed_on_paths_after(func, at, carrier)
+                .then(|| consuming_side_take(carrier, &take, &field))
+                .flatten()
+                .unwrap_or_else(|| format!("{{ let mut p = {take}; std::mem::take(&mut p{field}) }}"))
+        })
+}
+
+/// Whether the carrier `c` is bound once in the loop round of `ops[at]` and
+/// no op on a path from `ops[at]` to its next binding names it or an address
+/// into its block, its own release apart: a by-value move of `c` at `ops[at]`
+/// is then the last the rendered text says of it.
+fn unnamed_on_paths_after(func: &MirFunction, at: usize, c: ValueId) -> bool {
+    let (Some(def), Some(succ)) =
+        (crate::render_native_move::bound_once_this_round(func, at, c), crate::mir_liveness::successors(func))
+    else {
+        return false;
+    };
+    let mut names: BTreeSet<ValueId> =
+        crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == c).map(|(a, _)| a).collect();
+    names.insert(c);
+    let (mut seen, mut work) = (BTreeSet::new(), succ[at].clone());
+    while let Some(j) = work.pop() {
+        if j == def || !seen.insert(j) {
+            continue;
+        }
+        let op = &func.ops[j];
+        let mut all = Vec::new();
+        crate::mir_ops::op_values(op, &mut all);
+        let release = all == [c] && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. });
+        if all.iter().any(|v| names.contains(v)) && !release {
+            return false;
+        }
+        work.extend(succ[j].iter().copied());
+    }
+    true
+}
+
+/// The carrier the nested move `take` of the field read `src` consumed by
+/// value ([`consuming_side_take`]), if it did.
+pub(crate) fn consumed_carrier(src: ValueId, take: &str) -> Option<ValueId> {
+    let (carrier, _) = payload_take_of(field_of(src)?.0)?;
+    take.starts_with(&format!("match {} {{", var(carrier))).then_some(carrier)
+}
+
+/// The by-value form of a Result side's move-out expression `take`
+/// (`match &mut c { Side(v) => std::mem::take(v), Other(_) => unreachable!() }`)
+/// reading `field` off the payload: the carrier itself is consumed. `None`
+/// for any other shape of `take`.
+fn consuming_side_take(carrier: ValueId, take: &str, field: &str) -> Option<String> {
+    let c = var(carrier);
+    let arms = take.strip_prefix(&format!("match &mut {c} {{ "))?.strip_suffix(" }")?;
+    let (taken, absent) = arms.split_once(", ")?;
+    let side = taken.strip_suffix("(v) => std::mem::take(v)")?;
+    let other = absent.strip_suffix("(_) => unreachable!()")?;
+    (matches!((side, other), ("Ok", "Err") | ("Err", "Ok")))
+        .then(|| format!("match {c} {{ {side}(p) => p{field}, {other}(_) => unreachable!() }}"))
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust
