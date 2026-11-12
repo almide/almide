@@ -205,7 +205,10 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
             out.push(format!("{pad}}}));"));
         }
         _ => {
+            let mut body = rewrite_body(&body);
+            let moving = source.as_ref().is_some_and(|(src, _)| moves_out_of_dying_source(lines, (s, e), src, &elem, &mut body));
             let head = match &source {
+                Some((src, _)) if moving => format!("{pad}for ({i}, {elem}) in {src}.iter_mut().enumerate() {{"),
                 Some((src, _)) => format!("{pad}for ({i}, {elem}) in {src}.iter().enumerate() {{"),
                 None => format!("{pad}for {i} in 0i64..{len} {{"),
             };
@@ -213,12 +216,53 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
             if source.is_some() {
                 out.push(counter);
             }
-            out.extend(rewrite_body(&body));
+            out.extend(body);
             out.push(format!("{pad}}}"));
         }
     }
     out.extend(lines[e + 1..].iter().cloned());
     Some(out)
+}
+
+/// A loop over an owned list `src` that is dropped right after it, whose body
+/// copies the element once (`(*elem).clone()`) and reads neither the element
+/// nor a reference taken in the body after that copy: the element is taken
+/// out instead (a filter keeping a dying list's values moves them). The copy
+/// must sit in the iteration itself, under `if`s only, so it runs at most
+/// once per element. Rewrites `body` and answers whether it did.
+fn moves_out_of_dying_source(lines: &[String], (s, e): (usize, usize), src: &str, elem: &str, body: &mut [String]) -> bool {
+    let owned = (0..s).rev().find_map(|k| let_parts(&lines[k]).filter(|(v, _, _)| *v == src))
+        .is_some_and(|(_, ty, _)| ty == "Vec<AlmideString>" || ty.starts_with("Vec<Vec<"));
+    let dies = lines[e + 1..].iter().find(|l| !is_note(l)).is_some_and(|l| l.trim() == format!("drop({src});"));
+    let copy = format!("(*{elem}).clone()");
+    let at: Vec<usize> = (0..body.len()).filter(|&k| body[k].contains(&copy)).collect();
+    let [c] = at[..] else { return false };
+    if !owned || !dies || body[c].matches(&copy).count() != 1 {
+        return false;
+    }
+    // Every block around the copy is an `if` arm: no inner loop or closure repeats it.
+    let level = body.iter().filter(|l| !l.trim().is_empty()).map(|l| indent_of(l)).min().unwrap_or(0);
+    let mut ind = indent_of(&body[c]);
+    for l in body[..c].iter().rev() {
+        if ind <= level {
+            break;
+        }
+        if !l.trim().is_empty() && indent_of(l) < ind {
+            let t = l.trim();
+            if !(t.ends_with('{') && (t.starts_with("if ") || t.starts_with("} else"))) {
+                return false;
+            }
+            ind = indent_of(l);
+        }
+    }
+    // References taken in the body (`let mut vN: &…`) and the element itself
+    // are not read once the element is gone.
+    let refs: Vec<&str> = body[..c].iter().filter_map(|l| let_parts(l).filter(|(_, ty, _)| ty.starts_with('&')).map(|(v, _, _)| v)).collect();
+    if body[c + 1..].iter().any(|l| mentions(l, elem) || refs.iter().any(|r| mentions(l, r))) {
+        return false;
+    }
+    body[c] = body[c].replace(&copy, &format!("std::mem::take(&mut *{elem})"));
+    true
 }
 
 /// `vS` and the index text `vS[IDX]` to replace, when `vLEN` is `vS.len()`, the
@@ -346,4 +390,5 @@ mod tests {
         let got = iterator_loops(src);
         assert!(got.contains("for (v11, __e_v11) in v4.iter().enumerate() {") && got.contains("v9.push(v21);"), "{got}");
     }
+
 }
