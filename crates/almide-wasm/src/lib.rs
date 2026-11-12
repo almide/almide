@@ -137,6 +137,7 @@ mod net_call;
 mod calls_modules;
 pub mod cells;
 mod global_reach;
+mod stride;
 mod unroll;
 mod collect;
 mod collections;
@@ -609,6 +610,12 @@ fn slot_memarg(payload_relative: u32) -> MemArg {
         align: 2,
         memory_index: 0,
     }
+}
+
+/// The strided range loops the emitter has produced so far in this process
+/// (src/stride.rs) — what tests/strided_range.rs reads.
+pub fn strided_loops_emitted() -> u64 {
+    stride::fired()
 }
 
 // ── program-function table ──────────────────────────────────────────────

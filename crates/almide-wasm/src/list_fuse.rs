@@ -22,6 +22,53 @@ enum Stage<'a> {
     Filter(&'a IrExpr),
 }
 
+/// What [`Emitter::fused_element`] emits one element of.
+#[derive(Clone, Copy)]
+struct FusedEl<'s, 'e> {
+    stages: &'s [&'s Stage<'e>],
+    drop: Option<usize>,
+    src: LoopSrc,
+    pair: Option<(u32, SliceTy, u32, u32, u32)>,
+    elem0: SliceTy,
+    acc: u32,
+    item: u32,
+    acc_ty: SliceTy,
+    cb: Option<&'e IrExpr>,
+    fold: Option<&'s (Vec<u32>, &'e IrExpr)>,
+    xs: &'e IrExpr,
+    /// The chain's arguments were noted by an earlier copy's activation.
+    noted: bool,
+    head: &'e IrExpr,
+}
+
+/// The strided lane's reading of a fused chain over a range (src/stride.rs):
+/// `Some((k, keep))` when stage `k` is the chain's first filter, every stage
+/// before it a map of pure wrapping `Int` arithmetic, and the filter keeps
+/// exactly the elements whose source value has low bit `keep`.
+fn fused_stride(stages: &[&Stage]) -> Option<(usize, bool)> {
+    use almide_types::types::Ty;
+    let mut defs = std::collections::HashMap::new();
+    let mut ivar = None;
+    let mut prev: Option<&IrExpr> = None;
+    for (k, st) in stages.iter().enumerate() {
+        let (Stage::Map(f) | Stage::Filter(f)) = **st;
+        let IrExprKind::Lambda { params, body, .. } = &f.kind else { return None };
+        let [(p, Ty::Int)] = params.as_slice() else { return None };
+        match prev {
+            None => ivar = Some(*p),
+            Some(b) => {
+                defs.insert(*p, b);
+            }
+        }
+        match st {
+            Stage::Map(_) if crate::stride::pure_int(body) => prev = Some(body),
+            Stage::Map(_) => return None,
+            Stage::Filter(_) => return Some((k, crate::stride::parity_test(body, ivar?, &defs)?)),
+        }
+    }
+    None
+}
+
 /// Judge one stage's callback body for `almide_ir::fusion` (#2953): PURE when
 /// it observes nothing — no Named call (user fns are opaque here, and println
 /// IS a Named call), no call into a user module or an effect module, no
@@ -251,10 +298,58 @@ impl Emitter<'_> {
             _ => None,
         };
         // element value rides a typed hold between stages.
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.loop_src_exit(src);
+        let el = FusedEl { stages: &stages, drop: None, src, pair, elem0, acc, item, acc_ty, cb, fold: fold.as_ref(), xs, noted: false, head: cur };
+        match (src, pair, fused_stride(&stages)) {
+            // A range source whose first filter keeps one parity of the
+            // element (src/stride.rs): the strided ×2 lane.
+            (LoopSrc::Count { cur, end }, None, Some((drop, keep))) => {
+                self.fused_strided(&FusedEl { drop: Some(drop), ..el }, cur, end, keep)?;
+            }
+            _ => {
+                self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+                self.loop_src_exit(src);
+                self.fused_element(&el)?;
+                self.loop_src_step(src);
+            }
+        }
+        if let Some((p, ..)) = pair {
+            self.f.instructions().local_get(p).call(F_DEC_FLAT);
+            self.release_i32();
+        }
+        self.f.instructions().local_get(acc);
+        self.loop_src_close(src);
+        if cb.is_none() {
+            self.release_val(acc_ty);
+            self.release_val(acc_ty);
+        }
+        Ok(Some(Some(Lowered::owned(acc_ty))))
+    }
+    /// The strided ×2 lane over a fused chain's range source (src/stride.rs
+    /// `trip_header`): two elements per trip, then at most one more; the
+    /// filter `x.drop` decided is not emitted.
+    fn fused_strided(&mut self, x: &FusedEl<'_, '_>, cur: u32, end: u32, keep: bool) -> Result<(), EmitError> {
+        let n = self.strided_header(cur, end, false, keep)?;
+        self.fused_element(x)?;
+        self.step_by_two(cur);
+        self.fused_element(&FusedEl { noted: true, ..*x })?;
+        self.step_by_two(cur);
+        self.strided_middle(n);
+        self.fused_element(&FusedEl { noted: true, ..*x })?;
+        self.strided_footer();
+        Ok(())
+    }
+
+    /// One element of a fused chain: its activation, its skip-block, the
+    /// stages (all but `drop`, a filter the strided lane already decided)
+    /// and the fold step.
+    fn fused_element(&mut self, x: &FusedEl<'_, '_>) -> Result<(), EmitError> {
+        let FusedEl { stages, drop, src, pair, elem0, acc, item, acc_ty, cb, fold, xs, noted, head } = *x;
         // #2755: one activation per element covers every stage.
-        self.witness_fused_open(xs, cb, acc, acc_ty);
+        if noted {
+            self.witness_fused_reopen(acc, acc_ty);
+        } else {
+            self.witness_fused_open(xs, cb, acc, acc_ty);
+        }
         // The skip-block opens BEFORE the element value exists — a wasm
         // block cannot receive operands from outside (the validator
         // caught the push-then-open draft immediately). Filter's br_if
@@ -270,7 +365,7 @@ impl Emitter<'_> {
         if let Some((p, pair_ty, io, vo, ih)) = pair {
             // `pair, element` are on the stack: park the element, then the
             // index, and hand the pair to the first map as a view.
-            self.witness_inline_arg(cur);
+            self.witness_inline_arg(head);
             self.store_ty_slot(elem0, vo);
             self.f.instructions().local_get(p).local_get(ih).i64_extend_i32_u();
             self.store_ty_slot(INT, io);
@@ -284,7 +379,10 @@ impl Emitter<'_> {
         // drops it. A borrowed map result stays its source's.
         let mut owners: Vec<(u32, SliceTy)> = Vec::new();
         let mut pending: Option<SliceTy> = None;
-        for st in stages {
+        for (k, st) in stages.iter().enumerate() {
+            if Some(k) == drop {
+                continue;
+            }
             match st {
                 Stage::Map(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
@@ -348,19 +446,7 @@ impl Emitter<'_> {
         self.release_fused_owners(&owners);
         self.witness_fused_close();
         self.f.instructions().end(); // skip-block
-        self.loop_src_step(src);
-        if let Some((p, ..)) = pair {
-            self.f.instructions().local_get(p).call(F_DEC_FLAT);
-            self.release_i32();
-        }
-        self.f.instructions().local_get(acc);
-        let _ = cur_ty;
-        self.loop_src_close(src);
-        if cb.is_none() {
-            self.release_val(acc_ty);
-            self.release_val(acc_ty);
-        }
-        Ok(Some(Some(Lowered::owned(acc_ty))))
+        Ok(())
     }
 }
 

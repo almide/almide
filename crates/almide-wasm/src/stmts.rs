@@ -413,6 +413,9 @@ impl Emitter<'_> {
                     if var_ty != INT {
                         return unsup("forin-range-nonint");
                     }
+                    if var_tuple.is_none() && self.try_strided_range(var, crate::stride::Bounds::Exprs(start, end), *inclusive, body)? {
+                        return Ok(());
+                    }
                     self.lower(start, Some(INT))?;
                     self.f.instructions().local_set(var_idx);
                     self.lower(end, Some(INT))?;
@@ -460,6 +463,9 @@ impl Emitter<'_> {
                     {
                         if var_ty != INT {
                             return unsup("forin-range-nonint");
+                        }
+                        if var_tuple.is_none() && self.try_strided_range(var, crate::stride::Bounds::Locals(sl, el), inclusive, body)? {
+                            return Ok(());
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;
