@@ -309,8 +309,10 @@ fn lendable_vars(f: &IrFunction) -> HashSet<VarId> {
     struct Vars(HashSet<VarId>, HashSet<VarId>);
     impl IrVisitor for Vars {
         fn visit_stmt(&mut self, s: &IrStmt) {
-            if let IrStmtKind::Bind { var, mutability: Mutability::Var, ty, .. } = &s.kind {
-                if lendable(ty) {
+            // A var bound to a string literal stays out: the lowering may read
+            // its interpolations off the literal, which a lend would rewrite.
+            if let IrStmtKind::Bind { var, mutability: Mutability::Var, ty, value } = &s.kind {
+                if lendable(ty) && !matches!(value.kind, IrExprKind::LitStr { .. }) {
                     self.0.insert(*var);
                 }
             }
@@ -496,7 +498,10 @@ pub(crate) fn select(ir: &mut IrProgram) {
         // A self-recursive fn stays out: its tail call becomes the loop
         // rewrite's carried params, which this convention does not carry.
         let recursive = calls_named(&f.body, name);
-        if plain && !generic && !recursive && !f.is_test && f.extern_attrs.is_empty() && f.export_attrs.is_empty()
+        // A function the host's native code calls back keeps the move-mode
+        // convention its callback adapter writes back from.
+        let host_called = crate::native_callbacks::is_root(name);
+        if plain && !generic && !recursive && !host_called && !f.is_test && f.extern_attrs.is_empty() && f.export_attrs.is_empty()
             && p.is_mut && lendable(&p.ty)
         {
             cands.insert(name.to_string(), *k);
@@ -508,6 +513,9 @@ pub(crate) fn select(ir: &mut IrProgram) {
         .iter()
         .map(|f| (f.name.to_string(), f.params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect()))
         .collect();
+    // Every caller is a direct call site: a candidate no function calls is
+    // reached some other way (the host, an export) and keeps its convention.
+    cands.retain(|n, _| ir.functions.iter().any(|f| calls_named(&f.body, n)));
     loop {
         let mut refused: BTreeSet<String> = BTreeSet::new();
         for f in &ir.functions {
