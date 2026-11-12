@@ -409,7 +409,7 @@
 798	spec/wasm_cross/int_pow_negative_exponent.almd
 2303	spec/wasm_cross/int_pow_operator_negative_base.almd
 1154	spec/wasm_cross/int_pow_overflow_wraps.almd
-4195	spec/wasm_cross/int_rem_pow2_zero.almd
+4286	spec/wasm_cross/int_rem_pow2_zero.almd
 2647	spec/wasm_cross/int_rotate_negative_count.almd
 2278	spec/wasm_cross/int_wrap_rotate_width.almd
 2248	spec/wasm_cross/interp_diverging_part.almd
@@ -741,7 +741,7 @@
 4028	spec/wasm_cross/range_head_fold_edges.almd
 2040	spec/wasm_cross/range_head_fold_huge.almd
 2049	spec/wasm_cross/range_head_map_count_overflow.almd
-1515	spec/wasm_cross/range_inclusive_end_at_max.almd
+1589	spec/wasm_cross/range_inclusive_end_at_max.almd
 3161	spec/wasm_cross/range_inclusive_runtime_max.almd
 2257	spec/wasm_cross/range_materialize_oom.almd
 4421	spec/wasm_cross/rbtree_balance_rotations.almd
