@@ -97,30 +97,26 @@ fn registry_entry(call_name: &str) -> Option<(usize, &'static str)> {
 }
 
 /// The source's signature table read from its declarations alone (#4682):
-/// parse and register, as the checker does before it infers any body, and
-/// take each fn's registered `FnSig`. `lower_fn` types an IR function's
-/// return from that same registered sig and its parameters from the same
-/// declared annotations, so this agrees with [`lower_source_sigs`] without
-/// inferring and lowering the whole source (value_core is 66 KB, about 26 ms
-/// of every build that reaches it). The agreement is gated entry by entry
-/// over the whole registry (`declared_sigs_gate` below), so the "cannot drift
-/// from what is linked" promise in the module doc still holds.
+/// parse and register, as the checker does before it infers any body, then
+/// name and type each fn as lowering would
+/// (`almide_frontend::lower::entry_fn_ir_signatures`). That agrees with
+/// [`lower_source_sigs`] without inferring and lowering the whole source
+/// (value_core is 66 KB, about 26 ms of every build that reaches it). The
+/// agreement is gated entry by entry over the whole registry
+/// (`declared_sigs_gate` below), so the "cannot drift from what is linked"
+/// promise in the module doc still holds.
+///
+/// The table is keyed by IR name, as the lowered one is. The source lowers as
+/// an ENTRY program, which escapes its `__` fns (`almide_fn___x`, #3483), so
+/// a registry entry whose impl is spelled `__x` finds no row in either table
+/// and stays `Unregistered`. That is today's behaviour, kept here.
 fn declared_source_sigs(idx: usize) -> Option<SourceSigs> {
     let (source, _) = crate::mir_ops::self_host_runtime()[idx];
     let prog = almide_lang::parse_cached(source)?;
     let canon = almide_frontend::canonicalize::canonicalize_program(prog, std::iter::empty());
-    let sigs = prog
-        .decls
-        .iter()
-        .filter_map(|d| match d {
-            almide_lang::ast::Decl::Fn { name, .. } => Some(name.as_str()),
-            _ => None,
-        })
-        .filter_map(|name| {
-            let sig = canon.env.functions.get(&almide_lang::intern::sym(name))?;
-            let params = sig.params.iter().map(|(_, t)| t.clone()).collect();
-            Some((name.to_string(), RegistrySig { params, ret: sig.ret.clone() }))
-        })
+    let sigs = almide_frontend::lower::entry_fn_ir_signatures(prog, &canon.env)
+        .into_iter()
+        .map(|(name, (params, ret))| (name.as_str().to_string(), RegistrySig { params, ret }))
         .collect();
     Some(Arc::new(sigs))
 }
