@@ -94,3 +94,38 @@ fn an_update_of_a_present_key_allocates_nothing() {
     // a copy of the key per update allocated one each.
     assert!(large < small + 100, "{large} blocks at 2,000 updates against {small} at 100 — a key copy per update?");
 }
+
+/// New keys through the twin append in order, one probe each, across the
+/// size where the map starts its key index, and later updates of any of them
+/// (first, middle, last) land on the entry already there.
+#[test]
+fn new_keys_append_in_order_across_the_index_threshold() {
+    let source = r#"effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.new()
+  let put = (k: String, v: Int) => {
+    m[k] = v
+  }
+  for i in 0..<40 {
+    put("key${i}", i)
+  }
+  put("key0", 100)
+  put("key20", 120)
+  put("key39", 139)
+  put("key40", 140)
+  let keys = map.keys(m) |> list.join(",")
+  let total = map.values(m) |> list.fold(0, (a, b) => a + b)
+  println("${map.len(m)} ${total} ${keys}")
+}
+"#;
+    let rust = almide_mir::pipeline::try_render_rust_source(source).unwrap_or_else(|e| panic!("left the certified render: {e:?}"));
+    assert!(rust.contains("almide_rt_map_set_str("), "the set does not take the key by reference");
+    let keys: Vec<String> = (0..=40).map(|i| format!("key{i}")).collect();
+    let total: i64 = (0..40).sum::<i64>() + 100 + 120 + 139 - 20 - 39 + 140;
+    let expect = format!("41 {total} {}\n", keys.join(","));
+    let dir = scratch("threshold");
+    let src = dir.join("prog.almd");
+    std::fs::write(&src, source).unwrap();
+    let (stdout, stderr) = run(&src);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(stdout, expect, "{stderr}");
+}
