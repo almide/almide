@@ -13850,12 +13850,17 @@ fn __jr_hdup(b: Bytes, kst: List[Int], base: Int, kp: Int, mut ht: List[Int]) ->
   if kp - base == 128 then {
     var j = base
     while fine and j < kp {
-      fine = __jr_hroom(b, kst, kp, ht) and __jr_hput(b, kst, j, ht)
+      fine = __jr_hroom(b, kst, kp, ht)
+      if fine then {
+        fine = __jr_hput(b, kst, j, ht)
+      } else ()
       j = j + 2
     }
   } else ()
-  if not fine or not __jr_hroom(b, kst, kp, ht) then -1
-  else {
+  if fine then {
+    fine = __jr_hroom(b, kst, kp, ht)
+  } else ()
+  if fine then {
     let t = list.len(ht) - 1
     let kl = kst[kp + 1]
     var s = int.band(__jr_khash(b, kst[kp], kl), t - 1)
@@ -13877,7 +13882,7 @@ fn __jr_hdup(b: Bytes, kst: List[Int], base: Int, kp: Int, mut ht: List[Int]) ->
       }
     }
     r
-  }
+  } else -1
 }
 
 fn __jr_key_is(b: Bytes, ks: Int, kl: Int, k: Bytes) -> Bool = {
