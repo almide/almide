@@ -391,4 +391,50 @@ mod tests {
         assert!(got.contains("for (v11, __e_v11) in v4.iter().enumerate() {") && got.contains("v9.push(v21);"), "{got}");
     }
 
+    /// A filter over a list of strings dropped right after the loop.
+    const FILTER: &str = r#"    let mut v4: Vec<AlmideString> = almd_build(v3);
+    let mut v8: i64 = v4.len() as i64;
+    let mut v9: Vec<AlmideString> = (0..v8.max(0)).map(|_| AlmideString::new()).collect();
+    let mut v10: i64 = 0i64;
+    let mut v11: i64 = 0i64;
+    let mut v12: i64 = 1i64;
+    loop {
+        let v13: bool = v11 < v8;
+        if !v13 { break; }
+        let mut v15: i64 = 8i64;
+        let mut v14: i64 = v11.wrapping_mul(v15);
+        let mut v16: &str = &v4[(0usize + ((v14 as u64) >> 3u32) as usize)][..];
+        let mut v17: i64 = rt_string_eq(v16, "x");
+        if v17 != 0 {
+            let mut v18 = v4[(0usize + ((v14 as u64) >> 3u32) as usize)].clone();
+            v9[(0usize + ((v10 as u64) >> 3u32) as usize)] = v18;
+            v10 = v10.wrapping_add(v12);
+        } else {
+        }
+        let mut v25: i64 = v11.wrapping_add(v12);
+        v11 = v25;
+    }
+    drop(v4);
+    v9.truncate(v10 as usize);
+}
+"#;
+
+    #[test]
+    fn a_filter_over_a_dying_list_moves_the_kept_values() {
+        let got = iterator_loops(FILTER.to_string());
+        assert!(got.contains("for (v11, __e_v11) in v4.iter_mut().enumerate() {"), "{got}");
+        assert!(got.contains("let mut v18 = std::mem::take(&mut *__e_v11);") && !got.contains(".clone()"), "{got}");
+    }
+
+    #[test]
+    fn a_filter_keeps_the_copy_where_the_value_is_read_after_it_or_the_list_lives_on() {
+        for src in [
+            FILTER.replace("            v10 = v10.wrapping_add(v12);\n", "            v10 = v10.wrapping_add(v12);\n            let mut v19: i64 = rt_string_eq(v16, \"y\");\n"),
+            FILTER.replace("    drop(v4);\n", "    let mut v30: i64 = v4.len() as i64;\n    drop(v4);\n"),
+            FILTER.replace("Vec<AlmideString> = almd_build", "Vec<AlmdRec0> = almd_build"),
+        ] {
+            let got = iterator_loops(src);
+            assert!(got.contains("v4.iter().enumerate()") && got.contains("(*__e_v11).clone()") && !got.contains("mem::take"), "{got}");
+        }
+    }
 }
