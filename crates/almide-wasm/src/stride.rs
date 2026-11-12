@@ -81,6 +81,34 @@ pub(crate) fn parity(e: &IrExpr, ivar: VarId, defs: &HashMap<VarId, &IrExpr>) ->
     }
 }
 
+/// `Some((k, c))`: `e` is `k * p + c` in wrapping `i64` arithmetic for
+/// every value of `p` — what an induction value stepping `k` per unit of
+/// `p` reproduces exactly (list_fuse.rs, the strided lane's first map).
+pub(crate) fn affine(e: &IrExpr, p: VarId) -> Option<(i64, i64)> {
+    match &e.kind {
+        IrExprKind::Var { id } if *id == p => Some((1, 0)),
+        IrExprKind::LitInt { value } => Some((0, *value)),
+        IrExprKind::UnOp { op: UnOp::NegInt, operand } => {
+            let (k, c) = affine(operand, p)?;
+            Some((k.wrapping_neg(), c.wrapping_neg()))
+        }
+        IrExprKind::BinOp { op: BinOp::AddInt, left, right } => {
+            let ((a, b), (c, d)) = (affine(left, p)?, affine(right, p)?);
+            Some((a.wrapping_add(c), b.wrapping_add(d)))
+        }
+        IrExprKind::BinOp { op: BinOp::SubInt, left, right } => {
+            let ((a, b), (c, d)) = (affine(left, p)?, affine(right, p)?);
+            Some((a.wrapping_sub(c), b.wrapping_sub(d)))
+        }
+        IrExprKind::BinOp { op: BinOp::MulInt, left, right } => match (lit(left), lit(right)) {
+            (_, Some(m)) => affine(left, p).map(|(k, c)| (k.wrapping_mul(m), c.wrapping_mul(m))),
+            (Some(m), _) => affine(right, p).map(|(k, c)| (k.wrapping_mul(m), c.wrapping_mul(m))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// `Some(q)`: `cond` holds exactly when the low bit of `ivar` is `q`.
 pub(crate) fn parity_test(cond: &IrExpr, ivar: VarId, defs: &HashMap<VarId, &IrExpr>) -> Option<bool> {
     match &cond.kind {
@@ -239,13 +267,21 @@ impl Emitter<'_> {
         let end = self.hold_i64()?;
         self.f.instructions().local_set(end);
         let n = self.strided_header(vi, end, inclusive, plan.keep)?;
+        // The trip's base steps once per trip (a one-add chain); each copy
+        // sets the loop variable from it.
+        let base = self.hold_i64()?;
+        self.f.instructions().local_get(vi).local_set(base);
+        self.strided_lane_open(n);
         self.witness_loop_open();
+        self.f.instructions().local_get(base).local_set(vi);
         self.lower_loop_body(&plan.body, false)?;
-        self.step_by_two(vi);
+        self.f.instructions().local_get(base).i64_const(2).i64_add().local_set(vi);
         self.lower_loop_body(&plan.body, false)?;
         self.witness_loop_close();
-        self.step_by_two(vi);
+        self.f.instructions().local_get(base).i64_const(4).i64_add().local_set(base);
         self.strided_middle(n);
+        self.f.instructions().local_get(base).local_set(vi);
+        self.release_i64();
         self.witness_loop_open();
         self.lower_loop_body(&plan.body, false)?;
         self.witness_loop_close();
@@ -254,17 +290,12 @@ impl Emitter<'_> {
         Ok(true)
     }
 
-    pub(crate) fn step_by_two(&mut self, vi: u32) {
-        self.f.instructions().local_get(vi).i64_const(2).i64_add().local_set(vi);
-    }
-
     /// The strided lane's head over the counter `vi` (already at the
     /// range's start) and the bound in `end`: an empty range or one with no
     /// value of parity `keep` skips everything; otherwise `vi` moves to the
     /// first kept value, the trip count goes to the returned local
-    /// (unsigned: exact for every pair of bounds), and the fast lane opens,
-    /// leaving it while fewer than two trips remain. Opens three labels:
-    /// the skip-all block, the remainder block and the fast loop.
+    /// (unsigned: exact for every pair of bounds). Opens the skip-all
+    /// block; [`Self::strided_lane_open`] opens the fast lane's two.
     pub(crate) fn strided_header(&mut self, vi: u32, end: u32, inclusive: bool, keep: bool) -> Result<u32, EmitError> {
         let d = self.hold_i64()?;
         let n = self.hold_i64()?;
@@ -285,9 +316,14 @@ impl Emitter<'_> {
         i.local_get(vi).local_get(n).i64_add().local_set(vi);
         // n = trips = (d - step) / 2 + 1, unsigned.
         i.local_get(d).local_get(n).i64_sub().i64_const(1).i64_shr_u().i64_const(1).i64_add().local_set(n);
+        Ok(n)
+    }
+
+    /// Open the fast lane: left while fewer than two trips remain.
+    pub(crate) fn strided_lane_open(&mut self, n: u32) {
+        let mut i = self.f.instructions();
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(n).i64_const(2).i64_lt_u().br_if(1);
-        Ok(n)
     }
 
     /// After the fast lane's two copies: count them, loop, and fall into

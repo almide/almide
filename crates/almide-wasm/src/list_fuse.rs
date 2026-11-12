@@ -27,6 +27,8 @@ enum Stage<'a> {
 struct FusedEl<'s, 'e> {
     stages: &'s [&'s Stage<'e>],
     drop: Option<usize>,
+    /// Stages before this one are folded into the source value.
+    from: usize,
     src: LoopSrc,
     pair: Option<(u32, SliceTy, u32, u32, u32)>,
     elem0: SliceTy,
@@ -298,7 +300,7 @@ impl Emitter<'_> {
             _ => None,
         };
         // element value rides a typed hold between stages.
-        let el = FusedEl { stages: &stages, drop: None, src, pair, elem0, acc, item, acc_ty, cb, fold: fold.as_ref(), xs, noted: false, head: cur };
+        let el = FusedEl { stages: &stages, drop: None, from: 0, src, pair, elem0, acc, item, acc_ty, cb, fold: fold.as_ref(), xs, noted: false, head: cur };
         match (src, pair, fused_stride(&stages)) {
             // A range source whose first filter keeps one parity of the
             // element (src/stride.rs): the strided ×2 lane.
@@ -329,12 +331,37 @@ impl Emitter<'_> {
     /// filter `x.drop` decided is not emitted.
     fn fused_strided(&mut self, x: &FusedEl<'_, '_>, cur: u32, end: u32, keep: bool) -> Result<(), EmitError> {
         let n = self.strided_header(cur, end, false, keep)?;
-        self.fused_element(x)?;
-        self.step_by_two(cur);
-        self.fused_element(&FusedEl { noted: true, ..*x })?;
-        self.step_by_two(cur);
+        // Strength reduction: a first map `k * x + c` (wrapping) before the
+        // decided filter becomes an induction value stepping `2k` per
+        // element, so the copies read it instead of the counter (which the
+        // trip count already replaced) and skip that map.
+        let affine = match x.stages.first() {
+            Some(Stage::Map(f)) if x.drop.is_some_and(|d| d > 0) => match &f.kind {
+                IrExprKind::Lambda { params, body, .. } => params.first().and_then(|(p, _)| crate::stride::affine(body, *p)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let (from, k) = match affine {
+            Some((k, c)) => {
+                self.f.instructions().local_get(cur).i64_const(k).i64_mul().i64_const(c).i64_add().local_set(cur);
+                (1, k)
+            }
+            None => (0, 1),
+        };
+        let x = FusedEl { from, ..*x };
+        let step = k.wrapping_mul(2);
+        // The second copy reads `value + step` from its own local: the value
+        // steps once per trip, so its chain is one add long.
+        let next = self.hold_i64()?;
+        self.strided_lane_open(n);
+        self.fused_element(&x)?;
+        self.f.instructions().local_get(cur).i64_const(step).i64_add().local_set(next);
+        self.fused_element(&FusedEl { noted: true, src: LoopSrc::Count { cur: next, end }, ..x })?;
+        self.release_i64();
+        self.f.instructions().local_get(cur).i64_const(step.wrapping_mul(2)).i64_add().local_set(cur);
         self.strided_middle(n);
-        self.fused_element(&FusedEl { noted: true, ..*x })?;
+        self.fused_element(&FusedEl { noted: true, ..x })?;
         self.strided_footer();
         Ok(())
     }
@@ -343,7 +370,7 @@ impl Emitter<'_> {
     /// stages (all but `drop`, a filter the strided lane already decided)
     /// and the fold step.
     fn fused_element(&mut self, x: &FusedEl<'_, '_>) -> Result<(), EmitError> {
-        let FusedEl { stages, drop, src, pair, elem0, acc, item, acc_ty, cb, fold, xs, noted, head } = *x;
+        let FusedEl { stages, drop, from, src, pair, elem0, acc, item, acc_ty, cb, fold, xs, noted, head } = *x;
         // #2755: one activation per element covers every stage.
         if noted {
             self.witness_fused_reopen(acc, acc_ty);
@@ -380,7 +407,7 @@ impl Emitter<'_> {
         let mut owners: Vec<(u32, SliceTy)> = Vec::new();
         let mut pending: Option<SliceTy> = None;
         for (k, st) in stages.iter().enumerate() {
-            if Some(k) == drop {
+            if k < from || Some(k) == drop {
                 continue;
             }
             match st {
