@@ -622,6 +622,16 @@ fn loop_uw_direct_unwrap(
             let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
             return loop_uw_direct_unwrap(&stmts, tail, env, nv);
         }
+        // A propagating bound branch: the rest of the block moves into its arms.
+        if let Some(stmts) = loop_uw_bound_branch_continuation(stmts, i, tail) {
+            if stmts[..i].iter().any(stmt_has_unwrap) {
+                return UwStep::Decline;
+            }
+            return match loop_uw_rewrite_block(&stmts, &None, env, nv) {
+                Some(out) => UwStep::Rewritten(out),
+                None => UwStep::Decline,
+            };
+        }
         let Some((ok_pat, inner, x_ty)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
         if stmts[..i].iter().any(stmt_has_unwrap) {
             return UwStep::Decline;
