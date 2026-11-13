@@ -26,6 +26,9 @@ struct FnArgCx<'a> {
     /// `lent` names a list receiver's element: the value-converting adapter
     /// may take it by reference too.
     elem_lent: bool,
+    /// The type param a callback returns that the runtime only orders
+    /// ([`key_only_var`]): a tuple record there goes as a Rust tuple.
+    key: Option<&'a str>,
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
@@ -112,6 +115,11 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
             None => return None,
         }
     } else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
+    let keyed = cx.key.is_some_and(|b| matches!(dret, DTy::Var(v) if v == b));
+    let closure = match ret.map(clo::owned_nty) {
+        Some(NTy::Rec(i)) if keyed => tuple_key(&closure, i).unwrap_or(closure),
+        _ => closure,
+    };
     bind_env(side, &name, (*blk, t), slots, lambda.is_none())?;
     Some(closure)
 }

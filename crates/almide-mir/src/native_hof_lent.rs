@@ -76,3 +76,36 @@ fn elem_lent_twin<'h>(h: &'h Hof, env: &Env) -> Option<(&'h str, &'static str, &
     })?;
     Some((t.as_str(), name, item))
 }
+
+/// The type param `B` the one callback of `h` returns when the runtime only
+/// orders it: bounded `Ord`, and named by nothing else — not the result,
+/// another argument or a callback param (`list.sort_by`'s key).
+fn key_only_var(h: &Hof) -> Option<&str> {
+    let mut callbacks = h.params.iter().filter(|(d, _)| matches!(d, DTy::Fn(..)));
+    let (Some((DTy::Fn(ps, r), _)), None) = (callbacks.next(), callbacks.next()) else { return None };
+    let DTy::Var(b) = &**r else { return None };
+    let ordered = h.bounds.iter().any(|(v, c)| v == b && *c == almide_lang::capability_bounds::Cap::Ord);
+    let alone = !mentions_var(&h.ret, b)
+        && !ps.iter().any(|p| mentions_var(p, b))
+        && h.params.iter().all(|(d, _)| matches!(d, DTy::Fn(..)) || !mentions_var(d, b));
+    (ordered && alone).then_some(b.as_str())
+}
+
+/// The callback `closure` (returning the tuple record `i`) returning the
+/// same fields as a Rust tuple: a tuple orders as the derived record order
+/// does, field by field, and std's sort runs its cheaper comparison on it.
+/// `None` unless the record derives that order and the closure spells its
+/// return type as expected.
+fn tuple_key(closure: &str, i: u16) -> Option<String> {
+    let fields = rec::tuple_fields(i)?;
+    let boxed = fields.iter().any(|f| rec::enum_field_boxed(i, *f));
+    if boxed || !crate::render_native_rec::native_order_safe(i) || !(2..=12).contains(&fields.len()) {
+        return None;
+    }
+    let ret = format!("-> {} {{ ", rec::struct_name(i));
+    let at = closure.find(&ret)?;
+    let body = closure[at + ret.len()..].strip_suffix(" }")?;
+    let tys: Vec<String> = fields.iter().map(|f| rec::owned_ty(*f)).collect();
+    let parts: Vec<String> = (0..fields.len()).map(|k| format!("__k.f{k}")).collect();
+    Some(format!("{}-> ({},) {{ let __k = {{ {body} }}; ({},) }}", &closure[..at], tys.join(", "), parts.join(", ")))
+}

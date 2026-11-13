@@ -593,7 +593,7 @@ fn plan(
     let mut env = plan_env(hof, &got, declared_return)?;
     let (lent, elem) = lent_receivers(call.args, hof, &env);
     let lent_t = lent.map(|l| l.2).or(elem.as_ref().map(|e| e.0));
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent_t, elem_lent: elem.is_some() };
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent_t, elem_lent: elem.is_some(), key: key_only_var(hof) };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
