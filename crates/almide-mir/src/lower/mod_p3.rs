@@ -525,6 +525,16 @@ impl LowerCtx {
     /// defer (or its strict-mode refusal), else the plain rebind.
     fn lower_stmt_assign_fallback(&mut self, var: VarId, value: &IrExpr) -> Result<(), LowerError> {
         if self.in_frame > 0 && is_heap_ty(&value.ty) {
+            // A frame whose ops really run where they stand (no both-arms
+            // linearization, no one-iteration loop model, no defunctionalized
+            // body): the var's own slot is rebound in place, the loop-carried
+            // slot rule (drop the old object, `SetLocal` the new one), so a read
+            // after the frame sees what the path that ran left there.
+            if self.linearized == 0 && self.model_frame == 0 && self.in_defunc_body == 0 {
+                if let Some(done) = self.try_frame_slot_rebind(var, value) {
+                    return done;
+                }
+            }
             // STRICT value mode: this defer DROPS the write. In an EXECUTING frame
             // (a `try_lower_unit_if` arm) that is a silent wrong value on the
             // verified default — `if let v = x { out = int.to_string(v) }` left
