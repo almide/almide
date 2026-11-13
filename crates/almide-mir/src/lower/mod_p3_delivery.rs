@@ -46,24 +46,4 @@ impl LowerCtx {
             }
         }
     }
-
-    /// [`Self::lower_stmt_assign_fallback`]'s in-place rebind of a heap var's own
-    /// slot inside a frame that really runs: `Some(Ok)` once rebound, `None`
-    /// (every op rolled back) where the var has no owned slot of its own or the
-    /// value has no fresh-owned producer.
-    fn try_frame_slot_rebind(&mut self, var: VarId, value: &IrExpr) -> Option<Result<(), LowerError>> {
-        let local = *self.value_of.get(&var)?;
-        if !self.live_heap_handles.contains(&local) || self.param_values.contains(&local) {
-            return None;
-        }
-        let (ops, handles) = (self.ops.len(), self.live_heap_handles.len());
-        match self.lower_scalar_loop_heap_reassign(var, value) {
-            Ok(()) => Some(Ok(())),
-            Err(_) => {
-                self.ops.truncate(ops);
-                self.live_heap_handles.truncate(handles);
-                None
-            }
-        }
-    }
 }

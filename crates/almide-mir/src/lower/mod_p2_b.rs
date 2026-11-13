@@ -420,9 +420,6 @@ pub(crate) struct LowerCtx {
     /// Raised while an arm of the both-arms linearization is lowered: its ops run whether
     /// or not the arm is taken, so nothing in it may leave the function.
     linearized: u32,
-    /// Raised while a `while` body is lowered as its one-iteration MODEL (the ops
-    /// do not run once per iteration): nothing in it may rebind a slot in place.
-    model_frame: u32,
     /// Set when [`Self::unrewritten_bang_wall`] refused a `!` in this fn. The refusal is
     /// raised inside attempts that roll back and try another route, and no later route
     /// gives that `!` its propagation, so the fn is refused once its body is lowered.

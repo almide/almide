@@ -53,11 +53,10 @@ impl LowerCtx {
         self.record_elided_calls(cond);
         let mark = self.live_heap_handles.len();
         self.in_frame += 1;
-        self.model_frame += 1;
-        let lowered = body.iter().try_for_each(|stmt| self.lower_stmt(stmt));
-        self.model_frame -= 1;
+        for stmt in body {
+            self.lower_stmt(stmt)?;
+        }
         self.in_frame -= 1;
-        lowered?;
         self.drop_arm_locals(mark);
         Ok(())
     }
