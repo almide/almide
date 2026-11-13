@@ -112,7 +112,27 @@ pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
             out.extend(dups.iter().map(|(_, v)| *v));
         }
     }
+    out.extend((0..func.ops.len()).filter_map(|i| lent_param_copy(func, i, &root)));
     out
+}
+
+/// The copy `ops[at]` makes of a borrowed heap parameter, when every use of
+/// the copy only borrows and it is never rebound, returned or handed over:
+/// the caller holds the parameter for the whole call, so the copy is the
+/// parameter's own reference (an erased newtype read through its accessor:
+/// `bytes.get(uuid.to_bytes(u), 6)`). Such a parameter stays borrowed
+/// (`native_move_params`), and a caller that only lends its argument copies
+/// nothing for the call.
+pub(crate) fn lent_param_copy(func: &MirFunction, at: usize, root: &BTreeMap<ValueId, ValueId>) -> Option<ValueId> {
+    let Op::Dup { dst, src } = func.ops[at] else { return None };
+    if !func.params.iter().any(|p| p.value == src && p.repr.is_heap()) || func.owned_params.contains(&src) || func.ret == Some(dst) {
+        return None;
+    }
+    let held = |x: ValueId| x == dst || x == src;
+    if func.ops.iter().any(|o| matches!(o, Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } if held(*x))) {
+        return None;
+    }
+    last_borrowing_use(func, at, dst, root).map(|_| dst)
 }
 
 /// The last op after `at` that reads, other than to release it, `d` or
