@@ -139,7 +139,10 @@ pub(crate) fn lent_param_copy(func: &MirFunction, at: usize, root: &BTreeMap<Val
     let given = |o: &Op| matches!(o, Op::CallFn { name, args, .. }
         if args.iter().enumerate().any(|(k, a)| matches!(a, CallArg::Handle(v) if *v == dst)
             && (crate::native_move_params::by_value(name, k) || grows(name, k))));
-    if func.ops.iter().any(given) {
+    // A copy read through its own slots (`doc.root.inner`) is the owned
+    // carrier its fields move out of when it dies: it stays a copy.
+    let slots = |o: &Op| matches!(o, Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [dst]);
+    if func.ops.iter().any(|o| given(o) || slots(o)) {
         return None;
     }
     last_borrowing_use(func, at, dst, root).map(|_| dst)
