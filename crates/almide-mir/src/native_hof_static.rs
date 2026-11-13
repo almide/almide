@@ -132,12 +132,12 @@ mod native_host_callback_tests {
         let env = Env::new();
         for lambda in [Some("visit"), None] {
             let code = tuple_callback_adapter(&env, lambda, "captured", (&[DTy::Str], &DTy::Unit),
-                (&[NativeSigKind::Str], &[]), None, false).expect("the tuple callback adapts");
+                (&[NativeSigKind::Str], &[]), (None, false)).expect("the tuple callback adapts");
             assert!(code.contains("-> ()"), "{code}");
             assert!(!code.contains("0_i64"), "void return must not fabricate a value: {code}");
         }
         assert!(tuple_callback_adapter(&env, Some("visit"), "captured", (&[DTy::Str], &DTy::Int),
-            (&[NativeSigKind::Str], &[]), None, false).is_none());
+            (&[NativeSigKind::Str], &[]), (None, false)).is_none());
     }
 
     #[test]

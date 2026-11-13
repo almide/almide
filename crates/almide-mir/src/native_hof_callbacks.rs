@@ -106,9 +106,9 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
         // A lent element the converting adapter cannot take by reference
         // keeps the copying route.
         let lent_one = side.lent && dps.len() == 1 && layout.len() == 1;
-        match tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret, lent_one) {
+        match tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), (ret, lent_one)) {
             Some(c) => { side.lent = lent_one; c }
-            None if lent_one => { side.lent = false; tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret, false)? }
+            None if lent_one => { side.lent = false; tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), (ret, false))? }
             None => return None,
         }
     } else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };

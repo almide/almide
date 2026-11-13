@@ -134,7 +134,7 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
 /// `lent`: the one param arrives by reference (a list receiver's element,
 /// `elem_lent_twin`); only an element that converts to itself is taken so.
 fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
-    (ps, moved): (&[NativeSigKind], &[bool]), ret: Option<NativeSigKind>, lent: bool) -> Option<String> {
+    (ps, moved): (&[NativeSigKind], &[bool]), (ret, lent): (Option<NativeSigKind>, bool)) -> Option<String> {
     if ps.iter().chain(ret.iter()).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
