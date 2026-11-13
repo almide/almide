@@ -265,7 +265,7 @@ pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
 
 /// Probe steps allowed per bit of the table's size. The longest cluster of a
 /// WELL-spread hash grows with the table — logarithmically: linear probing at
-/// load 3/4 (dead slots count toward it) gives a longest probe of about
+/// load 3/4, the old growth point (dead slots count toward it), gives a longest probe of about
 /// 18·log2(slots), and plain Int keys churned by delete + insert at 100 000
 /// entries (tests/map_delete_amortized_test.rs) reach 156 steps. A fixed 128
 /// therefore flagged honest maps of ~100 000 entries as flooded, and every
@@ -283,7 +283,9 @@ fn almide_map_flood_bound(slot_len: usize) -> usize {
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
-/// (load ≤ 3/4) whose slots each carry an entry position (low 32 bits) AND
+/// (load ≤ 1/2, #4707: at 3/4 a lookup's probe count varied enough that its
+/// branches mispredicted, and a 5000-key `group_by` count ran 1.11x the wasm
+/// leg; at 1/2 it runs 0.89x, for 8 more bytes per entry) whose slots each carry an entry position (low 32 bits) AND
 /// the upper 32 bits of that entry's hash. A probe rejects a slot on the tag
 /// it already loaded — it never reads `hashes[p]` (a second, dependent load
 /// into another array) — and touches the entry only on a tag match. Shared
@@ -309,7 +311,7 @@ pub struct AlmideKeyIndex {
 
 impl AlmideKeyIndex {
     pub fn with_capacity(n: usize) -> Self {
-        let slot_len = (n * 4 / 3 + 1).next_power_of_two().max(32);
+        let slot_len = (n * 2).next_power_of_two().max(32);
         AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], flooded: false }
     }
 
@@ -339,7 +341,7 @@ impl AlmideKeyIndex {
     pub fn push(&mut self, h: u64) {
         let p = self.hashes.len() as u32;
         self.hashes.push(h);
-        if self.hashes.len() * 4 > self.slots.len() * 3 {
+        if self.hashes.len() * 2 > self.slots.len() {
             self.grow(self.slots.len() * 2);
         }
         self.place(h, p);
@@ -367,7 +369,7 @@ impl AlmideKeyIndex {
             p += 1;
             keep(p - 1)
         });
-        let slot_len = (self.hashes.len() * 4 / 3 + 1).next_power_of_two().max(32);
+        let slot_len = (self.hashes.len() * 2).next_power_of_two().max(32);
         self.slots.clear();
         self.slots.resize(slot_len, ALMIDE_MAP_SLOT_EMPTY);
         for p in 0..self.hashes.len() {
