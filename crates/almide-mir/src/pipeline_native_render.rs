@@ -215,9 +215,6 @@ fn rewrite_native_linked_mir(
             f.name
         )));
     }
-    // A call of a function that only returns its parameter is a copy of
-    // the argument (an erased newtype's accessor).
-    crate::native_identity_calls::inline(functions);
     // A closure block only its direct calls named, all of them inlined, is
     // never built (no copy of what it captures).
     for f in functions.iter_mut() {
@@ -548,6 +545,9 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     // No function is known to leave the heap slots alone until this program's are read.
     crate::native_slot_takes::set_quiet(&[]);
+    // A call of a function that only returns its parameter, whose result is
+    // only lent, is a copy of the argument (an erased newtype's accessor).
+    crate::native_identity_calls::inline(&mut functions);
     rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results, test_harness)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);

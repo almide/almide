@@ -18,44 +18,67 @@
 use crate::{CallArg, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
 
-/// Replace every call of an identity function in `functions` by a copy of
-/// the argument it returns. A body that becomes an identity this way (a call
-/// of one) is one too, so the rewrite runs until no call is left to replace.
+/// Replace every call of an identity function in `functions` whose result
+/// the caller only lends by a copy of the argument it returns. A function
+/// whose body only calls an identity on its param is one too. A result the
+/// caller takes (rebinds, returns, hands on) keeps its call, and with it the
+/// call-site move the certificate states.
 pub(crate) fn inline(functions: &mut [MirFunction]) {
-    loop {
-        // The test harness's panic marker is an identity too, but its call is
-        // what names a test abort's message (`native_test_panic::is_message`).
-        let identities: BTreeMap<String, usize> = functions
-            .iter()
-            .filter(|f| !crate::native_test_harness::raw_panic(&f.name))
-            .filter_map(|f| returned_param(f).map(|k| (f.name.clone(), k)))
+    let identities = identities(functions);
+    if identities.is_empty() {
+        return;
+    }
+    for f in functions.iter_mut() {
+        let root = crate::render_native_borrow_read::roots(f);
+        let copies: Vec<(usize, Op)> = (0..f.ops.len())
+            .filter_map(|i| as_copy(&f.ops[i], &identities).filter(|_| only_lent(f, i, &root)).map(|c| (i, c)))
             .collect();
-        if identities.is_empty() {
-            return;
-        }
-        let mut changed = false;
-        for f in functions.iter_mut() {
-            for op in f.ops.iter_mut() {
-                if let Some(copy) = as_copy(op, &identities) {
-                    *op = copy;
-                    changed = true;
-                }
-            }
-        }
-        if !changed {
-            return;
+        for (i, c) in copies {
+            f.ops[i] = c;
         }
     }
 }
 
-/// The index of the parameter `f` returns a copy of, when its whole body is
-/// that copy.
-fn returned_param(f: &MirFunction) -> Option<usize> {
-    let [Op::Dup { dst, src }] = f.ops.as_slice() else { return None };
-    if f.ret != Some(*dst) || !f.owned_params.is_empty() {
+/// The identity functions of `functions` and the param each returns: a body
+/// that is a copy of a param, or a call of an identity on one. The test
+/// harness's panic marker is an identity too, but its call is what names a
+/// test abort's message (`native_test_panic::is_message`).
+fn identities(functions: &[MirFunction]) -> BTreeMap<String, usize> {
+    let mut out: BTreeMap<String, usize> = BTreeMap::new();
+    loop {
+        let before = out.len();
+        for f in functions {
+            if out.contains_key(&f.name) || crate::native_test_harness::raw_panic(&f.name) {
+                continue;
+            }
+            if let Some(k) = returned_param(f, &out) {
+                out.insert(f.name.clone(), k);
+            }
+        }
+        if out.len() == before {
+            return out;
+        }
+    }
+}
+
+/// The index of the parameter `f` returns, when its whole body is a copy of
+/// it or a call of a known identity on it.
+fn returned_param(f: &MirFunction, known: &BTreeMap<String, usize>) -> Option<usize> {
+    let [op] = f.ops.as_slice() else { return None };
+    let Op::Dup { dst, src } = as_copy(op, known).unwrap_or_else(|| op.clone()) else { return None };
+    if f.ret != Some(dst) || !f.owned_params.is_empty() {
         return None;
     }
-    f.params.iter().position(|p| p.value == *src)
+    f.params.iter().position(|p| p.value == src)
+}
+
+/// The result of the call at `i` is only lent: never rebound, returned or
+/// handed over, and every use borrows it.
+fn only_lent(f: &MirFunction, i: usize, root: &BTreeMap<ValueId, ValueId>) -> bool {
+    let Some(d) = crate::mir_ops::defined_value(&f.ops[i]) else { return false };
+    f.ret != Some(d)
+        && !f.ops.iter().any(|o| matches!(o, Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } if *x == d))
+        && crate::render_native_borrow_read::last_borrowing_use(f, i, d, root).is_some()
 }
 
 /// `op` as the copy it amounts to, when it calls an identity function on a
