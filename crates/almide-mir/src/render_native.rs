@@ -546,7 +546,7 @@ fn seed_param_ntys(
             None => repr_nty(&p.repr, true)?,
         };
         // A MOVE param (#4006 class P) arrives as the caller's own value.
-        let nty = if func.owned_params.contains(&p.value) { owned_nty(nty) } else { nty };
+        let nty = if func.owned_params.contains(&p.value) || func.inout_params.contains(&p.value) { owned_nty(nty) } else { nty };
         tys.insert(p.value, nty);
     }
     Ok(tys)

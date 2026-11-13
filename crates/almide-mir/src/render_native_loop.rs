@@ -58,6 +58,7 @@ fn render_fn(
     used_shims: &mut Vec<&'static str>,
 ) -> Result<(String, Option<NTy>), LowerError> {
     let tys = seed_param_ntys(func, sigs)?;
+    let _inout = crate::native_inout::RenderScope::enter(func);
     crate::render_native_bounds::begin(func);
     let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
@@ -189,6 +190,8 @@ fn render_fn(
                 }
                 st.out.push_str(&line);
                 st.out.push('\n');
+                // No later early release names it again.
+                EARLY_DROPPED.with(|e| e.borrow_mut().insert(*c));
             }
         }
         prev_start = st.out.len();
@@ -670,7 +673,10 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             }) =>
         {
             let t = st.tys[src];
-            if st.tys.contains_key(local) {
+            if crate::native_inout::is_rendering_inout(*local) {
+                // The caller's lent buffer (`crate::native_inout`).
+                line!("*{} = {};", var(*local), crate::render_native_move::take_expr(&var(*src)));
+            } else if st.tys.contains_key(local) {
                 line!("{} = {};", var(*local), crate::render_native_move::take_expr(&var(*src)));
             } else {
                 st.tys.insert(*local, t);

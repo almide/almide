@@ -13,6 +13,10 @@ pub(crate) fn plain_mutator(name: &str, k: usize) -> bool {
 /// Whether an argument is a place, including a callback-bearing mutator
 /// that the plain receiver publication transform deliberately does not serve.
 pub(crate) fn mutable_argument(name: &str, k: usize) -> bool {
+    // A user fn's in-out param writes the caller's buffer (`crate::native_inout`).
+    if crate::native_inout::is_inout_position(name, k) {
+        return true;
+    }
     if let Some((module, func)) = name.split_once('.') {
         if let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) {
             if program.decls.iter().any(|d| matches!(d,
