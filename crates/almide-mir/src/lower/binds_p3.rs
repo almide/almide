@@ -258,14 +258,6 @@ impl LowerCtx {
     /// allocation (cert `i`; its scope-end `Drop` = cert `d`), tracked as a materialized
     /// aggregate so a later field read / `==` may load its real slots. Mirrors
     /// [`Self::try_lower_scalar_record_construct`] with a leading tag slot.
-    /// Is `ty` a `List` ctor field the GENERATED variant drop can free — a `List[scalar]`
-    /// (the drop body's flat `rc_dec` is a full free: scalar elements own nothing), a
-    /// `List[String]` (freed per-element via the generic `__drop_list_str`), or a
-    /// `List[<rich variant>]` (freed per-element via the generated mutually-recursive
-    /// `$__drop_list_<E>`)? The construction-side mirror of the field loop in
-    /// [`crate::lower::generate_variant_drop_sources`] — a shape outside this set
-    /// (`List[<flat variant>]`, `Map`) gets NO free statement there, so admitting it here
-    /// would build a value whose drop leaks.
     /// Is an `Option[payload]` ctor/record field freed EXACTLY by the generated
     /// drops? Mirrors the drop generators' Option→List normalization (#1064):
     /// scalar, String, flat variant, or rich (recursive-drop) variant.
@@ -279,6 +271,27 @@ impl LowerCtx {
                 .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
     }
 
+    /// A `Map[String | scalar, scalar]` ctor field on the native render: the variant
+    /// renders as an owned Rust type whose `AlmideMap` field is freed by the variant's
+    /// own scope-end drop, so construction moves the map in and nothing can leak. A
+    /// Float key has no native map spelling, and a map of heap values stays refused
+    /// (`ctor_aggregate_list_field`), as does the wasm leg.
+    fn ctor_field_native_owned_map(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Map, a) = ty else { return false };
+        crate::lower::owned_tco_slots()
+            && a.len() == 2
+            && (matches!(a[0], Ty::String) || (!is_heap_ty(&a[0]) && !matches!(a[0], Ty::Float)))
+            && !is_heap_ty(&a[1])
+    }
+
+    /// Is `ty` a `List` ctor field admitted on every leg — a `List[scalar]`, a
+    /// `List[String]`, a `List[<rich variant>]`, a `List[<flat variant>]` or a list of
+    /// scalar tuples? The set was first drawn to mirror the field loop of the per-type
+    /// variant drop generator; that generator was deleted with the old wasm pipeline
+    /// (#2935, #2950). The wasm product leg now frees variant fields structurally from
+    /// the IR types (almide-wasm `rc_shape`), and the native render through Rust
+    /// ownership. The set is kept as it was; widening it is a per-shape decision.
     fn ctor_list_field_drop_freeable(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         let Ty::Applied(TypeConstructorId::List, a) = ty else { return false };
@@ -462,14 +475,14 @@ impl LowerCtx {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
+        if self.ctor_field_native_owned_map(&arg.ty) {
+            let obj = self.lower_owned_heap_field(arg)?;
+            return Some((obj, true));
+        }
         if self.ctor_list_field_drop_freeable(&arg.ty) {
-            // A `List[scalar]` / `List[<rich variant>]` ctor field (ADT brick 5:
-            // `ValArray(items)` — the gguf read_array accumulator): admitted EXACTLY when
-            // the generated `$__drop_<T>` body frees it (flat `rc_dec` / `__drop_list_<E>`
-            // — see `generate_variant_drop_sources`' field loop), so construction and drop
-            // can never disagree. A Var arg is `Dup`'d (co-owned, rc-aware on both drop
-            // paths); a `List[String]` / `List[<flat variant>]` / `Map` field stays walled
-            // (the generator emits no free for those — admitting one would leak).
+            // A `List` ctor field of the admitted set (ADT brick 5: `ValArray(items)` —
+            // the gguf read_array accumulator; see `ctor_list_field_drop_freeable`). A Var
+            // arg is `Dup`'d (co-owned, rc-aware on both drop paths).
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }

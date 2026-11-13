@@ -129,7 +129,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(), inout_params: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty), slot_origins: Default::default(),
+                    aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -244,7 +244,7 @@ impl LowerCtx {
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
                     call_moves: Default::default(), inout_params: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty), slot_origins: Default::default(),
+                    aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -311,7 +311,7 @@ impl LowerCtx {
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
             call_moves: Default::default(), inout_params: Default::default(),
-            aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), &Ty::option(ty.clone())), slot_origins: Default::default(),
+            aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), &Ty::option(ty.clone())), slot_origins: Default::default(),
         });
         true
     }
