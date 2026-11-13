@@ -117,7 +117,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
     if is_effect
         && !matches!(fret, FloorRet::RuntimeResult(..))
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat | FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt)
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResListInt | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat | FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt)
         && !counted_host_op
     {
         return Err("an effect fn whose return is not a Result carrier".into());

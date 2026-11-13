@@ -188,6 +188,7 @@ fn result_ret_agrees(r: FloorRet, t: &str) -> bool {
             ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
         FloorRet::ResBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<u8>" && string(err)),
+        FloorRet::ResListInt => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<i64>" && string(err)),
         FloorRet::ResProcessStatus => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideProcessStatus" && string(err)),
         FloorRet::ResBytesStrInt => result_parts(t).is_some_and(|(ok, err)| ok == "(Vec<u8>,AlmideString,i64)" && string(err)),
         FloorRet::ResFileStat => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideFileStat" && string(err)),
@@ -231,6 +232,9 @@ fn floor_ret_result_str_container(ok: &TypeExpr) -> Option<FloorRet> {
         }
         TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some(VALUE_TYPE) => {
             return Some(FloorRet::ResListValue)
+        }
+        TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1 && simple(&a[0]) == Some("Int") => {
+            Some(FloorRet::ResListInt)
         }
         TypeExpr::Generic { name, args: a } if name.as_str() == "List" && a.len() == 1
             && matches!(&a[0], TypeExpr::Tuple { elements } if elements.iter().map(simple).collect::<Vec<_>>() == [Some("String"), Some(VALUE_TYPE)]) => Some(FloorRet::ResStrValuePairs),
