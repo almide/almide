@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// The Result block's tag word: right after the payload handle in slot 0.
-const RESULT_TAG_OFFSET: i64 = BLOCK_HEADER as i64 + 4;
+pub(crate) const RESULT_TAG_OFFSET: i64 = BLOCK_HEADER as i64 + 4;
 
 /// A Result of two scalar payloads: the materializers build its Ok as
 /// `Init::ResOkScalar` (length word 0) and its Err as a one-slot block

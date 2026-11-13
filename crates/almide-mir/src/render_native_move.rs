@@ -356,39 +356,6 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
     None
 }
 
-/// Whether `src`, read at `ops[at]`, is rebound (`SetLocal`) later in the
-/// block `at` sits in (not inside a nested `if` or loop) before any further
-/// read: the rebind dominates everything after, the loop's back edge
-/// included, so the read is the old value's last (`m = map.set(m, k, v)`).
-fn rebound_before_read(func: &MirFunction, at: usize, src: ValueId) -> bool {
-    let mut depth = 0usize;
-    let mut reads = Vec::new();
-    for op in &func.ops[at + 1..] {
-        match op {
-            Op::IfThen { .. } | Op::LoopStart => depth += 1,
-            Op::EndIf { .. } | Op::LoopEnd | Op::Else { .. } if depth == 0 => return false,
-            Op::EndIf { .. } | Op::LoopEnd => depth -= 1,
-            _ => {}
-        }
-        if depth == 0 {
-            if let Op::SetLocal { local, src: s } = op {
-                if *local == src {
-                    return *s != src;
-                }
-            }
-        }
-        if bookkeeping(op) {
-            continue;
-        }
-        reads.clear();
-        crate::mir_ops::op_reads(op, &mut reads);
-        if reads.contains(&src) {
-            return false;
-        }
-    }
-    false
-}
-
 /// Whether a call's arg `src` at `ops[at]` may be moved into a by-value
 /// runtime param: the last-use rule above, or a read the value's own rebind
 /// follows before any other read. Same eligibility (owned kind with a
@@ -408,6 +375,11 @@ pub(crate) fn moves_at_call(
     }
     // (The function's result is fine here: what it returns is the rebound
     // value, read after the rebind.)
+    // An in-out param (`crate::native_inout`) is the caller's place behind
+    // `&mut`: a read its own rebind follows takes the old value out of it.
+    if func.inout_params.contains(&src) {
+        return rebind::rebound_before_read(func, at, src, true);
+    }
     if func.params.iter().any(|p| p.value == src) && !func.owned_params.contains(&src) {
         return false;
     }
@@ -415,7 +387,7 @@ pub(crate) fn moves_at_call(
         .ops
         .iter()
         .any(|op| matches!(op, Op::Dup { dst, src: s } if *s == src && borrow_arms.contains(dst)));
-    !joined && rebound_before_read(func, at, src)
+    !joined && rebind::rebound_before_read(func, at, src, false)
 }
 
 thread_local! {
@@ -510,10 +482,12 @@ pub(crate) fn set_stack_lits(func: &MirFunction, user_fns: &std::collections::BT
         }
         let allowed: Vec<ValueId> = match op {
             Op::ListLit { dst, .. } | Op::Alloc { dst, init: crate::Init::IntList(_), .. } => vec![*dst],
+            // (A buffer lent to an in-out param is written, not borrowed.)
             Op::CallFn { name, args, .. } if user_fns.contains(name.as_str()) => args
                 .iter()
-                .filter_map(|a| match a {
-                    crate::CallArg::Handle(v) => Some(*v),
+                .enumerate()
+                .filter_map(|(k, a)| match a {
+                    crate::CallArg::Handle(v) if !crate::native_inout::is_inout_position(name, k) => Some(*v),
                     _ => None,
                 })
                 .collect(),
@@ -675,13 +649,37 @@ pub(crate) fn result_param_dies(func: &MirFunction, at: usize, base: ValueId) ->
 
 /// The expression that moves a payload out of its dying carrier `base` at
 /// `ops[at]`: the noted `take`, or for a String-Ok carrier that moves whole
-/// ([`carrier_moves_whole`]) the binding itself, matched by value.
+/// ([`carrier_moves_whole`]) the binding itself, matched by value. A Result
+/// carrier that moves whole is matched by value too: the side's payload is
+/// the binding's own, and no `Default` is written back into a carrier about
+/// to be dropped (`match &mut` kept the carrier's address taken, so its dead
+/// stores stayed: T0ok's err side, 1.26x against the by-value match).
 pub(crate) fn payload_move(func: &MirFunction, at: usize, base: ValueId, kind: Option<NTy>, take: String) -> String {
-    if kind == Some(NTy::ResStr) && carrier_moves_whole(func, at, base) {
-        format!("match {} {{ Ok(s) | Err(s) => s }}", crate::render_native::var(base))
-    } else {
-        take
+    let b = crate::render_native::var(base);
+    match kind {
+        Some(NTy::ResStr) if carrier_moves_whole(func, at, base) => format!("match {b} {{ Ok(s) | Err(s) => s }}"),
+        Some(NTy::Rec(_)) => match by_value_side(&take, &b) {
+            Some(by_value) if carrier_moves_whole(func, at, base) => by_value,
+            _ => take,
+        },
+        _ => take,
     }
+}
+
+/// `match &mut b { S(v) => std::mem::take(v), O(_) => X }` (a Result side
+/// taken out of carrier `b`, render_native_carrier) as the by-value match
+/// `match b { S(v) => v, O(_) => X }`; any other take is not one.
+fn by_value_side(take: &str, b: &str) -> Option<String> {
+    let rest = take.strip_prefix(&format!("match &mut {b} {{ "))?;
+    let (side, rest) = rest.split_once("(v) => std::mem::take(v), ")?;
+    if !matches!(side, "Ok" | "Err") {
+        return None;
+    }
+    let (other, absent) = rest.strip_suffix(" }")?.split_once("(_) => ")?;
+    if !matches!(other, "Ok" | "Err") || other == side || !matches!(absent, "unreachable!()" | "Default::default()") {
+        return None;
+    }
+    Some(format!("match {b} {{ {side}(v) => v, {other}(_) => {absent} }}"))
 }
 
 /// The carrier `base` is bound once, in the same loop round as the copy at
@@ -746,6 +744,9 @@ pub(crate) fn set_rebound(func: &MirFunction) {
         Op::SetLocal { local, .. } => Some(*local),
         _ => None,
     }));
+    // A buffer lent to an in-out param (`crate::native_inout`) is rewritten
+    // in place by the call: it holds other contents after it.
+    set.extend(crate::native_inout::lent_values(func));
     REBOUND.with(|m| *m.borrow_mut() = set);
     CARRIER_PARAMS.with(|m| m.borrow_mut().clear());
 }
@@ -771,12 +772,21 @@ thread_local! {
 }
 
 pub(crate) fn take_expr(code: &str) -> String {
-    let once = code
-        .strip_prefix('v')
-        .and_then(|n| n.parse::<u32>().ok())
-        .is_some_and(|n| moves_as_itself(ValueId(n)));
-    if once && !drill_no_moves() {
+    let id = code.strip_prefix('v').and_then(|n| n.parse::<u32>().ok()).map(ValueId);
+    let inout = id.is_some_and(crate::native_inout::is_rendering_inout);
+    if !inout && id.is_some_and(moves_as_itself) && !drill_no_moves() {
         code.to_string()
+    } else {
+        take_place(code)
+    }
+}
+
+/// `std::mem::take` of the binding `code`: an in-out param is `&mut T`
+/// already, its place taken through it.
+pub(crate) fn take_place(code: &str) -> String {
+    let id = code.strip_prefix('v').and_then(|n| n.parse::<u32>().ok()).map(ValueId);
+    if id.is_some_and(crate::native_inout::is_rendering_inout) {
+        format!("std::mem::take({code})")
     } else {
         format!("std::mem::take(&mut {code})")
     }
@@ -784,3 +794,5 @@ pub(crate) fn take_expr(code: &str) -> String {
 
 #[path = "render_native_move_alias.rs"]
 mod aliases;
+#[path = "render_native_move_rebind.rs"]
+mod rebind;

@@ -161,7 +161,9 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
     for p in &func.params {
         if p.repr.is_heap() {
             s.of.insert(p.value, p.value);
-            if func.owned_params.contains(&p.value) {
+            // An IN-OUT param's line opens with the reference its caller
+            // lent and closes with the hand-back `Consume` (`native_inout`).
+            if func.owned_params.contains(&p.value) || func.inout_params.contains(&p.value) {
                 s.event(p.value, 'i');
             }
         }
@@ -262,9 +264,11 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
     let merge_credits = merge_dst_i_credits(func);
     // A copy-on-write `Dup` (#3321) opens its own line with `i`, not `a`: the
     // same one +1, backed by the same `Dup` op, moved from the `a` count to the
-    // `i` count.
+    // `i` count. An IN-OUT param's opening `i` is backed by the reference its
+    // caller lent for the call (`native_inout`), one per such param.
+    let lent = func.params.iter().filter(|p| p.repr.is_heap() && func.inout_params.contains(&p.value)).count();
     // Single-condition decisions (MC/DC ledger, #566): && as early return.
-    if i != allocs + heap_results + merge_credits + cow_opened {
+    if i != allocs + heap_results + merge_credits + cow_opened + lent {
         return false;
     }
     a + cow_opened == dups
@@ -745,7 +749,7 @@ fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
     let mut roots: BTreeSet<ValueId> = func
         .params
         .iter()
-        .filter(|p| p.repr.is_heap() && !func.owned_params.contains(&p.value))
+        .filter(|p| p.repr.is_heap() && !func.owned_params.contains(&p.value) && !func.inout_params.contains(&p.value))
         .map(|p| p.value)
         .collect();
     for op in &func.ops {
