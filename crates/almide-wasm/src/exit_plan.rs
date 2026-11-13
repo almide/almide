@@ -188,6 +188,13 @@ impl Emitter<'_> {
             return;
         }
         let raw = if self.tail_release_allowed { Default::default() } else { raw_address_sources(body, &binds) };
+        self.carry_binds(binds, |v| raw.contains(v));
+    }
+
+    /// Record `binds` as loop-carried owner locals (see
+    /// [`Self::populate_loop_carried`]); `raw` names the ones a raw address
+    /// may be read through.
+    fn carry_binds(&mut self, binds: Vec<almide_ir::VarId>, raw: impl Fn(&almide_ir::VarId) -> bool) {
         for v in binds {
             let Some(&(idx, ty)) = self.locals.get(&v) else { continue };
             if idx < self.rc_param_ceiling || self.cells.contains(&v) || self.deferred_ranges.contains_key(&v) || !self.rc_droppable(ty) {
@@ -195,10 +202,27 @@ impl Emitter<'_> {
             }
             self.loop_carried.insert(idx);
             self.owned_ty.entry(idx).or_insert(ty);
-            if raw.contains(&v) {
+            if raw(&v) {
                 self.loop_carried_raw.insert(idx);
             }
         }
+    }
+
+    /// #4648: a `for` / `while` body is the same shape as a loop-form frame:
+    /// its `let`s are frame credits whose previous occupant only the next
+    /// pass's rebind releases (stmts_loop.rs). An early exit lowered before a
+    /// bind (`let m = f(i)!` exits inside its own initializer) runs on a pass
+    /// after that bind ran, so the local holds the block an earlier pass bound;
+    /// an error or guard return reaches neither the rebind nor the epilogue,
+    /// and that block leaked. The body's binds join the loop-carried set while
+    /// it is lowered; the returned pair restores the sets after it. Under the
+    /// raw-address rule every one is treated as a raw source (a `return_call`
+    /// keeps it: leak, never a dangle).
+    pub(crate) fn carry_loop_body_binds(&mut self, body: &[almide_ir::IrStmt]) -> (BTreeSet<u32>, BTreeSet<u32>) {
+        let saved = (self.loop_carried.clone(), self.loop_carried_raw.clone());
+        let all_raw = !self.tail_release_allowed;
+        self.carry_binds(stmt_binds(body), |_| all_raw);
+        saved
     }
 
     /// The ONE writer of a frame's exit releases. Safe by the epilogue's
@@ -477,25 +501,35 @@ pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
 
 /// The `let` variables of a frame's body, lifted lambdas not entered.
 fn frame_binds(body: &almide_ir::IrExpr) -> Vec<almide_ir::VarId> {
-    struct Scan(Vec<almide_ir::VarId>);
-    impl almide_ir::visit::IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-            if !matches!(e.kind, almide_ir::IrExprKind::Lambda { .. }) {
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-        fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
-            if let almide_ir::IrStmtKind::Bind { var, .. } = &s.kind
-                && !self.0.contains(var)
-            {
-                self.0.push(*var);
-            }
-            almide_ir::visit::walk_stmt(self, s);
-        }
-    }
-    let mut s = Scan(Vec::new());
+    let mut s = BindScan(Vec::new());
     almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
     s.0
+}
+
+/// The `let` variables of a loop body (#4648), lifted lambdas not entered.
+fn stmt_binds(body: &[almide_ir::IrStmt]) -> Vec<almide_ir::VarId> {
+    let mut s = BindScan(Vec::new());
+    for stmt in body {
+        almide_ir::visit::IrVisitor::visit_stmt(&mut s, stmt);
+    }
+    s.0
+}
+
+struct BindScan(Vec<almide_ir::VarId>);
+impl almide_ir::visit::IrVisitor for BindScan {
+    fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+        if !matches!(e.kind, almide_ir::IrExprKind::Lambda { .. }) {
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+        if let almide_ir::IrStmtKind::Bind { var, .. } = &s.kind
+            && !self.0.contains(var)
+        {
+            self.0.push(*var);
+        }
+        almide_ir::visit::walk_stmt(self, s);
+    }
 }
 
 /// Is a call in TAIL position of `e` (the branches of an `if` / `match`, a
