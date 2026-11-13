@@ -20,8 +20,12 @@ struct FnArgCx<'a> {
     /// The op index, which names the env array.
     at: usize,
     bounds: &'a [(String, almide_lang::capability_bounds::Cap)],
-    /// The type param of a lent `Option` receiver ([`lent_var`]).
+    /// The type param of a lent `Option` receiver ([`lent_var`]), or of a
+    /// list receiver whose elements are lent ([`elem_lent_twin`]).
     lent: Option<&'a str>,
+    /// `lent` names a list receiver's element: the value-converting adapter
+    /// may take it by reference too.
+    elem_lent: bool,
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
@@ -96,10 +100,18 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     let name = format!("__env_{}_{}", cx.at, side.prelude.len());
     if tuples && ret == Some(NativeSigKind::F64) { side.shims.push(LANE_F64); }
     // The params that take a lent receiver's payload: by reference.
-    let lent: Vec<bool> = dps.iter().map(|d| !tuples && cx.lent.is_some_and(|t| matches!(d, DTy::Var(v) if v == t))).collect();
+    let lent: Vec<bool> = dps.iter().map(|d| (!tuples || cx.elem_lent) && cx.lent.is_some_and(|t| matches!(d, DTy::Var(v) if v == t))).collect();
     side.lent = lent.contains(&true);
-    let closure = if tuples { tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret)? }
-        else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
+    let closure = if tuples {
+        // A lent element the converting adapter cannot take by reference
+        // keeps the copying route.
+        let lent_one = side.lent && dps.len() == 1 && layout.len() == 1;
+        match tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret, lent_one) {
+            Some(c) => { side.lent = lent_one; c }
+            None if lent_one => { side.lent = false; tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), ret, false)? }
+            None => return None,
+        }
+    } else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
     bind_env(side, &name, (*blk, t), slots, lambda.is_none())?;
     Some(closure)
 }

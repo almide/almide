@@ -131,22 +131,31 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
     })
 }
 
+/// `lent`: the one param arrives by reference (a list receiver's element,
+/// `elem_lent_twin`); only an element that converts to itself is taken so.
 fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps, dret): (&[DTy], &DTy),
-    (ps, moved): (&[NativeSigKind], &[bool]), ret: Option<NativeSigKind>) -> Option<String> {
+    (ps, moved): (&[NativeSigKind], &[bool]), ret: Option<NativeSigKind>, lent: bool) -> Option<String> {
     if ps.iter().chain(ret.iter()).any(|k| matches!(k, NativeSigKind::Narrow { .. })) { return None; }
     let mut params = Vec::new();
     let mut setup = Vec::new();
     let mut args = Vec::new();
     for (i, d) in dps.iter().enumerate() {
-        params.push(format!("__p{i}: {}", runtime_type(env, d)?));
+        params.push(format!("__p{i}: {}{}", if lent { "&" } else { "" }, runtime_type(env, d)?));
     }
     for (i, ((d, code), k)) in callback_layout(dps, ps.len())?.iter().zip(ps).enumerate() {
         let ty = clo::owned_nty(*k);
         let value = convert_callback_value(env, d, ty, code, true)?;
+        let heap = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_));
+        if lent && (value != *code || !heap) { return None; }
         setup.push(format!("let __a{i} = {value};"));
         // A param the lambda takes over gets the converted value itself.
-        let borrow = matches!(ty, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) && !moved.get(i).copied().unwrap_or(false);
-        args.push(format!("{}__a{i}", if borrow { "&" } else { "" }));
+        let taken = moved.get(i).copied().unwrap_or(false);
+        let borrow = heap && !taken;
+        args.push(match (lent, taken) {
+            (true, true) => format!("__a{i}.clone()"),
+            (true, false) => format!("__a{i}"),
+            _ => format!("{}__a{i}", if borrow { "&" } else { "" }),
+        });
     }
     let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
