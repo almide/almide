@@ -160,6 +160,12 @@ impl LowerCtx {
                  a modeled (non-executable) frame"
             )));
         }
+        // A heap element on native owned slots takes the same functional rebind
+        // a local list does (`g = list.set(g, i, v)` after the C-067 guard): the
+        // guard reads the slot fresh and the global Assign path owns the swap.
+        if crate::lower::owned_tco_slots() && is_heap_ty(&value.ty) && crate::lower::is_heap_ty(&gty) {
+            return self.lower_heap_elem_index_rebind(target, index, value);
+        }
         if is_heap_ty(&value.ty)
             || !crate::lower::is_heap_ty(&gty)
             || crate::lower::is_heap_elem_list_ty(&gty)
@@ -263,7 +269,9 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         // A shared-cell list (native owned slots) is read out of its cell for the
         // guard, as every other reference to it is; the rebind below writes the cell.
-        let guarded = if crate::lower::owned_tco_slots() && self.cell_of.contains_key(&target) {
+        let guarded = if crate::lower::owned_tco_slots()
+            && (self.cell_of.contains_key(&target)
+                || (!self.value_of.contains_key(&target) && crate::lower::mutable_global_info(target).is_some())) {
             self.value_or_global(target)
         } else {
             self.value_for(target)

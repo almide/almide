@@ -47,3 +47,35 @@ test "let-bind of a mutable global read" {
   assert(region_count == 2)
   assert(speeds[1] == 6.5)
 }
+
+// A HEAP element (the ceangal font table class): the write goes through the
+// global slot too, and an earlier copy of the list keeps its old elements.
+type Face = { data: Bytes, ok: Bool }
+
+var faces: List[Face] = list.repeat({ data: bytes.new(), ok: false }, 3)
+
+var names: List[String] = ["a", "b"]
+
+fn load_face(slot: Int, n: Int) -> Unit = {
+  faces[slot] = { data: bytes.zeros(n), ok: n > 0 }
+}
+
+test "module var heap-element index-assign" {
+  let before = faces
+  load_face(1, 2)
+  load_face(2, 0)
+  assert_eq(list.map(faces, (f) => bytes.len(f.data)), [0, 2, 0])
+  assert_eq(list.map(faces, (f) => f.ok), [false, true, false])
+  assert_eq(list.map(before, (f) => bytes.len(f.data)), [0, 0, 0])
+  names[1] = "z"
+  assert_eq(names, ["a", "z"])
+}
+
+test "module var heap-element index-assign in a counted loop" {
+  for slot in 0..<3 {
+    if not faces[slot].ok then {
+      faces[slot] = { data: bytes.zeros(slot), ok: true }
+    } else ()
+  }
+  assert_eq(list.map(faces, (f) => f.ok), [true, true, true])
+}
