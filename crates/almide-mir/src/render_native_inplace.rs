@@ -57,6 +57,8 @@ thread_local! {
     static SITES: std::cell::RefCell<BTreeMap<usize, Site>> = const { std::cell::RefCell::new(BTreeMap::new()) };
     /// The second argument of each candidate call, where it is a handle.
     static KEYS: std::cell::RefCell<BTreeMap<usize, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+    /// The second argument of every call, where it is a handle.
+    static CALL_KEYS: std::cell::RefCell<BTreeMap<usize, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
     /// The rebinds whose call was rendered in the slot: they render nothing.
     static DONE: std::cell::RefCell<BTreeSet<usize>> = const { std::cell::RefCell::new(BTreeSet::new()) };
 }
@@ -72,6 +74,8 @@ pub(crate) fn begin(func: &MirFunction) {
         _ => None,
     };
     KEYS.with(|k| *k.borrow_mut() = sites.keys().filter_map(key).collect());
+    let calls = if crate::render_native_move::drill_no_moves() { BTreeMap::new() } else { (0..func.ops.len()).filter_map(|i| key(&i)).collect() };
+    CALL_KEYS.with(|k| *k.borrow_mut() = calls);
     SITES.with(|s| *s.borrow_mut() = sites);
     DONE.with(|d| d.borrow_mut().clear());
 }
@@ -155,7 +159,9 @@ fn shared_key(i: usize, kind: Kind, twin: &str, rest: &str) -> Option<(String, V
 /// when `i` is a candidate site and the text is the one statement described
 /// in the module doc. The twin's items join `used_shims`.
 pub(crate) fn rewrite(i: usize, tys: &BTreeMap<ValueId, NTy>, out: &mut String, start: usize, used_shims: &mut Vec<&'static str>) {
-    let Some((kind, s, d, rebind)) = SITES.with(|m| m.borrow().get(&i).copied()) else { return };
+    let Some((kind, s, d, rebind)) = SITES.with(|m| m.borrow().get(&i).copied()) else {
+        return str_key(i, tys, out, start, used_shims);
+    };
     let Some(text) = out.get(start..) else { return };
     let (slot, head) = (var(s), format!("let mut {}: ", var(d)));
     // One statement, on the last line; whatever precedes it stays.
@@ -192,9 +198,53 @@ pub(crate) fn rewrite(i: usize, tys: &BTreeMap<ValueId, NTy>, out: &mut String, 
     DONE.with(|m| m.borrow_mut().insert(rebind));
 }
 
+/// A consuming call that is not an in-slot site, whose key argument is the
+/// bytes of a borrowed string copied for the call (`AlmideString::from(k)`,
+/// `k: &str`), renders through the runtime's borrowed-string-key twin
+/// ([`crate::native_floor::str_key_twin`]) with `k` itself: the key is copied
+/// only where the call stores it. A map updated through a closure's shared
+/// cell (`m[k] = v` inside a lambda) copied its key on every update, and
+/// freed the copy again whenever the key was already there.
+fn str_key(i: usize, tys: &BTreeMap<ValueId, NTy>, out: &mut String, start: usize, used_shims: &mut Vec<&'static str>) {
+    let Some(key) = CALL_KEYS.with(|k| k.borrow().get(&i).copied()) else { return };
+    if tys.get(&key) != Some(&NTy::StrRef) {
+        return;
+    }
+    let Some(text) = out.get(start..) else { return };
+    let body = text.trim_end_matches('\n');
+    let line_at = body.rfind('\n').map_or(0, |n| n + 1);
+    let line = &body[line_at..];
+    let Some((head, call)) = line.split_once(" = ") else { return };
+    if !head.trim_start().starts_with("let mut ") || !call.ends_with(");") {
+        return;
+    }
+    let Some((symbol, args)) = call.split_once('(') else { return };
+    // The first argument holds no top-level comma: no call, tuple or generic.
+    let Some((first, rest)) = args.split_once(", ") else { return };
+    if first.contains(['(', '<', '[', '{']) && !first.starts_with("std::mem::take(&mut ") {
+        return;
+    }
+    let copied = format!("AlmideString::from({})", var(key));
+    let Some(after) = rest.strip_prefix(copied.as_str()).filter(|a| a.starts_with(", ") || *a == ");") else { return };
+    let Some((twin, items)) = crate::native_floor::str_key_twin(symbol) else { return };
+    let edited = format!("{}{head} = {twin}({first}, {}{after}\n", &body[..line_at], var(key));
+    out.truncate(start);
+    out.push_str(&edited);
+    used_shims.extend(items);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_borrowed_string_key_twin_is_paired_from_the_signatures() {
+        let twin = |s: &str| crate::native_floor::str_key_twin(s).map(|t| t.0);
+        assert_eq!(twin("almide_rt_map_set").as_deref(), Some("almide_rt_map_set_str"));
+        // No `_str` twin, or one whose key is not the body's type parameter.
+        assert_eq!(twin("almide_rt_map_get"), None);
+        assert_eq!(twin("almide_rt_map_set_str"), None);
+    }
 
     #[test]
     fn an_identifier_is_matched_whole() {

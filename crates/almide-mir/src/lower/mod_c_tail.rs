@@ -589,6 +589,7 @@ include!("desugar_guard_b.rs");
 include!("desugar_guard_c.rs");
 include!("desugar_main_payload.rs");
 include!("cells.rs");
+include!("cells_field_write.rs");
 include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");
 include!("mod_p2_b.rs");

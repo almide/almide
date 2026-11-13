@@ -13,6 +13,11 @@ struct RuntimeScan {
     /// inherent impls and its impls of std traits.
     types: Vec<(&'static str, &'static str)>,
     impls: Vec<(&'static str, &'static str)>,
+    /// Types with an inherent or trait impl under a `#[cfg]` gate the floor
+    /// cannot carry: such a type is never taken alone, since a body calling a
+    /// method of the dropped impl would pass the closure and fail at rustc.
+    /// A host module carries one whole, every twin under its own gate.
+    gated_impl_types: BTreeSet<&'static str>,
     fns: BTreeSet<&'static str>,
 }
 
@@ -31,6 +36,8 @@ impl RuntimeScan {
         if kind == ItemKind::Impl {
             if !attributed || native_only_cfg_impl(text) {
                 self.impls.push((name, text));
+            } else {
+                self.gated_impl_types.insert(name);
             }
             return;
         }
@@ -56,7 +63,8 @@ impl RuntimeScan {
 }
 
 fn build_runtime_index() -> RuntimeIndex {
-    let RuntimeScan { mut items, mut seen, modules, mut types, mut impls, fns } = RuntimeScan::scan();
+    let RuntimeScan { mut items, mut seen, modules, mut types, mut impls, gated_impl_types, fns } = RuntimeScan::scan();
+    types.retain(|(name, _)| !gated_impl_types.contains(name));
     items.retain(|n, _| seen.get(n) == Some(&1));
     take_modules(&mut items, &seen, modules);
     take_complementary_cfg_functions(&mut items, &seen);
@@ -102,10 +110,10 @@ fn build_runtime_index() -> RuntimeIndex {
         trait_methods.extend(trait_method_names(src));
         runtime_traits.extend(trait_names(src));
     }
-    let mut idx = take_prelude_traits(prelude, &runtime_traits, RuntimeIndex { items, defined, trait_methods, fns, fs_built: BTreeSet::new() });
+    let mut idx = take_prelude_traits(prelude, &runtime_traits, RuntimeIndex { items, defined, trait_methods, fns, host_built: BTreeMap::new() });
     take_types(&mut idx, &seen, types, &impls, &runtime_traits);
     take_runtime_traits(&mut idx, &seen, &impls);
-    take_fs_host_module(&mut idx);
+    take_host_modules(&mut idx);
     // The same std-only kernel module the ordinary native runtime embeds.
     // Keep its target-feature implementations and cfg twins together.
     idx.items.insert("almide_kernel", RtItem {
@@ -140,7 +148,7 @@ fn take_modules(
 /// every prelude impl of it, taken by any of its methods or its name.
 /// Runtime types carry their own impls of these traits when taken below.
 fn take_prelude_traits(prelude: &'static str, runtime_traits: &BTreeSet<&'static str>, idx: RuntimeIndex) -> RuntimeIndex {
-    let RuntimeIndex { mut items, defined, mut trait_methods, fns, fs_built } = idx;
+    let RuntimeIndex { mut items, defined, mut trait_methods, fns, host_built } = idx;
     let traits: Vec<_> = prelude_traits(prelude)
         .into_iter()
         .filter(|(name, ..)| !runtime_traits.contains(name) && !items.contains_key(name))
@@ -154,7 +162,7 @@ fn take_prelude_traits(prelude: &'static str, runtime_traits: &BTreeSet<&'static
     }
     // An impl for a type the header cannot carry (it reaches such a
     // name) stays behind: no carried body holds a value of that type.
-    let provisional = RuntimeIndex { items, defined, trait_methods, fns, fs_built };
+    let provisional = RuntimeIndex { items, defined, trait_methods, fns, host_built };
     let mut taken: Vec<(&'static str, &'static str, Vec<&'static str>)> = Vec::new();
     for (name, decl, impls, methods) in traits {
         let mut whole = String::from(decl);
@@ -164,14 +172,14 @@ fn take_prelude_traits(prelude: &'static str, runtime_traits: &BTreeSet<&'static
         }
         taken.push((name, &*Box::leak(whole.into_boxed_str()), methods));
     }
-    let RuntimeIndex { mut items, defined, trait_methods, fns, fs_built } = provisional;
+    let RuntimeIndex { mut items, defined, trait_methods, fns, host_built } = provisional;
     for (name, whole, methods) in taken {
         items.insert(name, RtItem { text: whole });
         for m in methods {
             items.insert(m, RtItem { text: whole });
         }
     }
-    RuntimeIndex { items, defined, trait_methods, fns, fs_built }
+    RuntimeIndex { items, defined, trait_methods, fns, host_built }
 }
 
 /// A runtime type travels with its inherent impls and its impls of std or
@@ -230,14 +238,21 @@ fn take_runtime_traits(idx: &mut RuntimeIndex, seen: &BTreeMap<&'static str, usi
     }
 }
 
-/// Make the fs host module's `#[cfg]` twins, its modules and its types
+/// [`take_host_module`] for every host module.
+fn take_host_modules(idx: &mut RuntimeIndex) {
+    for module in HOST_MODULES {
+        take_host_module(idx, module);
+    }
+}
+
+/// Make a host module's `#[cfg]` twins, its modules and its types
 /// takeable: each name defined more than once or under a gate becomes one
 /// item of all its definitions (attributes kept), a module one item of its
 /// whole text, a type one item with every impl the module gives it of a trait
 /// the runtime does not define (as `take_types` carries a type). Every other
 /// top-level fn and const stays the item it was.
-fn take_fs_host_module(idx: &mut RuntimeIndex) {
-    let Some(src) = fs_host_source() else { return };
+fn take_host_module(idx: &mut RuntimeIndex, module: &'static str) {
+    let Some(src) = host_source(module) else { return };
     let items = scan_items(src, true);
     let mut defs: BTreeMap<&'static str, Vec<(ItemKind, &'static str, bool)>> = BTreeMap::new();
     for &(kind, name, text, attributed) in &items {
@@ -245,7 +260,6 @@ fn take_fs_host_module(idx: &mut RuntimeIndex) {
             defs.entry(name).or_default().push((kind, text, attributed));
         }
     }
-    let mut built = BTreeSet::new();
     for (name, ds) in defs {
         let is_mod = ds.iter().any(|(k, t, _)| *k == ItemKind::Other && lex(t).iter().take_while(|x| x.text != name).any(|x| x.text == "mod"));
         let is_type = ds.iter().any(|(k, ..)| *k == ItemKind::Type);
@@ -268,7 +282,7 @@ fn take_fs_host_module(idx: &mut RuntimeIndex) {
             }
         }
         let text: &'static str = Box::leak(whole.join("\n").into_boxed_str());
-        built.insert(text.as_ptr() as usize);
+        idx.host_built.insert(text.as_ptr() as usize, module);
         idx.items.insert(name, RtItem { text });
     }
     // A top-level `thread_local! { … }` travels whole, by any static it defines.
@@ -282,7 +296,6 @@ fn take_fs_host_module(idx: &mut RuntimeIndex) {
             }
         }
     }
-    idx.fs_built = built;
 }
 
 /// The traits `src` defines at its top level.
@@ -354,14 +367,14 @@ mod scoped_module_tests {
         let text = scan.items["scoped"].text;
         assert!(text.contains("#[cfg(unix)]") && text.contains("#[cfg(not(unix))]"));
         let rt = RuntimeIndex { items: scan.items, defined: defined_names(SRC),
-            trait_methods: BTreeSet::new(), fns: BTreeSet::new(), fs_built: BTreeSet::new() };
+            trait_methods: BTreeSet::new(), fns: BTreeSet::new(), host_built: BTreeMap::new() };
         assert_eq!(references_in(&rt, text).unwrap(), ["scoped"]);
     }
 
     #[test]
     fn a_scoped_module_does_not_hide_an_unresolved_parent_call() {
         let rt = RuntimeIndex { items: HashMap::new(), defined: ["outside"].into_iter().collect(),
-            trait_methods: BTreeSet::new(), fns: ["outside"].into_iter().collect(), fs_built: BTreeSet::new() };
+            trait_methods: BTreeSet::new(), fns: ["outside"].into_iter().collect(), host_built: BTreeMap::new() };
         assert_eq!(references_in(&rt, "mod scoped { pub fn inside() { super::outside(); } }"), Err("outside".into()));
         let mut scan = RuntimeScan::default();
         const SRC: &str = "#[cfg(unix)] mod only_unix { pub fn inside() {} }";

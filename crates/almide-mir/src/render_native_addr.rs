@@ -259,6 +259,12 @@ fn owned_from(code: &str, t: NTy) -> Option<String> {
     Some(match t {
         NTy::Opt => code.to_string(),
         NTy::Res | NTy::ResStr => format!("{code}.clone()"),
+        // A struct with no `Default` (one holding a Result) cannot be taken
+        // from: it moves as itself on its last use, else it is copied.
+        NTy::Rec(_) if !crate::render_native_rec::has_default(t) => {
+            let moved = crate::render_native_move::take_expr(code);
+            if moved == code { moved } else { format!("{code}.clone()") }
+        }
         NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => crate::render_native_move::take_expr(code),
         NTy::StrRef => format!("AlmideString::from({code})"),
         NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),

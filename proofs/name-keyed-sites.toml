@@ -439,11 +439,6 @@ class = "legacy"
 names = 14
 
 [[site]]
-id = "crates/almide-mir/src/host_ops.rs::WALLED::table"
-class = "legacy"
-names = 3
-
-[[site]]
 id = "crates/almide-mir/src/lower/binds_p2_c.rs::seed_call_module_heap_read_shape::or-pattern"
 class = "legacy"
 names = 2
@@ -1252,6 +1247,30 @@ id = "crates/almide-verify/src/native_calls.rs::NATIVE_FS_HOST_CALLS::table"
 class = "justified"
 names = 38
 why = "The independent checker's copy of the trusted-base named set (NativeCalls.native_fs_host_calls): almide-verify shares no code with the producer, so it holds its own list; tests/native_fs_host_calls_test.rs holds the copies to one list in one order."
+
+[[site]]
+id = "crates/almide-mir/src/host_ops.rs::NATIVE_UNIX_HOST_CALLS::table"
+class = "justified"
+names = 12
+why = "The named set of a trusted-base row (proofs/TRUSTED_BASE.md, Native unix host calls; owner ruling 2026-11-10, moved before rc1 2026-11-13), not a property derivable from a declaration: which runtime unix functions a certified native program may call as trusted host calls is a trust decision the row records by name, and the index after the fs set is the witness host id. tests/native_fs_host_calls_test.rs holds it equal to the row, NativeCalls.native_unix_host_calls and almide-verify's copy, and to exactly the unix host ops."
+
+[[site]]
+id = "crates/almide-mir/src/host_ops.rs::NATIVE_HOST_CLASSES::table"
+class = "justified"
+names = 2
+why = "The trusted-base rows' runtime modules (proofs/TRUSTED_BASE.md, Native fs host calls and Native unix host calls), not a property of a function: which runtime modules a certified native program may call as trusted hosts is the trust decision itself, and the order fixes the witness host ids (fs's set, then unix's). tests/native_fs_host_calls_test.rs holds the sets and NativeCalls.native_host_calls to it."
+
+[[site]]
+id = "crates/almide-mir/src/native_floor_host.rs::HOST_MODULES::table"
+class = "justified"
+names = 2
+why = "The build script's copy of NATIVE_HOST_CLASSES' module names: native_floor_host.rs is also spliced into crates/almide-mir/build.rs, which cannot reach host_ops, to build the host modules' items into the generated runtime index. The unit test host_modules_are_the_host_classes holds the two equal."
+
+[[site]]
+id = "crates/almide-verify/src/native_calls.rs::NATIVE_UNIX_HOST_CALLS::table"
+class = "justified"
+names = 12
+why = "The independent checker's copy of the trusted-base unix named set (NativeCalls.native_unix_host_calls): almide-verify shares no code with the producer, so it holds its own list; tests/native_fs_host_calls_test.rs holds the copies to one list in one order."
 
 [[site]]
 id = "crates/almide-mir/src/native_floor_sig.rs::file_stat_decl_agrees::table"

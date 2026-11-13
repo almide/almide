@@ -1643,10 +1643,9 @@ fn main() {{
         let mut b = {ty}::C0(0.0_f64.to_bits() as i64);
         for _ in 0..100_000 {{ a = {ty}::C1(Box::new(a)); b = {ty}::C1(Box::new(b)); }}
         assert_eq!(almd_equal(&a, &b), 1);
-        // Drain iteratively: this measures equality, separately from recursive Drop.
-        for mut node in [a, b] {{
-            loop {{ match node {{ {ty}::C1(next) => node = *next, _ => break }} }}
-        }}
+        // The type's own Drop releases its chain in a loop (#4676), so the
+        // 100,000 levels are released on this 128 KiB stack too.
+        drop((a, b));
     }}).unwrap().join().unwrap();
 }}
 "#));
