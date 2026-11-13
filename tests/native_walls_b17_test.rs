@@ -187,3 +187,74 @@ effect fn main() -> Unit = {
 fn a_record_unwrap_or_arm_lowers_as_its_match() {
     both(UNWRAP_OR_ARM, "a 3 / a\ndefault 2 / file:b!\ndefault 2 / file:zz\n");
 }
+
+// A `var` copied from an `Option[record]` field, then matched and reassigned in
+// a `while`: the copy owns its record through the option.
+const OPTION_FIELD_SLOT: &str = r#"
+type Pos = { x: Int, y: Int, z: Int }
+type PathNode = { pos: Pos, g: Float, h: Float, parent: Option[Pos] }
+fn pos_eq(a: Pos, b: Pos) -> Bool = a.x == b.x and a.y == b.y and a.z == b.z
+fn reconstruct(goal_node: PathNode, closed_nodes: List[PathNode]) -> List[Pos] = {
+  var path = [goal_node.pos]
+  var current_parent = goal_node.parent
+  var safety = 0
+  let max_safety = list.len(closed_nodes) + 1
+  while safety < max_safety {
+    safety = safety + 1
+    match current_parent {
+      none => { safety = max_safety },
+      some(parent_pos) => {
+        path = [parent_pos] + path
+        let parent_node = list.find(closed_nodes, (n) => pos_eq(n.pos, parent_pos))
+        match parent_node {
+          some(pn) => { current_parent = pn.parent },
+          none => { safety = max_safety },
+        }
+      },
+    }
+  }
+  path
+}
+fn p(x: Int) -> Pos = Pos { x: x, y: 0, z: 1 }
+effect fn main() -> Unit = {
+  let nodes = [PathNode { pos: p(0), g: 0.0, h: 0.0, parent: none }, PathNode { pos: p(1), g: 0.0, h: 0.0, parent: some(p(0)) }, PathNode { pos: p(2), g: 0.0, h: 0.0, parent: some(p(1)) }]
+  let goal = PathNode { pos: p(3), g: 0.0, h: 0.0, parent: some(p(2)) }
+  println(list.join(reconstruct(goal, nodes) |> list.map((q) => int.to_string(q.x)), ","))
+}
+"#;
+
+#[test]
+fn a_var_copy_of_an_option_record_field_is_a_loop_slot() {
+    both(OPTION_FIELD_SLOT, "0,1,2,3\n");
+}
+
+// The same with a record that holds a String: its drop recurses.
+const OPTION_FIELD_SLOT_HEAP: &str = r#"
+type Pos = { x: Int, tag: String }
+type Node = { pos: Pos, parent: Option[Pos] }
+fn p(x: Int) -> Pos = Pos { x: x, tag: "t" + int.to_string(x) }
+fn next(q: Pos) -> Option[Pos] = if q.x > 0 then some(p(q.x - 1)) else none
+fn walk(n0: Node) -> Int = {
+  var cur = n0.parent
+  var n = 0
+  var go = true
+  while go {
+    match cur {
+      none => { go = false },
+      some(q) => {
+        n = n + q.x + string.len(q.tag)
+        cur = next(q)
+      },
+    }
+  }
+  n
+}
+effect fn main() -> Unit = {
+  println(int.to_string(walk(Node { pos: p(9), parent: some(p(4)) })))
+}
+"#;
+
+#[test]
+fn a_var_copy_of_an_option_heap_record_field_is_a_loop_slot() {
+    both(OPTION_FIELD_SLOT_HEAP, "20\n");
+}
