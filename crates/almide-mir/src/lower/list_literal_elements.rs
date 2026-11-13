@@ -257,8 +257,13 @@ impl LowerCtx {
             if let Some(obj) = self.try_lower_tuple_construct(&tels) {
                 return ListElemArm::Built(obj);
             }
+            return ListElemArm::Decline;
         }
-        ListElemArm::Decline
+        // A Var or call of exactly the classified tuple type is an owned
+        // reference like any other same-typed element: `lower_owned_heap_field`
+        // Dups it (or takes the fresh call result), and the registered
+        // `$__drop_list_<R>_int` frees it.
+        if e_ref.ty == *elem_ty { ListElemArm::Fallthrough } else { ListElemArm::Decline }
     }
 
     /// The heap-PAIR tuple element arm (`StrInt` / `IntStr` / `StrVariant` / `StrMapStr` /
