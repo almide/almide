@@ -271,3 +271,51 @@ fn a_rebound_in_out_param_moves_its_old_value_into_the_op() {
     assert!(body_of(&out, "adds").contains("almide_rt_set_insert_owned(std::mem::take(v0)"), "{out}");
     assert_eq!(run_native(REBIND), "7 false 5 6 25 t012345\n");
 }
+
+const RECORD: &str = r#"
+type Budget = { left: Int, depth: Int, exhausted: Bool, memo: Map[Int, String] }
+
+fn spend(mut b: Budget) -> Bool =
+  if b.exhausted or b.left <= 0 then {
+    b.exhausted = true
+    false
+  } else {
+    b.left = b.left - 1
+    true
+  }
+
+fn enter(mut b: Budget, max: Int) -> Bool =
+  if not spend(b) then false
+  else if b.depth >= max then {
+    b.exhausted = true
+    false
+  } else {
+    b.depth = b.depth + 1
+    true
+  }
+
+fn leave(mut b: Budget) -> Unit = {
+  b.depth = b.depth - 1
+}
+
+effect fn main() -> Unit = {
+  var b = { left: 50, depth: 0, exhausted: false, memo: map.set(map.new(), 1, "one") }
+  var n = 0
+  for i in 0..<40 {
+    if enter(b, 3) then { n = n + 1 } else { leave(b) }
+  }
+  println("${n} ${b.left} ${b.depth} ${b.exhausted} ${map.len(b.memo)}")
+}
+"#;
+
+#[test]
+fn a_mut_record_param_is_lent_and_its_scalar_fields_written_in_place() {
+    // A record `mut` param is the caller's place behind `&mut`, as a buffer
+    // is: a scalar field write stores into it, the record is never rebuilt.
+    let out = render(RECORD).expect("renders");
+    for name in ["spend", "enter", "leave"] {
+        assert!(header_of(&out, name).contains("&mut AlmdRec"), "{name} borrows the caller's record:\n{out}");
+        assert!(!body_of(&out, name).contains(".clone()"), "{name} copies nothing:\n{out}");
+    }
+    assert_eq!(run_native(RECORD), "3 46 -34 true 1\n");
+}
