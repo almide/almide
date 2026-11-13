@@ -290,3 +290,25 @@ effect fn main() -> Unit = {
 fn a_spread_over_a_bound_unwrap_or_record_reads_its_fields() {
     both(SPREAD_OVER_UNWRAP_OR, "1:0-2@1eof 0:6-7@7b 0:9-10@1c\n");
 }
+
+// A spread override `parent: some(c.pos)` (an Option ctor over a field read),
+// in a mapped closure and at a fn tail: built as a record literal field is.
+const SPREAD_OPTION_FIELD_OVERRIDE: &str = r#"
+type Pos = { x: Int, y: Int }
+type Node = { pos: Pos, g: Float, parent: Option[Pos] }
+fn mk(p: Pos, q: Pos) -> Node = { pos: p, g: 1.0, parent: some(q) }
+fn upd(ns: List[Node], c: Node) -> List[Node] = list.map(ns, (n) => if n.g > 0.5 then { ...n, g: 0.0, parent: some(c.pos) } else n)
+fn upd2(n: Node, c: Node) -> Node = { ...n, g: 2.0, parent: some(c.pos) }
+fn show(n: Node) -> String = "${n.pos.x}/${n.g}/" + (match n.parent { some(p) => int.to_string(p.x), none => "-" })
+effect fn main() -> Unit = {
+  let a = mk(Pos { x: 1, y: 1 }, Pos { x: 2, y: 2 })
+  println(show(a))
+  println(show(upd2(a, mk(Pos { x: 5, y: 5 }, Pos { x: 0, y: 0 }))))
+  println(list.join(upd([a, { pos: Pos { x: 3, y: 0 }, g: 0.1, parent: none }], mk(Pos { x: 7, y: 7 }, Pos { x: 0, y: 0 })) |> list.map((n) => show(n)), " "))
+}
+"#;
+
+#[test]
+fn a_spread_override_of_an_option_ctor_over_a_field_builds_like_a_record_field() {
+    both(SPREAD_OPTION_FIELD_OVERRIDE, "1/1/2\n1/2/5\n1/0/7 3/0.1/-\n");
+}
