@@ -38,6 +38,8 @@ mod arm_exit;
 mod crossmod_toplets;
 mod list_rest;
 mod literal_elems;
+mod spec_journal;
+use spec_journal::Journaled;
 pub use arm_exit::lift_stmt_arm_exits;
 pub use list_rest::desugar_list_rest_matches;
 pub use literal_elems::bind_heap_unwrap_or_literal_elems;
