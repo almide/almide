@@ -457,30 +457,7 @@ impl LowerCtx {
                     // BORROW the slot handle: the subject owns the String; a move-out auto-Dups
                     // in `lower_heap_result_arm`, a consuming re-use Dups in `lower_owned_heap_field`.
                     let p = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
-                    self.aggregate_blocks.insert(p, crate::render_native_rec::block_key(fty));
-                    self.param_values.insert(p);
-                    // An Option/Result PAYLOAD field (`Box(Option[Int])` — the depth-2
-                    // single-outer + builtin-inner class): seed the borrowed handle's
-                    // READ-shape so the inner `match $f { Some(n)/None }` executes (reads the
-                    // len/cap tag) instead of walling on a scalar destructure. Gated to
-                    // Option/Result exactly (the canonical seeder's variant arms) — a
-                    // String/List/nested-variant bind keeps today's borrow-only discipline.
-                    if matches!(fty,
-                        Ty::Applied(
-                            almide_lang::types::constructor::TypeConstructorId::Option
-                                | almide_lang::types::constructor::TypeConstructorId::Result,
-                            _
-                        ))
-                    {
-                        self.seed_variant_param(p, fty);
-                    }
-                    // A CLOSURE payload (`Run(f) => f()` — the variant-stored closure
-                    // class): the borrowed handle IS a closure block — admit it to the
-                    // dispatch set so the arm's `f(…)` lowers to `CallIndirect`.
-                    if matches!(fty, Ty::Fn { .. }) {
-                        self.closure_values.insert(p);
-                    }
-                    self.value_of.insert(*var, p);
+                    self.bind_borrowed_heap_slot(p, *var, fty);
                 } else {
                     // Rung-5 variants slab: a SCALAR payload is a plain slot of the
                     // subject block — target-neutral ListGetScalar (native `subj[slot]`).
@@ -493,6 +470,36 @@ impl LowerCtx {
                 }
             }
         }
+    }
+
+    /// Bind `var` to the BORROWED heap handle `p` just loaded from a slot of a block
+    /// its container owns (a variant payload field, a list element): the borrow is
+    /// recorded in `param_values` (a move-out auto-Dups, nothing drops it here).
+    pub(crate) fn bind_borrowed_heap_slot(&mut self, p: ValueId, var: VarId, fty: &Ty) {
+        self.aggregate_blocks.insert(p, crate::render_native_rec::block_key(fty));
+        self.param_values.insert(p);
+        // An Option/Result PAYLOAD field (`Box(Option[Int])` — the depth-2
+        // single-outer + builtin-inner class): seed the borrowed handle's
+        // READ-shape so the inner `match $f { Some(n)/None }` executes (reads the
+        // len/cap tag) instead of walling on a scalar destructure. Gated to
+        // Option/Result exactly (the canonical seeder's variant arms) — a
+        // String/List/nested-variant bind keeps today's borrow-only discipline.
+        if matches!(fty,
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::Option
+                    | almide_lang::types::constructor::TypeConstructorId::Result,
+                _
+            ))
+        {
+            self.seed_variant_param(p, fty);
+        }
+        // A CLOSURE payload (`Run(f) => f()` — the variant-stored closure
+        // class): the borrowed handle IS a closure block — admit it to the
+        // dispatch set so the arm's `f(…)` lowers to `CallIndirect`.
+        if matches!(fty, Ty::Fn { .. }) {
+            self.closure_values.insert(p);
+        }
+        self.value_of.insert(var, p);
     }
 
     /// Lower a UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, the unit
