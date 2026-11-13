@@ -215,6 +215,9 @@ fn rewrite_native_linked_mir(
             f.name
         )));
     }
+    // A call of a function that only returns its parameter is a copy of
+    // the argument (an erased newtype's accessor).
+    crate::native_identity_calls::inline(functions);
     // A closure block only its direct calls named, all of them inlined, is
     // never built (no copy of what it captures).
     for f in functions.iter_mut() {
