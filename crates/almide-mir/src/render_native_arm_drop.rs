@@ -41,8 +41,19 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
     if !matches!(ops[i0], Op::IfThen { cond, dst: None } if cond == t) {
         return None;
     }
+    let (i1, i2) = arm_bounds(ops, i0, flag_exits)?;
+    let released = match ops.get(i2 + 1) {
+        Some(Op::Drop { v } | Op::DropListStr { v }) => *v == c,
+        _ => false,
+    };
+    (released && only_views_before(ops, k, i2, c)).then_some((i1, i2))
+}
+
+/// The `Else` and `EndIf` of the valueless `if` opened at `i0`, when both arms
+/// reach their own end without leaving the dispatch.
+fn arm_bounds(ops: &[Op], i0: usize, flag_exits: &BTreeSet<usize>) -> Option<(usize, usize)> {
     let (mut depth, mut loops) = (0i32, 0i32);
-    let (mut i1, mut i2) = (None, None);
+    let mut i1 = None;
     for (i, op) in ops.iter().enumerate().skip(i0 + 1) {
         match op {
             Op::IfThen { .. } => depth += 1,
@@ -53,11 +64,7 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
                 i1 = Some(i);
             }
             Op::EndIf { val } if depth == 0 => {
-                if val.is_some() {
-                    return None;
-                }
-                i2 = Some(i);
-                break;
+                return if val.is_some() { None } else { Some((i1?, i)) };
             }
             Op::EndIf { .. } => depth -= 1,
             Op::LoopStart => loops += 1,
@@ -73,14 +80,12 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
             return None;
         }
     }
-    let (i1, i2) = (i1?, i2?);
-    let released = match ops.get(i2 + 1) {
-        Some(Op::Drop { v } | Op::DropListStr { v }) => *v == c,
-        _ => false,
-    };
-    if !released {
-        return None;
-    }
+    None
+}
+
+/// Every op after `k` that reads carrier `c`, other than its release right
+/// after `i2`, is a tag or payload view at or before `i2`.
+fn only_views_before(ops: &[Op], k: usize, i2: usize, c: ValueId) -> bool {
     let mut reads = Vec::new();
     for (i, op) in ops.iter().enumerate().skip(k + 1) {
         if i == i2 + 1 {
@@ -93,10 +98,10 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
         }
         let views = matches!(op, Op::Prim { kind: PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr, .. });
         if i > i2 || !views {
-            return None;
+            return false;
         }
     }
-    Some((i1, i2))
+    true
 }
 
 /// The release line for carrier `name` at an arm's end, when the text so far

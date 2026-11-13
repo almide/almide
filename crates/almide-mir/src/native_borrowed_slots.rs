@@ -152,12 +152,7 @@ fn plan(f: &MirFunction, s: ValueId) -> Option<Plan> {
             Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [s] => {}
             Op::ListGetScalar { list, idx, .. } if *list == s && *idx != s => {}
             Op::CallFn { name, args, .. } => {
-                let only_lends = args.iter().enumerate().all(|(k, a)| match a {
-                    CallArg::Scalar(v) => *v != s,
-                    CallArg::Handle(v) => *v != s || !crate::native_hof::mutable_argument(name, k),
-                    CallArg::Imm(_) | CallArg::Label(_) => true,
-                });
-                if !only_lends {
+                if !call_only_lends(name, args, s) {
                     return None;
                 }
             }
@@ -179,7 +174,18 @@ fn plan(f: &MirFunction, s: ValueId) -> Option<Plan> {
             _ => return None,
         }
     }
-    // The chain copies are named by the chain, the rebind and their releases.
+    remove_chain_releases(f, &chain_values, &rebinds, &mut removed)?;
+    (!rebinds.is_empty()).then_some(Plan { removed, rebinds })
+}
+
+/// The chain copies are named by the chain, the rebind and their releases:
+/// adds each release to `removed`, or `None` when another op names a copy.
+fn remove_chain_releases(
+    f: &MirFunction,
+    chain_values: &BTreeSet<ValueId>,
+    rebinds: &BTreeMap<usize, ValueId>,
+    removed: &mut BTreeSet<usize>,
+) -> Option<()> {
     for (i, op) in f.ops.iter().enumerate() {
         let named: Vec<ValueId> = values(op).into_iter().filter(|v| chain_values.contains(v)).collect();
         if named.is_empty() || removed.contains(&i) || rebinds.contains_key(&i) {
@@ -191,7 +197,17 @@ fn plan(f: &MirFunction, s: ValueId) -> Option<Plan> {
         }
         return None;
     }
-    (!rebinds.is_empty()).then_some(Plan { removed, rebinds })
+    Some(())
+}
+
+/// A call that names `s` only lends it: never as a scalar, and as a handle
+/// only in a position the callee does not write through.
+fn call_only_lends(name: &str, args: &[CallArg], s: ValueId) -> bool {
+    args.iter().enumerate().all(|(k, a)| match a {
+        CallArg::Scalar(v) => *v != s,
+        CallArg::Handle(v) => *v != s || !crate::native_hof::mutable_argument(name, k),
+        CallArg::Imm(_) | CallArg::Label(_) => true,
+    })
 }
 
 /// `v` as a chain of copies (`Dup`) of a payload read (`LoadHandle`): the
