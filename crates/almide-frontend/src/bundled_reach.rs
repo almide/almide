@@ -75,6 +75,13 @@ struct Spelled {
     /// `(P, f)`: a requirement call that dispatches to the module of
     /// whichever conforming type `T` is bound to (#4289).
     protocol_members: HashSet<(String, String)>,
+    /// The `a` nodes of `a.f` whose `a` is a module name (#4695): the
+    /// qualifier of a call, never a bare name of its own. Counted as an
+    /// ident it named every sibling function called `a` in every reached
+    /// module — `map.set(..)` woke `bytes.map`, which entered the bytes
+    /// self-host source. `absorb` still reads the pair as a module call or,
+    /// when `a` is a binding, as a member.
+    qualifier_nodes: HashSet<*const Expr>,
 }
 
 impl Spelled {
@@ -104,8 +111,7 @@ impl Spelled {
 
     /// Is `a` in `a.f` (certainly) a module rather than a binding?
     fn is_module_qualifier(&self, a: &str) -> bool {
-        !self.binders.contains(a)
-            && (almide_lang::stdlib_info::is_any_stdlib(a) || almide_lang::stdlib_info::is_bundled_module(a))
+        !self.binders.contains(a) && is_module_name(a)
     }
 }
 
@@ -496,6 +502,11 @@ fn spell_pattern(p: &Pattern, out: &mut Spelled) {
     }
 }
 
+/// A stdlib or bundled module's name.
+fn is_module_name(a: &str) -> bool {
+    almide_lang::stdlib_info::is_any_stdlib(a) || almide_lang::stdlib_info::is_bundled_module(a)
+}
+
 /// Every expression through the shared read-only visitor; the per-node
 /// callback adds the names the visitor does not descend into (types,
 /// patterns, statement annotations).
@@ -505,8 +516,13 @@ fn spell_expr(e: &Expr, out: &mut Spelled) {
 
 fn spell_node(x: &Expr, out: &mut Spelled) {
     match &x.kind {
+        ExprKind::Ident { .. } if out.qualifier_nodes.contains(&(x as *const Expr)) => {}
         ExprKind::Ident { name } | ExprKind::TypeName { name } => spell_type_name(name.as_str(), out),
         ExprKind::Member { object, field } => match &object.kind {
+            ExprKind::Ident { name } if is_module_name(name.as_str()) => {
+                out.qualified.insert((name.to_string(), field.to_string()));
+                out.qualifier_nodes.insert(&**object as *const Expr);
+            }
             // A type name receiver (`T.__join(xs, sep)` on a type parameter)
             // classifies like a bare name: `absorb` reads it as a protocol
             // requirement call when `T` is a protocol-bounded parameter, and
@@ -725,6 +741,20 @@ mod tests {
         let l = live("fn main() -> Unit = println(int.to_string(list.len(list.map([1], (x) => x + 1))))\n");
         assert!(is_live(&l, "list", "map") && is_live(&l, "list", "len"), "{:?}", l.live_fns.get("list"));
         assert!(!is_live(&l, "list", "sort_by"), "{:?}", l.live_fns.get("list"));
+    }
+
+    #[test]
+    fn a_module_qualifier_names_no_function_of_its_name() {
+        // #4695: `map.set` qualifies a call into `map`; it is not a bare
+        // `map`, so a reached `bytes` keeps `bytes.map` out (and with it the
+        // bytes self-host source it would enter). A qualified call still
+        // keeps its own function live.
+        let l = live("fn f(b: Bytes, m: Map[String, Int]) -> Int = bytes.len(b) + map.len(map.set(m, \"k\", 1))\n");
+        assert!(is_live(&l, "bytes", "len"), "{:?}", l.live_fns.get("bytes"));
+        assert!(!is_live(&l, "bytes", "map"), "{:?}", l.live_fns.get("bytes"));
+        assert!(is_live(&l, "map", "set"), "{:?}", l.live_fns.get("map"));
+        let l = live("fn f(b: Bytes, xs: List[Int]) -> Int = bytes.len(b) + list.len(list.map(xs, (x) => x))\n");
+        assert!(is_live(&l, "list", "map"), "{:?}", l.live_fns.get("list"));
     }
 
     #[test]

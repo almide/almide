@@ -240,8 +240,14 @@ fn op_fn(op: ValueOp) -> Option<(Sym, Sym)> {
     if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&op) {
         return *hit;
     }
+    // Only a module whose source spells the attribute can declare the op: the
+    // others are never parsed. Parsing every bundled module to find one
+    // declaration was most of what a `json.parse` program's build spent past
+    // the program itself (#4695).
+    let attr = format!("@{VALUE_OP_ATTR}");
     let found = almide_lang::stdlib_info::BUNDLED_MODULES.iter().find_map(|m| {
-        let program = almide_lang::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached)?;
+        let source = almide_lang::stdlib_info::bundled_source(m).filter(|s| s.contains(attr.as_str()))?;
+        let program = almide_lang::parse_cached(source)?;
         program.decls.iter().find_map(|d| match d {
             Decl::Fn { name, .. } if declared_value_op(m, name.as_str()) == Some(op) => Some((sym(m), *name)),
             _ => None,
