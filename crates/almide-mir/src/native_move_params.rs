@@ -134,11 +134,18 @@ fn consumed_params(
         let at_top = named.iter().all(|&i| depth[i] == 0);
         // Or a floor call that takes it by value there (`map.set(m, k, v)`
         // on a `mut` param): the body's last use gives it away.
+        // A declared floor or runtime call that takes the param by value has
+        // a lending form too: handed a value its caller keeps, it reads the
+        // borrow and builds only its result (`list.take(xs, n)` copies `n`
+        // elements). Taking the param over for it pays only where every call
+        // site hands over its own value: a site that keeps reading its
+        // argument copies all of it for the call (#4701).
+        let by_value_handed = |name: &str, at: usize| by_value(name, at) && hands(k);
         let grows = matches!(&func.ops[last], Op::CallFn { name, args, .. }
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
                 || args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value))
-                    .is_some_and(|k| by_value(name, k)
+                    .is_some_and(|k| by_value_handed(name, k)
                         // Or a program function whose own param there is a
                         // move param: the body hands the param on (`poke(mut
                         // b) = bytes.put_u8(b, 0, v)` over a linked body).
@@ -163,7 +170,7 @@ fn consumed_params(
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        by_value(name, k)
+                        by_value_handed(name, k)
                             || owned.moves(&func.ops[i], k)
                             // The list or string a concatenation grows in place.
                             || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
