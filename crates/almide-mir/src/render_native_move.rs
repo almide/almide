@@ -628,8 +628,9 @@ pub(crate) fn set_moving_args(
                         (base, format!("std::mem::take(&mut {place})"), reads)
                     }
                 };
+                let inout = crate::native_inout::field_moves_out(func, at, base, take.trim_start_matches("std::mem::take(&mut ").trim_end_matches(')'));
                 let ok = payload_carrier(tys.get(&base).copied())
-                    && carrier_dies_after_reading(func, at, base, borrow_arms, true)
+                    && (inout || carrier_dies_after_reading(func, at, base, borrow_arms, true))
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then(|| (v, payload_move(func, at, base, tys.get(&base).copied(), take)))
             })

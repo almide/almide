@@ -143,9 +143,10 @@ fn is_record(ty: &Ty) -> bool {
 }
 
 /// A field write the in-out convention carries: a scalar value stored into
-/// the record in place (`p.f = e`); a heap value keeps the move-mode rebind.
-fn field_write_ok(value: &IrExpr) -> bool {
-    !crate::lower::is_heap_ty(&value.ty)
+/// the record in place (`p.f = e`); a heap value rebinds the place to the
+/// record with that field replaced, its other fields moved over.
+fn field_write_ok(_value: &IrExpr) -> bool {
+    true
 }
 
 /// Does `body` write `p` — an assignment, an in-place mutator, or a lend to
@@ -691,4 +692,62 @@ pub(crate) fn lent_values(func: &crate::MirFunction) -> Vec<crate::ValueId> {
         }
     }
     out
+}
+
+/// Whether the field `place` (`v0.fK`) of the in-out param `base`, read at
+/// `ops[at]`, may move out of the caller's record: on the straight path
+/// after `at` the place is rebound whole (`SetLocal`) before anything reads
+/// that field again, reads the record other than through the addresses of
+/// its other fields, or hands it back. The spread rebind of a field write
+/// (`p.f = op(p.f, ..)` ≡ `p = { ...p, f: op(p.f, ..) }`) is this shape: each
+/// field leaves the old record once, into the op or the new record, and
+/// `*p = ..` writes the new one over what is left.
+pub(crate) fn field_moves_out(func: &crate::MirFunction, at: usize, base: crate::ValueId, place: &str) -> bool {
+    use crate::Op;
+    if !func.inout_params.contains(&base) {
+        return false;
+    }
+    let Some(k) = place.strip_prefix(&format!("{}.f", crate::render_native::var(base))).and_then(|k| k.parse::<i64>().ok()) else {
+        return false;
+    };
+    let offset = i64::from(crate::lower::layout::BLOCK_HEADER) + k * i64::from(crate::lower::layout::SLOT_SIZE);
+    let consts: HashMap<crate::ValueId, i64> =
+        func.ops.iter().filter_map(|op| if let Op::ConstInt { dst, value } = op { Some((*dst, *value)) } else { None }).collect();
+    // Address values rooted at `base` → their byte offset into the block.
+    let mut addrs: HashMap<crate::ValueId, Option<i64>> = HashMap::new();
+    let mut reads = Vec::new();
+    for op in &func.ops[at + 1..] {
+        match op {
+            Op::SetLocal { local, .. } if *local == base => return true,
+            Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::LoopStart | Op::LoopEnd | Op::LoopBreakUnless { .. } | Op::Return { .. } => {
+                return false
+            }
+            Op::Prim { kind: crate::PrimKind::Handle, dst: Some(d), args } if args.as_slice() == [base] => {
+                addrs.insert(*d, Some(0));
+                continue;
+            }
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } if addrs.contains_key(a) || addrs.contains_key(b) => {
+                let (root, other) = if addrs.contains_key(a) { (a, b) } else { (b, a) };
+                let at_off = addrs[root].zip(consts.get(other).copied()).map(|(x, y)| x + y);
+                addrs.insert(*dst, at_off);
+                continue;
+            }
+            // The hand-back is a read by the caller; the release of the old
+            // record before the rebind frees what the moves left.
+            Op::Consume { v } | Op::Borrow { v } if *v == base => return false,
+            _ if crate::render_native_move::bookkeeping(op) => continue,
+            _ => {}
+        }
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        if reads.contains(&base) {
+            return false;
+        }
+        // A read through an address of the moved field, or of an address
+        // whose offset is unknown, sees the emptied slot.
+        if reads.iter().any(|r| addrs.get(r).is_some_and(|o| o.is_none_or(|o| o == offset))) {
+            return false;
+        }
+    }
+    false
 }
