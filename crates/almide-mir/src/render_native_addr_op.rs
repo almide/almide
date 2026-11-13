@@ -434,6 +434,13 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         _ => false,
     };
     let place = if boxed { format!("(*{field})") } else { field };
+    // A read lent to an in-out param is the field's place itself
+    // (crate::native_inout_field): nothing is read out of it.
+    if crate::native_inout_field::lends(*d, &place) {
+        tys.insert(*d, f);
+        line!("// {}: lends {place} to the in-out call", var(*d));
+        return Ok(true);
+    }
     let no_prior_borrow = reads_of_place(&place).is_empty();
     if (st.moves_first.contains(d) || (st.moves.contains(d) && no_prior_borrow))
         && !st.moves_last.contains(d)

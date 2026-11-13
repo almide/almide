@@ -84,6 +84,7 @@ mod native_cell_window;
 mod native_map_entries;
 pub mod native_move_params;
 pub(crate) mod native_inout;
+pub(crate) mod native_inout_field;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;

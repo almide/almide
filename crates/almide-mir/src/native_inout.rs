@@ -166,7 +166,7 @@ fn writes(body: &IrExpr, p: VarId, cands: &Cands) -> bool {
                 self.2 = true;
             }
             if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
-                if self.1.get(name.as_str()).is_some_and(|ks| ks.iter().any(|&k| args.get(k).is_some_and(|a| is_var(a, self.0)))) {
+                if self.1.get(name.as_str()).is_some_and(|ks| ks.iter().any(|&k| args.get(k).and_then(place_root) == Some(self.0))) {
                     self.2 = true;
                 }
             }
@@ -204,6 +204,17 @@ fn simple_operand(e: &IrExpr) -> bool {
     let mut s = S(true);
     s.visit_expr(e);
     s.0
+}
+
+/// The var a lent place names: the var itself, or the record var a field
+/// path (`st.budget`, `st.a.b`) starts from; the caller's place either way,
+/// lent `&mut` whole or by field (`crate::native_inout_field`).
+fn place_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } if is_record(&object.ty) => place_root(object),
+        _ => None,
+    }
 }
 
 fn is_var(e: &IrExpr, p: VarId) -> bool {
@@ -413,12 +424,12 @@ fn refused_sites(e: &IrExpr, cands: &Cands, ok_vars: &HashSet<VarId>, refused: &
                         if let Some(ks) = self.cands.get(&name) {
                             let good = !matches!(target, CallTarget::Module { .. })
                                 && self.in_lambda == 0
-                                && ks.iter().all(|&k| match args.get(k).map(|a| &a.kind) {
-                                    Some(IrExprKind::Var { id }) => {
-                                        self.ok_vars.contains(id)
-                                            && !args.iter().enumerate().any(|(j, b)| j != k && (mentions(b, *id) || !simple_operand(b)))
+                                && ks.iter().all(|&k| match args.get(k).and_then(place_root) {
+                                    Some(id) => {
+                                        self.ok_vars.contains(&id)
+                                            && !args.iter().enumerate().any(|(j, b)| j != k && (mentions(b, id) || !simple_operand(b)))
                                     }
-                                    _ => false,
+                                    None => false,
                                 });
                             if !good {
                                 self.refused.insert(name);
@@ -666,6 +677,7 @@ pub(crate) struct RenderScope(BTreeSet<crate::ValueId>);
 
 impl RenderScope {
     pub(crate) fn enter(func: &crate::MirFunction) -> Self {
+        crate::native_inout_field::note_function(func);
         RenderScope(RENDERING.with(|s| std::mem::replace(&mut *s.borrow_mut(), func.inout_params.clone())))
     }
 }
