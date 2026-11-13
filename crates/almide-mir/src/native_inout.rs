@@ -558,7 +558,7 @@ fn scoped_read(target: &CallTarget, args: &[IrExpr], ty: &Ty, p: VarId, writes: 
 /// plus its own `mut` params (`selected` or move-mode: the native
 /// preparation owns a written param in a local).
 fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSet<VarId> {
-    struct Vars<'a>(HashSet<VarId>, HashSet<VarId>, &'a HashMap<String, Vec<usize>>);
+    struct Vars<'a>(HashSet<VarId>, HashSet<VarId>, &'a HashMap<String, Vec<usize>>, HashSet<VarId>);
     impl IrVisitor for Vars<'_> {
         fn visit_stmt(&mut self, s: &IrStmt) {
             if let IrStmtKind::Bind { var, mutability: Mutability::Var, ty, .. } = &s.kind {
@@ -581,6 +581,7 @@ fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSe
                         };
                         let bound = params.iter().map(|(v, _)| *v).collect();
                         for v in almide_ir::free_vars::free_vars(body, &bound) {
+                            self.3.insert(v);
                             if !scoped_read(target, args, &e.ty, v, self.2) {
                                 self.1.insert(v);
                             }
@@ -593,17 +594,22 @@ fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSe
                 }
                 IrExprKind::Lambda { params, body, .. } => {
                     let bound = params.iter().map(|(v, _)| *v).collect();
-                    self.1.extend(almide_ir::free_vars::free_vars(body, &bound));
+                    let free = almide_ir::free_vars::free_vars(body, &bound);
+                    self.3.extend(free.iter().copied());
+                    self.1.extend(free);
                     walk_expr(self, e);
                 }
                 _ => walk_expr(self, e),
             }
         }
     }
-    let mut v = Vars(HashSet::new(), HashSet::new(), writes);
+    let mut v = Vars(HashSet::new(), HashSet::new(), writes, HashSet::new());
     v.visit_expr(&f.body);
     let mut out: HashSet<VarId> = v.0.difference(&v.1).copied().collect();
-    out.extend(f.params.iter().filter(|p| p.is_mut && lendable(&p.ty) && !v.1.contains(&p.var)).map(|p| p.var));
+    // A move-mode fn keeps a `mut` param any closure captures in a write-back
+    // cell, which has no place to lend (a candidate's own params are added
+    // where its body passed `body_uses_ok`).
+    out.extend(f.params.iter().filter(|p| p.is_mut && lendable(&p.ty) && !v.3.contains(&p.var)).map(|p| p.var));
     out
 }
 

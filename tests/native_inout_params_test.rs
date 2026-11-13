@@ -721,3 +721,39 @@ fn a_let_bound_closure_used_before_the_next_write_keeps_the_param_lent() {
     }
     assert_eq!(run_native(LET_CLOSURE), "a:1=0/2 z:1=-1/3 1\na:4=3/5 4\n5\n");
 }
+
+const CELL_SIBLING: &str = r#"
+type S = { n: Int, xs: List[Int] }
+
+fn bumpv(mut s: S, k: Int) -> Int = {
+  s.n = s.n + k
+  s.n
+}
+
+fn weigh(s: S) -> Int = s.n * 100 + list.len(s.xs)
+
+fn wc_match(mut s: S, k: Int) -> Int = {
+  let ys = s.xs |> list.map((x) => x + weigh(s))
+  s.xs = ys
+  match k {
+    0 => bumpv(s, 1),
+    _ => bumpv(s, k),
+  }
+}
+
+effect fn main() -> Unit = {
+  var f = { n: 0, xs: [5, 6] }
+  let fv = wc_match(f, 0) + list.len(f.xs) + wc_match(f, 7)
+  println("${fv} n=${f.n} xs=${f.xs}")
+  var g = { n: 1, xs: [1] }
+  println("${g.xs} ${wc_match(g, 2)} ${g.n}")
+}
+"#;
+
+#[test]
+fn a_param_in_a_write_back_cell_is_never_lent_in_place() {
+    // `wc_match` is refused (a sibling reads `f` beside its lend), so it keeps
+    // `s` in the write-back cell its closure reads: `bumpv(s, ..)` inside it
+    // must not lend a copy of the cell's record.
+    assert_eq!(run_native(CELL_SIBLING), "11 n=8 xs=[109, 110]\n[1] 3 3\n");
+}
