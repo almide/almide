@@ -1435,6 +1435,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
 | `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
+| `ALMIDE_DBG_INOUT` | debug | print why a `mut` param keeps the move-mode convention instead of the in-out lend (native v1) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
 | `ALMIDE_DBG_NESTED_MATCH` | debug | print why a nested-match chain was refused (v1 lowering) |
