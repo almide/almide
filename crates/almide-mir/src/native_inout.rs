@@ -463,7 +463,12 @@ fn tail_calls_named(e: &IrExpr, name: &str) -> bool {
     match &e.kind {
         IrExprKind::Call { target: CallTarget::Named { name: n }, .. }
         | IrExprKind::TailCall { target: CallTarget::Named { name: n }, .. } => n.as_str() == name,
-        IrExprKind::Block { expr: Some(tail), .. } => tail_calls_named(tail, name),
+        // `let r = f(..); r` returns the call's result unchanged: a tail call too.
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            tail_calls_named(tail, name)
+                || matches!((&tail.kind, stmts.last().map(|s| &s.kind)),
+                    (IrExprKind::Var { id }, Some(IrStmtKind::Bind { var, value, .. })) if id == var && tail_calls_named(value, name))
+        }
         IrExprKind::If { then, else_, .. } => tail_calls_named(then, name) || tail_calls_named(else_, name),
         IrExprKind::Match { arms, .. } => arms.iter().any(|a| tail_calls_named(&a.body, name)),
         _ => false,
