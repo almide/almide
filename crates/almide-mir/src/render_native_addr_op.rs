@@ -406,7 +406,11 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
 /// before then, and Rust re-initializes it at the rebind), else a take that
 /// leaves the field's `Default` behind.
 fn field_move(st: &AddrState, d: ValueId, place: &str) -> String {
-    if st.moves_partial.contains(&d) {
+    // An in-out record is the caller's, behind `&mut`: nothing moves out of
+    // it partially (crate::native_inout).
+    let lent = place.split('.').next().and_then(|v| v.strip_prefix('v')).and_then(|n| n.parse::<u32>().ok())
+        .is_some_and(|n| crate::native_inout::is_rendering_inout(ValueId(n)));
+    if st.moves_partial.contains(&d) && !lent {
         place.to_owned()
     } else {
         format!("std::mem::take(&mut {place})")

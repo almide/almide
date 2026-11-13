@@ -149,35 +149,6 @@ fn field_write_ok(_value: &IrExpr) -> bool {
     true
 }
 
-/// Does `body` write `p` — an assignment, an in-place mutator, or a lend to
-/// an in-out position of a candidate? A `mut` param the body never writes
-/// has nothing to lend back and keeps the move-mode convention.
-fn writes(body: &IrExpr, p: VarId, cands: &Cands) -> bool {
-    struct W<'a>(VarId, &'a Cands, bool);
-    impl IrVisitor for W<'_> {
-        fn visit_stmt(&mut self, s: &IrStmt) {
-            if matches!(s.kind, IrStmtKind::Assign { var, .. } | IrStmtKind::FieldAssign { target: var, .. } if var == self.0) {
-                self.2 = true;
-            }
-            walk_stmt(self, s);
-        }
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if rebinds(e, self.0) {
-                self.2 = true;
-            }
-            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
-                if self.1.get(name.as_str()).is_some_and(|ks| ks.iter().any(|&k| args.get(k).and_then(place_root) == Some(self.0))) {
-                    self.2 = true;
-                }
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut w = W(p, cands, false);
-    w.visit_expr(body);
-    w.2
-}
-
 /// The in-place mutator call (`list.push(p, x)`, `string.push`, the clears,
 /// the byte appends) whose functional rebind targets `p`.
 fn rebinds(e: &IrExpr, p: VarId) -> bool {
@@ -619,7 +590,7 @@ fn prune(ir: &IrProgram, cands: &mut Cands) {
             if let Some(ks) = cands.get(f.name.as_str()) {
                 let ok = ks.iter().all(|&k| {
                     let p = f.params[k].var;
-                    body_uses_ok(&f.body, p, cands, &writes) && self::writes(&f.body, p, cands)
+                    body_uses_ok(&f.body, p, cands, &writes)
                 });
                 if !ok {
                     refused.insert(f.name.to_string());
