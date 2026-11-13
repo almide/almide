@@ -258,3 +258,35 @@ effect fn main() -> Unit = {
 fn a_var_copy_of_an_option_heap_record_field_is_a_loop_slot() {
     both(OPTION_FIELD_SLOT_HEAP, "20\n");
 }
+
+// A record bound from `list.get(xs, k) ?? <record>` is a real record: a spread
+// over it in a loop reads its fields.
+const SPREAD_OVER_UNWRAP_OR: &str = r#"
+type Token = { kind: Int, start: Int, end: Int, line: Int, col: Int, text: String }
+fn is_layout(t: Token) -> Bool = t.kind == 0
+fn shift(old: List[Token], delta: Int, edit_at: Int, edit_line: Int) -> List[Token] = {
+  var out: List[Token] = []
+  var k = 0
+  while k < list.len(old) {
+    let o = list.get(old, k) ?? Token { kind: 9, start: 0, end: 0, line: 1, col: 1, text: "eof" }
+    if not is_layout(o) then {
+      list.push(out, o)
+    } else {
+      let moved = o.start >= edit_at
+      list.push(out, if moved then Token { ...o, start: o.start + delta, end: o.end + delta, col: if o.line == edit_line then o.col + delta else o.col } else o)
+    }
+    k = k + 1
+  }
+  out
+}
+effect fn main() -> Unit = {
+  let ts = [Token { kind: 1, start: 0, end: 2, line: 1, col: 1, text: "eof" }, Token { kind: 0, start: 2, end: 3, line: 1, col: 3, text: "b" }, Token { kind: 0, start: 5, end: 6, line: 2, col: 1, text: "c" }]
+  let r = shift(ts, 4, 2, 1)
+  println(list.join(r |> list.map((t) => "${t.kind}:${t.start}-${t.end}@${t.col}${t.text}"), " "))
+}
+"#;
+
+#[test]
+fn a_spread_over_a_bound_unwrap_or_record_reads_its_fields() {
+    both(SPREAD_OVER_UNWRAP_OR, "1:0-2@1eof 0:6-7@7b 0:9-10@1c\n");
+}
