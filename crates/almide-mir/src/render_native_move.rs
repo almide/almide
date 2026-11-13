@@ -211,12 +211,7 @@ pub(crate) fn dying_after(
 /// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
 /// takes of it and nothing reads) does not see the field, which the move
 /// leaves empty, so it does not keep the record alive.
-pub(crate) fn carrier_dies_after(
-    func: &MirFunction,
-    at: usize,
-    src: ValueId,
-    borrow_arms: &std::collections::BTreeSet<ValueId>,
-) -> bool {
+pub(crate) fn carrier_dies_after(func: &MirFunction, at: usize, src: ValueId, borrow_arms: &std::collections::BTreeSet<ValueId>) -> bool {
     // An in-out param is the caller's place: the caller reads it after the
     // call, so it never dies here (a field leaves it only through
     // `native_inout::field_moves_out`, which puts the field back).

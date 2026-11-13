@@ -156,19 +156,7 @@ impl OptionTracker {
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
             }
-            Op::Dup { dst, src } if self.minted.contains(src) => {
-                out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
-                self.opt_vals.insert(*dst);
-                self.minted.insert(*dst);
-            }
-            // A copy of a call's Option written into a value-only slot is a
-            // value too: the slot holds no object on any path, and the call
-            // result keeps its own release.
-            Op::Dup { dst, src }
-                if self.opt_vals.contains(src)
-                    && !self.heap_payloads.contains(src)
-                    && self.slot_of.get(dst).is_some_and(|l| self.minted.contains(l)) =>
-            {
+            Op::Dup { dst, src } if self.copies_as_value(*dst, *src) => {
                 out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
@@ -196,6 +184,16 @@ impl OptionTracker {
             _ => return Some(op),
         }
         None
+    }
+
+    /// A `Dup` of a value Option is a value copy. So is a copy of a call's
+    /// Option written into a value-only slot: the slot holds no object on any
+    /// path, and the call result keeps its own release.
+    fn copies_as_value(&self, dst: ValueId, src: ValueId) -> bool {
+        self.minted.contains(&src)
+            || (self.opt_vals.contains(&src)
+                && !self.heap_payloads.contains(&src)
+                && self.slot_of.get(&dst).is_some_and(|l| self.minted.contains(l)))
     }
 
     /// The call, if-join and pass-through arms.
