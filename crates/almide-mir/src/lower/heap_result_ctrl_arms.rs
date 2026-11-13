@@ -35,10 +35,7 @@ impl LowerCtx {
             IrExprKind::Match { subject, arms }
                 if self.is_variant_shaped_match_subject(&subject.ty) =>
             {
-                // A shape the value dispatchers decline (a guarded arm) is still a
-                // match the desugared `if` chain carries.
-                self.speculate(|this| this.lower_variant_subject_match_arm(subject, arms, result_ty))
-                    .or_else(|| self.lower_desugarable_match_arm(subject, arms, result_ty))
+                self.lower_variant_subject_match_arm(subject, arms, result_ty)
             }
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_nested_heap_result_if_arm(cond, then, else_, result_ty)
