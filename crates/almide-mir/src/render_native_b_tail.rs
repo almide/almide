@@ -231,8 +231,11 @@ fn render_first_join_value(
                 NTy::F64,
                 var(v),
             ),
+            // Declared unset as the other heap joins: an `Ok(0)` placeholder was
+            // built and its drop checked at every arm's assignment (a fallible
+            // fn's join on each call: U4_mix 1.38x against 1.15x unset).
             NTy::Res => (
-                format!("let mut {}: Result<i64, AlmideString> = Ok(0);", var(*d)),
+                format!("let mut {}: Result<i64, AlmideString>;", var(*d)),
                 NTy::Res,
                 format!("{}.clone()", var(v)),
             ),

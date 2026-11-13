@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 #[path = "render_native_carrier.rs"]
-mod carrier;
+pub(crate) mod carrier;
 #[path = "render_native_map.rs"]
 mod map;
 #[path = "render_native_slots.rs"]

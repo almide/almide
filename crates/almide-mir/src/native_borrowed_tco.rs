@@ -10,7 +10,7 @@ use crate::render_native::{NTy, call_arg, var};
 /// A value must flow through every enclosing join to the actual return.
 /// Merely being the last expression of an inner arm is not tail position.
 pub(crate) fn sites(f: &MirFunction) -> BTreeSet<usize> {
-    if !f.owned_params.is_empty() || !f.call_moves.is_empty() || f.ret.is_none()
+    if !f.owned_params.is_empty() || !f.inout_params.is_empty() || !f.call_moves.is_empty() || f.ret.is_none()
         || f.ops.iter().any(|op| !matches!(op,
             Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Borrow { .. } | Op::ListGetScalar { .. }
             | Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. }

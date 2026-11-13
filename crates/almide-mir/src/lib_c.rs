@@ -45,6 +45,15 @@ pub struct MirFunction {
     /// pass made one; the certificate states each param's mode
     /// (`certificate_native_calls`, proofs/NativeCalls.v).
     pub owned_params: BTreeSet<ValueId>,
+    /// The IN-OUT parameters (`native_inout`): a `mut` heap param the caller
+    /// lends for the call (`&mut` on this render). The body holds it as an
+    /// owned slot — it may release the old object and rebind the slot in
+    /// place — and hands the slot's object back with a `Consume` at every
+    /// exit, so the reference the caller lent now names the slot's final
+    /// object. The caller neither moves nor copies the argument (mode 0 in
+    /// the native-calls witness); the callee's line opens with the lent `i`
+    /// and closes with that hand-back `m`.
+    pub inout_params: BTreeSet<ValueId>,
     /// The op indices of the call-site MOVES: a `Consume` right after a
     /// `CallFn` that hands that argument to a move parameter of its callee.
     /// The certificate writes these as the call-site move-out `M` on the

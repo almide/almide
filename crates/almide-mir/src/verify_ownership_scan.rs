@@ -11,9 +11,11 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     let mut borrowed: BTreeSet<ValueId> = BTreeSet::new();
     init_borrowed_params(func, &mut object_of, &mut dead, &mut borrowed);
     // A MOVE param (#4006 class P) enters holding the reference its caller
-    // handed over: owned at 1, not borrowed.
+    // handed over: owned at 1, not borrowed. An IN-OUT param holds the one
+    // its caller lent for the call and must hand it back (`Consume`) before
+    // the end, or the end-of-function check reports the leak.
     let mut rc = rc;
-    for p in &func.owned_params {
+    for p in func.owned_params.iter().chain(&func.inout_params) {
         if borrowed.remove(p) {
             rc.insert(*p, 1);
         }

@@ -47,6 +47,8 @@ pub fn rewrite_option_ops(
     // Its checked carrier type still excludes the scalar Option rewrite.
     heap_payloads.extend(carriers.iter().copied());
     t.opt_vals.extend(opt_params.iter().copied());
+    // A slot reassigned anywhere is no constant, whatever its first value.
+    t.reassigned = ops.iter().filter_map(|op| match op { Op::SetLocal { local, .. } => Some(*local), _ => None }).collect();
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
         t.flow_op(op, &mut out, option_fns, &heap_payloads);
@@ -55,6 +57,20 @@ pub fn rewrite_option_ops(
 }
 
 impl OptionTracker {
+    /// A module slot holding a scalar Option (native_slot_rewrite): its read
+    /// is the Option value itself, owning no object. `true` when `op` is such
+    /// a read and its result was noted as a minted Option (the op stays).
+    fn notes_scalar_slot_read(&mut self, op: &Op) -> bool {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { return false };
+        let slot = args.len() == 1
+            && self.const_vals.get(&args[0]).is_some_and(|a| crate::native_slot_rewrite::scalar_option_slot_at(*a));
+        if slot {
+            self.opt_vals.insert(*d);
+            self.minted.insert(*d);
+        }
+        slot
+    }
+
     /// A 0-or-1 block filled in place (`crate::option_blocks`): None until
     /// its hit stores the payload, then its length word 1. `true` when `op`
     /// is one of the block's ops and was rewritten; any other length word is
@@ -82,6 +98,22 @@ impl OptionTracker {
                         Some(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(ValueId(self.fresh)), args: vec![] })
                     }
                     Some(1) => self.pending.remove(&o).map(|p| Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(ValueId(self.fresh)), args: vec![p] }),
+                    // A tag computed at run time (a fold's carried tag local):
+                    // the length word is the tag, so a nonzero one is Some.
+                    None if self.pending.contains_key(&o) => {
+                        let p = self.pending.remove(&o).expect("the guard saw the payload");
+                        let (j, s, n) = (ValueId(self.fresh), ValueId(self.fresh + 1), ValueId(self.fresh + 2));
+                        self.fresh += 3;
+                        out.push(Op::IfThen { cond: args[1], dst: Some(j) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(s), args: vec![p] });
+                        out.push(Op::Else { val: Some(s) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(n), args: vec![] });
+                        out.push(Op::EndIf { val: Some(n) });
+                        self.opt_vals.extend([j, s, n]);
+                        self.minted.extend([j, s, n]);
+                        out.push(Op::SetLocal { local: o, src: j });
+                        return true;
+                    }
                     _ => None,
                 };
                 let Some(made) = made else { return false };
@@ -101,9 +133,15 @@ impl OptionTracker {
         if self.filled_block_op(&op, out) {
             return None;
         }
+        if self.notes_scalar_slot_read(&op) {
+            out.push(op);
+            return None;
+        }
         match &op {
             Op::ConstInt { dst, value } => {
-                self.const_vals.insert(*dst, *value);
+                if !self.reassigned.contains(dst) {
+                    self.const_vals.insert(*dst, *value);
+                }
                 out.push(op);
             }
             Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
@@ -230,6 +268,8 @@ pub(crate) fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> 
 #[derive(Default)]
 struct OptionTracker {
     const_vals: BTreeMap<ValueId, i64>,
+    /// Slots some `SetLocal` reassigns: never read as their first constant.
+    reassigned: BTreeSet<ValueId>,
     /// Values known to be scalar Options.
     opt_vals: BTreeSet<ValueId>,
     /// Carriers this pass minted (no object of their own).

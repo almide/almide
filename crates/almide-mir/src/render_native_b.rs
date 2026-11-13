@@ -93,6 +93,15 @@ pub(crate) fn render_set_local(
         }};
     }
     let t = *tys.get(src).ok_or_else(|| wall("native: SetLocal of untyped value"))?;
+    // An in-out param's slot is the caller's buffer (`crate::native_inout`).
+    if crate::native_inout::is_rendering_inout(*local) {
+        let prev = tys.get(local).copied();
+        if prev != Some(crate::render_native::owned_nty(t)) {
+            return Err(wall(format!("native: in-out slot rebound to another type ({prev:?} <- {t:?})")));
+        }
+        line!("*{} = {};", var(*local), end_if_copy_rhs(*src, t));
+        return Ok(());
+    }
     // A borrowed slot re-pointed at a payload of the same record kind.
     if let (Some(NTy::RecRef(a)), NTy::RecRef(b)) = (tys.get(local), t) {
         if *a == b {
@@ -203,6 +212,19 @@ fn render_call_fn(call: NativeCall<'_>, sink: NativeSink<'_, '_>) -> Result<(), 
     }
 }
 
+/// The argument of an in-out param (`crate::native_inout`): the caller's own
+/// buffer, lent `&mut` — re-lent when it is the caller's own in-out param.
+/// Anything but an owned buffer of the param's type is refused.
+fn inout_arg(name: &str, a: &CallArg, want: NTy, got: NTy) -> Result<String, LowerError> {
+    let CallArg::Handle(v) = a else {
+        return Err(wall(format!("native: in-out argument of `{name}` is not a handle")));
+    };
+    if got != crate::render_native::owned_nty(want) || crate::render_native_move::is_stack_lit(*v) {
+        return Err(wall(format!("native: in-out argument of `{name}` is not an owned buffer ({got:?})")));
+    }
+    Ok(if crate::native_inout::is_rendering_inout(*v) { format!("&mut *{}", var(*v)) } else { format!("&mut {}", var(*v)) })
+}
+
 /// A user fn call (by declared sig table): each arg rendered in the callee's
 /// declared param mode, then the result bound from the declared return.
 /// Extracted verbatim from `render_call_fn` (codopsy r2, #852).
@@ -221,7 +243,10 @@ fn render_user_fn_call(
     for (i, (a, p)) in call.args.iter().zip(&callee.params).enumerate() {
         let want = declared_param_want(callee_sig, i, p)?;
         let (code, got) = call_arg(a, s.tys)?;
-        let arg = if callee.owned_params.contains(&p.value) {
+        let arg = if callee.inout_params.contains(&p.value) {
+            // The caller lends its own buffer (`crate::native_inout`).
+            inout_arg(name, a, want, got)?
+        } else if callee.owned_params.contains(&p.value) {
             moved_arg(name, crate::render_native::owned_nty(want), code, got)?
         } else if matches!(want, NTy::Res | NTy::ResStr)
             && got == want
@@ -551,6 +576,29 @@ fn lent_payload(ret: Option<NTy>) -> Option<NTy> {
     matches!(p, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr).then_some(p)
 }
 
+/// [`render_declared_floor_call`]'s borrowing twin (its symbol, its items):
+/// a result read only through borrows, from a Value the function borrows
+/// (v0's decode path), or an element Option whose list the function borrows
+/// — the element lent (`Option<&A>`), no copy of it (render_native_borrow_read).
+fn borrow_twin_route(
+    dst: Option<&ValueId>,
+    floor: &'static crate::native_floor::FloorFn,
+    unedited: bool,
+    ret: Option<NTy>,
+) -> Option<(&'static str, &'static Vec<&'static str>, Option<(&'static str, usize)>)> {
+    let (d, (twin, items)) = (dst?, floor.borrow_twin.as_ref()?);
+    if crate::render_native_borrow_read::borrowed_result(*d) && unedited {
+        // A derived decode's read of a declared slot: the twin's `_at` form,
+        // which tries that slot before it scans (native_decode_hint).
+        return Some(match (crate::native_decode_hint::slot(*d), &floor.hinted_twin) {
+            (Some(slot), Some((at, at_items))) => (at.as_str(), at_items, Some((twin.as_str(), slot))),
+            _ => (twin.as_str(), items, None),
+        });
+    }
+    let option = crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some();
+    option.then_some((twin.as_str(), items, None))
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -589,22 +637,7 @@ fn render_declared_floor_call(
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
     // A result read only through borrows, from a Value the function borrows:
     // the runtime's borrowing twin, no copy of the field (v0's decode path).
-    let by_ref = match (dst, &floor.borrow_twin) {
-        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
-            // A derived decode's read of a declared slot: the twin's `_at`
-            // form, which tries that slot before it scans (native_decode_hint).
-            match (crate::native_decode_hint::slot(*d), &floor.hinted_twin) {
-                (Some(slot), Some((at, items))) => Some((at.as_str(), items, Some((twin.as_str(), slot)))),
-                _ => Some((twin.as_str(), items, None)),
-            }
-        }
-        // An element Option whose list the function borrows: the element
-        // lent (`Option<&A>`), no copy of it (render_native_borrow_read).
-        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some() => {
-            Some((twin.as_str(), items, None))
-        }
-        _ => None,
-    };
+    let by_ref = borrow_twin_route(dst.as_ref(), floor, edited.is_none(), ret);
     let expr = match by_ref {
         Some((at, _, Some((twin, slot)))) => {
             let hinted = expr.replacen(&format!("{}(", floor.symbol), &format!("{at}("), 1);

@@ -343,32 +343,33 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         }
         IrExprKind::Call { target: CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
         | IrExprKind::TailCall { .. } => false,
-        _ => {
-            // A VALUE in return position. Wrap it when it produces the declared
-            // type; anything else (a Never-typed die, an already-Result
-            // propagation) is left for the existing machinery.
-            if expr.ty == *decl_ty {
-                let inner = std::mem::replace(
-                    expr,
-                    IrExpr {
-                        kind: IrExprKind::Unit,
-                        ty: Ty::Unit,
-                        span: None,
-                        def_id: None,
-                    },
-                );
-                *expr = IrExpr {
-                    span: inner.span.clone(),
-                    def_id: inner.def_id,
-                    kind: IrExprKind::ResultOk { expr: Box::new(inner) },
-                    ty: result_ty.clone(),
-                };
-                true
-            } else {
-                false
-            }
-        }
+        _ => wrap_value_in_ok(expr, decl_ty, result_ty),
     }
+}
+
+/// [`wrap_return_positions_go`]'s VALUE in return position: wrapped in `ok`
+/// when it produces the declared type; anything else (a Never-typed die, an
+/// already-Result propagation) is left for the existing machinery.
+fn wrap_value_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
+    if expr.ty != *decl_ty {
+        return false;
+    }
+    let inner = std::mem::replace(
+        expr,
+        IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        },
+    );
+    *expr = IrExpr {
+        span: inner.span.clone(),
+        def_id: inner.def_id,
+        kind: IrExprKind::ResultOk { expr: Box::new(inner) },
+        ty: result_ty.clone(),
+    };
+    true
 }
 
 fn lower_function_all_impl(
@@ -414,6 +415,17 @@ fn lower_function_all_impl(
     }
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
     let params = ctx.bind_params(&func.params)?;
+    // An IN-OUT param (`crate::native_inout`) is the body's own slot: not a
+    // borrow, never released here — every exit hands it back (below).
+    let inout_positions = crate::native_inout::positions(func.name.as_str()).unwrap_or_default();
+    let inout_params: std::collections::BTreeSet<ValueId> =
+        inout_positions.iter().filter_map(|&k| params.get(k)).map(|p| p.value).collect();
+    for v in &inout_params {
+        ctx.param_values.remove(v);
+    }
+    let _inout = crate::native_inout::LoweringScope::enter(
+        inout_positions.iter().filter_map(|&k| func.params.get(k)).map(|p| p.var).collect(),
+    );
     // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
     // dispatch (the existing self-rec guard would otherwise wall it). The rewritten body lowers
     // through the ordinary statements+tail path; if it is out of the TCO subset, `None` keeps the
@@ -438,6 +450,8 @@ fn lower_function_all_impl(
     // rewrites introduce.
     let desugared = apply_pre_lower_desugars(func_body, &func.params);
     let func_body: &IrExpr = desugared.as_ref().unwrap_or(func_body);
+    let continued = desugar_err_arm_continuations(func_body, &func.ret_ty);
+    let func_body: &IrExpr = continued.as_ref().unwrap_or(func_body);
     // A RESULT-ABI fn (declared `Result[Unit, E]`, or a declared-Unit AUTO_WRAP lift) whose
     // effective TAIL is Unit-typed produces NO value on the unit path — the never-err strips
     // reduce a lifted tail call to a raw Unit effect call, and a declared-Result effect fn can
@@ -508,15 +522,17 @@ fn lower_function_all_impl(
     crate::native_foreign::extend_bound(&mut declared_caps, func.is_effect);
     let lifted = std::mem::take(&mut ctx.lifted);
     let heap_slot_masks = ctx.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect();
+    let ops = crate::native_inout::hand_back(ctx.ops, &inout_params);
     let main = MirFunction {
         name: func.name.as_str().to_string(),
         params,
-        ops: ctx.ops,
+        ops,
         ret,
         declared_caps,
         heap_slot_masks,
         owned_params: Default::default(),
         call_moves: Default::default(),
+        inout_params,
         aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks), slot_origins: std::mem::take(&mut ctx.slot_origins),
     };
     let mut all = vec![main];
@@ -617,3 +633,4 @@ include!("desugar_match_b.rs");
 include!("desugar_match_c.rs");
 include!("desugar_match_subject.rs");
 include!("synth_eq.rs");
+include!("desugar_err_arm_cont.rs");
