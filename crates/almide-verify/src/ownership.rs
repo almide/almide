@@ -153,11 +153,10 @@ impl Brx {
         }
     }
 
-    /// One byte inside `{…}` (not `}`, not a newline).
+    /// One byte inside `{…}` that is not a delimiter (`is_struct`) and not a
+    /// newline.
     fn step(&mut self, b: u8) {
-        if b == b'|' {
-            self.in_else = true;
-        } else if is_xmark(b) || is_tmark(b) {
+        if is_xmark(b) || is_tmark(b) {
             // A second mark on the same arm is malformed.
             let abort = is_tmark(b);
             if self.in_else {
@@ -192,20 +191,18 @@ struct Cond {
 }
 
 impl Cond {
-    /// One byte inside `[…]` (not a newline); `true` when it is the closing `]`.
-    fn step(&mut self, b: u8) -> bool {
-        match b {
-            b'|' => self.in_else = true,
-            b']' => return true,
-            _ => {
-                if let Some(op) = parse_byte(b) {
-                    let arm = if self.in_else { &mut self.else_ops } else { &mut self.then_ops };
-                    arm.push(op);
-                }
-            }
+    /// One byte inside `[…]` that is not a delimiter and not a newline.
+    fn step(&mut self, b: u8) {
+        if let Some(op) = parse_byte(b) {
+            let arm = if self.in_else { &mut self.else_ops } else { &mut self.then_ops };
+            arm.push(op);
         }
-        false
     }
+}
+
+/// `is_struct` (#4631): a structural delimiter byte.
+fn is_struct(b: u8) -> bool {
+    matches!(b, b'{' | b'}' | b'[' | b']' | b'(' | b')' | b'|')
 }
 
 /// The parser state of one line (`parse_xc`'s `cur`, `lp`, `cp`, `bp`).
@@ -218,16 +215,11 @@ struct LineState {
 }
 
 impl LineState {
-    /// `finish_line_x` / `finish_line_c`: flush, defensively closing ONE open
-    /// region — an open branch wins over an open conditional loop, which wins
-    /// over an open loop (the others are dropped, as in the proof).
+    /// `finish_line_x` (#4631): a region still open at newline/EOF poisons
+    /// the line — a dropped closer is never read as the closed region.
     fn finish(mut self) -> Vec<Item> {
-        if let Some(brx) = self.branch {
-            self.items.push(brx.close());
-        } else if let Some(cond) = self.cond {
-            self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
-        } else if let Some(body) = self.loop_body {
-            self.items.push(Item::Loop(body));
+        if self.branch.is_some() || self.cond.is_some() || self.loop_body.is_some() {
+            self.items.push(Item::Poison);
         }
         self.items
     }
@@ -235,19 +227,35 @@ impl LineState {
     /// One byte that is not a newline.
     fn step(&mut self, b: u8) {
         if let Some(brx) = self.branch.as_mut() {
-            if b == b'}' {
-                let closed = self.branch.take().map(Brx::close);
-                self.items.extend(closed);
-            } else {
-                brx.step(b);
+            match b {
+                // A second separator, a `}` before the one separator, or any
+                // other delimiter inside an arm poisons (the region ends).
+                b'|' if !brx.in_else => brx.in_else = true,
+                b'}' if brx.in_else => {
+                    let closed = self.branch.take().map(Brx::close);
+                    self.items.extend(closed);
+                }
+                _ if is_struct(b) => {
+                    self.branch = None;
+                    self.items.push(Item::Poison);
+                }
+                _ => brx.step(b),
             }
         } else if is_xmark(b) || is_tmark(b) {
             // An exit or abort marker outside a `{…}` branch poisons the line.
             self.items.push(Item::Poison);
         } else if let Some(cond) = self.cond.as_mut() {
-            if cond.step(b) {
-                let cond = self.cond.take().unwrap_or_default();
-                self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
+            match b {
+                b'|' if !cond.in_else => cond.in_else = true,
+                b']' if cond.in_else => {
+                    let cond = self.cond.take().unwrap_or_default();
+                    self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
+                }
+                _ if is_struct(b) => {
+                    self.cond = None;
+                    self.items.push(Item::Poison);
+                }
+                _ => cond.step(b),
             }
         } else {
             self.step_plain(b);
@@ -259,13 +267,20 @@ impl LineState {
         match b {
             b'{' => self.branch = Some(Brx::default()),
             b'[' => self.cond = Some(Cond::default()),
-            // `(` starts a FRESH body, discarding an unclosed one.
-            b'(' => self.loop_body = Some(Vec::new()),
-            b')' => {
-                if let Some(body) = self.loop_body.take() {
-                    self.items.push(Item::Loop(body));
+            // A `(` inside an open `(` (a dropped `)`) poisons.
+            b'(' => {
+                if self.loop_body.take().is_some() {
+                    self.items.push(Item::Poison);
+                } else {
+                    self.loop_body = Some(Vec::new());
                 }
             }
+            b')' => match self.loop_body.take() {
+                Some(body) => self.items.push(Item::Loop(body)),
+                None => self.items.push(Item::Poison),
+            },
+            // A `|`, `}` or `]` outside the region it belongs to.
+            b'|' | b'}' | b']' => self.items.push(Item::Poison),
             _ => {
                 if let Some(op) = parse_byte(b) {
                     match self.loop_body.as_mut() {
@@ -439,9 +454,10 @@ mod tests {
     }
 
     #[test]
-    fn a_loop_opened_inside_a_branch_region_is_not_a_loop() {
-        // Inside `{…}` the paren bytes are skipped, exactly as parse_xc does.
-        assert_eq!(parse(b"{(i)|}"), vec![vec![Item::Branch(vec![Op::Inc], vec![])]]);
+    fn a_delimiter_inside_a_branch_arm_poisons() {
+        // Arms are flat (#4631): a loop opened inside `{…}` is malformed.
+        assert!(parse(b"{(i)|}")[0].contains(&Item::Poison));
+        assert!(parse(b"[{i|}|]")[0].contains(&Item::Poison));
     }
 
     #[test]
@@ -453,12 +469,41 @@ mod tests {
     }
 
     #[test]
-    fn a_second_open_paren_restarts_the_body() {
-        assert_eq!(parse(b"(i(d)"), vec![vec![Item::Loop(vec![Op::Dec])]]);
+    fn a_second_open_paren_poisons() {
+        // A dropped `)` used to restart the body and discard `i` (#4631).
+        assert!(parse(b"(i(d)")[0].contains(&Item::Poison));
     }
 
     #[test]
-    fn end_of_line_closes_the_branch_and_drops_the_open_loop() {
-        assert_eq!(parse(b"(i{d"), vec![vec![Item::Branch(vec![Op::Dec], vec![])]]);
+    fn a_region_open_at_end_of_line_poisons() {
+        for w in [&b"(i{d"[..], b"{|id", b"[i|d", b"(id", b"{|id\nid"] {
+            assert!(parse(w)[0].contains(&Item::Poison), "{}", String::from_utf8_lossy(w));
+        }
+    }
+
+    #[test]
+    fn a_stray_separator_or_closer_poisons() {
+        for w in [&b"i|d"[..], b"id}", b"id]", b"id)", b"(i|d)", b"{i|d|}", b"[i|d|]"] {
+            assert!(parse(w)[0].contains(&Item::Poison), "{}", String::from_utf8_lossy(w));
+        }
+    }
+
+    #[test]
+    fn the_witness_mutation_lab_cells_are_rejected() {
+        // #4631: the drop-`|` and drop-`}` mutations of accepted ownership
+        // branch witnesses, which every judge used to accept.
+        for (good, mutants) in [("{|id}", ["{id}", "{|id"]), ("{|im}", ["{im}", "{|im"])] {
+            assert!(check_xc(good.as_bytes()), "{good}");
+            for m in mutants {
+                assert!(!check_xc(m.as_bytes()), "{m}");
+            }
+        }
+        // The general case: a moved separator no longer turns a rejected
+        // witness into an accepted one.
+        assert!(!check_xc(b"{i|d}"));
+        assert!(!check_xc(b"{id}"));
+        // A recorder bug that moved the separator by one op.
+        assert!(check_xc(b"i{d|d}"));
+        assert!(!check_xc(b"i{|dd}"));
     }
 }
