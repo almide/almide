@@ -14,7 +14,8 @@
 //!
 //! What this test holds — the rendered text and the blocks allocated, never a
 //! wall-clock time:
-//! - the loop moves the payload out (`std::mem::take`) and copies nothing;
+//! - the loop moves the payload out (`std::mem::take`, or the by-value
+//!   match when the carrier dies there) and copies nothing;
 //! - the blocks the fold allocates grow in proportion to its steps (the
 //!   copying fold's grow with their square);
 //! - the folds print the same on wasm.
@@ -122,7 +123,8 @@ fn first_loop(main: &str) -> String {
 fn the_ok_payload_moves_out_of_its_carrier_every_round() {
     for (what, source) in [("object fold", object_fold(8, "!")), ("list fold", list_fold(8))] {
         let body = first_loop(&rendered_main(&source));
-        assert!(body.contains("std::mem::take(v)"), "{what}: the Ok payload is not moved out:\n{body}");
+        let moved = body.contains("std::mem::take(v)") || body.contains(" { Ok(v) => v, Err(_) => unreachable!() }");
+        assert!(moved, "{what}: the Ok payload is not moved out:\n{body}");
         assert!(!body.contains(".clone()"), "{what}: the loop copies a value:\n{body}");
     }
 }
