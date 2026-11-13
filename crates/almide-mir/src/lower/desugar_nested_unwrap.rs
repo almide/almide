@@ -133,6 +133,14 @@ fn nested_unwrap_rewrite_stmts(
                 if nested_unwrap_rewrite_expr(expr, next_var) {
                     return true;
                 }
+                // A call statement (`list.push(xs, f(x)!)`): its arguments are
+                // operands like a bound value's, below a root that is no unwrap.
+                if matches!(expr.kind, IrExprKind::Call { .. }) {
+                    if let Some((bind, span)) = take_innermost_scalar_unwrap(expr, next_var) {
+                        stmts.insert(i, IrStmt { kind: bind, span });
+                        return true;
+                    }
+                }
                 (false, None)
             }
             _ => (false, None),
@@ -177,15 +185,16 @@ fn nested_unwrap_rewrite_stmts(
     false
 }
 
-/// A scalar-typed `Unwrap` whose operand is a Result/Option — the node class
-/// every nested hoist below targets.
+/// An `Unwrap` whose operand is a Result/Option — the node class every nested
+/// hoist below targets. A heap payload hoists the same way: the hoisted bind is
+/// the let-unwrap shape whose payload the bind machinery owns, and the place it
+/// left reads that binding.
 fn is_hoistable_unwrap(e: &IrExpr) -> bool {
     use almide_ir::IrExprKind;
     matches!(
         &e.kind,
         IrExprKind::Unwrap { expr: inner }
-            if !crate::lower::is_heap_ty(&e.ty)
-                && matches!(
+            if matches!(
                     &inner.ty,
                     almide_lang::types::Ty::Applied(
                         almide_lang::types::constructor::TypeConstructorId::Result
@@ -240,8 +249,9 @@ fn has_candidate_unwrap(body: &IrExpr) -> bool {
 /// NEVER into: a Lambda body (different scope — hoisting captures the lambda's
 /// params in the outer bind), `if`/`match` arms or `??` fallbacks (conditional
 /// evaluation — the hoisted unwrap would run and propagate unconditionally),
-/// `and`/`or` right operands (short-circuit), call ARGUMENTS (the call-arg
-/// unwrap ANF already owns that position), or nested blocks/loops. The first
+/// `and`/`or` right operands (short-circuit), or nested blocks/loops. A direct
+/// call's ARGUMENTS are operands under the same left-to-right rule (the call-arg
+/// ANF lifts them only from a block's own statements, not inside a loop body). The first
 /// draft used the generic visitor and walled five fallible_lambda_test fns by
 /// hoisting a LAMBDA-body `!` into the enclosing bind — the ratchet caught it.
 fn take_innermost_scalar_unwrap(
@@ -285,7 +295,15 @@ fn take_innermost_scalar_unwrap(
                 }
                 None
             }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            // A direct call's arguments, left to right (a computed or method callee
+            // is itself an operand evaluated first, so those keep their position).
+            IrExprKind::Call {
+                target: almide_ir::CallTarget::Named { .. } | almide_ir::CallTarget::Module { .. },
+                args: elements,
+                ..
+            }
+            | IrExprKind::List { elements }
+            | IrExprKind::Tuple { elements } => {
                 for el in elements.iter_mut() {
                     if let Some(found) = search(el, next_var, false) {
                         return Some(found);
