@@ -165,10 +165,6 @@ impl<K: Clone + Ord, V: Clone> Journaled<BTreeMap<K, V>> {
         self.note(&k);
         self.inner.insert(k, v)
     }
-    pub(crate) fn remove(&mut self, k: &K) -> Option<V> {
-        self.note(k);
-        self.inner.remove(k)
-    }
     pub(crate) fn entry(&mut self, k: K) -> std::collections::btree_map::Entry<'_, K, V> {
         self.note(&k);
         self.inner.entry(k)
