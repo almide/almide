@@ -504,3 +504,52 @@ fn a_bind_of_a_mut_param_snapshots_the_place_and_keeps_it_lent() {
     assert!(header_of(&out, "same").contains("&mut AlmdRec"), "{out}");
     assert_eq!(run_native(TRIAL), "true false true 4 3 0\n");
 }
+
+const TAIL: &str = r#"
+type St = { n: Int, log: List[String] }
+
+fn fill(mut acc: List[Int], n: Int) -> Int =
+  if n == 0 then list.len(acc)
+  else {
+    acc = acc + [n]
+    fill(acc, n - 1)
+  }
+
+fn walk(xs: List[Int], i: Int, mut st: St) -> Option[Int] =
+  if i >= list.len(xs) then none
+  else {
+    st.n = st.n + 1
+    st.log = st.log + ["v${i}"]
+    let x = list.get(xs, i) ?? 0
+    if x > 10 then some(x + st.n) else walk(xs, i + 1, st)
+  }
+
+fn deep(k: Int, mut st: St) -> Int =
+  if k == 0 then st.n
+  else {
+    let r = deep(k - 1, st)
+    st.n = st.n + r
+    r
+  }
+
+effect fn main() -> Unit = {
+  var a = [9]
+  let c = fill(a, 4)
+  var st = { n: 0, log: [] }
+  let w = walk([1, 2, 30, 4], 0, st)
+  let w2 = walk([1, 2], 0, st)
+  let d = deep(3, st)
+  println("${c} ${list.len(a)} ${w ?? -1} ${w2 ?? -1} ${d} ${st.n} ${list.join(st.log, ",")}")
+}
+"#;
+
+#[test]
+fn a_tail_call_that_passes_each_place_on_as_itself_keeps_it_lent() {
+    // `walk(xs, i + 1, st)`: the loop rewrite carries `xs` and `i`; `st` is
+    // the same place on every iteration, so it stays lent `&mut`.
+    let out = render(TAIL).expect("renders");
+    for name in ["fill", "walk", "deep"] {
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's place:\n{out}");
+    }
+    assert_eq!(run_native(TAIL), "5 5 33 -1 5 20 v0,v1,v2,v0,v1\n");
+}

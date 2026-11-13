@@ -523,6 +523,28 @@ fn tail_calls_named(e: &IrExpr, name: &str) -> bool {
     }
 }
 
+/// Whether every self call in `e` passes each in-out param `ps[i]` at its own
+/// position: the tail-call loop then carries none of them (the place stays
+/// where the caller lent it, the same on every iteration).
+fn self_calls_pass_places(e: &IrExpr, name: &str, ps: &[(usize, VarId)]) -> bool {
+    struct S<'a>(&'a str, &'a [(usize, VarId)], bool);
+    impl IrVisitor for S<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, args, .. } = &e.kind
+            {
+                if name.as_str() == self.0 && !self.1.iter().all(|&(k, p)| args.get(k).is_some_and(|a| is_var(a, p))) {
+                    self.2 = false;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut s = S(name, ps, true);
+    s.visit_expr(e);
+    s.2
+}
+
 fn calls_named(e: &IrExpr, name: &str) -> bool {
     struct N<'a>(&'a str, bool);
     impl IrVisitor for N<'_> {
@@ -617,10 +639,13 @@ fn candidate_positions(f: &IrFunction, names: &HashMap<String, usize>) -> Option
     let library = name.split_once('.').is_some_and(|(m, _)| almide_lang::stdlib_info::is_any_stdlib(m));
     let plain = !library && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
     let generic = f.generics.as_ref().is_some_and(|g| !g.is_empty());
-    // A self tail call stays out: it becomes the loop rewrite's carried
-    // params, which this convention does not carry. A non-tail self call
-    // lends the place on, as a call to any other candidate does.
-    let recursive = tail_calls_named(&f.body, name);
+    // A self tail call becomes the loop rewrite's carried params, which this
+    // convention does not carry: it stays out unless every self call passes
+    // each place on as itself (the loop then carries none of them). A
+    // non-tail self call lends the place on, as a call to any other
+    // candidate does.
+    let places: Vec<(usize, VarId)> = ks.iter().map(|&k| (k, f.params[k].var)).collect();
+    let recursive = tail_calls_named(&f.body, name) && !self_calls_pass_places(&f.body, name, &places);
     // A function the host's native code calls back keeps the move-mode
     // convention its callback adapter writes back from.
     let host_called = crate::native_callbacks::is_root(name);
