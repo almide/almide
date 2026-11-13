@@ -621,7 +621,13 @@ impl LowerCtx {
         for (i, ov) in overrides.iter().enumerate() {
             if let Some(expr) = ov {
                 if is_heap_ty(&tys[i]) {
-                    let Some(obj) = self.lower_owned_heap_field(expr) else {
+                    // The same Option/Result ctor fallback a record literal's field
+                    // takes (`record_field_ctor_fallback`): a spread builds a record
+                    // of the same declared type, freed the same way.
+                    let Some(obj) = self
+                        .lower_owned_heap_field(expr)
+                        .or_else(|| self.record_field_ctor_fallback(expr))
+                    else {
                         crate::trace::trace("ALMIDE_DBG_ELEM", || {
                             format!(
                                 "[spread] heap override {} ({}) declined",
