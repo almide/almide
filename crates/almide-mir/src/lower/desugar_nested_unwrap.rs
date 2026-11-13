@@ -146,6 +146,9 @@ fn nested_unwrap_rewrite_stmts(
             _ => (false, None),
         };
         let Some(value) = value else { continue };
+        if factor_branch_unwrap(value) {
+            return true;
+        }
         let at_root = matches!(&value.kind, IrExprKind::Unwrap { .. });
         if at_root && !root_ok {
             // Still recurse INSIDE the root unwrap's operand for a deeper one.
@@ -183,6 +186,31 @@ fn nested_unwrap_rewrite_stmts(
         }
     }
     false
+}
+
+/// `if c then a! else b!` over one carrier type is `(if c then a else b)!`: the
+/// condition runs first, then exactly one of `a`/`b`, then the one `!` — the
+/// same order and the same propagation. Bound, it becomes the let-unwrap shape
+/// (the loop error slot, the continuation, or the return rule) instead of a
+/// heap branch whose arms each leave the fn.
+fn factor_branch_unwrap(value: &mut almide_ir::IrExpr) -> bool {
+    use almide_ir::{IrExpr, IrExprKind};
+    let IrExprKind::If { cond, then, else_ } = &value.kind else { return false };
+    let (IrExprKind::Unwrap { expr: a }, IrExprKind::Unwrap { expr: b }) = (&then.kind, &else_.kind) else {
+        return false;
+    };
+    if a.ty != b.ty || then.ty != value.ty || else_.ty != value.ty {
+        return false;
+    }
+    let carrier = IrExpr {
+        kind: IrExprKind::If { cond: cond.clone(), then: a.clone(), else_: b.clone() },
+        ty: a.ty.clone(),
+        span: value.span,
+        def_id: None,
+    };
+    let kind = IrExprKind::Unwrap { expr: Box::new(carrier) };
+    *value = IrExpr { kind, ty: value.ty.clone(), span: value.span, def_id: value.def_id };
+    true
 }
 
 /// An `Unwrap` whose operand is a Result/Option — the node class every nested
