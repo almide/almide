@@ -3,7 +3,8 @@
 //! certified native render: the variant is a typed value there and releases
 //! the list with itself. The rule is the element's shape — a tuple or a
 //! record — so a field of another heap kind the variant's release does not
-//! cover (a map, a list of lists) is still refused whole, never built wrong.
+//! cover (a map of heap values, a list of lists) is still refused whole, never
+//! built wrong. A map of scalar values is a constructor field there too.
 
 fn render(src: &str) -> Result<String, String> {
     let src = src.to_string();
@@ -58,4 +59,15 @@ fn a_field_of_another_heap_kind_is_still_refused() {
     for (name, src) in [("map", map), ("nested list", nested)] {
         assert!(render(&src).is_err(), "{name} field rendered");
     }
+}
+
+#[test]
+fn a_map_of_scalar_values_is_a_constructor_field() {
+    let src = program(
+        "RVals(Map[String, Float])",
+        "RVals(m) => int.to_string(map.len(m))",
+        "RVals([\"a\": 1.5])",
+    );
+    let code = render(&src).unwrap_or_else(|e| panic!("map of scalars refused: {e}"));
+    assert!(code.contains("fn almd_mk("), "no mk in:\n{code}");
 }

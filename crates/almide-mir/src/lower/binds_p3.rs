@@ -271,14 +271,18 @@ impl LowerCtx {
                 .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
     }
 
-    /// A `Map` ctor field on the native render: the variant renders as an owned
-    /// Rust type whose `AlmideMap` field is freed by the variant's own scope-end
-    /// drop, so construction moves the map in and nothing can leak. A Float key
-    /// has no native map spelling and stays walled, as does the wasm leg.
+    /// A `Map[String | scalar, scalar]` ctor field on the native render: the variant
+    /// renders as an owned Rust type whose `AlmideMap` field is freed by the variant's
+    /// own scope-end drop, so construction moves the map in and nothing can leak. A
+    /// Float key has no native map spelling, and a map of heap values stays refused
+    /// (`ctor_aggregate_list_field`), as does the wasm leg.
     fn ctor_field_native_owned_map(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
+        let Ty::Applied(TypeConstructorId::Map, a) = ty else { return false };
         crate::lower::owned_tco_slots()
-            && matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && !matches!(a[0], Ty::Float))
+            && a.len() == 2
+            && (matches!(a[0], Ty::String) || (!is_heap_ty(&a[0]) && !matches!(a[0], Ty::Float)))
+            && !is_heap_ty(&a[1])
     }
 
     /// Is `ty` a `List` ctor field admitted on every leg — a `List[scalar]`, a
