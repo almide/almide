@@ -49,6 +49,8 @@ pub fn rewrite_option_ops(
     t.opt_vals.extend(opt_params.iter().copied());
     // A slot reassigned anywhere is no constant, whatever its first value.
     t.reassigned = ops.iter().filter_map(|op| match op { Op::SetLocal { local, .. } => Some(*local), _ => None }).collect();
+    t.slot_of = ops.iter().filter_map(|op| match op { Op::SetLocal { local, src } => Some((*src, *local)), _ => None }).collect();
+    t.heap_payloads = heap_payloads.clone();
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
         t.flow_op(op, &mut out, option_fns, &heap_payloads);
@@ -155,6 +157,18 @@ impl OptionTracker {
                 self.minted.insert(*dst);
             }
             Op::Dup { dst, src } if self.minted.contains(src) => {
+                out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
+                self.opt_vals.insert(*dst);
+                self.minted.insert(*dst);
+            }
+            // A copy of a call's Option written into a value-only slot is a
+            // value too: the slot holds no object on any path, and the call
+            // result keeps its own release.
+            Op::Dup { dst, src }
+                if self.opt_vals.contains(src)
+                    && !self.heap_payloads.contains(src)
+                    && self.slot_of.get(dst).is_some_and(|l| self.minted.contains(l)) =>
+            {
                 out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
@@ -270,6 +284,10 @@ struct OptionTracker {
     const_vals: BTreeMap<ValueId, i64>,
     /// Slots some `SetLocal` reassigns: never read as their first constant.
     reassigned: BTreeSet<ValueId>,
+    /// A `SetLocal`'s source → the slot it is written into.
+    slot_of: BTreeMap<ValueId, ValueId>,
+    /// Options whose payload is a heap value: never a value-only copy.
+    heap_payloads: BTreeSet<ValueId>,
     /// Values known to be scalar Options.
     opt_vals: BTreeSet<ValueId>,
     /// Carriers this pass minted (no object of their own).
@@ -372,5 +390,31 @@ mod tests {
         rewrite_option_ops(&mut mixed, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
         assert!(mixed.ops.iter().any(|op| matches!(op, Op::Dup { dst, src } if *dst == v(4) && *src == v(1))));
         assert!(mixed.ops.iter().any(|op| matches!(op, Op::Drop { v: d } if *d == v(1))));
+    }
+    #[test]
+    fn a_call_option_copied_into_a_value_only_slot_is_a_value_copy() {
+        // `var r = none; if c then r = find()`: the slot holds no object on
+        // either path, so the copy written into it must own none either.
+        let v = ValueId;
+        let mut f = MirFunction {
+            name: "option_slot".into(),
+            ops: vec![
+                Op::Alloc { dst: v(0), repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }, init: Init::OptNone },
+                Op::ConstInt { dst: v(1), value: 1 },
+                Op::IfThen { cond: v(1), dst: None },
+                Op::CallFn { dst: Some(v(2)), name: "find".into(), args: vec![],
+                    result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) },
+                Op::Dup { dst: v(3), src: v(2) },
+                Op::SetLocal { local: v(0), src: v(3) },
+                Op::Drop { v: v(2) },
+                Op::Else { val: None },
+                Op::EndIf { val: None },
+                Op::Consume { v: v(0) },
+            ],
+            ..Default::default()
+        };
+        rewrite_option_ops(&mut f, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
+        assert!(f.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::OptCopy, dst: Some(d), .. } if *d == v(3))));
+        assert!(crate::verify_ownership(&f).is_ok(), "{:?}", crate::verify_ownership(&f));
     }
 }
