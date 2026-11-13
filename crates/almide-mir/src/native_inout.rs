@@ -559,7 +559,7 @@ fn prune_fn(f: &IrFunction, cands: &Cands, writes: &HashMap<String, Vec<usize>>,
     refused_sites(&f.body, cands, &ok_vars, refused);
     if dbg {
         for n in refused.difference(&before) {
-            eprintln!("[inout] {n} refused: a call site in {}", f.name);
+            crate::trace::trace("ALMIDE_DBG_INOUT", || format!("[inout] {n} refused: a call site in {}", f.name));
         }
     }
 }
