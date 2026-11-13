@@ -143,11 +143,11 @@ pub(crate) struct LowerCtx {
     /// (materialized_options / materialized_results / materialized_results_str):
     /// "untracked" is now the ABSENCE of a shape in one place, never a
     /// disagreement between sets, and a shape overwrite is a plain insert.
-    value_shapes: HashMap<ValueId, crate::lower::VariantShape>,
+    value_shapes: Journaled<HashMap<ValueId, crate::lower::VariantShape>>,
     /// #1414 drop dimension: ONE record per value (see `DropFacts`). Replaces
     /// heap_elem_lists / variant_drop_handles / the *_result_results family /
     /// list_list_str_lists / str_str_elem_lists.
-    value_drops: HashMap<ValueId, crate::lower::DropFacts>,
+    value_drops: Journaled<HashMap<ValueId, crate::lower::DropFacts>>,
     /// MIR values KNOWN to be MATERIALIZED Results (the DynListStr len-as-tag layout: `Ok(int)` =
     /// len 0 with the value in slot 0, `Err(string)` = len 1 owning the message). An `Ok`/`Err`
     /// `match` may EXECUTE (read `len` as the tag — len 0 → Ok, len != 0 → Err — and extract slot
@@ -174,7 +174,7 @@ pub(crate) struct LowerCtx {
     /// a function-typed param or call result) lowers to `Op::CallIndirect` through the
     /// block (fnidx loaded from slot 0, the block passed as the borrowed env arg —
     /// `emit_closure_call`) instead of deferring — the closure EXECUTES.
-    closure_values: HashSet<ValueId>,
+    closure_values: Journaled<HashSet<ValueId>>,
     /// C1 DIRECT-CALL INLINE: source-`VarId` → the INLINE lambda (`params`, `body`) a `let f =
     /// (x) => body` statically bound. A later DIRECT call `f(args)` whose callee is this `f`
     /// is DEFUNCTIONALIZED — the body is lowered INLINE with each param bound to its arg, and
@@ -256,7 +256,7 @@ pub(crate) struct LowerCtx {
     /// NOT lift → an empty/garbage block) has cap 0 and would TRAP at `xs[0]`, a NEW crash where the
     /// deferred `Const 0` merely mis-valued. Gating on real materialization keeps `xs[i]` from
     /// regressing an unmaterialized-list program to a runtime trap.
-    materialized_lists: HashSet<ValueId>,
+    materialized_lists: Journaled<HashSet<ValueId>>,
     /// Heap binds that fell to the DEFERRED `Alloc{Opaque}` model (an EMPTY block whose
     /// content is never populated — sound only while nothing READS through it). A
     /// custom-variant `match` over such a subject would read a garbage tag and execute
@@ -274,19 +274,19 @@ pub(crate) struct LowerCtx {
     /// [`Op::DropValue`] (runtime-tag-dispatched: a Str/Array/Object Value frees its one heap
     /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
     /// when a `Value`-typed bind is created.
-    value_handles: HashSet<ValueId>,
+    value_handles: Journaled<HashSet<ValueId>>,
     /// MIR values that are `List[Value]` (a list whose i64 slots hold OWNED dynamic `Value` handles,
     /// each itself possibly a heap-payload Str/Array). A scope-end drop emits [`Op::DropListValue`]
     /// (recursive `$__drop_value` per element) instead of the flat [`Op::DropListStr`], which would
     /// leak each element Value's nested payload. Populated when a `List[Value]` literal/arg is
     /// materialized. Distinct from `heap_elem_lists` (String elements, whose `rc_dec` is the full free).
-    value_elem_lists: HashSet<ValueId>,
+    value_elem_lists: Journaled<HashSet<ValueId>>,
     /// MIR values that are a `List[(String, Value)]` whose element slots hold owned (String, Value)
     /// TUPLE blocks (the yaml `pairs` shape). A scope-end drop emits [`Op::DropListStrValue`]
     /// (`$__drop_list_str_value`: per tuple, rc_dec the String slot + recursive `$__drop_value` the Value
     /// slot, then the tuple, then the list) — a flat [`Op::DropListStr`] would leak each tuple's payloads.
     /// Populated when a `List[(String,Value)]` concat is materialized via `__list_concat_rc`.
-    str_value_elem_lists: HashSet<ValueId>,
+    str_value_elem_lists: Journaled<HashSet<ValueId>>,
     /// MIR values that are a `List[(String, String)]` (the `map.to_list` / svg render_attrs shape) —
     /// element slots hold owned (String, String) TUPLE blocks. A scope-end drop emits
     /// [`Op::DropListStrStr`] (`$__drop_list_str_str`: per tuple, rc_dec BOTH String slots, then the
@@ -306,7 +306,7 @@ pub(crate) struct LowerCtx {
     /// (garbage) slot handles, so loading + dereferencing one would TRAP at `rc_dec`. (A
     /// scalar field read does not dereference, so it tolerates a 0 slot as a benign mis-read;
     /// but a heap-field deref must be gated on REAL materialization.)
-    materialized_aggregates: HashSet<ValueId>,
+    materialized_aggregates: Journaled<HashSet<ValueId>>,
     /// MIR values that are MIXED scalar+heap record/tuple blocks → the i64-SLOT INDICES that
     /// hold an OWNED heap handle (a `String`/`List`/nested-aggregate field). Such a value's
     /// scope-end / per-iteration drop emits a [`Op::DropListStr`] (cert = the SAME single `d`
@@ -315,10 +315,10 @@ pub(crate) struct LowerCtx {
     /// [`MirFunction::heap_slot_masks`] side table. A value here is treated like a
     /// `heap_elem_lists` member for drop-op SELECTION, but the mask makes the recursive free
     /// touch only the heap slots (NOT every slot — the scalar fields must not be `rc_dec`'d).
-    record_masks: HashMap<ValueId, Vec<usize>>,
+    record_masks: Journaled<HashMap<ValueId, Vec<usize>>>,
     /// All-scalar tuple and record blocks → their declared type
     /// ([`MirFunction::aggregate_blocks`]).
-    pub(crate) aggregate_blocks: std::collections::BTreeMap<ValueId, String>,
+    pub(crate) aggregate_blocks: Journaled<std::collections::BTreeMap<ValueId, String>>,
     /// The CURRENT binding (`lower_bind`) is a MUTABLE `var` (set by `lower_stmt` from the
     /// `Bind` mutability). A `var b = r.items` heap-field extraction may be COW-mutated later,
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow
