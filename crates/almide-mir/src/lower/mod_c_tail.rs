@@ -519,7 +519,7 @@ fn lower_function_all_impl(
         heap_slot_masks,
         owned_params: Default::default(),
         call_moves: Default::default(),
-        aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks),
+        aggregate_blocks: ctx.aggregate_blocks.take_inner(),
     };
     let mut all = vec![main];
     all.extend(lifted);
