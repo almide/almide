@@ -614,13 +614,22 @@ fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSe
 }
 
 /// Does `e` mention `r` other than as a place lent to a candidate's in-out
-/// position? Two lends side by side borrow the place one after the other; a
-/// read may stay borrowed across the other's lend.
+/// position or a scalar read through it? Two lends side by side borrow the
+/// place one after the other, and a scalar read is a copy; a heap read may
+/// stay borrowed across the other's lend.
 fn reads_besides_lends(e: &IrExpr, r: VarId, cands: &Cands) -> bool {
     struct R<'a>(VarId, &'a Cands, bool);
     impl IrVisitor for R<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
+                // A scalar read through the place is a copy: it holds nothing.
+                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+                    if place_root(e) == Some(self.0) && !crate::lower::is_heap_ty(&e.ty) =>
+                {
+                    if let IrExprKind::IndexAccess { index, .. } = &e.kind {
+                        self.visit_expr(index);
+                    }
+                }
                 IrExprKind::Var { id } if *id == self.0 => self.2 = true,
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if self.1.contains_key(name.as_str()) => {
                     let ks = &self.1[name.as_str()];
@@ -692,7 +701,8 @@ fn refused_sites(e: &IrExpr, cands: &Cands, ok_vars: &HashSet<VarId>, refused: &
             };
             for (j, sib) in siblings.iter().enumerate() {
                 for (name, r) in nested_lends(sib, self.cands) {
-                    if siblings.iter().enumerate().any(|(i, o)| i != j && reads_besides_lends(o, r, self.cands)) {
+                    // A sibling whose value is a scalar holds no borrow once evaluated.
+                    if siblings.iter().enumerate().any(|(i, o)| i != j && crate::lower::is_heap_ty(&o.ty) && reads_besides_lends(o, r, self.cands)) {
                         self.refused.insert(name);
                     }
                 }
