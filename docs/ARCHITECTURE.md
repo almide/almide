@@ -297,6 +297,7 @@ ratchet); `ALMIDE_ONLY_PASS=sink|fold|dce|propagate` runs exactly one of them
 | 7 | top-let reclassify | `almide_ir::reclassify_top_lets` | analysis | const-vs-runtime top-let classification after folding |
 | 8 | monomorphize | `mono/` (`monomorphize`) | specialization | clone structurally-bounded generic fns per call-site type; runs `mutual_tco` (`mutual_tco.rs`: mutually-recursive tail calls → one loop) as its last step |
 | 9 | ir_link | `almide-frontend::ir_link` | link | link dependency modules into the root after the monomorphized call graph exists |
+| 10 | value fuse | `optimize/value_fuse.rs` (`stamp_kernels`, `fuse_value_round_trips`) | opt (perf) | a `Value` built and consumed exactly once by a known consumer is not materialized: a parsed document read only at static key paths is read off the text in one scan, and a built `Value` serialized once is written straight to text; consumers are recognized by their stdlib `@value_op` declarations, never by name |
 
 ### B. `almide-codegen` nanopass pipeline (native codegen v3 / WGSL)
 

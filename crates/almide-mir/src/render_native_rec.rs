@@ -24,6 +24,10 @@ pub(crate) struct RecDecl {
     pub name: String,
     /// Source types prove Rust structural equality preserves language equality.
     pub eq_safe: bool,
+    /// A struct or enum whose fields all compare by their source types
+    /// although Rust structural equality does not (a Float rides an i64 bit
+    /// lane): how each case's fields compare, rendered as its own `impl PartialEq`.
+    pub eq_fields: Option<Vec<Vec<FieldEq>>>,
     /// Source tuple fields establish the same lexicographic order as Rust.
     pub ord_safe: bool,
     pub fields: Vec<NTy>,
@@ -189,7 +193,7 @@ pub(crate) const VALUE_KEY: &str = "Ty::Value";
 /// The generated `Value` type: v0's own runtime enum (`AlmideValue`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn value_index() -> u16 {
-    intern(&|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), ..RecDecl::default() })
+    intern(&|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), eq_safe: true, ..RecDecl::default() })
 }
 
 /// `t` is the generated `Value` type.
@@ -448,6 +452,7 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
         }
     }
     out.push_str("}\n");
+    out.push_str(&source_eq_impl(i, d));
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
     let leaf = d.default_tag.unwrap_or(cases[0].0);

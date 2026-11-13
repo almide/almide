@@ -127,7 +127,10 @@ impl Emitter<'_> {
         self.witness_branch_open();
         let arms = (|| {
             self.witness_branch_arm();
-            self.lower_stmt_expr(then)?;
+            self.room_proven = self.proven_room(cond, then);
+            let then_ok = self.lower_stmt_expr(then);
+            self.room_proven = None;
+            then_ok?;
             self.f.instructions().else_();
             self.witness_branch_arm();
             self.lower_stmt_expr(else_)
@@ -410,6 +413,9 @@ impl Emitter<'_> {
                     if var_ty != INT {
                         return unsup("forin-range-nonint");
                     }
+                    if var_tuple.is_none() && self.try_strided_range(var, crate::stride::Bounds::Exprs(start, end), *inclusive, body)? {
+                        return Ok(());
+                    }
                     self.lower(start, Some(INT))?;
                     self.f.instructions().local_set(var_idx);
                     self.lower(end, Some(INT))?;
@@ -457,6 +463,9 @@ impl Emitter<'_> {
                     {
                         if var_ty != INT {
                             return unsup("forin-range-nonint");
+                        }
+                        if var_tuple.is_none() && self.try_strided_range(var, crate::stride::Bounds::Locals(sl, el), inclusive, body)? {
+                            return Ok(());
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;

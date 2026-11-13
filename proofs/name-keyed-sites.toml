@@ -1270,3 +1270,9 @@ id = "crates/almide-mir/src/native_floor_sig.rs::PROCESS_STATUS_ABI::table"
 class = "justified"
 names = 2
 why = "These are the field labels of the ProcessStatus record crossing the native runtime boundary, not properties of the io.stdout or io.stderr functions. The one table is read by both the bundled-declaration check and the host-result conversion: field names, types and order must equal the runtime struct, and a renamed field must refuse the conversion rather than remap its slots. Function attributes cannot declare this record layout."
+
+[[site]]
+id = "crates/almide-frontend/src/bundled_reach/live.rs::REWRITE_INSERTED::table"
+class = "justified"
+names = 10
+why = "Which bundled functions the value-fusion rewrite calls, and which call each one replaces (json.parse for the directed reader, json.stringify for the array writer), is a fact about that rewrite site, not about the functions: no source spells them, so the reach pruning (#4328) must be told when to keep them. Keeping them only once their trigger is live stops every program that loads json from entering the reader's bytes and float sources. tests/compiler_inserted_calls_test.rs scans for every literal module.__name call the compiler builds and refuses one no table lists, and checks every row's function and trigger is declared by its module."

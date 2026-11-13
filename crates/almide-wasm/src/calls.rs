@@ -469,6 +469,7 @@ impl Emitter<'_> {
                     debug_assert!(self.tail_consumed.is_empty());
                     self.f.instructions().call(index);
                     self.release_borrowed_temps(depth);
+                    self.witness_diverged(i);
                 }
                 Ok(ret)
             }
@@ -782,6 +783,7 @@ impl Emitter<'_> {
         } else {
             self.f.instructions().call(index);
             self.release_borrowed_temps(depth);
+            self.witness_diverged(i);
         }
         // The callee-owned convention IS the declaration: a table callee
         // hands its droppable result over with exactly one credit (#1986 /

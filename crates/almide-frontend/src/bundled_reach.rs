@@ -43,7 +43,7 @@ use almide_lang::ast::{
 use almide_lang::stdlib_info::{bundled_source, AUTO_IMPORT_BUNDLED};
 
 mod live;
-pub use live::{compiler_called_fns, live_bundled, reach_within, LiveBundled, COMPILER_INSERTED, TEST_SYNTHESIZED};
+pub use live::{compiler_called_fns, live_bundled, reach_within, LiveBundled, COMPILER_INSERTED, REWRITE_INSERTED, TEST_SYNTHESIZED};
 
 /// The names one source spells, split by the position they can reach a
 /// module from.
@@ -689,6 +689,27 @@ mod tests {
 
     fn is_live(l: &super::LiveBundled, module: &str, f: &str) -> bool {
         l.live_fns.get(module).is_some_and(|fs| fs.contains(f))
+    }
+
+    fn live_with_json(src: &str) -> super::LiveBundled {
+        let tokens = almide_lang::lexer::Lexer::tokenize(src);
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
+        let json = almide_lang::parse_cached(almide_lang::stdlib_info::bundled_source("json").expect("json"))
+            .expect("json parses");
+        super::live_bundled(std::iter::once(&prog), &[("json", json)], &|_| true)
+    }
+
+    #[test]
+    fn a_rewrite_inserted_function_waits_for_its_trigger() {
+        // The directed JSON reader replaces a `json.parse` site only; its body
+        // names `bytes` and `float`. Loading `json` to stringify must not keep
+        // it, or every json program parses and checks those modules.
+        let l = live_with_json("import json\nfn main() -> Unit = println(json.stringify(value.int(1)))\n");
+        assert!(is_live(&l, "json", "__array_text"), "{:?}", l.live_fns.get("json"));
+        assert!(!is_live(&l, "json", "__spans") && !is_live(&l, "json", "__rows"), "{:?}", l.live_fns.get("json"));
+        assert!(!l.auto_modules.contains(&"bytes"), "{:?}", l.auto_modules);
+        let l = live_with_json("import json\nfn main() -> Unit = println(int.to_string(value.get_int(json.parse(\"{}\") ?? value.null(), \"a\") ?? 0))\n");
+        assert!(is_live(&l, "json", "__spans") && is_live(&l, "json", "__leaf_int"), "{:?}", l.live_fns.get("json"));
     }
 
     #[test]

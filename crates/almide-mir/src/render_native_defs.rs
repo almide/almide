@@ -43,6 +43,7 @@ pub(crate) fn struct_defs() -> String {
                 out.push_str(&format!("    f{k}: {ty},\n"));
             }
             out.push_str("}\n\n");
+            out.push_str(&source_eq_impl(i as u16, d));
         }
         out
     })

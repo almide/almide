@@ -107,7 +107,9 @@ pub(crate) fn derive_records(
     if d.uses_matrix {
         names.push(MATRIX_KEY.to_string());
     }
-    names.iter().map(|n| d.decl_of(n, &names, &set, &rank)).collect()
+    let mut decls: Vec<RecDecl> = names.iter().map(|n| d.decl_of(n, &names, &set, &rank)).collect();
+    d.source_equalities(&mut decls, &names);
+    decls
 }
 
 impl Derive<'_> {
@@ -434,34 +436,35 @@ impl Derive<'_> {
                 closure_of: Some((params.iter().map(scalar_or_heap).collect(), result)), ..RecDecl::default() };
         }
         if n == VALUE_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            // `AlmideValue`'s PartialEq is the language's Value `==` (`value_eq_ref`).
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideValue"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: true, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if n == MATRIX_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if n == BYTES_KEY {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("Vec<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         let (is_enum, cases) = &self.decls[n];
         let eq_safe = self.exact_eq_decl(n, &mut Default::default());
         if self.maps.contains(n) {
             let scalar = |t: &almide_lang::types::Ty| if *t == almide_lang::types::Ty::Float32 { NTy::F32 } else { spell(t) };
             let (k, v) = (scalar(&cases[0].1[0]), scalar(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if self.sets.contains(n) {
             return RecDecl { name: n.to_string(), set_of: Some(if cases[0].1[0] == almide_lang::types::Ty::Float32 { NTy::F32 } else { spell(&cases[0].1[0]) }), ..RecDecl::default() };
         }
         if self.options.contains(n) {
             let p = spell(&cases[0].1[0]);
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: Some(p), result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if self.results.contains(n) {
             let (o, e) = (spell(&cases[0].1[0]), spell(&cases[0].1[1]));
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: Some((o, e)), map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if self.lists.contains(n) {
-            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, record_labels: None };
+            return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: Some(spell(&cases[0].1[0])), alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         let ord_safe = self.exact_order_decl(n, &mut Default::default());
         if *is_enum {
@@ -477,10 +480,10 @@ impl Derive<'_> {
                 option_of: None,
                 result_of: None,
                 map_of: None,
-                eq_safe, ord_safe, set_of: None, closure_of: None, cell_of: None, record_labels: None,
+                eq_safe, ord_safe, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None,
             }
         } else {
-            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe, ord_safe, set_of: None, closure_of: None, cell_of: None, record_labels: self.record_labels.get(n).cloned() }
+            RecDecl { name: n.to_string(), fields: cases[0].1.iter().map(spell).collect(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe, ord_safe, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: self.record_labels.get(n).cloned() }
         }
     }
 }

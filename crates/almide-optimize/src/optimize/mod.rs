@@ -11,6 +11,7 @@ mod dce;
 mod optional_chain;
 mod propagate;
 mod sink_inline;
+mod value_fuse;
 
 use almide_ir::*;
 
@@ -59,6 +60,18 @@ pub fn optimize_program(program: &mut IrProgram) {
         // Pass 0: inline a list sink into a call whose argument is a list
         // chain (#3584 / #3590), so each leg's fusion sees one chain.
         sink_inline::inline_list_sinks(program);
+    }
+
+    // The Value-fusion kernels ship only where a rewrite names them; the
+    // stamp is what lets the post-mono prune drop them everywhere else, so
+    // it is not an optional pass.
+    value_fuse::stamp_kernels(program);
+    if !ablate {
+        // Pass 0b: a Value built and consumed once by a known consumer is
+        // read or written without the tree (value_fuse.rs). Before folding
+        // and branch-lift, so the helpers it synthesizes are optimized and
+        // lifted like source functions.
+        value_fuse::fuse_value_round_trips(program);
     }
 
     if run("fold") {

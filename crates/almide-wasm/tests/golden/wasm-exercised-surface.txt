@@ -382,6 +382,8 @@ call:io.print
 call:io.stderr
 call:io.stdin
 call:io.stdout
+call:json.__leaf_int
+call:json.__spans
 call:json.parse
 call:json.stringify
 call:json.stringify_pretty
