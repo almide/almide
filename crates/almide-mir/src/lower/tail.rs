@@ -112,11 +112,16 @@ impl LowerCtx {
                 self.seed_variant_read_shape(owned, &expr.ty);
                 // An `Option[record]` copy owns its record through the option: its
                 // drop recurses into the payload, as an Option[record] call result's.
+                // A heap payload with no recursive drop of its own (an all-scalar
+                // record) is the flat one-level sweep, as for such a call result.
                 if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &expr.ty {
-                    if let Some(rn) = a.first().and_then(|p| self.record_or_anon_drop_type_name(p)) {
+                    if let Some(payload) = a.first().filter(|p| is_heap_ty(p)) {
                         self.value_shapes.insert(owned, crate::lower::VariantShape::Option);
+                        let rn = self.record_or_anon_drop_type_name(payload);
                         let d = self.value_drops.entry(owned).or_default();
-                        d.named_route = Some(format!("optrec:{rn}"));
+                        if let Some(rn) = rn {
+                            d.named_route = Some(format!("optrec:{rn}"));
+                        }
                         d.flat_elems = true;
                     }
                 }
