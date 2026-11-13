@@ -156,11 +156,6 @@ impl LowerCtx {
         let (IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }) = &value.kind else {
             return Ok(false);
         };
-        // The exit drops the function's live handles, not the state of a loop it
-        // leaves (#4715): a `!` inside a loop body is the loop flag rewrite's.
-        if self.scalar_loop_depth > 0 {
-            decline!("in-loop");
-        }
         // Decomposed (codopsy A, cog 78 → the frame below): the admission
         // analysis — every decline gate up to the payload class — is a pure
         // read of the ctx, moved verbatim to `bang_return_admission`
