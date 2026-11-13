@@ -622,6 +622,11 @@ fn loop_uw_direct_unwrap(
             let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
             return loop_uw_direct_unwrap(&stmts, tail, env, nv);
         }
+        // A propagating bound branch: lift its `!` to a bind of the branch's Result.
+        if let Some(split) = loop_uw_lift_bound_branch(s, env.err_ty, nv) {
+            let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
+            return loop_uw_direct_unwrap(&stmts, tail, env, nv);
+        }
         let Some((ok_pat, inner, x_ty)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
         if stmts[..i].iter().any(stmt_has_unwrap) {
             return UwStep::Decline;
