@@ -5783,6 +5783,24 @@ local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
 @memory_unsafe
 @intrinsic("almide_rt_ffi_store")
 local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _
+
+
+
+
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block")
+local fn __block(b: Bytes) -> Handle = _
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block_load")
+local fn __block_load(base: Handle, off: Int, n: Int) -> Bytes = _
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block_store")
+local effect fn __block_store(base: Handle, off: Int, b: Bytes) -> Result[Unit, String] = _
 "#;
 pub const SRC_FFI_BRIDGE: &str = r#"
 
