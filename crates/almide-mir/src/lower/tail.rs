@@ -110,6 +110,16 @@ impl LowerCtx {
                 // Its owned snapshot keeps that layout through nested writes.
                 self.seed_faithful_read_shape(owned, &expr.ty);
                 self.seed_variant_read_shape(owned, &expr.ty);
+                // An `Option[record]` copy owns its record through the option: its
+                // drop recurses into the payload, as an Option[record] call result's.
+                if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) = &expr.ty {
+                    if let Some(rn) = a.first().and_then(|p| self.record_or_anon_drop_type_name(p)) {
+                        self.value_shapes.insert(owned, crate::lower::VariantShape::Option);
+                        let d = self.value_drops.entry(owned).or_default();
+                        d.named_route = Some(format!("optrec:{rn}"));
+                        d.flat_elems = true;
+                    }
+                }
             }
             return Ok(owned);
         }
