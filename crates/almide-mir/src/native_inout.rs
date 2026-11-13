@@ -607,6 +607,32 @@ fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSe
     out
 }
 
+/// Does `e` mention `r` other than as a place lent to a candidate's in-out
+/// position? Two lends side by side borrow the place one after the other; a
+/// read may stay borrowed across the other's lend.
+fn reads_besides_lends(e: &IrExpr, r: VarId, cands: &Cands) -> bool {
+    struct R<'a>(VarId, &'a Cands, bool);
+    impl IrVisitor for R<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Var { id } if *id == self.0 => self.2 = true,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if self.1.contains_key(name.as_str()) => {
+                    let ks = &self.1[name.as_str()];
+                    for (k, a) in args.iter().enumerate() {
+                        if !(ks.contains(&k) && is_var(a, self.0)) {
+                            self.visit_expr(a);
+                        }
+                    }
+                }
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut v = R(r, cands, false);
+    v.visit_expr(e);
+    v.2
+}
+
 /// The candidate calls inside `e` (outside closures) and the root of each
 /// place they lend.
 fn nested_lends(e: &IrExpr, cands: &Cands) -> Vec<(String, VarId)> {
@@ -660,7 +686,7 @@ fn refused_sites(e: &IrExpr, cands: &Cands, ok_vars: &HashSet<VarId>, refused: &
             };
             for (j, sib) in siblings.iter().enumerate() {
                 for (name, r) in nested_lends(sib, self.cands) {
-                    if siblings.iter().enumerate().any(|(i, o)| i != j && mentions(o, r)) {
+                    if siblings.iter().enumerate().any(|(i, o)| i != j && reads_besides_lends(o, r, self.cands)) {
                         self.refused.insert(name);
                     }
                 }
