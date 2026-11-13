@@ -1,0 +1,41 @@
+// A `!` nested in a call argument inside a match arm block that is a bound
+// value, in a loop body: it runs only on the arm that reaches it, and its err
+// leaves the function.
+type Face = { name: String, data: Bytes }
+
+fn parse(name: String, b: Bytes) -> Face = { name: name, data: b }
+
+fn load(name: String) -> Result[Bytes, String] = match name {
+  "a" => ok(bytes.from_list([1, 2, 3])),
+  "b" => ok(bytes.from_list([1, 2, 3, 4, 5])),
+  _ => err("no face ${name}"),
+}
+
+effect fn total(text: String) -> Int = {
+  var faces: List[(String, Face)] = []
+  var sum = 0
+  for line in string.split(text, "\n") {
+    let cols = string.split(line, "\t")
+    if list.len(cols) == 2 then {
+      let name = cols[0]
+      let f = match list.find(faces, (p) => p.0 == name) {
+        some(p) => p.1,
+        none => {
+          let loaded = parse(name, load(name)!)
+          faces = faces + [(name, loaded)]
+          loaded
+        },
+      }
+      sum = sum + bytes.len(f.data) * (int.parse(cols[1]) ?? 0)
+    } else ()
+  }
+  sum + list.len(faces) * 1000
+}
+
+test "each face loads once" {
+  assert_eq(total("a\t1\nb\t2\na\t3\nbad\nb\t4")!, 2042)
+}
+
+test "a missing face leaves the function with its err" {
+  assert_eq(total("a\t1\nc\t2\nb\t3") ?? -1, -1)
+}
