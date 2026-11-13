@@ -223,3 +223,51 @@ fn a_var_bound_to_a_string_literal_is_lent_and_read_back_after_the_call() {
     }
     assert_eq!(run_native(LITERAL), "1a,2b\nstring [HI!]\nt=x012 len=4\n");
 }
+
+const REBIND: &str = r#"
+fn adds(mut s: Set[Int], x: Int) -> Unit = { s = set.insert(s, x) }
+
+fn puts(mut m: Map[String, Int], k: String, v: Int) -> Unit = { m = map.set(m, k, v) }
+
+fn grows(mut xs: List[Int], x: Int) -> Unit = { xs = xs + [x] }
+
+fn tags(mut s: String, n: Int) -> Unit = { s = s + int.to_string(n) }
+
+fn maybe(mut s: Set[Int], x: Int) -> Unit = {
+  if x % 3 == 0 then { s = set.insert(s, x) } else { s = set.remove(s, x - 1) }
+}
+
+effect fn main() -> Unit = {
+  var s: Set[Int] = set.new()
+  var m: Map[String, Int] = map.new()
+  var xs: List[Int] = []
+  var t = "t"
+  for i in 0..<6 {
+    adds(s, i)
+    puts(m, int.to_string(i % 4), i)
+    grows(xs, i * i)
+    tags(t, i)
+    maybe(s, i + 10)
+  }
+  println("${set.len(s)} ${set.contains(s, 12)} ${map.get(m, "1") ?? 0} ${list.len(xs)} ${list.get(xs, 5) ?? 0} ${t}")
+}
+"#;
+
+#[test]
+fn a_rebound_in_out_param_moves_its_old_value_into_the_op() {
+    // `p = op(p, ..)` through `&mut`: the old value leaves the caller's place
+    // (`std::mem::take`) into the op's by-value form and the rebind writes the
+    // result back — never a whole copy per rebind (#4582 on this render).
+    let out = render(REBIND).expect("renders");
+    for name in ["adds", "puts", "grows", "tags", "maybe"] {
+        let body = body_of(&out, name);
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's buffer:\n{out}");
+        assert!(!body.contains(".clone()"), "{name} copies nothing:\n{body}");
+    }
+    for name in ["adds", "puts", "maybe"] {
+        let body = body_of(&out, name);
+        assert!(body.contains("(std::mem::take(v0)"), "{name} takes the old value out of the place:\n{body}");
+    }
+    assert!(body_of(&out, "adds").contains("almide_rt_set_insert_owned(std::mem::take(v0)"), "{out}");
+    assert_eq!(run_native(REBIND), "7 false 5 6 25 t012345\n");
+}
