@@ -25,6 +25,12 @@
 //! always the fn's value: never a loop body, a lambda body or a bound value,
 //! where an arm's value is not what the fn returns.
 //!
+//! A BOUND branch on that chain (`let r = match s { … }`) whose arm holds a
+//! `guard c else E` is lifted too, the bind moving into every arm. A failing
+//! guard there returns `E` from the fn; left in place, the restructure made
+//! `E` the bound value (the fn carried on with `r = E`), where the other legs
+//! return it.
+//!
 //! A loop body is not on that chain, and an exit in one leaves through the
 //! loop forms instead: one that can only raise is spelled as the propagation
 //! the loop error flag carries (`LoopRaises`), and one that yields a value
@@ -341,18 +347,89 @@ fn branch_with_rest(s: &IrExpr, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty)
     IrExpr { kind, ty: ty.clone(), span: s.span, def_id: s.def_id }
 }
 
+/// Is `value` a bound `if` / `match` (`let r = match s { … }`) with a plain
+/// `guard c else E` standing in one of its arm blocks? A failing guard there
+/// returns `E` from the fn, as the other legs run it: it is not the bound
+/// value. Only a guard over a real condition counts: the `guard false` the
+/// front end gives a `guard let` is left to the shape every leg already shares
+/// (#4678). Every arm must yield a value (a block with a tail, or a bare
+/// expression) for the bind to move into it.
+fn bound_branch_exits(value: &IrExpr) -> bool {
+    let plain_guard = |s: &IrStmt| {
+        matches!(&s.kind, IrStmtKind::Guard { cond, .. } if !matches!(cond.kind, IrExprKind::LitBool { .. }))
+    };
+    let exits = |a: &IrExpr| matches!(&a.kind, IrExprKind::Block { stmts, .. } if stmts.iter().any(plain_guard));
+    let yields = |a: &IrExpr| !matches!(&a.kind, IrExprKind::Block { expr: None, .. });
+    match &value.kind {
+        IrExprKind::If { then, else_, .. } => (exits(then) || exits(else_)) && yields(then) && yields(else_),
+        IrExprKind::Match { arms, .. } => {
+            arms.iter().any(|a| exits(&a.body)) && arms.iter().all(|a| yields(&a.body))
+        }
+        _ => false,
+    }
+}
+
+/// One arm of a lifted bound branch: the arm's own statements, the bind of
+/// the value the arm yields, then the rest of the enclosing block.
+fn bound_arm_with_rest(arm: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty) -> Option<IrExpr> {
+    let IrStmtKind::Bind { var, mutability, ty: bound_ty, .. } = &bind.kind else { return None };
+    let (mut stmts, value) = match &arm.kind {
+        IrExprKind::Block { stmts: own, expr } => (own.clone(), expr.as_deref()?.clone()),
+        _ => (Vec::new(), arm.clone()),
+    };
+    let kind = IrStmtKind::Bind { var: *var, mutability: *mutability, ty: bound_ty.clone(), value };
+    stmts.push(IrStmt { kind, span: bind.span });
+    stmts.extend(rest.iter().cloned());
+    Some(block(stmts, tail.cloned(), ty, arm))
+}
+
+/// The bound branch `value` of the statement `bind` as the block's tail: each
+/// arm binds its own value, then runs the rest of the block.
+///
+/// ```text
+/// { pre; let r = match s { A => a, B => { guard g else E; b } }; rest; tail }
+///   ≡  { pre; match s { A => { let r = a; rest; tail }, B => { guard g else E; let r = b; rest; tail } } }
+/// ```
+fn bound_branch_with_rest(value: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty) -> Option<IrExpr> {
+    let kind = match &value.kind {
+        IrExprKind::If { cond, then, else_ } => IrExprKind::If {
+            cond: cond.clone(),
+            then: Box::new(bound_arm_with_rest(then, bind, rest, tail, ty)?),
+            else_: Box::new(bound_arm_with_rest(else_, bind, rest, tail, ty)?),
+        },
+        IrExprKind::Match { subject, arms } => IrExprKind::Match {
+            subject: subject.clone(),
+            arms: arms
+                .iter()
+                .map(|a| {
+                    let body = bound_arm_with_rest(&a.body, bind, rest, tail, ty)?;
+                    Some(IrMatchArm { pattern: a.pattern.clone(), guard: a.guard.clone(), body })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        },
+        _ => return None,
+    };
+    Some(IrExpr { kind, ty: ty.clone(), span: value.span, def_id: value.def_id })
+}
+
 /// Lift every exiting branch statement on `e`'s tail chain; `e` stands where
 /// its value is the fn's value. `None` when nothing on the chain exits.
 fn lift_tail(e: &IrExpr) -> Option<IrExpr> {
     let rebuilt = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span, def_id: e.def_id };
     match &e.kind {
         IrExprKind::Block { stmts, expr } => {
-            let exiting = stmts.iter().position(|s| {
-                matches!(&s.kind, IrStmtKind::Expr { expr } if is_unit_branch(expr) && spine_leaves_fn(expr, false))
+            let exiting = stmts.iter().position(|s| match &s.kind {
+                IrStmtKind::Expr { expr } => is_unit_branch(expr) && spine_leaves_fn(expr, false),
+                IrStmtKind::Bind { value, .. } => bound_branch_exits(value),
+                _ => false,
             });
             if let Some(i) = exiting {
-                let IrStmtKind::Expr { expr: s } = &stmts[i].kind else { return None };
-                let lifted = branch_with_rest(s, &stmts[i + 1..], expr.as_deref(), &e.ty);
+                let (rest, tail) = (&stmts[i + 1..], expr.as_deref());
+                let lifted = match &stmts[i].kind {
+                    IrStmtKind::Expr { expr: s } => branch_with_rest(s, rest, tail, &e.ty),
+                    IrStmtKind::Bind { value, .. } => bound_branch_with_rest(value, &stmts[i], rest, tail, &e.ty)?,
+                    _ => return None,
+                };
                 let lifted = lift_tail(&lifted).unwrap_or(lifted);
                 return Some(rebuilt(IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(lifted)) }));
             }
