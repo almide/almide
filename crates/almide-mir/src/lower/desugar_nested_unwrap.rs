@@ -146,6 +146,14 @@ fn nested_unwrap_rewrite_stmts(
             _ => (false, None),
         };
         let Some(value) = value else { continue };
+        // A bound or assigned block/branch value (`let f = match o { none => {
+        // let x = g(h()!) … } }`): its own statement lists take the hoist, the
+        // way a statement expression's do — the hoisted bind lands in the arm's
+        // block, ahead of the statement it came from, so it runs exactly when
+        // and where it did.
+        if nested_unwrap_rewrite_expr(value, next_var) {
+            return true;
+        }
         if factor_branch_unwrap(value) {
             return true;
         }
