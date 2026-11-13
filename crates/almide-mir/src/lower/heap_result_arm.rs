@@ -162,7 +162,9 @@ impl LowerCtx {
                     ctx.drop_arm_locals(arm_mark);
                     Some(obj)
                 });
-                if direct.is_some() {
+                // Only a record/tuple payload takes the match form: the other heap
+                // payloads keep the routes the callers already have for them.
+                if direct.is_some() || self.aggregate_field_tys(&arm.ty).is_none() {
                     return direct;
                 }
                 // Outside that subset (a record payload, a computed-call operand),
