@@ -1742,3 +1742,82 @@ fn owned_regions_preserve_views_bounds_permissions_and_detached_lifetimes() {
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
 }
+
+const REGION_PROGRAM_MAIN: &str = r#"
+effect fn main() -> Unit = {
+ let r = ffi.alloc(3)!
+ ffi.write(r, 0, bytes.from_list([4, 5, 6]))!
+ println("${bytes.to_list(ffi.to_bytes(r)!)}")
+ println("${imax(ffi.len(r), 2)}")
+}
+"#;
+
+/// The native Region storage has no real address, so a program whose live
+/// code can hand one across a host boundary is refused: directly, through a
+/// declared record, through a callback's parameter, or through a type
+/// parameter the host could instantiate with a Region.
+#[test]
+fn a_live_host_boundary_that_can_carry_a_region_address_is_refused() {
+    let host_max = "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n";
+    for (name, decls, call) in [
+        ("direct", "@extern(rust, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n", "take(r)"),
+        ("declared", "type Holder = { inner: Region, n: Int }\n@extern(rust, \"host\", \"take\")\nfn take(h: Holder) -> Int = _\n",
+            "take({ inner: r, n: 1 })"),
+        ("callback", "@extern(rust, \"host\", \"take\")\nfn take(k: (Int) -> Region) -> Int = _\n", "take((n) => r)"),
+        ("returned", "@extern(rust, \"host\", \"take\")\nfn take(n: Int) -> List[Region] = _\n", "list.len(take(1))"),
+        ("generic", "@extern(rust, \"host\", \"take\")\nfn take[T](x: T) -> Int = _\n", "take(r)"),
+    ] {
+        let source = format!("import ffi\n{host_max}{decls}{}",
+            REGION_PROGRAM_MAIN.replace(" println(\"${imax", &format!(" println(\"${{{call}}}\")\n println(\"${{imax")));
+        let refused = almide_mir::pipeline::try_render_rust_source_certified(&source).err()
+            .unwrap_or_else(|| panic!("{name}: rendered a live address-carrying boundary"));
+        assert!(format!("{refused:?}").contains("closed Almide-owned address domain"), "{name}: {refused:?}");
+    }
+}
+
+/// A host binding over plain data does not open the domain, and neither does
+/// an address-carrying binding that no root reaches (a package brings all its
+/// modules): native renders the program and agrees with v0.
+#[test]
+fn plain_data_bindings_and_unreached_region_bindings_keep_the_domain_closed() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-region-bound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = format!("import ffi\n{}{}{}",
+            "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n",
+            "@extern(rust, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n\
+             effect fn unreached() -> Int = take(ffi.alloc(1)!)\n",
+            REGION_PROGRAM_MAIN);
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(&source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        assert!(!rust.contains("host::take"), "the unreached binding was rendered");
+        let rs = dir.join("region_bound.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, rust).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("region_bound");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "region_bound", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "[4, 5, 6]\n3\n");
+        let input = dir.join("region_bound.almd");
+        std::fs::write(&input, &source).unwrap();
+        let oracle = dir.join("region_bound-v0");
+        let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+            .args(["build", "--no-verified"]).arg(&input).arg("-o").arg(&oracle)
+            .env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let v0 = Command::new(oracle).output().unwrap();
+        assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
