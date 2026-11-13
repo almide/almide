@@ -440,9 +440,18 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     let place = if boxed { format!("(*{field})") } else { field };
     // A read lent to an in-out param is the field's place itself
     // (crate::native_inout_field): nothing is read out of it.
-    if crate::native_inout_field::lends(*d, &place) {
+    // Through a borrowed sub-record read (`let v44: &R = &v12.f0`) the lend
+    // names the root place (`&mut v12.f0.f0`): a `&` binding lends nothing
+    // mutably.
+    let lend_place = match crate::render_native_addr::field_of(ad.base) {
+        Some((_, parent)) if matches!(ty(tys, &ad.base), Some(NTy::RecRef(_))) => {
+            if boxed { format!("(*{parent}.f{k})") } else { format!("{parent}.f{k}") }
+        }
+        _ => place.clone(),
+    };
+    if crate::native_inout_field::lends(*d, &lend_place) {
         tys.insert(*d, f);
-        line!("// {}: lends {place} to the in-out call", var(*d));
+        line!("// {}: lends {lend_place} to the in-out call", var(*d));
         return Ok(true);
     }
     let no_prior_borrow = reads_of_place(&place).is_empty();
