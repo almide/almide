@@ -279,6 +279,16 @@ impl LowerCtx {
                 .is_some_and(|n| self.variant_layouts.needs_recursive_drop(&n, &|_| false))
     }
 
+    /// A `Map` ctor field on the native render: the variant renders as an owned
+    /// Rust type whose `AlmideMap` field is freed by the variant's own scope-end
+    /// drop, so construction moves the map in and nothing can leak. A Float key
+    /// has no native map spelling and stays walled, as does the wasm leg.
+    fn ctor_field_native_owned_map(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        crate::lower::owned_tco_slots()
+            && matches!(ty, Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 && !matches!(a[0], Ty::Float))
+    }
+
     fn ctor_list_field_drop_freeable(&self, ty: &Ty) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         let Ty::Applied(TypeConstructorId::List, a) = ty else { return false };
@@ -459,6 +469,10 @@ impl LowerCtx {
         // free (#2739). A variant whose drop is the GENERATED `$__drop_<T>` frees only the
         // field kinds its generator lists, which do not include `Bytes`: that one stays walled.
         if matches!(arg.ty, Ty::String) || (matches!(arg.ty, Ty::Bytes) && !needs_rec) {
+            let obj = self.lower_owned_heap_field(arg)?;
+            return Some((obj, true));
+        }
+        if self.ctor_field_native_owned_map(&arg.ty) {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
