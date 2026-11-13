@@ -195,7 +195,9 @@ fn loop_uw_node(kind: IrExprKind, ty: Ty) -> IrExpr {
 }
 
 /// The `err($x) => { __ef = true; __ev = $x }` arm (a fresh `$x` allocated from `nv`).
-fn loop_uw_err_arm(ef: VarId, ev: VarId, err_ty: &Ty, nv: &mut u32) -> almide_ir::IrMatchArm {
+/// `x_ty` is the callee's err type: one that is not the slot's is stored as the
+/// propagation desugar's own conversion of it ([`loop_uw_err_conversion`]).
+fn loop_uw_err_arm(ef: VarId, ev: VarId, err_ty: &Ty, x_ty: &Ty, nv: &mut u32) -> almide_ir::IrMatchArm {
     let x = VarId(*nv);
     *nv += 1;
     let set_flag = IrStmt {
@@ -211,24 +213,29 @@ fn loop_uw_err_arm(ef: VarId, ev: VarId, err_ty: &Ty, nv: &mut u32) -> almide_ir
     // turns the slot's ownership certificate into the PROVEN `i(id)m` loop-slot shape (storing the
     // bare borrow certifies as the unsound `idm` = init/drop/move-a-dead-ref). `err_ty` is gated
     // to `String` by the caller, so `ConcatStr` typechecks and yields the same bytes as `$x`.
-    let owned = loop_uw_node(
-        IrExprKind::BinOp {
-            op: almide_ir::BinOp::ConcatStr,
-            left: Box::new(loop_uw_node(IrExprKind::Var { id: x }, err_ty.clone())),
-            right: Box::new(loop_uw_node(
-                IrExprKind::LitStr { value: String::new() },
-                Ty::String,
-            )),
-        },
-        err_ty.clone(),
-    );
+    // A converted err is already a fresh String of its own.
+    let owned = if x_ty == err_ty {
+        loop_uw_node(
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(loop_uw_node(IrExprKind::Var { id: x }, err_ty.clone())),
+                right: Box::new(loop_uw_node(
+                    IrExprKind::LitStr { value: String::new() },
+                    Ty::String,
+                )),
+            },
+            err_ty.clone(),
+        )
+    } else {
+        loop_uw_err_conversion(x, x_ty, err_ty).expect("admitted by loop_uw_err_admits")
+    };
     let set_val = IrStmt {
         kind: IrStmtKind::Assign { var: ev, value: owned },
         span: None,
     };
     almide_ir::IrMatchArm {
         pattern: almide_ir::IrPattern::Err {
-            inner: Box::new(almide_ir::IrPattern::Bind { var: x, ty: err_ty.clone() }),
+            inner: Box::new(almide_ir::IrPattern::Bind { var: x, ty: x_ty.clone() }),
         },
         guard: None,
         body: loop_uw_node(
@@ -238,8 +245,32 @@ fn loop_uw_err_arm(ef: VarId, ev: VarId, err_ty: &Ty, nv: &mut u32) -> almide_ir
     }
 }
 
-/// `let v = e!` / `Expr(e!)` whose `!` propagates `Result[_, err_ty]` → `(ok_pattern, inner)`.
-fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern, IrExpr)> {
+/// A callee err of type `x_ty` stored into the loop's `String` err slot: the same
+/// conversion a top-level `!` propagates (`let_unwrap_err_payload`: the repr text of
+/// a typed err, the ", " join of a `List[String]`), over the bound err `x`. `None`
+/// when no conversion is written for the pair (a non-heap err keeps its decline).
+fn loop_uw_err_conversion(x: VarId, x_ty: &Ty, err_ty: &Ty) -> Option<IrExpr> {
+    if !matches!(err_ty, Ty::String) || !is_heap_ty(x_ty) {
+        return None;
+    }
+    let at = loop_uw_node(IrExprKind::Unit, Ty::Unit);
+    let_unwrap_err_payload(&at, x, x_ty, err_ty)
+}
+
+/// The callee err type of `inner` when its `!` can feed the loop err slot: the slot's
+/// own type, or one [`loop_uw_err_conversion`] converts.
+fn loop_uw_err_admits(inner: &IrExpr, err_ty: &Ty) -> Option<Ty> {
+    let x_ty = inner.ty.result_err_ty()?;
+    if &x_ty == err_ty || loop_uw_err_conversion(VarId(0), &x_ty, err_ty).is_some() {
+        Some(x_ty)
+    } else {
+        None
+    }
+}
+
+/// `let v = e!` / `Expr(e!)` whose `!` propagates `Result[_, err_ty]` (or an err
+/// [`loop_uw_err_admits`] converts) → `(ok_pattern, inner, callee err type)`.
+fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern, IrExpr, Ty)> {
     use almide_lang::types::constructor::TypeConstructorId;
     let (ok_pat, inner): (almide_ir::IrPattern, IrExpr) = match &s.kind {
         IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
@@ -257,8 +288,9 @@ fn loop_uw_unwrap_stmt(s: &IrStmt, err_ty: &Ty) -> Option<(almide_ir::IrPattern,
         _ => return None,
     };
     match &inner.ty {
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == err_ty => {
-            Some((ok_pat, inner))
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+            let x_ty = loop_uw_err_admits(&inner, err_ty)?;
+            Some((ok_pat, inner, x_ty))
         }
         _ => None,
     }
@@ -590,7 +622,7 @@ fn loop_uw_direct_unwrap(
             let stmts = [&stmts[..i], &split[..], &stmts[i + 1..]].concat();
             return loop_uw_direct_unwrap(&stmts, tail, env, nv);
         }
-        let Some((ok_pat, inner)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
+        let Some((ok_pat, inner, x_ty)) = loop_uw_unwrap_stmt(s, env.err_ty) else { continue };
         if stmts[..i].iter().any(stmt_has_unwrap) {
             return UwStep::Decline;
         }
@@ -604,7 +636,7 @@ fn loop_uw_direct_unwrap(
             guard: None,
             body: rest2,
         };
-        let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, nv);
+        let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, &x_ty, nv);
         let m = loop_uw_node(
             IrExprKind::Match { subject: Box::new(inner), arms: vec![ok_arm, err_arm] },
             Ty::Unit,
@@ -658,16 +690,16 @@ fn loop_uw_trailing_unwrap(expr: &IrExpr, env: UwEnv<'_>, nv: &mut u32) -> Optio
     if expr_has_unwrap(expr) {
         return None;
     }
-    match &expr.ty {
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && &a[1] == env.err_ty => {}
+    let x_ty = match &expr.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => loop_uw_err_admits(expr, env.err_ty)?,
         _ => return None,
-    }
+    };
     let ok_arm = almide_ir::IrMatchArm {
         pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Wildcard) },
         guard: None,
         body: loop_uw_node(IrExprKind::Unit, Ty::Unit),
     };
-    let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, nv);
+    let err_arm = loop_uw_err_arm(env.ef, env.ev, env.err_ty, &x_ty, nv);
     Some(loop_uw_node(
         IrExprKind::Match { subject: Box::new(expr.clone()), arms: vec![ok_arm, err_arm] },
         Ty::Unit,
