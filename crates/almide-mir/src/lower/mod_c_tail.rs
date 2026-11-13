@@ -533,7 +533,7 @@ fn lower_function_all_impl(
         owned_params: Default::default(),
         call_moves: Default::default(),
         inout_params,
-        aggregate_blocks: std::mem::take(&mut ctx.aggregate_blocks),
+        aggregate_blocks: ctx.aggregate_blocks.take_inner(),
     };
     let mut all = vec![main];
     all.extend(lifted);

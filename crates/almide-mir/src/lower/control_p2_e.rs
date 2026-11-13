@@ -540,7 +540,7 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: then_val });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot.clone();
-        self.materialized_aggregates = ma_snapshot;
+        self.materialized_aggregates.restore_to(ma_snapshot);
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = lower_arm(self, else_body)?;
         if then_val.is_none() && else_val.is_none() { return None; }

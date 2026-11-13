@@ -1,4 +1,4 @@
-/// A full snapshot of the ValueId-keyed TRACKING state a speculative lowering
+/// The speculation snapshot of the TRACKING state a speculative lowering
 /// attempt can pollute — the read-shape sets, the drop-route maps, the lift
 /// list, the op stream. `LowerCtx::speculate` restores ALL of it when the
 /// attempt declines, so "try a rewrite, fall back on decline" can never leave
@@ -6,24 +6,17 @@
 /// regression: a declined heap-`??`-as-match attempt left the SUBJECT's stable
 /// ValueId in `materialized_options`, and the downstream #1270 bind rewrite
 /// then took a different, walling branch). Ops/lhh/lifted are length-truncated;
-/// the set/map state has no such watermark, so it is cloned wholesale — heavy,
-/// but compile-time-only and bounded by per-function set sizes. This is the
-/// #1100 rollback discipline generalized from the op stream to the WHOLE
-/// decision state; #1414's per-value repr eventually deletes the need.
+/// the set/map state is `Journaled` (`spec_journal`): each map records the
+/// prior state of the keys written while the attempt runs and replays it
+/// backwards on decline, restoring the contents a whole clone restored at a
+/// cost proportional to the writes, not to the map sizes. This is the #1100
+/// rollback discipline generalized from the op stream to the WHOLE decision
+/// state; #1414's per-value repr eventually deletes the need.
 struct SpecSnapshot {
     ops_len: usize,
     lhh_len: usize,
     lifted_len: usize,
-    value_shapes: std::collections::HashMap<ValueId, crate::lower::VariantShape>,
-    value_drops: std::collections::HashMap<ValueId, crate::lower::DropFacts>,
-    materialized_lists: std::collections::HashSet<ValueId>,
-    value_handles: std::collections::HashSet<ValueId>,
-    value_elem_lists: std::collections::HashSet<ValueId>,
-    str_value_elem_lists: std::collections::HashSet<ValueId>,
-    materialized_aggregates: std::collections::HashSet<ValueId>,
-    closure_values: std::collections::HashSet<ValueId>,
-    record_masks: std::collections::HashMap<ValueId, Vec<usize>>,
-    aggregate_blocks: std::collections::BTreeMap<ValueId, String>,
+    marks: [super::spec_journal::Mark; 10],
 }
 
 impl LowerCtx {
@@ -84,34 +77,47 @@ impl LowerCtx {
             ops_len: self.ops.len(),
             lhh_len: self.live_heap_handles.len(),
             lifted_len: self.lifted.len(),
-            value_shapes: self.value_shapes.clone(),
-            value_drops: self.value_drops.clone(),
-            materialized_lists: self.materialized_lists.clone(),
-            value_handles: self.value_handles.clone(),
-            value_elem_lists: self.value_elem_lists.clone(),
-            str_value_elem_lists: self.str_value_elem_lists.clone(),
-            materialized_aggregates: self.materialized_aggregates.clone(),
-            closure_values: self.closure_values.clone(),
-            record_masks: self.record_masks.clone(),
-            aggregate_blocks: self.aggregate_blocks.clone(),
+            marks: self.open_spec_journals(),
         };
         let out = f(self);
         if out.is_none() {
             self.ops.truncate(snap.ops_len);
             self.live_heap_handles.truncate(snap.lhh_len);
             self.lifted.truncate(snap.lifted_len);
-            self.value_shapes = snap.value_shapes;
-            self.value_drops = snap.value_drops;
-            self.materialized_lists = snap.materialized_lists;
-            self.value_handles = snap.value_handles;
-            self.value_elem_lists = snap.value_elem_lists;
-            self.str_value_elem_lists = snap.str_value_elem_lists;
-            self.materialized_aggregates = snap.materialized_aggregates;
-            self.closure_values = snap.closure_values;
-            self.record_masks = snap.record_masks;
-            self.aggregate_blocks = snap.aggregate_blocks;
         }
+        self.close_spec_journals(snap.marks, out.is_some());
         out
+    }
+
+    /// Open the journal of every tracking map a speculation restores.
+    fn open_spec_journals(&mut self) -> [super::spec_journal::Mark; 10] {
+        [
+            self.value_shapes.open(),
+            self.value_drops.open(),
+            self.materialized_lists.open(),
+            self.value_handles.open(),
+            self.value_elem_lists.open(),
+            self.str_value_elem_lists.open(),
+            self.materialized_aggregates.open(),
+            self.closure_values.open(),
+            self.record_masks.open(),
+            self.aggregate_blocks.open(),
+        ]
+    }
+
+    /// Close the journals `open_spec_journals` opened, in the same order:
+    /// `keep == false` undoes the declined attempt's writes.
+    fn close_spec_journals(&mut self, m: [super::spec_journal::Mark; 10], keep: bool) {
+        self.value_shapes.close(m[0], keep);
+        self.value_drops.close(m[1], keep);
+        self.materialized_lists.close(m[2], keep);
+        self.value_handles.close(m[3], keep);
+        self.value_elem_lists.close(m[4], keep);
+        self.str_value_elem_lists.close(m[5], keep);
+        self.materialized_aggregates.close(m[6], keep);
+        self.closure_values.close(m[7], keep);
+        self.record_masks.close(m[8], keep);
+        self.aggregate_blocks.close(m[9], keep);
     }
 }
 
