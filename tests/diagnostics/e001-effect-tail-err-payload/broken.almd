@@ -1,0 +1,7 @@
+// An effect fn's `err(..)` tail leaves through its String error channel
+// (#4654): the payload must be a String.
+effect fn work(n: Int) -> Int = err([n])
+
+effect fn main() -> Unit = {
+  println(int.to_string(work(3)!))
+}

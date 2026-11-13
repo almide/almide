@@ -1,0 +1,2 @@
+expects_code = "E001"
+expects_error = "if branch: expected Result[Int, String] but got Result[Int, List[String]]"
