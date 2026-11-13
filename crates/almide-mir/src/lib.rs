@@ -92,6 +92,7 @@ mod native_map_entries;
 pub mod native_move_params;
 mod native_unnest_tail;
 mod render_native_spine_clone;
+pub(crate) mod native_inout;
 pub(crate) mod native_region_window;
 mod native_list_ops;
 mod native_narrow_rewrite;

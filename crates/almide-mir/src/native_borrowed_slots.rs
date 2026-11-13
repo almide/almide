@@ -46,7 +46,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], sigs: &NativeSigs) {
     SLOTS.with(|m| m.borrow_mut().clear());
     for f in functions.iter_mut() {
         let Some((kinds, _)) = sigs.get(&f.name) else { continue };
-        if !f.owned_params.is_empty() || kinds.len() != f.params.len() {
+        if !f.owned_params.is_empty() || !f.inout_params.is_empty() || kinds.len() != f.params.len() {
             continue;
         }
         for (k, kind) in kinds.iter().enumerate() {
@@ -151,11 +151,7 @@ fn plan(f: &MirFunction, s: ValueId) -> Option<Plan> {
             Op::Dup { dst, .. } if *dst == s => {}
             Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [s] => {}
             Op::ListGetScalar { list, idx, .. } if *list == s && *idx != s => {}
-            Op::CallFn { name, args, .. } => {
-                if !call_only_lends(name, args, s) {
-                    return None;
-                }
-            }
+            Op::CallFn { name, args, .. } if only_lends(name, args, s) => {}
             Op::SetLocal { local, src } if *local == s => {
                 let (payload, chain) = payload_chain(f, *src, &defs)?;
                 let Op::Prim { args, .. } = &f.ops[defs[&payload]] else { return None };
@@ -174,13 +170,23 @@ fn plan(f: &MirFunction, s: ValueId) -> Option<Plan> {
             _ => return None,
         }
     }
-    remove_chain_releases(f, &chain_values, &rebinds, &mut removed)?;
+    chain_releases(f, &chain_values, &rebinds, &mut removed)?;
     (!rebinds.is_empty()).then_some(Plan { removed, rebinds })
 }
 
-/// The chain copies are named by the chain, the rebind and their releases:
-/// adds each release to `removed`, or `None` when another op names a copy.
-fn remove_chain_releases(
+/// Whether the call `name(args)` only lends `s` (never in a position the
+/// callee writes, never as a scalar).
+fn only_lends(name: &str, args: &[CallArg], s: ValueId) -> bool {
+    args.iter().enumerate().all(|(k, a)| match a {
+        CallArg::Scalar(v) => *v != s,
+        CallArg::Handle(v) => *v != s || !crate::native_hof::mutable_argument(name, k),
+        CallArg::Imm(_) | CallArg::Label(_) => true,
+    })
+}
+
+/// [`plan`]'s chain copies: named by the chain, the rebind and their
+/// releases only; each release joins `removed`.
+fn chain_releases(
     f: &MirFunction,
     chain_values: &BTreeSet<ValueId>,
     rebinds: &BTreeMap<usize, ValueId>,
@@ -198,16 +204,6 @@ fn remove_chain_releases(
         return None;
     }
     Some(())
-}
-
-/// A call that names `s` only lends it: never as a scalar, and as a handle
-/// only in a position the callee does not write through.
-fn call_only_lends(name: &str, args: &[CallArg], s: ValueId) -> bool {
-    args.iter().enumerate().all(|(k, a)| match a {
-        CallArg::Scalar(v) => *v != s,
-        CallArg::Handle(v) => *v != s || !crate::native_hof::mutable_argument(name, k),
-        CallArg::Imm(_) | CallArg::Label(_) => true,
-    })
 }
 
 /// `v` as a chain of copies (`Dup`) of a payload read (`LoadHandle`): the
