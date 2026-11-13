@@ -413,3 +413,54 @@ fn a_record_field_passed_to_a_mut_param_lends_its_place() {
     assert!(out.contains("almd_spend(&mut v"), "{out}");
     assert_eq!(run_native(FIELD_LEND), "0 3 ok 0,ok 1,ok 2,no 3,no 4 true 0 2 true true false 0 3 1\n");
 }
+
+const CLOSURE_READ: &str = r#"
+type St = { metas: List[Int], log: List[String], n: Int }
+
+fn zonk(st: St, t: Int) -> Int = t + list.len(st.metas)
+
+fn new_meta(mut st: St, k: Int) -> Int = {
+  st.metas = st.metas + [k]
+  st.n = st.n + 1
+  list.len(st.metas)
+}
+
+fn settle(mut st: St, ctx: List[Int]) -> Int = {
+  let z = ctx |> list.map((t) => zonk(st, t))
+  if list.any(z, (t) => t > zonk(st, 100)) then new_meta(st, 7) else new_meta(st, 3)
+}
+
+fn by_simp(mut st: St, ctx: List[Int]) -> Int = {
+  let a = settle(st, ctx)
+  let zs = ctx |> list.map((t) => zonk(st, t) + st.n)
+  st.log = st.log + ["z ${list.len(zs)}"]
+  a + list.fold(zs, 0, (acc, x) => acc + x)
+}
+
+fn checked(mut st: St, ctx: List[Int]) -> Int! = {
+  let bad = list.filter(ctx, (t) => zonk(st, t) > 50)
+  guard list.is_empty(bad) else err("bad ${list.len(bad)} at ${st.n}")
+  ok(new_meta(st, list.len(ctx)))
+}
+
+effect fn main() -> Unit = {
+  var st = { metas: [1, 2], log: [], n: 0 }
+  let r = by_simp(st, [5, 200, 9])
+  let r2 = by_simp(st, [1])
+  let c1 = checked(st, [1, 2]) ?? -1
+  let c2 = checked(st, [1, 99]) ?? -2
+  println("${r} ${r2} ${c1} ${c2} ${st.n} ${list.len(st.metas)} ${list.join(st.log, ",")}")
+}
+"#;
+
+#[test]
+fn a_closure_that_only_reads_a_mut_param_for_one_call_keeps_it_lent() {
+    // `ctx |> list.map((t) => zonk(st, t))`: the closure reads the place and
+    // dies with the call, so `st` stays lent `&mut` and is lent on after it.
+    let out = render(CLOSURE_READ).expect("renders");
+    for name in ["new_meta", "settle", "by_simp", "checked"] {
+        assert!(header_of(&out, name).contains("&mut AlmdRec"), "{name} borrows the caller's record:\n{out}");
+    }
+    assert!(body_of(&out, "settle").contains("almd_new_meta(&mut *v0"), "{out}");
+    assert_eq!(run_native(CLOSURE_READ), "229 11 5 -2 3 5 z 3,z 1\n");
+}

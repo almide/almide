@@ -210,22 +210,45 @@ fn mentions(e: &IrExpr, p: VarId) -> bool {
 /// Does `p` occur in `body` only where the in-out convention can carry it:
 /// read by a call argument, an operator, an access or an interpolation;
 /// rebound by an assignment or an in-place mutator; lent to an in-out
-/// position of a candidate. A bind, a return, a capture, a container
-/// element, a match subject or an iteration keeps the move-mode convention.
+/// position of a candidate; read by a closure that does not outlive the
+/// call it is passed to ([`scoped_read`]). A bind, a return, any other
+/// capture, a container element, a match subject or an iteration keeps the
+/// move-mode convention.
 fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String, Vec<usize>>) -> bool {
+    uses_ok(body, p, cands, writes, false)
+}
+
+/// [`body_uses_ok`]; with `read_only`, `p` is only read: no rebind, no field
+/// write, no lend to a written position.
+fn uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String, Vec<usize>>, read_only: bool) -> bool {
     struct C<'a> {
         p: VarId,
         cands: &'a Cands,
         writes: &'a HashMap<String, Vec<usize>>,
+        read_only: bool,
         ok: bool,
     }
     impl C<'_> {
+        /// The use that keeps `p` out of the convention (traced once).
+        fn no(&mut self, why: &str) {
+            if self.ok && !self.read_only {
+                crate::trace::trace("ALMIDE_DBG_INOUT", || format!("[inout] {:?} stays move-mode: {why}", self.p));
+            }
+            self.ok = false;
+        }
         fn read(&mut self, e: &IrExpr) {
             if !is_var(e, self.p) {
                 self.visit_expr(e);
             }
         }
-        fn call(&mut self, target: &CallTarget, args: &[IrExpr]) {
+        fn call(&mut self, target: &CallTarget, args: &[IrExpr], ty: &Ty) {
+            let captured = args.iter().any(|a| matches!(&a.kind, IrExprKind::Lambda { body, .. } if mentions(body, self.p)));
+            if captured {
+                if !scoped_read(target, args, ty, self.p, self.writes) {
+                    self.no("closure outlives or writes");
+                }
+                return;
+            }
             for (i, a) in args.iter().enumerate() {
                 if !is_var(a, self.p) {
                     self.visit_expr(a);
@@ -243,7 +266,7 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
                     _ => false,
                 };
                 if !lent {
-                    self.ok = false;
+                    self.no("lend position");
                 }
             }
         }
@@ -254,21 +277,22 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
                 return;
             }
             match &e.kind {
-                IrExprKind::Var { id } if *id == self.p => self.ok = false,
+                IrExprKind::Var { id } if *id == self.p => self.no("bare value"),
                 IrExprKind::Lambda { body, .. } => {
                     if mentions(body, self.p) {
-                        self.ok = false;
+                        self.no("closure");
                     }
                 }
+                IrExprKind::Call { .. } if self.read_only && rebinds(e, self.p) => self.no("read-only rebind"),
                 IrExprKind::Call { target: CallTarget::Module { .. }, args, .. } if rebinds(e, self.p) => {
                     for a in &args[1..] {
                         if mentions(a, self.p) || !simple_operand(a) {
-                            self.ok = false;
+                            self.no("mutator operand");
                         }
                         self.visit_expr(a);
                     }
                 }
-                IrExprKind::Call { target, args, .. } => self.call(target, args),
+                IrExprKind::Call { target, args, .. } => self.call(target, args, &e.ty),
                 IrExprKind::BinOp { left, right, .. } => {
                     self.read(left);
                     self.read(right);
@@ -287,7 +311,7 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
                 }
                 IrExprKind::TailCall { .. } => {
                     if mentions(e, self.p) {
-                        self.ok = false;
+                        self.no("tail call");
                     }
                 }
                 _ => walk_expr(self, e),
@@ -298,6 +322,9 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
                 return;
             }
             match &s.kind {
+                IrStmtKind::Assign { var, .. } | IrStmtKind::FieldAssign { target: var, .. } if self.read_only && *var == self.p => {
+                    self.no("read-only write")
+                }
                 IrStmtKind::Assign { value, .. } => self.read_assign(value),
                 IrStmtKind::FieldAssign { target, value, .. } if *target == self.p && field_write_ok(value) => {
                     self.visit_expr(value)
@@ -307,7 +334,7 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
                 | IrStmtKind::MapInsert { target, .. }
                     if *target == self.p =>
                 {
-                    self.ok = false
+                    self.no("index or map write")
                 }
                 _ => walk_stmt(self, s),
             }
@@ -317,15 +344,33 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String,
         /// The value of an assignment: a bare `p` there would alias the slot.
         fn read_assign(&mut self, value: &IrExpr) {
             if is_var(value, self.p) {
-                self.ok = false;
+                self.no("assign alias");
             } else {
                 self.visit_expr(value);
             }
         }
     }
-    let mut c = C { p, cands, writes, ok: true };
+    let mut c = C { p, cands, writes, read_only, ok: true };
     c.visit_expr(body);
     c.ok
+}
+
+/// A call that passes a closure capturing `p` lends it the place for the
+/// call alone: the callee is a stdlib fn whose answer holds no function value
+/// (the closure cannot leave in it, and a stdlib fn stores nothing), and
+/// every argument, the closure bodies included, only reads `p` — nothing
+/// writes the place while a closure that reads it is alive.
+fn scoped_read(target: &CallTarget, args: &[IrExpr], ty: &Ty, p: VarId, writes: &HashMap<String, Vec<usize>>) -> bool {
+    fn has_fn(ty: &Ty) -> bool {
+        matches!(ty, Ty::Fn { .. }) || ty.children().into_iter().any(has_fn)
+    }
+    let none = Cands::new();
+    matches!(target, CallTarget::Module { .. })
+        && !has_fn(ty)
+        && args.iter().all(|a| match &a.kind {
+            IrExprKind::Lambda { body, .. } => uses_ok(body, p, &none, writes, true),
+            _ => !mentions(a, p) || uses_ok(a, p, &none, writes, true),
+        })
 }
 
 /// The vars a call in `f` may lend: its `var` locals no closure captures,
@@ -589,6 +634,7 @@ fn prune(ir: &IrProgram, cands: &mut Cands) {
         .iter()
         .map(|f| (f.name.to_string(), f.params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect()))
         .collect();
+    let dbg = almide_base::env::flag("ALMIDE_DBG_INOUT");
     loop {
         let mut refused: BTreeSet<String> = BTreeSet::new();
         for f in &ir.functions {
@@ -598,6 +644,7 @@ fn prune(ir: &IrProgram, cands: &mut Cands) {
                     body_uses_ok(&f.body, p, cands, &writes)
                 });
                 if !ok {
+                    crate::trace::trace("ALMIDE_DBG_INOUT", || format!("[inout] {} refused: its body", f.name));
                     refused.insert(f.name.to_string());
                 }
             }
@@ -605,10 +652,21 @@ fn prune(ir: &IrProgram, cands: &mut Cands) {
             // a non-candidate) holds a borrowed payload of the returned tuple
             // afterwards, not a buffer of its own to lend.
             let mut ok_vars = lendable_vars(f);
+            // A candidate's own in-out param passed `body_uses_ok`: every
+            // closure that captures it only reads it for one call's length.
+            for &k in cands.get(f.name.as_str()).into_iter().flatten() {
+                ok_vars.insert(f.params[k].var);
+            }
             for v in tuple_written_vars(&f.body, &writes, &cands) {
                 ok_vars.remove(&v);
             }
+            let before = if dbg { refused.clone() } else { BTreeSet::new() };
             refused_sites(&f.body, &cands, &ok_vars, &mut refused);
+            if dbg {
+                for n in refused.difference(&before) {
+                    eprintln!("[inout] {n} refused: a call site in {}", f.name);
+                }
+            }
         }
         for t in &ir.top_lets {
             refused_sites(&t.value, &cands, &HashSet::new(), &mut refused);
