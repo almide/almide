@@ -217,7 +217,10 @@ pub(crate) fn carrier_dies_after(
     src: ValueId,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) -> bool {
-    carrier_dies_after_reading(func, at, src, borrow_arms, false)
+    // An in-out param is the caller's place: the caller reads it after the
+    // call, so it never dies here (a field leaves it only through
+    // `native_inout::field_moves_out`, which puts the field back).
+    !func.inout_params.contains(&src) && carrier_dies_after_reading(func, at, src, borrow_arms, false)
 }
 
 /// [`carrier_dies_after`], where `slots` also leaves out a record's scalar
