@@ -744,6 +744,20 @@ mod tests {
     }
 
     #[test]
+    fn a_module_qualifier_names_no_function_of_its_name() {
+        // #4695: `map.set` qualifies a call into `map`; it is not a bare
+        // `map`, so a reached `bytes` keeps `bytes.map` out (and with it the
+        // bytes self-host source it would enter). A qualified call still
+        // keeps its own function live.
+        let l = live("fn f(b: Bytes, m: Map[String, Int]) -> Int = bytes.len(b) + map.len(map.set(m, \"k\", 1))\n");
+        assert!(is_live(&l, "bytes", "len"), "{:?}", l.live_fns.get("bytes"));
+        assert!(!is_live(&l, "bytes", "map"), "{:?}", l.live_fns.get("bytes"));
+        assert!(is_live(&l, "map", "set"), "{:?}", l.live_fns.get("map"));
+        let l = live("fn f(b: Bytes, xs: List[Int]) -> Int = bytes.len(b) + list.len(list.map(xs, (x) => x))\n");
+        assert!(is_live(&l, "list", "map"), "{:?}", l.live_fns.get("list"));
+    }
+
+    #[test]
     fn a_live_body_keeps_what_it_names_in_another_module() {
         // `list.sum[A: Numeric]` calls `A.__sum`: the requirement each
         // reached number module implements stays live with its module.
