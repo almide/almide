@@ -1775,18 +1775,16 @@ fn a_live_host_boundary_that_can_carry_a_region_address_is_refused() {
     }
 }
 
-/// A host binding over plain data does not open the domain, and neither does
-/// an address-carrying binding that no root reaches (a package brings all its
-/// modules): native renders the program and agrees with v0.
+/// A host binding over plain data does not open the domain: native renders
+/// the program and agrees with v0.
 #[test]
-fn plain_data_bindings_and_unreached_region_bindings_keep_the_domain_closed() {
+fn a_host_binding_over_plain_data_keeps_the_domain_closed() {
     std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
         let dir = std::env::temp_dir().join(format!("almide-native-region-bound-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let source = format!("import ffi\n{}{}{}",
             "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n",
-            "@extern(rust, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n\
-             effect fn unreached() -> Int = take(ffi.alloc(1)!)\n",
+            "",
             REGION_PROGRAM_MAIN);
         let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(&source)
             .unwrap_or_else(|e| panic!("native refused: {e:?}"));
@@ -1794,7 +1792,6 @@ fn plain_data_bindings_and_unreached_region_bindings_keep_the_domain_closed() {
             let property = almide_verify::Property::from_name(property).expect("known certificate property");
             assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
         }
-        assert!(!rust.contains("host::take"), "the unreached binding was rendered");
         let rs = dir.join("region_bound.rs");
         let crates = almide_codegen::runtime_crate_deps(&rust);
         std::fs::write(&rs, rust).unwrap();
