@@ -133,11 +133,22 @@ fn nested_unwrap_rewrite_stmts(
                 if nested_unwrap_rewrite_expr(expr, next_var) {
                     return true;
                 }
+                // A call statement (`list.push(xs, f(x)!)`): its arguments are
+                // operands like a bound value's, below a root that is no unwrap.
+                if matches!(expr.kind, IrExprKind::Call { .. }) {
+                    if let Some((bind, span)) = take_innermost_scalar_unwrap(expr, next_var) {
+                        stmts.insert(i, IrStmt { kind: bind, span });
+                        return true;
+                    }
+                }
                 (false, None)
             }
             _ => (false, None),
         };
         let Some(value) = value else { continue };
+        if factor_branch_unwrap(value) {
+            return true;
+        }
         let at_root = matches!(&value.kind, IrExprKind::Unwrap { .. });
         if at_root && !root_ok {
             // Still recurse INSIDE the root unwrap's operand for a deeper one.
@@ -177,15 +188,41 @@ fn nested_unwrap_rewrite_stmts(
     false
 }
 
-/// A scalar-typed `Unwrap` whose operand is a Result/Option — the node class
-/// every nested hoist below targets.
+/// `if c then a! else b!` over one carrier type is `(if c then a else b)!`: the
+/// condition runs first, then exactly one of `a`/`b`, then the one `!` — the
+/// same order and the same propagation. Bound, it becomes the let-unwrap shape
+/// (the loop error slot, the continuation, or the return rule) instead of a
+/// heap branch whose arms each leave the fn.
+fn factor_branch_unwrap(value: &mut almide_ir::IrExpr) -> bool {
+    use almide_ir::{IrExpr, IrExprKind};
+    let IrExprKind::If { cond, then, else_ } = &value.kind else { return false };
+    let (IrExprKind::Unwrap { expr: a }, IrExprKind::Unwrap { expr: b }) = (&then.kind, &else_.kind) else {
+        return false;
+    };
+    if a.ty != b.ty || then.ty != value.ty || else_.ty != value.ty {
+        return false;
+    }
+    let carrier = IrExpr {
+        kind: IrExprKind::If { cond: cond.clone(), then: a.clone(), else_: b.clone() },
+        ty: a.ty.clone(),
+        span: value.span,
+        def_id: None,
+    };
+    let kind = IrExprKind::Unwrap { expr: Box::new(carrier) };
+    *value = IrExpr { kind, ty: value.ty.clone(), span: value.span, def_id: value.def_id };
+    true
+}
+
+/// An `Unwrap` whose operand is a Result/Option — the node class every nested
+/// hoist below targets. A heap payload hoists the same way: the hoisted bind is
+/// the let-unwrap shape whose payload the bind machinery owns, and the place it
+/// left reads that binding.
 fn is_hoistable_unwrap(e: &IrExpr) -> bool {
     use almide_ir::IrExprKind;
     matches!(
         &e.kind,
         IrExprKind::Unwrap { expr: inner }
-            if !crate::lower::is_heap_ty(&e.ty)
-                && matches!(
+            if matches!(
                     &inner.ty,
                     almide_lang::types::Ty::Applied(
                         almide_lang::types::constructor::TypeConstructorId::Result
@@ -240,8 +277,9 @@ fn has_candidate_unwrap(body: &IrExpr) -> bool {
 /// NEVER into: a Lambda body (different scope — hoisting captures the lambda's
 /// params in the outer bind), `if`/`match` arms or `??` fallbacks (conditional
 /// evaluation — the hoisted unwrap would run and propagate unconditionally),
-/// `and`/`or` right operands (short-circuit), call ARGUMENTS (the call-arg
-/// unwrap ANF already owns that position), or nested blocks/loops. The first
+/// `and`/`or` right operands (short-circuit), or nested blocks/loops. A direct
+/// call's ARGUMENTS are operands under the same left-to-right rule (the call-arg
+/// ANF lifts them only from a block's own statements, not inside a loop body). The first
 /// draft used the generic visitor and walled five fallible_lambda_test fns by
 /// hoisting a LAMBDA-body `!` into the enclosing bind — the ratchet caught it.
 fn take_innermost_scalar_unwrap(
@@ -285,7 +323,15 @@ fn take_innermost_scalar_unwrap(
                 }
                 None
             }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            // A direct call's arguments, left to right (a computed or method callee
+            // is itself an operand evaluated first, so those keep their position).
+            IrExprKind::Call {
+                target: almide_ir::CallTarget::Named { .. } | almide_ir::CallTarget::Module { .. },
+                args: elements,
+                ..
+            }
+            | IrExprKind::List { elements }
+            | IrExprKind::Tuple { elements } => {
                 for el in elements.iter_mut() {
                     if let Some(found) = search(el, next_var, false) {
                         return Some(found);

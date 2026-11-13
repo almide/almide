@@ -435,7 +435,13 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_result_ty(bind_ty) {
-            self.value_shapes.insert(payload, crate::lower::VariantShape::ResultScalar);
+            // The payload block is laid out by its own family: a heap-Ok Result
+            // reads its tag where every HeapOk carrier keeps it.
+            let shape = match crate::lower::result_family(bind_ty) {
+                crate::lower::ResultFamily::HeapOk if crate::lower::owned_tco_slots() => crate::lower::VariantShape::ResultHeapOk,
+                _ => crate::lower::VariantShape::ResultScalar,
+            };
+            self.value_shapes.insert(payload, shape);
             if crate::lower::is_lenlist_list_ty(bind_ty) {
                 self.value_drops.entry(payload).or_default().named_route = Some("list_lenlist".to_string());
             } else if crate::lower::is_heap_elem_list_ty(bind_ty) {
