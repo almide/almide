@@ -40,8 +40,9 @@
             the line of the caller's object that argument is.
      hosts  one id per call the function makes to a NATIVE FS HOST CALL
             (#4006 class E): the index of the runtime function it calls in
-            `native_fs_host_calls` below — the named set of the trusted
-            base's "Native fs host calls" row (proofs/TRUSTED_BASE.md). A
+            `native_host_calls` below — the named sets of the trusted
+            base's "Native fs host calls" and "Native unix host calls" rows
+            (proofs/TRUSTED_BASE.md), laid end to end. A
             call outside the set carries an out-of-range id.
      lines  the function's ownership lines in the alphabet and delimiters of
             `check_xc`, one per heap parameter first (parameter order), then
@@ -58,7 +59,7 @@
        every other line pass the exit-aware ownership check with the owned-
        line guard (`check_line (guard_line …)`, as `check_xc` judges them),
        and no parameter line reuses (CallModes' shift-safety);
-     - HOSTS: every host id names a function of `native_fs_host_calls`
+     - HOSTS: every host id names a function of `native_host_calls`
        (`hosts_ok`): a host call outside the named set is refused.
 
    `check_native_calls_sound` states what acceptance gives, per block: the
@@ -205,8 +206,31 @@ Definition native_fs_host_calls : list string :=
    "almide_rt_fs_fold_lines_range";
    "almide_rt_fs_fold_lines_chunked"].
 
+(* The NATIVE UNIX HOST CALLS (owner ruling 2026-11-10, before rc1 on
+   2026-11-13): the runtime unix functions a natively rendered program may
+   call as trusted host calls, the code the embedded wasm host already serves
+   as its interim ops 104..=116 — `host_ops.rs` `NATIVE_UNIX_HOST_CALLS`, in
+   that order. *)
+Definition native_unix_host_calls : list string :=
+  ["almide_rt_unix___os_connect";
+   "almide_rt_unix___os_listen";
+   "almide_rt_unix___os_accept";
+   "almide_rt_unix___os_send";
+   "almide_rt_unix___os_recv";
+   "almide_rt_unix___os_close";
+   "almide_rt_unix___os_wait";
+   "almide_rt_unix___os_take_fds";
+   "almide_rt_unix___os_shm_create";
+   "almide_rt_unix___os_shm_resize";
+   "almide_rt_unix___os_shm_write";
+   "almide_rt_unix___os_shm_read"].
+
+(* Every named host call, by witness id: the fs set, then the unix set
+   (`host_ops::NATIVE_HOST_CLASSES`). *)
+Definition native_host_calls : list string := native_fs_host_calls ++ native_unix_host_calls.
+
 Definition hosts_ok (b : block) : bool :=
-  forallb (fun h => Nat.ltb h (List.length native_fs_host_calls)) (b_hosts b).
+  forallb (fun h => Nat.ltb h (List.length native_host_calls)) (b_hosts b).
 
 (* ─── the lines ─── *)
 
@@ -299,7 +323,7 @@ Theorem check_native_calls_sound :
          forall body, UnrollsL cs body -> param_stream_ok (mode_of_nat m) body = true) /\
       (forall cs, In cs (skipn (List.length (b_modes b)) (b_lines b)) ->
          forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0) /\
-      (forall h, In h (b_hosts b) -> exists f, nth_error native_fs_host_calls h = Some f).
+      (forall h, In h (b_hosts b) -> exists f, nth_error native_host_calls h = Some f).
 Proof.
   intros s H bs b Hin. unfold check_native_calls_cert, check_native_calls in H.
   rewrite forallb_forall in H. specialize (H b Hin).
@@ -322,7 +346,7 @@ Proof.
     exact (check_line_unroll_sound cs (nlines_rest _ _ Hlines cs Hcs) fops HU).
   - intros h Hh. unfold hosts_ok in Hhosts. rewrite forallb_forall in Hhosts.
     specialize (Hhosts h Hh). apply Nat.ltb_lt in Hhosts.
-    destruct (nth_error native_fs_host_calls h) as [f |] eqn:E; [exists f; reflexivity |].
+    destruct (nth_error native_host_calls h) as [f |] eqn:E; [exists f; reflexivity |].
     apply nth_error_None in E. lia.
 Qed.
 
@@ -425,10 +449,17 @@ Example nc_host_stream_callbacks_accept :
 id" = true.
 Proof. reflexivity. Qed.
 
-(* A host call to a runtime function OUTSIDE the named set (the out-of-range
-   id the producer writes for it: the set's length, 38) — REJECTED. *)
+(* The unix set's ids follow the fs set's: 38 (`almide_rt_unix___os_connect`)
+   through 49 (`almide_rt_unix___os_shm_read`) — ACCEPTED. *)
+Example nc_host_unix_calls_accept :
+  check_native_calls_cert "||| 38 43 49
+id" = true.
+Proof. reflexivity. Qed.
+
+(* A host call to a runtime function OUTSIDE the named sets (the out-of-range
+   id the producer writes for it: the sets' total length, 50) — REJECTED. *)
 Example nc_host_outside_set_rejects :
-  check_native_calls_cert "||| 38
+  check_native_calls_cert "||| 50
 id" = false.
 Proof. reflexivity. Qed.
 

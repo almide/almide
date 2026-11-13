@@ -364,7 +364,7 @@ fn wrap_value_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
         },
     );
     *expr = IrExpr {
-        span: inner.span.clone(),
+        span: inner.span,
         def_id: inner.def_id,
         kind: IrExprKind::ResultOk { expr: Box::new(inner) },
         ty: result_ty.clone(),
@@ -589,6 +589,7 @@ include!("desugar_guard_b.rs");
 include!("desugar_guard_c.rs");
 include!("desugar_main_payload.rs");
 include!("cells.rs");
+include!("cells_field_write.rs");
 include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");
 include!("mod_p2_b.rs");
@@ -623,6 +624,7 @@ include!("desugar_nested_unwrap.rs");
 include!("desugar_ctor_payload.rs");
 include!("desugar_loop.rs");
 include!("desugar_loop_b.rs");
+include!("desugar_loop_bound_branch.rs");
 include!("desugar_branch.rs");
 include!("desugar_branch_b.rs");
 include!("desugar_fan.rs");

@@ -4,8 +4,8 @@
 //! The witness is one block per function of a natively rendered program,
 //! `#`-separated: `<modes>|<sites>|<marks>`, a newline, then the function's
 //! ownership lines (heap parameters first), with an optional fourth header
-//! field `|<hosts>`: one id per native fs host call (#4006 class E), each an
-//! index into [`NATIVE_FS_HOST_CALLS`]. The program's signature table is
+//! field `|<hosts>`: one id per native host call (#4006 class E), each an
+//! index into [`NATIVE_FS_HOST_CALLS`] followed by [`NATIVE_UNIX_HOST_CALLS`]. The program's signature table is
 //! the list of every block's modes. A block is accepted iff its modes are 0
 //! or 1, every site agrees with its callee block's modes, the marks are as
 //! many as the arguments the sites move, each names a line of the block, and
@@ -90,9 +90,28 @@ pub const NATIVE_FS_HOST_CALLS: &[&str] = &[
     "almide_rt_fs_fold_lines_chunked",
 ];
 
-/// `hosts_ok`: every host id names a function of the set.
+/// `native_unix_host_calls` (NativeCalls.v): the trusted base's named set of
+/// native unix host calls, in the order of `almide_mir::host_ops`'s list.
+pub const NATIVE_UNIX_HOST_CALLS: &[&str] = &[
+    "almide_rt_unix___os_connect",
+    "almide_rt_unix___os_listen",
+    "almide_rt_unix___os_accept",
+    "almide_rt_unix___os_send",
+    "almide_rt_unix___os_recv",
+    "almide_rt_unix___os_close",
+    "almide_rt_unix___os_wait",
+    "almide_rt_unix___os_take_fds",
+    "almide_rt_unix___os_shm_create",
+    "almide_rt_unix___os_shm_resize",
+    "almide_rt_unix___os_shm_write",
+    "almide_rt_unix___os_shm_read",
+];
+
+/// `hosts_ok`: every host id names a function of `native_host_calls`, the
+/// fs set followed by the unix set.
 fn hosts_ok(b: &Block<'_>) -> bool {
-    b.hosts.iter().all(|h| h.as_index().is_some_and(|i| i < NATIVE_FS_HOST_CALLS.len()))
+    let named = NATIVE_FS_HOST_CALLS.len() + NATIVE_UNIX_HOST_CALLS.len();
+    b.hosts.iter().all(|h| h.as_index().is_some_and(|i| i < named))
 }
 
 /// `site_ok` (CallModes.v).
@@ -154,6 +173,7 @@ mod tests {
         assert!(c(b"||| 29\nid"));
         assert!(c(b"||| 30 31\nid"));
         assert!(c(b"||| 32 33 34 35 36 37\nid"));
-        assert!(!c(b"||| 38\nid"));
+        assert!(c(b"||| 38 43 49\nid"));
+        assert!(!c(b"||| 50\nid"));
     }
 }

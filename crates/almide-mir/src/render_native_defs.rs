@@ -46,6 +46,6 @@ pub(crate) fn struct_defs() -> String {
             out.push_str(&source_eq_impl(i as u16, d));
         }
         out
-    })
+    }) + &deep_drop_impls()
 }
 

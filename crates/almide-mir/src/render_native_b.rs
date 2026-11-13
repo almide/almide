@@ -219,6 +219,9 @@ fn inout_arg(name: &str, a: &CallArg, want: NTy, got: NTy) -> Result<String, Low
     let CallArg::Handle(v) = a else {
         return Err(wall(format!("native: in-out argument of `{name}` is not a handle")));
     };
+    if let Some(arg) = crate::native_inout_field::arg(name, *v) {
+        return arg;
+    }
     if got != crate::render_native::owned_nty(want) || crate::render_native_move::is_stack_lit(*v) {
         return Err(wall(format!("native: in-out argument of `{name}` is not an owned buffer ({got:?})")));
     }

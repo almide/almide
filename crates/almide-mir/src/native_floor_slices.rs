@@ -73,6 +73,48 @@ pub(crate) fn shared_key_twin(twin: &str) -> Twin {
     paired.then(|| Some((keyed.clone(), closure(&keyed, rt).ok()?)))?
 }
 
+/// The borrowed-string-key twin of the consuming runtime body `symbol`: the
+/// runtime fn `<symbol>_str`, paired from the signatures — the body's second
+/// param (the key) is a type parameter `K`, the twin's is `&str`, and every
+/// other param and the result are the body's with `K` read as `AlmideString`.
+/// It copies the key only where it stores it. Returns the twin and its items.
+/// `None` when the runtime carries no such fn.
+pub(crate) fn str_key_twin(symbol: &str) -> Twin {
+    let rt = runtime_index();
+    let body = signature_text(rt, symbol)?;
+    let (params, ret) = rust_signature(body)?;
+    let keyed = format!("{symbol}_str");
+    let (keyed_params, keyed_ret) = rust_signature(signature_text(rt, &keyed)?)?;
+    let k = squash(params.get(1)?);
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    // The key's type is one of the body's own type parameters.
+    let generics = squash(body.split_once('(')?.0);
+    let declared = generics.split(['<', ',']).skip(1).any(|g| g.split([':', '>']).next() == Some(k.as_str()));
+    if k.is_empty() || !k.chars().all(ident) || !declared {
+        return None;
+    }
+    // `t` with every whole identifier `k` read as `AlmideString`.
+    let as_str_key = |t: &String| {
+        let t = squash(t);
+        let mut out = String::new();
+        let mut rest = t.as_str();
+        while let Some(at) = rest.find(k.as_str()) {
+            let whole = !rest[..at].chars().next_back().is_some_and(ident) && !rest[at + k.len()..].chars().next().is_some_and(ident);
+            out.push_str(&rest[..at]);
+            out.push_str(if whole { "AlmideString" } else { k.as_str() });
+            rest = &rest[at + k.len()..];
+        }
+        out.push_str(rest);
+        out
+    };
+    let paired_types = |a: &String, b: &String| as_str_key(a) == squash(b);
+    let paired = params.len() == keyed_params.len()
+        && squash(&keyed_params[1]) == "&str"
+        && paired_types(&ret, &keyed_ret)
+        && params.iter().zip(&keyed_params).enumerate().all(|(at, (a, b))| at == 1 || paired_types(a, b));
+    paired.then(|| Some((keyed.clone(), closure(&keyed, rt).ok()?)))?
+}
+
 /// The refilling twin of the building runtime body `symbol`: the runtime fn
 /// `<symbol>_into`, paired from the signatures — a `&mut` of the body's
 /// result type, then the body's own params, and nothing returned. It leaves

@@ -1643,10 +1643,9 @@ fn main() {{
         let mut b = {ty}::C0(0.0_f64.to_bits() as i64);
         for _ in 0..100_000 {{ a = {ty}::C1(Box::new(a)); b = {ty}::C1(Box::new(b)); }}
         assert_eq!(almd_equal(&a, &b), 1);
-        // Drain iteratively: this measures equality, separately from recursive Drop.
-        for mut node in [a, b] {{
-            loop {{ match node {{ {ty}::C1(next) => node = *next, _ => break }} }}
-        }}
+        // The type's own Drop releases its chain in a loop (#4676), so the
+        // 100,000 levels are released on this 128 KiB stack too.
+        drop((a, b));
     }}).unwrap().join().unwrap();
 }}
 "#));
@@ -1964,4 +1963,132 @@ effect fn main() -> Unit = {
         assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
+}
+
+/// #4715: a `!` inside an arm block of a bound `if` / `match` in a loop body. The
+/// loop flag rewrite lifts it to a bind of the branch's Result; before, the bound
+/// return rule took it, and its exit left the loop's own state undropped, so the
+/// ownership certificate was rejected. Ok and err paths, on every route.
+#[test]
+fn bound_branch_bang_in_loop_preserves_all_routes() {
+    let dir = std::env::temp_dir().join(format!("almide-native-loop-bound-bang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+fn load(name: String) -> Result[List[Int], String] = match name {
+  "a" => ok([1, 2, 3]),
+  "bb" => ok([4]),
+  _ => err("no face ${name}"),
+}
+effect fn by_if(names: List[String]) -> Int = {
+  var sum = 0
+  for name in names {
+    let f = if string.len(name) > 5 then [1] else {
+        let loaded = load(name)!
+        loaded
+      }
+    println("if ${name}")
+    sum = sum + list.len(f)
+  }
+  sum
+}
+effect fn by_match(names: List[String]) -> Int = {
+  var sum = 0
+  for name in names {
+    let f = match list.get(names, 5) {
+      some(p) => [string.len(p)],
+      none => {
+        let loaded = load(name)!
+        loaded
+      },
+    }
+    println("match ${name}")
+    sum = sum + list.len(f)
+  }
+  sum
+}
+effect fn by_chain(names: List[String]) -> String = {
+  var out = ""
+  for name in names {
+    let f = if name == "x" then [] else if string.len(name) > 1 then {
+        let first = load(name)!
+        let second = load("a")!
+        first + second
+      } else load(name)!
+    out = out + "${list.len(f)};"
+  }
+  out
+}
+effect fn main() -> Unit = {
+  println("${by_if(["a", "longname", "a"])!}")
+  println("${by_match(["a", "bb"])!}")
+  println("${by_chain(["x", "bb", "a"])!}")
+  match by_if(["a", "zz", "a"]) {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+  match by_match(["bb", "q", "a"]) {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+  match by_chain(["a", "cc", "a"]) {
+    ok(s) => println("ok ${s}"),
+    err(e) => println("err ${e}"),
+  }
+}
+"#;
+    check_routes(&dir, "loop_bound_branch_bang", source,
+        "if a\nif longname\nif a\n7\nmatch a\nmatch bb\n4\n0;4;3;\nif a\nerr no face zz\nmatch bb\nerr no face q\nerr no face cc\n",
+        "", 0);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The indic shape: a `!` nested in a call argument inside the match arm block a
+/// loop-body bind takes. The hoist binds it in the arm, the loop flag rewrite
+/// places it behind the arm's continuation, and a Bytes payload crosses it.
+#[test]
+fn nested_bang_in_bound_arm_in_loop_preserves_all_routes() {
+    let dir = std::env::temp_dir().join(format!("almide-native-nested-bound-bang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+type Face = { name: String, data: Bytes }
+
+fn parse(name: String, b: Bytes) -> Face = { name: name, data: b }
+
+fn load(name: String) -> Result[Bytes, String] = match name {
+  "a" => ok(bytes.from_list([1, 2, 3])),
+  "b" => ok(bytes.from_list([1, 2, 3, 4, 5])),
+  _ => err("no face ${name}"),
+}
+
+effect fn total(text: String) -> Int = {
+  var faces: List[(String, Face)] = []
+  var sum = 0
+  for line in string.split(text, "\n") {
+    let cols = string.split(line, "\t")
+    if list.len(cols) == 2 then {
+      let name = cols[0]
+      let f = match list.find(faces, (p) => p.0 == name) {
+        some(p) => p.1,
+        none => {
+          let loaded = parse(name, load(name)!)
+          list.push(faces, (name, loaded))
+          loaded
+        },
+      }
+      sum = sum + bytes.len(f.data) * (int.parse(cols[1]) ?? 0)
+    } else ()
+  }
+  sum + list.len(faces) * 1000
+}
+
+effect fn main() -> Unit = {
+  println("${total("a\t1\nb\t2\na\t3\nbad\nb\t4")!}")
+  match total("a\t1\nc\t2\nb\t3") {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+}
+"#;
+    check_routes(&dir, "nested_bang_in_bound_arm", source, "2042\nerr no face c\n", "", 0);
+    std::fs::remove_dir_all(dir).unwrap();
 }

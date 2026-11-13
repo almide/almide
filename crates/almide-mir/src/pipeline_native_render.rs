@@ -543,9 +543,16 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     let (linked, runtime, host_results) = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
+    // The lowered lambdas' tuple and list types re-derive the record table,
+    // which may move indices: settle it before the heap-slot kinds record one
+    // (a slot read as `Rec(i)` of the old table named another type at render).
+    crate::render_native_rec::extend_with(&crate::lambda_sigs::declared_types());
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     // No function is known to leave the heap slots alone until this program's are read.
     crate::native_slot_takes::set_quiet(&[]);
+    // A call of a function that only returns its parameter, whose result is
+    // only lent, is a copy of the argument (an erased newtype's accessor).
+    crate::native_identity_calls::inline(&mut functions);
     rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results, test_harness)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
