@@ -128,16 +128,57 @@ pub(crate) fn release_llvm_rustc_args() -> Vec<String> {
     RELEASE_LLVM_ARGS.iter().flat_map(|a| ["-C".to_string(), format!("llvm-args={a}")]).collect()
 }
 
+/// The LLVM options every native build passes at EVERY optimization level,
+/// on every target, for the program crate and the runtime alike (#4674).
+/// These are correctness options, not tuning.
+///
+/// `-unroll-add-parallel-reductions=false` keeps the loop unroller from
+/// splitting a reduction over several accumulators. LLVM 22 (rustc 1.97)
+/// joins the accumulators of a SUBTRACTING reduction (`acc = acc - f(x)`)
+/// with subtractions where the partial results must be added, so the loop
+/// returns a wrong value. The backend's tuning for the arm64 macOS default
+/// CPU turns the split on, and the unroller is the only loop pass that runs
+/// at opt-level 1 (at 3 the vectorizer usually takes the loop first), so
+/// `almide run` printed `-1` for `list.range(0, 1000) |> list.map((x) => x /
+/// 2) |> list.fold(1, (acc, x) => acc - x)` where the release build and wasm
+/// printed `-249499`: wrong for every length whose unrolled loop runs at
+/// least once. The defect is in the target-independent pass (x86-64 shows it
+/// with `-unroll-runtime -unroll-count=4` and the split forced on), so the
+/// option is passed everywhere rather than keyed on a target or CPU name;
+/// where the split was already off it changes nothing. A later occurrence of
+/// an LLVM option overrides an earlier one, and these are appended after any
+/// inherited `RUSTFLAGS`.
+pub(crate) const NATIVE_LLVM_ARGS: &[&str] = &["-unroll-add-parallel-reductions=false"];
+
+/// [`NATIVE_LLVM_ARGS`] as rustc arguments (`-C llvm-args=…` each).
+pub(crate) fn native_llvm_rustc_args() -> Vec<String> {
+    NATIVE_LLVM_ARGS.iter().flat_map(|a| ["-C".to_string(), format!("llvm-args={a}")]).collect()
+}
+
+/// The LLVM options the runtime is compiled with: [`NATIVE_LLVM_ARGS`], then
+/// [`RELEASE_LLVM_ARGS`] in a `--release` build.
+pub(crate) fn runtime_llvm_args(release: bool) -> Vec<&'static str> {
+    let release_args: &[&str] = if release { RELEASE_LLVM_ARGS } else { &[] };
+    NATIVE_LLVM_ARGS.iter().chain(release_args).copied().collect()
+}
+
 /// Every codegen flag a `--release` native build adds on top of the release
 /// profile (opt-level=3, fat LTO, one codegen unit), as rustc arguments: the
 /// `-C target-cpu` of [`release_target_cpu`], if any, then
-/// [`release_llvm_rustc_args`]. The one list both build paths pass, and what
-/// `almide build --print-release-rustflags` prints, so a benchmark can compile
-/// its hand-written Rust reference with the same flags instead of copying
-/// this decision.
+/// [`release_llvm_rustc_args`], then [`native_llvm_rustc_args`]. The one list
+/// both build paths pass, and what `almide build --print-release-rustflags`
+/// prints, so a benchmark can compile its hand-written Rust reference with
+/// the same flags instead of copying this decision.
 pub(crate) fn release_codegen_rustc_args() -> Vec<String> {
     let cpu = release_target_cpu().map(|cpu| ["-C".to_string(), format!("target-cpu={cpu}")]);
-    cpu.into_iter().flatten().chain(release_llvm_rustc_args()).collect()
+    cpu.into_iter().flatten().chain(release_llvm_rustc_args()).chain(native_llvm_rustc_args()).collect()
+}
+
+/// The codegen flags a native build of either level passes to every crate:
+/// [`release_codegen_rustc_args`] for `--release`, [`native_llvm_rustc_args`]
+/// otherwise.
+pub(crate) fn codegen_rustc_args(release: bool) -> Vec<String> {
+    if release { release_codegen_rustc_args() } else { native_llvm_rustc_args() }
 }
 
 /// `--target-cpu native` on a cross build would tune for this machine's CPU,
@@ -422,7 +463,8 @@ mod tests {
     /// that order, and follows the target and `--target-cpu` like the build.
     #[test]
     fn the_release_codegen_args_are_the_cpu_then_the_llvm_options() {
-        let llvm = release_llvm_rustc_args();
+        let mut llvm = release_llvm_rustc_args();
+        llvm.extend(native_llvm_rustc_args());
         {
             let _g = CrossTargetGuard::set(Some("x86_64-unknown-linux-musl".into()));
             let mut want = vec!["-C".to_string(), "target-cpu=x86-64-v3".to_string()];
@@ -435,5 +477,27 @@ mod tests {
             let _g = CrossTargetGuard::set(Some("aarch64-unknown-linux-musl".into()));
             assert_eq!(release_codegen_rustc_args(), llvm, "aarch64 stays generic");
         }
+    }
+
+    /// #4674: no native build of any level, on any target, lets the loop
+    /// unroller split a reduction over several accumulators — the program
+    /// crate and the runtime alike, and last in the list so it overrides an
+    /// earlier occurrence.
+    #[test]
+    fn every_level_keeps_the_unroller_to_one_accumulator() {
+        let off = "llvm-args=-unroll-add-parallel-reductions=false".to_string();
+        assert_eq!(native_llvm_rustc_args(), vec!["-C".to_string(), off.clone()]);
+        for release in [false, true] {
+            assert_eq!(codegen_rustc_args(release).last(), Some(&off), "release={release}");
+            assert!(runtime_llvm_args(release).contains(&"-unroll-add-parallel-reductions=false"), "release={release}");
+        }
+        for triple in ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "aarch64-apple-darwin"] {
+            let _g = CrossTargetGuard::set(Some(triple.into()));
+            for release in [false, true] {
+                assert_eq!(codegen_rustc_args(release).last(), Some(&off), "{triple} release={release}");
+            }
+        }
+        assert_eq!(runtime_llvm_args(false), NATIVE_LLVM_ARGS.to_vec(), "the dev runtime adds no release option");
+        assert!(runtime_llvm_args(true).contains(&"-force-ordered-reductions=false"));
     }
 }
