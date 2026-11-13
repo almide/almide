@@ -112,6 +112,9 @@ fn render_fn(
     crate::render_native_addr::clear_str_fields();
     crate::render_native_move::set_rebound(func);
     crate::render_native_borrow_read::set_borrowed_results(func, lent_options);
+    crate::render_native_slices::begin(func, &tys);
+    crate::render_native_inplace::begin(func);
+    crate::render_native_tail_return::begin(func);
     crate::render_native_keyed::begin_fn(func, &borrows.arms);
     crate::native_map_entries::begin(func);
     // Interpolation chains built in one buffer (crate::render_native_interp).
@@ -196,6 +199,8 @@ fn render_fn(
         }
         prev_start = st.out.len();
         let stepped = render_fn_step(&mut st, i, op, &mut ops)?;
+        crate::render_native_inplace::rewrite(i, &st.tys, &mut st.out, prev_start, &mut *st.used_shims);
+        crate::render_native_tail_return::mark(i, &mut st.out, prev_start);
         // A shared cell's in-place borrow ends with its last read.
         for g in crate::render_native_keyed::guards_through(i) {
             for _ in 0..st.indent {
@@ -215,6 +220,9 @@ fn render_fn(
         return Err(wall("native: unbalanced IfThen/EndIf markers"));
     }
     crate::render_native_bounds::finish(func);
+    crate::render_native_tail_return::finish(func, sigs, is_main, &st.tys, &mut st.out);
+    crate::native_slot_chain::chain(&mut st.out);
+    crate::native_slot_order::declare_in_source_order(func, &mut st.out);
     finish_native_fn(func, sigs, is_main, &mut st.tys, st.out)
 }
 
@@ -253,6 +261,10 @@ fn render_fn_step<'a>(
 ) -> Result<bool, LowerError> {
     crate::render_native_bounds::at(i);
     crate::native_hof::at(st.func, i);
+    // The rebind of a slot its call edited in place.
+    if crate::render_native_inplace::done(i) {
+        return Ok(false);
+    }
     if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
@@ -284,6 +296,10 @@ fn render_fn_step<'a>(
         return Ok(false);
     }
     if render_printed_scalar(st, i)? || render_chain_final(st, i)? {
+        return Ok(false);
+    }
+    // A string floor call bound as slices of a borrowed param, and its reads.
+    if crate::render_native_slices::render(i, op, &mut st.tys, &mut st.out, st.indent, &mut *st.used_shims)? {
         return Ok(false);
     }
     let sink = NativeSink {
@@ -582,6 +598,7 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
                 && crate::render_native_addr::payload_take_of(*src).is_some_and(|(base, take)| {
                     crate::render_native_move::payload_carrier(st.tys.get(&base).copied())
                         && crate::render_native_move::carrier_dies_after(func, i, base, &st.borrows.arms)
+                        && !crate::render_native_addr::other_payload_live(func, i, base, &take)
                         && crate::render_native_addr::reads_of_take(&take)
                             .iter()
                             .all(|r| crate::render_native_move::dying_after(func, i, *r, &st.borrows.arms))

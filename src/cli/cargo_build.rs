@@ -83,9 +83,9 @@ codegen-units = 1
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        // A cdylib keeps the plain profile: the backtrace split is linked into executables only.
-        append_release_rustflags(&mut cmd, None);
     }
+    // A cdylib keeps the plain profile: the backtrace split is linked into executables only.
+    append_codegen_rustflags(&mut cmd, release, None);
     // #2772: the requested target (or the host) is stated, never inherited.
     let triple = super::native_target::cross_target();
     super::native_target::pin_cargo_target(&mut cmd, triple.as_deref());
@@ -206,6 +206,8 @@ pub(super) fn rlib_fast_program_profile_args(rs_code: &str, release: bool) -> Ve
         if let Some(split) = release_split_for(rs_code) {
             args.extend(split.rustc_args());
         }
+    } else {
+        args.extend(super::native_target::native_llvm_rustc_args());
     }
     args
 }
@@ -215,13 +217,14 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     // The runtime is built for the same CPU as the main crate: fat LTO does
     // not inline across functions whose target features differ.
     let cpu = release.then(super::native_target::release_target_cpu).flatten();
-    // The release LLVM options reach the runtime too: a loop it vectorized
-    // before LTO stays vectorized through it.
-    let llvm: &[&str] = if release { super::native_target::RELEASE_LLVM_ARGS } else { &[] };
+    // The LLVM options reach the runtime too: a loop it vectorized before LTO
+    // stays vectorized through it, and its own loops are unrolled like the
+    // program's.
+    let llvm = super::native_target::runtime_llvm_args(release);
     // Slim first: a source without the runtime boundary (a v1 render) has no
     // use for the v0 runtime rlib, so it must not pay for building one.
     let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
-    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
+    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), &llvm).ok()?;
     if !defines_entry_point(&slim) {
         slim.push_str("\nfn main() {}\n");
     }
@@ -341,8 +344,8 @@ fn run_cargo_build_and_locate_binary(
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_release_rustflags(&mut cmd, split);
     }
+    append_codegen_rustflags(&mut cmd, release, split);
     // Suppress cargo's chatty output
     cmd.arg("--quiet");
     // #2772: the target is stated (`--target` for a cross build) and an
@@ -451,15 +454,16 @@ pub(super) fn wrap_codegen_leak(stderr: String) -> String {
     )
 }
 
-/// A `--release` cargo build's `-C target-cpu` ([`super::native_target::release_target_cpu`])
-/// and release LLVM options ([`super::native_target::RELEASE_LLVM_ARGS`]),
-/// appended to the RUSTFLAGS the child already has — set on `cmd` (the rayon
-/// cfg) or inherited — so neither replaces the other.
+/// A cargo build's codegen flags ([`super::native_target::codegen_rustc_args`]:
+/// the LLVM options of every level, and for `--release` the `-C target-cpu`
+/// and the release LLVM options), appended to the RUSTFLAGS the child already
+/// has — set on `cmd` (the rayon cfg) or inherited — so neither replaces the
+/// other, and ours come last.
 ///
 /// `split` adds the backtrace-split sysroot and object ([`super::std_split`])
 /// when its paths can be spelled in the space-separated RUSTFLAGS and the
 /// inherited flags do not already name a sysroot.
-fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&super::std_split::StdSplit>) {
+fn append_codegen_rustflags(cmd: &mut std::process::Command, release: bool, split: Option<&super::std_split::StdSplit>) {
     let current = cmd.get_envs()
         .find(|(k, _)| *k == "RUSTFLAGS")
         .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
@@ -468,7 +472,7 @@ fn append_release_rustflags(cmd: &mut std::process::Command, split: Option<&supe
     let split_args = split
         .map(|s| s.rustc_args())
         .filter(|args| !flags.contains("--sysroot") && args.iter().all(|a| !a.contains(char::is_whitespace)));
-    for arg in super::native_target::release_codegen_rustc_args().into_iter().chain(split_args.into_iter().flatten()) {
+    for arg in super::native_target::codegen_rustc_args(release).into_iter().chain(split_args.into_iter().flatten()) {
         flags.push(' ');
         flags.push_str(&arg);
     }
@@ -614,7 +618,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
     // worst a file pays one extra rustc. Opt out with ALMIDE_NO_RTLIB=1.
     if !almide_base::env::flag("ALMIDE_NO_RTLIB") {
         if let (Ok(rlib), Some(mut slim)) = (
-            ensure_runtime_rlib("1", None, &[]),
+            ensure_runtime_rlib("1", None, &super::native_target::runtime_llvm_args(false)),
             crate::codegen::slim_main_with_external_runtime(rs_code),
         ) {
             if !defines_entry_point(&slim) {
@@ -636,6 +640,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
                     .arg("--edition").arg("2021")
                     .arg("-C").arg("opt-level=0")
                     .arg("-C").arg("overflow-checks=no")
+                    .args(super::native_target::native_llvm_rustc_args())
                     .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
                     .arg("-L").arg(rlib_dir)
                     .arg("-A").arg("warnings")
@@ -665,6 +670,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
         .arg("--edition").arg("2021")
         .arg("-C").arg("opt-level=1")
         .arg("-C").arg("overflow-checks=no")
+        .args(super::native_target::native_llvm_rustc_args())
         .arg("-A").arg("warnings")
         .output()
         .map_err(|e| format!("failed to run rustc: {}", e))?;
@@ -722,6 +728,7 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
     // its build ended, so a file could run — and pass on — another file's
     // tests. The lock that orders a build and its copy-out is per crate dir.
     cmd.arg("--target-dir").arg(project_dir.join("target"));
+    append_codegen_rustflags(&mut cmd, false, None);
     // A test binary must run on this machine: never inherit a cross target.
     super::native_target::pin_cargo_target(&mut cmd, None);
 

@@ -265,8 +265,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 4000 frames read 0.057 s on one runner, under the floor), so it runs
     # 15x the frames to clear the spawn-noise floor; a regressed
     # global row (a buffer copy per write) then reads seconds, not a hang.
+    # Raised to 18000 when the native local row read 0.067 s at 12000 on a
+    # runner (under the 0.08 s floor) after the native render got faster.
     "framebuf-global": "g:800",
-    "framebuf-local": "l:12000",
+    "framebuf-local": "l:18000",
     # framebuf-param (#4580): half the local row's frames; a regressed helper
     # (an 80 KB copy per quad on wasm, ~10 ms a frame) then reads about a
     # minute, not a hang.

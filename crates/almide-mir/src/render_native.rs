@@ -380,6 +380,8 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         let rendered = crate::render_native_keyed::specialize(func, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
+        // Ahead of the finished text: the rewrites above read its signature first.
+        bodies.push_str(crate::render_native_inline::attr(func, sigs));
         bodies.push_str(&rendered);
         bodies.push('\n');
         texts.insert(func.name.clone(), rendered);

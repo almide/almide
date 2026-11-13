@@ -477,25 +477,33 @@ why = "The Option[Fn] class of try_lower_option_unwrap_or, moved to its own help
 
 [[arm]]
 file = "binds_p2.rs"
-fn = "try_lower_bind_unwrap_return"
+fn = "emit_bang_return_rule"
 loads = 1
 verdict = "TAG_DISPATCHED"
-why = "The R2 one-rule `!` bind (return-op-eradication). Since PR #1816 this fn holds ONLY the dispatch: the one read is the tag — @4 for the scalar family (len-as-tag), @16 for HeapOk (cap-as-tag) — and the IfThen dispatches on it; the region reads moved verbatim to binds_p2_bang.rs (emit_bang_exit_arm inside the IfThen, bind_bang_ok_payload after the EndIf), each audited as CALLER_DISPATCHED under this caller."
+why = "The R2 one-rule `!` bind (return-op-eradication). The emission half of try_lower_bind_unwrap_return (split out so a converted err can roll the whole rule back under one speculation; the load is the same one, moved verbatim): the one read is the tag — @4 for the scalar family (len-as-tag), @16 for HeapOk (cap-as-tag) — and the IfThen dispatches on it; the region reads live in binds_p2_bang.rs (emit_bang_exit_arm inside the IfThen, bind_bang_ok_payload after the EndIf), each audited as CALLER_DISPATCHED under this caller."
 
 [[arm]]
 file = "binds_p2_bang.rs"
 fn = "emit_bang_exit_arm"
 loads = 2
 verdict = "CALLER_DISPATCHED"
-caller = "try_lower_bind_unwrap_return (binds_p2.rs — the call sits between IfThen(exit_cond) and EndIf, i.e. only where the tag said Err/none)"
+caller = "emit_bang_return_rule (binds_p2.rs — the call sits between IfThen(exit_cond) and EndIf, i.e. only where the tag said Err/none)"
 why = "The err arm reads the message @12 (rebox path) or @12 for the abort path — both only where the caller's tag dispatch said Err; the loads are BORROWs (LoadHandle) consumed in the arm."
+
+[[arm]]
+file = "binds_p2_bang.rs"
+fn = "bang_err_text_value"
+loads = 1
+verdict = "CALLER_DISPATCHED"
+caller = "emit_bang_exit_arm (binds_p2_bang.rs — called at the top of the exit arm, which itself runs only between emit_bang_return_rule's IfThen(exit_cond) and EndIf, i.e. only where the tag said Err)"
+why = "The callee's err payload @12 (LoadHandle) of a Result whose err type is not this fn's, read only on the Err side to lower its String conversion; a BORROW (recorded in param_values), never consumed or dropped by this arm — the carrier keeps ownership and is released by the exit arm's drops."
 
 [[arm]]
 file = "binds_p2_bang.rs"
 fn = "bind_bang_ok_payload"
 loads = 2
 verdict = "CALLER_DISPATCHED"
-caller = "try_lower_bind_unwrap_return (binds_p2.rs — the call follows the EndIf of the exit arm: the SURVIVING straight-line continuation, reachable only where the tag said Ok)"
+caller = "emit_bang_return_rule (binds_p2.rs — the call follows the EndIf of the exit arm: the SURVIVING straight-line continuation, reachable only where the tag said Ok)"
 why = "The ok payload @12 (load64 for a scalar, LoadHandle+Dup for a heap payload) is read in the surviving continuation the caller's IfThen(exit) already fenced; no raw sum read precedes the dispatch."
 
 [[arm]]

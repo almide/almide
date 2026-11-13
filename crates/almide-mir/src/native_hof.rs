@@ -670,6 +670,7 @@ fn value_arg(hof: &Hof, (at, k): (usize, usize), (a, code, t): (&CallArg, &str, 
     match taken {
         Some((take, owned)) => runtime_arg(&take, owned, false, true),
         None => {
+            if let Some(shared) = shared_place_arg(a, t, by_ref) { return shared; }
             let dying = matches!(a, CallArg::Handle(v) if crate::render_native_move::moving_arg(*v));
             runtime_arg(code, t, by_ref, dying)
         }
