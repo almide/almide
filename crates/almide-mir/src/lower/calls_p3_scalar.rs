@@ -44,7 +44,15 @@ impl LowerCtx {
             Some(v) => {
                 // Free any transient temp the operand allocated (e.g. a string-eq literal),
                 // keeping the operand internally `i…d`-balanced — the scalar `v` is not among them.
+                // A handle the operand handed to an OUTER variable is not a temp: it stays
+                // tracked in the enclosing scope, which frees it with that variable.
+                let kept = self.frame_handles_of_outer_assigns(expr, frame);
+                if !kept.is_empty() {
+                    let tail = self.live_heap_handles.split_off(frame.min(self.live_heap_handles.len()));
+                    self.live_heap_handles.extend(tail.into_iter().filter(|h| !kept.contains(h)));
+                }
                 self.drop_arm_locals(frame);
+                self.live_heap_handles.extend(kept);
                 Some(v)
             }
             None => {
@@ -53,5 +61,35 @@ impl LowerCtx {
                 None
             }
         }
+    }
+
+    /// The handles tracked since `frame` that now ARE the value of a variable declared
+    /// OUTSIDE the operand block: the move-mode write-back in an operand
+    /// (`not reparse(doc, …)` → `{ let t = reparse(doc, …); doc = t.1; t.0 }`) gives
+    /// `doc` a fresh reference that outlives the operand, so the operand's teardown
+    /// must not free it (it did: `doc` was read after its block was dropped).
+    fn frame_handles_of_outer_assigns(&self, expr: &IrExpr, frame: usize) -> Vec<ValueId> {
+        let IrExprKind::Block { stmts, .. } = &expr.kind else { return Vec::new() };
+        let declared: Vec<almide_ir::VarId> = stmts
+            .iter()
+            .filter_map(|s| match &s.kind {
+                IrStmtKind::Bind { var, .. } => Some(*var),
+                _ => None,
+            })
+            .collect();
+        let frame_handles = &self.live_heap_handles[frame.min(self.live_heap_handles.len())..];
+        let mut kept = Vec::new();
+        for s in stmts {
+            let IrStmtKind::Assign { var, .. } = &s.kind else { continue };
+            if declared.contains(var) {
+                continue;
+            }
+            if let Some(&h) = self.value_of.get(var) {
+                if frame_handles.contains(&h) && !kept.contains(&h) {
+                    kept.push(h);
+                }
+            }
+        }
+        kept
     }
 }
