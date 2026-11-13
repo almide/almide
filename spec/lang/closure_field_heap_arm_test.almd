@@ -1,0 +1,31 @@
+// A record's closure field called as a heap-result `if` arm
+// (`if refresh then vw.value() else cached(id)`, the ceangal a11y pass): the
+// same value as binding the field first and calling the binding.
+type Widget = { key: String, value: () -> String }
+
+var widgets: List[Widget] = []
+
+fn cached(id: String) -> String = id + "!"
+
+fn read_all(refresh: Bool) -> String = {
+  var out = ""
+  for i in 0..<list.len(widgets) {
+    let vw = widgets[i]
+    let direct = if refresh then vw.value()
+    else cached(vw.key)
+    let f = vw.value
+    let bound = if refresh then f()
+    else cached(vw.key)
+    out = out + direct + "/" + bound + ";"
+  }
+  out
+}
+
+test "a closure field call is a heap-result if arm" {
+  widgets = [
+    { key: "a", value: () => "x" },
+    { key: "b", value: () => "y" + "z" }
+  ]
+  assert_eq(read_all(true), "x/x;yz/yz;")
+  assert_eq(read_all(false), "a!/a!;b!/b!;")
+}
