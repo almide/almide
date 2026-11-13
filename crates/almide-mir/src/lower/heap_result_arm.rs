@@ -155,11 +155,27 @@ impl LowerCtx {
             // the caller keeps its WALL/defer (no invalid wasm). track_result=false: NOT a scope-end
             // local, it is the moved-out arm value.
             IrExprKind::UnwrapOr { expr, fallback } => {
-                let arm_mark = self.live_heap_handles.len();
-                let obj = self.try_lower_option_unwrap_or(expr, fallback, false)?;
-                self.ops.push(Op::Consume { v: obj });
-                self.drop_arm_locals(arm_mark);
-                Some(obj)
+                let direct = self.speculate(|ctx| {
+                    let arm_mark = ctx.live_heap_handles.len();
+                    let obj = ctx.try_lower_option_unwrap_or(expr, fallback, false)?;
+                    ctx.ops.push(Op::Consume { v: obj });
+                    ctx.drop_arm_locals(arm_mark);
+                    Some(obj)
+                });
+                // Only a record/tuple payload takes the match form: the other heap
+                // payloads keep the routes the callers already have for them.
+                if direct.is_some() || self.aggregate_field_tys(&arm.ty).is_none() {
+                    return direct;
+                }
+                // Outside that subset (a record payload, a computed-call operand),
+                // `e ?? d` is the match it means — `d` still runs only on the
+                // absent side — and that match is an arm like any other.
+                let m = if crate::lower::is_result_ty(&expr.ty) {
+                    Self::unwrap_or_as_result_match(arm, expr, fallback)
+                } else {
+                    Self::unwrap_or_as_option_match(arm, expr, fallback)
+                };
+                self.speculate(|ctx| ctx.lower_heap_result_arm(&m, result_ty))
             }
             IrExprKind::LitStr { value } => {
                 let repr = repr_of(result_ty).ok()?;

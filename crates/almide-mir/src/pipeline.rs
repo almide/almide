@@ -512,7 +512,17 @@ fn prepare_checked_ir(
         crate::native_foreign::check_exports(&ir)?;
         // The modules the program itself brought, read before the link loads
         // the bundled ones: a package may carry a library module's name.
-        user_modules = checker.env.user_modules.clone();
+        // The driver registers the library modules it loaded from their
+        // bundled source as modules too; those stay the library's. A module
+        // named like a library one is the program's own when it is the
+        // package itself or comes from a package (a versioned name).
+        let env = &checker.env;
+        user_modules = env.user_modules.iter()
+            .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.as_str())
+                || env.self_module_name == Some(**m)
+                || env.module_versioned_names.contains_key(*m))
+            .copied()
+            .collect();
         native_bundled::link(&mut ir, &mut checker)?;
     } else {
         resolve_user_module_calls(&mut ir);

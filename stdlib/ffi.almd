@@ -134,3 +134,21 @@ local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
 @memory_unsafe
 @intrinsic("almide_rt_ffi_store")
 local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _
+
+// The native v1 forms of the three operations above, for a program whose
+// Region can reach an `@extern(rust)` call (runtime/rs/src/ffi.rs
+// `AlmideFfiBlock`). On that render a `Handle` is a shared, fixed-size block
+// instead of an address, so every copy of a Region sees the same memory.
+// Reached only through the native Region pass, which renames the operations
+// above to these after the bounds and permission checks are in place.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block")
+local fn __block(b: Bytes) -> Handle = _
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block_load")
+local fn __block_load(base: Handle, off: Int, n: Int) -> Bytes = _
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_block_store")
+local effect fn __block_store(base: Handle, off: Int, b: Bytes) -> Result[Unit, String] = _

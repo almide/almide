@@ -265,7 +265,7 @@ pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
 
 /// Probe steps allowed per bit of the table's size. The longest cluster of a
 /// WELL-spread hash grows with the table — logarithmically: linear probing at
-/// load 3/4 (dead slots count toward it) gives a longest probe of about
+/// load 3/4, the old growth point (dead slots count toward it), gives a longest probe of about
 /// 18·log2(slots), and plain Int keys churned by delete + insert at 100 000
 /// entries (tests/map_delete_amortized_test.rs) reach 156 steps. A fixed 128
 /// therefore flagged honest maps of ~100 000 entries as flooded, and every
@@ -283,7 +283,9 @@ fn almide_map_flood_bound(slot_len: usize) -> usize {
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
-/// (load ≤ 3/4) whose slots each carry an entry position (low 32 bits) AND
+/// (load ≤ 1/2, #4707: at 3/4 a lookup's probe count varied enough that its
+/// branches mispredicted, and a 5000-key `group_by` count ran 1.11x the wasm
+/// leg; at 1/2 it runs 0.89x, for 8 more bytes per entry) whose slots each carry an entry position (low 32 bits) AND
 /// the upper 32 bits of that entry's hash. A probe rejects a slot on the tag
 /// it already loaded — it never reads `hashes[p]` (a second, dependent load
 /// into another array) — and touches the entry only on a tag match. Shared
@@ -309,7 +311,7 @@ pub struct AlmideKeyIndex {
 
 impl AlmideKeyIndex {
     pub fn with_capacity(n: usize) -> Self {
-        let slot_len = (n * 4 / 3 + 1).next_power_of_two().max(32);
+        let slot_len = (n * 2).next_power_of_two().max(32);
         AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], flooded: false }
     }
 
@@ -339,7 +341,7 @@ impl AlmideKeyIndex {
     pub fn push(&mut self, h: u64) {
         let p = self.hashes.len() as u32;
         self.hashes.push(h);
-        if self.hashes.len() * 4 > self.slots.len() * 3 {
+        if self.hashes.len() * 2 > self.slots.len() {
             self.grow(self.slots.len() * 2);
         }
         self.place(h, p);
@@ -367,7 +369,7 @@ impl AlmideKeyIndex {
             p += 1;
             keep(p - 1)
         });
-        let slot_len = (self.hashes.len() * 4 / 3 + 1).next_power_of_two().max(32);
+        let slot_len = (self.hashes.len() * 2).next_power_of_two().max(32);
         self.slots.clear();
         self.slots.resize(slot_len, ALMIDE_MAP_SLOT_EMPTY);
         for p in 0..self.hashes.len() {
@@ -813,6 +815,39 @@ pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &st
         m
     };
     __almide_v
+}
+// In-place twins of the consuming insert-or-update (render-only, #4661):
+// `m = map.set(m, k, v)` / `m = map.upsert(m, k, init, f)` whose result goes
+// straight back into the slot the map came from. The consuming form moves
+// the map's header into the call and back out on every update (1.5x on a
+// counting loop); these edit the map where it stands. Same entries, same
+// order, same values. Not Almide-visible functions.
+pub fn almide_rt_map_set_mut<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: K, v: V) { m.insert(k, v); }
+pub fn almide_rt_map_upsert_mut<K: PartialEq + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: K, init: V, f: impl Fn(V) -> V) {
+    if let Some(v) = m.get_mut(&k) {
+        let old = std::mem::replace(v, init);
+        *v = f(old);
+    } else {
+        m.insert(k, init);
+    }
+}
+// Shared-key twins of the in-place forms (render-only, #4661): the key
+// arrives by reference and is copied only where a new entry stores it. A
+// counting loop finds its key far more often than it adds one, and handing
+// the key over by value shared and released its handle on every update.
+pub fn almide_rt_map_set_mut_by_ref<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: &K, v: V) {
+    match m.get_mut(k) {
+        Some(slot) => *slot = v,
+        None => m.insert(k.clone(), v),
+    }
+}
+pub fn almide_rt_map_upsert_mut_by_ref<K: PartialEq + Clone + 'static, V: Clone>(m: &mut AlmideMap<K, V>, k: &K, init: V, f: impl Fn(V) -> V) {
+    if let Some(v) = m.get_mut(k) {
+        let old = std::mem::replace(v, init);
+        *v = f(old);
+    } else {
+        m.insert(k.clone(), init);
+    }
 }
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in

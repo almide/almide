@@ -234,6 +234,9 @@ pub(crate) struct FloorFn {
     /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
     /// (its symbol, its items): the Ok side a reference into the Value arg.
     pub borrow_twin: Option<(String, Vec<&'static str>)>,
+    /// The slot-hinted `_at` form of the borrowing twin (its symbol, its
+    /// items): the twin's params, then the position the lookup tries first.
+    pub hinted_twin: Option<(String, Vec<&'static str>)>,
     /// The runtime's `_ref` twin taking each by-value Value param by reference.
     pub by_ref: Option<Box<FloorFn>>,
 }
@@ -647,6 +650,9 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "String" => Some(FloorParam::Str),
             "Bytes" => Some(FloorParam::Bytes),
             "Matrix" => Some(FloorParam::Matrix(false)),
+            // A `Handle` that reaches the native render is a Region's shared
+            // block (`native_region.rs`); an address is never rendered.
+            "Handle" => Some(FloorParam::Runtime(crate::native_runtime_types::FFI_BLOCK, false)),
             n if n == VALUE_TYPE => Some(FloorParam::Value(false)),
             n if RuntimeType::of(n).is_some() => Some(FloorParam::Runtime(RuntimeType::of(n)?, false)),
             // Whether it is a list's element is checked against the params,
@@ -712,6 +718,7 @@ fn is_option_name(n: &str) -> bool {
 }
 
 include!("native_floor_sig.rs");
+include!("native_floor_slices.rs");
 include!("native_floor_index.rs");
 include!("native_floor_host.rs");
 include!("native_floor_scan.rs");

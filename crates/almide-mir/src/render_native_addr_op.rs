@@ -298,8 +298,11 @@ fn slot_load_handle(s: AddrSink<'_>, d: &ValueId, args: &[ValueId]) -> Result<bo
             // reference into the list's element.
             if st.borrow_reads.contains(d) {
                 tys.insert(*d, NTy::StrRef);
-                // A copy of it shares the element's handle (render_dup).
-                note_field(*d, ad.base, format!("{}[{ix}]", var(ad.base)));
+                // A copy of it shares the element's handle (render_dup),
+                // where the place still names the element at the copy.
+                if !st.moved_index_reads.contains(d) {
+                    note_field(*d, ad.base, format!("{}[{ix}]", var(ad.base)));
+                }
                 line!("let mut {}: &str = &{}[{ix}][..];", var(*d), var(ad.base));
                 return Ok(true);
             }
@@ -345,6 +348,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
             let s = crate::render_native_rec::struct_name(j);
             let r = acc.replacen("()", "_ref()", 1);
             tys.insert(*d, NTy::RecRef(j));
+            note_payload_view(*d, ad.base);
             line!("let mut {}: &{s} = {}.{r}.expect(\"checked variant payload\");", var(*d), var(ad.base));
             return Ok(true);
         }
@@ -352,7 +356,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     // The last read of a boxed record slot of an owned enum
     // (render_native_slots::movable_loads) moves the payload out.
     if let NTy::Rec(_) = t {
-        if st.moves_first.contains(d)
+        if may_move_payload(st.moves_first.contains(d), ad.base)
             && matches!(ty(tys, &ad.base), Some(NTy::Rec(_)))
             && crate::render_native_rec::has_default(t)
             && !crate::render_native_rec::is_region(i)
@@ -392,6 +396,7 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
     ) {
         let r = acc.replacen("()", "_ref()", 1);
         tys.insert(*d, rt);
+        note_payload_view(*d, ad.base);
         line!("let mut {}: {spelled} = {}.{r}.unwrap_or({empty});", var(*d), var(ad.base));
         return Ok(true);
     }
@@ -470,7 +475,9 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // would copy it (a string's bytes, a list's elements).
     if let (true, Some((t, spelled, whole))) = (st.borrow_reads.contains(d), borrowed_kind(f)) {
         tys.insert(*d, t);
-        note_field(*d, ad.base, place.clone());
+        if !st.moved_index_reads.contains(d) {
+            note_field(*d, ad.base, place.clone());
+        }
         line!("let mut {}: {spelled} = &{place}{whole};", var(*d));
         return Ok(true);
     }

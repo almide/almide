@@ -475,8 +475,25 @@ Pure mutable foreign parameters use typed copies with the shared IR
 write-back transformation. Borrowed callbacks use native typed dispatch;
 their host signatures retain the program's value types, including shared
 strings and Bytes/Matrix handles. Neither proves properties of host code.
-Fallible mutable, nominal and foreign-address adapters still refuse the v1
-route. Target-priority tests use deliberately different fallback bodies so
+Fallible mutable and nominal adapters, and every other foreign address,
+still refuse the v1 route.
+
+**A Region lent to an `@extern(rust)` call on native.** When a program
+passes an `ffi` Region to an `@extern(rust)` fn, the native v1 render keeps
+the Region's memory in the runtime's `AlmideFfiBlock`: one fixed-size `Rc`
+allocation of `Cell<u8>` that every copy of the Region shares
+(`native_region.rs`; `runtime/rs/src/ffi.rs`). The call passes
+`(ptr, len)`: the Region's offset into its block and its length
+(`native_foreign.rs`, `almide_rt_ffi_block_ptr`), the pair v0 and the wasm
+leg hand their hosts for the same declaration. TRUSTED: while the call runs,
+foreign code may read and write `[ptr, ptr + len)`; the block is fixed-size,
+kept alive by the Region argument, and neither moved nor freed during the
+call; the host stays inside that range and keeps no pointer after it
+returns. Almide's own reads and writes of the block are bounds-checked safe
+code. The ownership witness sees the block as an ordinary counted value. A C
+binding, an export, a Region inside another value, a returned, written-back
+or callback Region, and a host call that takes the address itself are
+refused, so this is the one place a block's address leaves Almide. Target-priority tests use deliberately different fallback bodies so
 an inliner cannot silently substitute them for the selected foreign call.
 
 **Native test harness.** Checked test bodies and their reachable helpers enter

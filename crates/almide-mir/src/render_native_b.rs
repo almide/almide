@@ -588,11 +588,18 @@ fn borrow_twin_route(
     floor: &'static crate::native_floor::FloorFn,
     unedited: bool,
     ret: Option<NTy>,
-) -> Option<(&'static str, &'static Vec<&'static str>)> {
+) -> Option<(&'static str, &'static Vec<&'static str>, Option<(&'static str, usize)>)> {
     let (d, (twin, items)) = (dst?, floor.borrow_twin.as_ref()?);
-    let result = crate::render_native_borrow_read::borrowed_result(*d) && unedited;
+    if crate::render_native_borrow_read::borrowed_result(*d) && unedited {
+        // A derived decode's read of a declared slot: the twin's `_at` form,
+        // which tries that slot before it scans (native_decode_hint).
+        return Some(match (crate::native_decode_hint::slot(*d), &floor.hinted_twin) {
+            (Some(slot), Some((at, at_items))) => (at.as_str(), at_items, Some((twin.as_str(), slot))),
+            _ => (twin.as_str(), items, None),
+        });
+    }
     let option = crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some();
-    (result || option).then_some((twin.as_str(), items))
+    option.then_some((twin.as_str(), items, None))
 }
 
 fn render_declared_floor_call(
@@ -635,7 +642,12 @@ fn render_declared_floor_call(
     // the runtime's borrowing twin, no copy of the field (v0's decode path).
     let by_ref = borrow_twin_route(dst.as_ref(), floor, edited.is_none(), ret);
     let expr = match by_ref {
-        Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
+        Some((at, _, Some((twin, slot)))) => {
+            let hinted = expr.replacen(&format!("{}(", floor.symbol), &format!("{at}("), 1);
+            crate::native_decode_hint::with_slot(&hinted, at, slot)
+                .unwrap_or_else(|| expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1))
+        }
+        Some((twin, _, None)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
         None => expr,
     };
     let (expr, ret) = match edited {
@@ -647,7 +659,7 @@ fn render_declared_floor_call(
     };
     used_shims.push(crate::native_floor::floor_header());
     match (&floor.twin, by_ref) {
-        (_, Some((_, items))) => used_shims.extend(items.iter().copied()),
+        (_, Some((_, items, _))) => used_shims.extend(items.iter().copied()),
         (Some((_, twin, items)), None) if expr.contains(&format!("{twin}(")) => used_shims.extend(items.iter().copied()),
         _ => used_shims.extend(floor.items.iter().copied()),
     }
