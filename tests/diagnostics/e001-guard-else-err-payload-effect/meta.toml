@@ -1,0 +1,2 @@
+expects_code = "E001"
+expects_error = "guard else: expected Result[Int, String] but got Result[Int, List[String]]"
