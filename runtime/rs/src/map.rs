@@ -605,6 +605,38 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     where K: std::borrow::Borrow<Q> {
         self.position(k).is_some()
     }
+    /// `insert` with a borrowed key, copied only when appended: the probe
+    /// `get_mut` makes, then a new key appends without a second one.
+    #[inline]
+    pub fn insert_borrowed<Q: ?Sized + PartialEq + AlmideMapKey>(&mut self, k: &Q, v: V, own: impl FnOnce(&Q) -> K)
+    where K: std::borrow::Borrow<Q> {
+        let linear = matches!(self.lookup, AlmideKeyLookup::Linear);
+        let found = if linear {
+            self.entries.iter().position(|e| matches!(e, Some((ek, _)) if ek.borrow() == k))
+        } else {
+            self.position(k)
+        };
+        match found {
+            Some(i) => {
+                if let Some((_, slot)) = &mut self.entries[i] {
+                    *slot = v;
+                }
+            }
+            None if linear => {
+                self.entries.push(Some((own(k), v)));
+                // A linear map has no holes, so key order is position order.
+                if self.entries.len() >= ALMIDE_MAP_INDEX_THRESHOLD {
+                    self.lookup.build(self.entries.iter().flatten().map(|(k, _)| k), self.entries.len());
+                }
+            }
+            None if matches!(self.lookup, AlmideKeyLookup::Ordered(_)) => self.ordered_append(own(k), v),
+            None => {
+                let h = self.lookup.hash_for(k);
+                self.entries.push(Some((own(k), v)));
+                self.note_push(h);
+            }
+        }
+    }
     /// Insert: update the value in place if the key exists (preserving its
     /// position), else append the new entry. Matches insertion-order semantics.
     pub fn insert(&mut self, k: K, v: V) {
@@ -808,10 +840,7 @@ pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<Alm
 }
 pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &str, v: V) -> AlmideMap<AlmideString, V> {
     let __almide_v: AlmideMap<AlmideString, V> = {
-        match m.get_mut(k) {
-            Some(slot) => *slot = v,
-            None => m.insert(AlmideString::from(k), v),
-        }
+        m.insert_borrowed(k, v, |k: &str| AlmideString::from(k));
         m
     };
     __almide_v

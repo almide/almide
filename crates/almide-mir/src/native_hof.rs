@@ -494,6 +494,8 @@ fn mentions_var(d: &DTy, t: &str) -> bool {
     }
 }
 
+include!("native_hof_lent.rs");
+
 /// The stdlib combinator `name` may be handed its `Option` argument `k`
 /// lent ([`lent_var`]).
 pub(crate) fn lends_receiver(name: &str, k: usize) -> bool {
@@ -589,13 +591,9 @@ fn plan(
     crate::trace::trace_for("ALMIDE_DBG_LOWER_FN", &at.0, || format!("HOF {}:{} {} got={got:?} result={:?} params={:?}", at.0, at.1, call.name, declared_result(call, user_fns), hof.params));
     let declared_return = declared_result(call, user_fns);
     let mut env = plan_env(hof, &got, declared_return)?;
-    // An element Option held as the lent element, handed to a combinator
-    // whose callback only takes its payload.
-    let lent = call.args.iter().enumerate().find_map(|(k, a)| match a {
-        CallArg::Handle(v) if crate::render_native_borrow_read::borrowed_option(*v) => Some((k, *v, lent_var(hof, k)?)),
-        _ => None,
-    });
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent.map(|l| l.2) };
+    let (lent, elem) = lent_receivers(call.args, hof, &env);
+    let lent_t = lent.map(|l| l.2).or(elem.as_ref().map(|e| e.0));
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent_t, elem_lent: elem.is_some(), key: key_only_var(hof) };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
@@ -628,6 +626,7 @@ fn plan(
     if let (Some((k, v, _)), true) = (lent, side.lent) {
         rendered[k] = var(v);
     }
+    twin = elem_twin_taken(twin, hof, elem.as_ref(), &mut side);
     if declared_return.is_none() && kind_of(&env, &hof.ret).is_none() {
         let ret = sigs.get(call.name)?.1?;
         bind_param(&mut env, &hof.ret, clo::owned_nty(ret))?;

@@ -27,3 +27,15 @@ test "string.drop_end" {
   assert_eq(string.drop_end("hello", 2), "hel")
   assert_eq(string.drop_end("hi", 10), "")
 }
+
+test "string.slice counts codepoints and clamps its range" {
+  assert_eq(string.slice("héllo", 1, 3), "él")
+  assert_eq(string.slice("日本語テキスト", 2, 4), "語テ")
+  assert_eq(string.slice("abé", 0, 3), "abé")
+  assert_eq(string.slice("aé", 1, 2), "é")
+  assert_eq(string.slice("abc", 1, 99), "bc")
+  assert_eq(string.slice("abc", -5, 2), "ab")
+  assert_eq(string.slice("abc", 2, 1), "")
+  assert_eq(string.slice("éa", 5, 9), "")
+  assert_eq(string.slice("", 0, 3), "")
+}

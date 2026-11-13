@@ -66,6 +66,11 @@ impl LowerCtx {
                 self.lower_desugarable_match_arm(subject, arms, result_ty)
             }
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if is_heap_ty(&arm.ty) && matches!(callee.kind, IrExprKind::Member { .. }) =>
+            {
+                self.lower_closure_field_call_arm(arm, callee, args, result_ty)
+            }
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
                 if is_heap_ty(&arm.ty) =>
             {
                 self.lower_inline_lambda_call_arm(callee, args, result_ty)
@@ -272,6 +277,36 @@ impl LowerCtx {
     /// `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
     /// `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
     /// not double-freed. Same per-arm balance the scalar block arm proves.
+    /// A call of a record's closure field (`if r then vw.value() else …`): the same
+    /// arm as its `let f = vw.value` then `f()` spelling, which binds the closure
+    /// as a tracked value and takes the known-closure call arm. The field is read
+    /// once, before the call, as in the source order.
+    fn lower_closure_field_call_arm(
+        &mut self,
+        arm: &IrExpr,
+        callee: &IrExpr,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let f = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: f, mutability: almide_ir::Mutability::Let,
+                ty: callee.ty.clone(), value: callee.clone(),
+            },
+            span: callee.span,
+        };
+        let read = IrExpr { kind: IrExprKind::Var { id: f }, ty: callee.ty.clone(), span: callee.span, def_id: None };
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(read) },
+                args: args.to_vec(), type_args: Vec::new(),
+            },
+            ..arm.clone()
+        };
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(call)), result_ty)
+    }
+
     fn lower_block_stmts_then_tail_arm(
         &mut self,
         stmts: &[IrStmt],

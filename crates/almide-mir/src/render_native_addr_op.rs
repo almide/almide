@@ -410,12 +410,15 @@ fn load_handle_enum_slot(s: AddrSink<'_>, d: &ValueId, ad: Addr, i: u16, k: usiz
 /// plain partial move where the block is rebound next (nothing names it whole
 /// before then, and Rust re-initializes it at the rebind), else a take that
 /// leaves the field's `Default` behind.
-fn field_move(st: &AddrState, d: ValueId, place: &str) -> String {
+/// A struct that releases its cycle iteratively implements `Drop`, so its
+/// fields are only ever taken (render_native_rec::has_deep_drop).
+fn field_move(st: &AddrState, d: ValueId, place: &str, base: Option<NTy>) -> String {
+    let dropping = matches!(base, Some(NTy::Rec(i)) if crate::render_native_rec::has_deep_drop(i));
     // An in-out record is the caller's, behind `&mut`: nothing moves out of
     // it partially (crate::native_inout).
     let lent = place.split('.').next().and_then(|v| v.strip_prefix('v')).and_then(|n| n.parse::<u32>().ok())
         .is_some_and(|n| crate::native_inout::is_rendering_inout(ValueId(n)));
-    if st.moves_partial.contains(&d) && !lent {
+    if st.moves_partial.contains(&d) && !dropping && !lent {
         place.to_owned()
     } else {
         format!("std::mem::take(&mut {place})")
@@ -467,7 +470,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
         && !crate::render_native_move::drill_no_moves()
     {
         tys.insert(*d, f);
-        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place));
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place, ty(tys, &ad.base)));
         return Ok(true);
     }
     // A borrow-only read (crate::render_native_borrow_read): a
@@ -485,7 +488,7 @@ fn load_handle_rec_field(s: AddrSink<'_>, d: &ValueId, ad: Addr, k: usize, f: NT
     // The last read of the slot of an owned record moves the value out
     // (a kind with a `Default` to leave in the slot).
     if st.moves.contains(d) && matches!(ty(tys, &ad.base), Some(NTy::Rec(_))) && crate::render_native_rec::has_default(f) {
-        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place));
+        line!("let mut {}: {} = {};", var(*d), crate::render_native_rec::owned_ty(f), field_move(st, *d, &place, ty(tys, &ad.base)));
         return Ok(true);
     }
     crate::render_native_addr::note_field_copy(*d);
