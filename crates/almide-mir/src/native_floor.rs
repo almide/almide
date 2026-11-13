@@ -143,6 +143,9 @@ pub(crate) enum FloorRet {
     /// `Result[List[Value], String]` — the generated carrier of the runtime's
     /// `Vec<AlmideValue>`.
     ResListValue,
+    /// `Result[List[Int], String]` — the generated carrier of a `Vec<i64>`
+    /// (`unix.__os_wait`'s ready descriptors).
+    ResListInt,
     ResStrValuePairs,
     /// The builtin `Matrix` — the runtime's own `AlmideMatrix`.
     Matrix,

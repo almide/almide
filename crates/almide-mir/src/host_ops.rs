@@ -250,6 +250,24 @@ pub const HOST_OPS: &[HostOp] = &[
     op("net", "__os_udp_recv_from", "almide_rt_net___os_udp_recv_from", NET).result(),
     op("net", "__os_udp_close", "almide_rt_net___os_udp_close", NET).result(),
     op("net", "__os_lookup_host", "almide_rt_net___os_lookup_host", NET).result(),
+    // ── unix: Unix-domain sockets and shared-memory files (R-unix-01) ──
+    // Native-only (no WASI floor: a stock wasm artifact refuses them, E081);
+    // the embedded wasm host serves the same core as interim ops 104..=116.
+    // The native render serves them from the runtime's `unix` module as the
+    // NATIVE UNIX HOST CALLS (proofs/TRUSTED_BASE.md). Every op is local
+    // inter-process I/O, counted as `Net` like the tcp ops above.
+    op("unix", "__os_connect", "almide_rt_unix___os_connect", NET).result(),
+    op("unix", "__os_listen", "almide_rt_unix___os_listen", NET).result(),
+    op("unix", "__os_accept", "almide_rt_unix___os_accept", NET).result(),
+    op("unix", "__os_send", "almide_rt_unix___os_send", NET).result(),
+    op("unix", "__os_recv", "almide_rt_unix___os_recv", NET).result(),
+    op("unix", "__os_take_fds", "almide_rt_unix___os_take_fds", NET),
+    op("unix", "__os_wait", "almide_rt_unix___os_wait", NET).result(),
+    op("unix", "__os_close", "almide_rt_unix___os_close", NET).result(),
+    op("unix", "__os_shm_create", "almide_rt_unix___os_shm_create", NET).result(),
+    op("unix", "__os_shm_resize", "almide_rt_unix___os_shm_resize", NET).result(),
+    op("unix", "__os_shm_write", "almide_rt_unix___os_shm_write", NET).result(),
+    op("unix", "__os_shm_read", "almide_rt_unix___os_shm_read", NET).result(),
     // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
     // The child run starts a child — a re-exec of the native test binary, a
     // fresh instance on the embedded host (op 117) — so it counts Process. The
@@ -309,6 +327,45 @@ pub const NATIVE_FS_HOST_CALLS: &[&str] = &[
     "almide_rt_fs_fold_lines_chunked",
 ];
 
+/// The NATIVE UNIX HOST CALLS (proofs/TRUSTED_BASE.md, "Native unix host
+/// calls"; owner ruling 2026-11-10, moved before rc1 on 2026-11-13): the
+/// runtime unix functions a natively rendered program may call as TRUSTED
+/// host calls, the same code the embedded wasm host already serves as its
+/// interim ops 104..=116. A call to one carries the runtime's whole `unix`
+/// module, exactly as an fs host call carries `fs`. Append-only in index
+/// order: the witness id is `NATIVE_FS_HOST_CALLS.len()` + this index.
+pub const NATIVE_UNIX_HOST_CALLS: &[&str] = &[
+    "almide_rt_unix___os_connect",
+    "almide_rt_unix___os_listen",
+    "almide_rt_unix___os_accept",
+    "almide_rt_unix___os_send",
+    "almide_rt_unix___os_recv",
+    "almide_rt_unix___os_close",
+    "almide_rt_unix___os_wait",
+    "almide_rt_unix___os_take_fds",
+    "almide_rt_unix___os_shm_create",
+    "almide_rt_unix___os_shm_resize",
+    "almide_rt_unix___os_shm_write",
+    "almide_rt_unix___os_shm_read",
+];
+
+/// The native host-call classes, in witness-id order: each runtime module a
+/// natively rendered program calls as a trusted host and the calls named for
+/// it. A host call's witness id is its index in the classes' lists laid end
+/// to end in this order (`proofs/NativeCalls.v`, `native_host_calls`).
+pub const NATIVE_HOST_CLASSES: &[(&str, &[&str])] =
+    &[("fs", NATIVE_FS_HOST_CALLS), ("unix", NATIVE_UNIX_HOST_CALLS)];
+
+/// How many host calls the classes name: the first out-of-range witness id.
+pub fn native_host_call_count() -> usize {
+    NATIVE_HOST_CLASSES.iter().map(|(_, calls)| calls.len()).sum()
+}
+
+/// The named calls of the native host class served by runtime `module`.
+pub fn native_host_class(module: &str) -> Option<&'static [&'static str]> {
+    NATIVE_HOST_CLASSES.iter().find(|(m, _)| *m == module).map(|(_, calls)| *calls)
+}
+
 /// Is the runtime `symbol` one of the [`NATIVE_FS_HOST_CALLS`]?
 pub fn is_native_fs_host_call(symbol: &str) -> bool {
     native_fs_host_id(symbol).is_some()
@@ -318,6 +375,19 @@ pub fn is_native_fs_host_call(symbol: &str) -> bool {
 /// [`NATIVE_FS_HOST_CALLS`].
 pub fn native_fs_host_id(symbol: &str) -> Option<usize> {
     NATIVE_FS_HOST_CALLS.iter().position(|s| *s == symbol)
+}
+
+/// The witness id of the native host call `symbol`, of any class: its index
+/// in the classes' lists laid end to end ([`NATIVE_HOST_CLASSES`]).
+pub fn native_host_id(symbol: &str) -> Option<usize> {
+    let mut base = 0;
+    for (_, calls) in NATIVE_HOST_CLASSES {
+        if let Some(i) = calls.iter().position(|s| *s == symbol) {
+            return Some(base + i);
+        }
+        base += calls.len();
+    }
+    None
 }
 
 /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
@@ -330,7 +400,6 @@ pub const CAP_MODULES: &[&str] =
 /// are refused by the lowering outright, so they never reach a certificate.
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
-    ("unix", "*", "unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("process", "exit", "exit lowers as the ProcExit prim, not an ordinary returning call"),
 ];
 

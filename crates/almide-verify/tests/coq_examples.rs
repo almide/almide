@@ -300,7 +300,8 @@ fn native_calls_examples() {
             ("||| 29\nid", true),
             ("||| 30 31\nid", true),
             ("||| 32 33 34 35 36 37\nid", true),
-            ("||| 38\nid", false),
+            ("||| 38 43 49\nid", true),
+            ("||| 50\nid", false),
         ],
     );
 }
