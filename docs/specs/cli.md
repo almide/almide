@@ -1526,6 +1526,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SCOPED_CLOSURE_OFF` | ablation | make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule |
 | `ALMIDE_SELF_INLINE_OFF` | ablation | turn OFF the native legs' one-level self-recursive inlining (`almide_ir::self_inline`, #4456), so a pure scalar recursion gets the accumulator loop again: the ablation leg of the fib row in scripts/check-perf-ratio.sh |
+| `ALMIDE_SELF_PEEL_OFF` | ablation | turn OFF the wasm legs' one-level inlining of an accumulator loop's own call (`almide_ir::self_peel`), so a binary recursion keeps the plain accumulator loop: the ablation leg of the peeled/unpeeled differential |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
@@ -1563,6 +1564,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_STDLIB_COVERAGE` | harness | rewrite the stdlib test-coverage ledger's rows from the measured run |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
+| `ALMIDE_VALUE_FUSE_OFF` | ablation | turn the Value fusion pass off (the directed JSON reader and the direct JSON writer) |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
 | `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |

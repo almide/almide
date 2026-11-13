@@ -75,6 +75,10 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrProgram, IrStmt, I
 use almide_ir::visit_mut::IrMutVisitor as _;
 use almide_types::types::Ty;
 
+mod writers;
+pub use writers::writer_sites;
+use writers::writer_body;
+
 /// Inline a callee this small (in weighted body nodes) at every site: its
 /// body costs about what the call and its argument shuffling do, so the
 /// module does not grow for it (the size ledgers are an axis too, #2980).
@@ -253,6 +257,10 @@ struct Callee {
     /// One module call passing every param once, in declaration order.
     /// Argument expressions can be substituted without moving any work.
     ordered_forwarder: bool,
+    /// A checked in-place writer (see `writer_body`), by its buffer param's
+    /// index: admitted only at a write-back site of `module.fn(..)`
+    /// (`Rewriter::splice_writers`), its own module's calls respelled.
+    writer: Option<usize>,
 }
 
 /// A module call with scalar arguments that reads no byte view: admitted only
@@ -435,11 +443,18 @@ impl Rewriter<'_> {
                 if name.as_str() == self.this {
                     return None;
                 }
-                (self.callees.get(name.as_str())?, args)
+                let c = self.callees.get(name.as_str())?;
+                if c.writer.is_some() {
+                    return None;
+                }
+                (c, args)
             }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, args } => {
                 let c = self.cross.get(&format!("{}.{}", module.as_str(), func.as_str()))?;
+                if c.writer.is_some() {
+                    return None;
+                }
                 // Another file's spans would name lines of that file in this
                 // frame (a trap's location, the debug lines): the body takes
                 // the site's span instead.
@@ -502,7 +517,8 @@ impl Rewriter<'_> {
     }
 
     fn expr(&mut self, e: &mut IrExpr) {
-        if let IrExprKind::Block { stmts, .. } = &mut e.kind {
+        if let IrExprKind::Block { stmts, expr } = &mut e.kind {
+            self.splice_writers(stmts, expr.as_deref());
             self.splice_binds(stmts);
         }
         almide_ir::visit_mut::walk_expr_mut(self, e);
@@ -547,8 +563,22 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
             || f.is_scoped_block_entry()
             || count[name] != 1
             || shadowed.contains(name)
-            || !is_scalar(&f.ret_ty)
         {
+            continue;
+        }
+        if let Some(m) = module
+            && !calls_itself(&f.body, name)
+            && let Some((k, body)) = writer_body(f, &names, m)
+        {
+            let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
+            let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
+            out.insert(
+                name.to_string(),
+                Callee { params, infos, body, portable: true, ordered_forwarder: false, writer: Some(k) },
+            );
+            continue;
+        }
+        if !is_scalar(&f.ret_ty) {
             continue;
         }
         // Only collection forwarding needs to expose an argument tree for
@@ -581,7 +611,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
         let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
         let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}"), &pvars));
-        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable, ordered_forwarder });
+        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable, ordered_forwarder, writer: None });
     }
     out
 }
@@ -640,6 +670,10 @@ fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, cros
         }
         let this = f.name.as_str().to_string();
         let mut r = Rewriter { callees, cross, this: &this, vt, changed: false };
+        let muts: Vec<VarId> = f.params.iter().filter(|p| p.is_mut).map(|p| p.var).collect();
+        if !muts.is_empty() {
+            r.splice_tail_writers(&mut f.body, &muts);
+        }
         almide_ir::visit_mut::IrMutVisitor::visit_expr_mut(&mut r, &mut f.body);
         changed |= r.changed;
     }
