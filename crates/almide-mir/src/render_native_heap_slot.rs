@@ -80,6 +80,28 @@ fn render_slot_take(dropped: bool, d: ValueId, slot: u32, t: NTy, out: &mut Stri
     Ok(())
 }
 
+/// The right-hand side of a heap slot's store of `src`: a scalar Option slot
+/// stores the Option value itself (the option rewrite replaced its handle
+/// with it), a copy with no block; any other slot takes a block's handle of
+/// its own type, or an empty list literal.
+fn slot_store_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, t: NTy, src: ValueId) -> Result<String, LowerError> {
+    if t == NTy::Opt && tys.get(&src) == Some(&NTy::Opt) {
+        return Ok(var(src).to_string());
+    }
+    let Some(base) = st.addrs.get(&src).copied().filter(|h| h.off == 0 && h.idx.is_none()).map(|h| h.base) else {
+        return Err(wall("native: a heap slot stored with something other than a block's handle"));
+    };
+    let got = tys.get(&base).copied();
+    if got == Some(t) {
+        Ok(crate::render_native_move::take_expr(&var(base)))
+    } else if got.is_some() && st.empty_lists.contains(&base) {
+        // An empty list literal is every list type's empty list.
+        Ok(format!("<{}>::default()", crate::render_native_rec::owned_ty(t)))
+    } else {
+        Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot")))
+    }
+}
+
 /// Render `op` when it reads, takes or stores a heap slot. `None` = not one.
 pub(super) fn render_heap_slot_op(
     op: &Op,
@@ -138,22 +160,9 @@ pub(super) fn render_heap_slot_op(
         }
         Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args } if args.len() == 2 => {
             let (slot, t) = slot_of(st, &args[0])?;
-            // A scalar Option slot stores the Option value itself (the option
-            // rewrite replaced its handle with it): a copy, no block.
-            let value = (t == NTy::Opt && tys.get(&args[1]) == Some(&NTy::Opt)).then_some(args[1]);
-            let Some(base) = value.or_else(|| st.addrs.get(&args[1]).copied().filter(|h| h.off == 0 && h.idx.is_none()).map(|h| h.base)) else {
-                return Some(Err(wall("native: a heap slot stored with something other than a block's handle")));
-            };
-            let got = tys.get(&base).copied();
-            let rhs = if value.is_some() {
-                var(base).to_string()
-            } else if got == Some(t) {
-                crate::render_native_move::take_expr(&var(base))
-            } else if got.is_some() && st.empty_lists.contains(&base) {
-                // An empty list literal is every list type's empty list.
-                format!("<{}>::default()", crate::render_native_rec::owned_ty(t))
-            } else {
-                return Some(Err(wall(format!("native: a {got:?} value stored into a {t:?} heap slot"))));
+            let rhs = match slot_store_rhs(st, tys, t, args[1]) {
+                Ok(rhs) => rhs,
+                Err(e) => return Some(Err(e)),
             };
             let snap = crate::native_slot_takes::snapshot_slot(slot);
             let store = if crate::render_native_rec::has_default(t) { store_text(snap, &rhs) }
