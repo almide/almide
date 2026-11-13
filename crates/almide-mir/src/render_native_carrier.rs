@@ -263,7 +263,7 @@ pub(super) fn render_carrier_op(
             }
             None
         }
-        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
+        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::Return { .. } => {
             cx.track_arms(op);
             None
         }
@@ -344,14 +344,28 @@ impl CarrierCx<'_> {
                 let (res, side) = self.st.res_tags.get(cond).copied()
                     .map(|(r, s)| (Some(r), s)).unwrap_or((None, true));
                 self.st.arms.push((res, side));
+                self.st.arms_left.push(None);
             }
             Op::Else { .. } => {
                 if let Some(a) = self.st.arms.last_mut() {
                     a.1 = !a.1;
                 }
             }
+            // The arm that returns early leaves the rest to the other side.
+            Op::Return { .. } => {
+                if let (Some(a), Some(l)) = (self.st.arms.last(), self.st.arms_left.last_mut()) {
+                    *l = Some(a.1);
+                }
+            }
             _ => {
-                self.st.arms.pop();
+                let (arm, left) = (self.st.arms.pop(), self.st.arms_left.pop().flatten());
+                // A top-level tag test one side of which returned: the code
+                // after it runs on the other side only, as inside that arm.
+                if let (Some((Some(res), _)), Some(side), true) = (arm, left, self.st.arms.len() == self.st.arms_kept) {
+                    self.st.arms.push((Some(res), !side));
+                    self.st.arms_left.push(None);
+                    self.st.arms_kept += 1;
+                }
             }
         }
     }
@@ -491,6 +505,18 @@ impl CarrierCx<'_> {
                 (p, format!("match {b} {{ Some(v) => v.clone(), None => {absent} }}"))
             } else if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
                 (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
+            } else if self.st.moves.contains(&d)
+                && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_)))
+                && has_default(p)
+                && !crate::render_native_addr::payload_lent(ad.base)
+                && !crate::render_native_move::drill_no_moves()
+            {
+                // The last read of the payload before the carrier is rebound
+                // or read at its tag again (a loop's `o = n.next` walk): the
+                // payload leaves and its `Default` stays, as a record's field
+                // does, so the carrier still reads `Some`. The copy was the
+                // whole rest of a chain on every step.
+                (p, format!("match &mut {b} {{ Some(v) => std::mem::take(v), None => {absent} }}"))
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }

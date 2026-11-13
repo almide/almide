@@ -51,7 +51,8 @@ pub(crate) fn iterator_loops(out: String) -> String {
     if out.ends_with('\n') {
         s.push('\n');
     }
-    s
+    // A reduction over a range that stayed a `loop` folds the range instead.
+    crate::render_native_fold_loops::fold_loops(s)
 }
 
 /// A `// …` line of the render.
@@ -86,7 +87,7 @@ pub(crate) fn mentions(text: &str, v: &str) -> bool {
 }
 
 /// `let mut v: T = rhs;` / `let v: T = rhs;` → (v, T, rhs).
-fn let_parts(l: &str) -> Option<(&str, &str, &str)> {
+pub(crate) fn let_parts(l: &str) -> Option<(&str, &str, &str)> {
     let t = l.trim();
     let t = t.strip_prefix("let mut ").or_else(|| t.strip_prefix("let "))?;
     let (v, rest) = t.split_once(": ")?;
@@ -96,7 +97,7 @@ fn let_parts(l: &str) -> Option<(&str, &str, &str)> {
 }
 
 /// `v = rhs;` (a plain assignment) → v.
-fn assigned_var(l: &str) -> Option<&str> {
+pub(crate) fn assigned_var(l: &str) -> Option<&str> {
     let t = l.trim();
     let (v, _) = t.split_once(" = ")?;
     is_var(v).then_some(v)

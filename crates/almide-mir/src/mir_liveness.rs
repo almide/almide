@@ -110,17 +110,45 @@ fn referring(func: &MirFunction, src: ValueId) -> BTreeSet<ValueId> {
 /// path after `ops[at]`. `true` whenever the control flow is not modelled.
 pub(crate) fn live_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
     let Some(succ) = successors(func) else { return true };
-    let live_in = live_in(func, &succ, src);
+    let live_in = live_in(func, &succ, src, false);
     succ[at].iter().any(|&s| live_in[s])
 }
 
+/// Whether the binding `src` made by the op that defines it is read on some
+/// path after `ops[at]` BEFORE that op runs again: [`live_after`], except
+/// that the definition of a value bound once, to which no local is bound,
+/// ends the binding it made the round before. A borrowed read inside a loop
+/// (`let v = &carrier.payload`) is a new binding every round; `live_after`
+/// follows the back edge to the next round's read of it and so reports the
+/// binding of this round as still lent.
+pub(crate) fn bound_read_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
+    let Some(succ) = successors(func) else { return true };
+    let live_in = live_in(func, &succ, src, true);
+    succ[at].iter().any(|&s| live_in[s])
+}
+
+/// The one op that defines `src`, when its definition starts a new binding:
+/// no other op defines or rebinds it, no local is bound to anything
+/// referring to it (a local outlives the round), and the definition reads
+/// nothing that refers to it.
+fn rebinding_def(func: &MirFunction, src: ValueId, refs: &BTreeSet<ValueId>) -> Option<usize> {
+    let mut defs = func.ops.iter().enumerate().filter(|(_, op)| crate::mir_ops::defined_value(op) == Some(src));
+    let (at, def) = defs.next()?;
+    let bound_to_local = func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if refs.contains(local)));
+    let mut reads = Vec::new();
+    crate::mir_ops::op_reads(def, &mut reads);
+    (defs.next().is_none() && !bound_to_local && !reads.iter().any(|r| refs.contains(r))).then_some(at)
+}
+
 /// Whether `src` (or anything referring to its storage) may be read on some
-/// path from each op on, that op included.
-fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
+/// path from each op on, that op included. `def_ends`: the definition of
+/// `src` ends the paths through it ([`bound_read_after`]).
+fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId, def_ends: bool) -> Vec<bool> {
     let refs = referring(func, src);
     let n = func.ops.len();
     let mut uses = vec![false; n];
     let mut kills = vec![false; n];
+    let def = if def_ends { rebinding_def(func, src, &refs) } else { None };
     for (i, op) in func.ops.iter().enumerate() {
         let mut vs = Vec::new();
         crate::mir_ops::op_values(op, &mut vs);
@@ -128,7 +156,7 @@ fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
         let releases = crate::render_native_move::bookkeeping(op)
             && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
             && vs == [src];
-        if releases || matches!(op, Op::SetLocal { local, src: s } if *local == src && *s != src) {
+        if def == Some(i) || releases || matches!(op, Op::SetLocal { local, src: s } if *local == src && *s != src) {
             kills[i] = true;
             continue;
         }
@@ -164,7 +192,7 @@ fn live_in(func: &MirFunction, succ: &[Vec<usize>], src: ValueId) -> Vec<bool> {
 /// path and is never one. Empty when the control flow is not modelled.
 pub(crate) fn dead_arm_starts(func: &MirFunction, src: ValueId) -> Vec<usize> {
     let Some(succ) = successors(func) else { return Vec::new() };
-    let live = live_in(func, &succ, src);
+    let live = live_in(func, &succ, src, false);
     let mut ifs: Vec<usize> = Vec::new();
     let mut out = Vec::new();
     for (i, op) in func.ops.iter().enumerate() {
@@ -266,7 +294,8 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
         // A rebind writes the binding from a value not viewing it.
         match op {
             Op::SetLocal { local, src } if *local == v => {
-                if refs.contains(src) {
+                // A rebind the render may make by refilling the slot reads it.
+                if refs.contains(src) || crate::render_native_inplace::refills(func, i) {
                     return false;
                 }
                 continue;

@@ -160,7 +160,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
     let ordered = list_elem_ordered((module, func), generics.iter().flatten().map(|g| g.name.as_str()).collect(), params);
     let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, &rust_ret, rt);
-    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
+    let hinted_twin = borrow_twin.as_ref().and_then(|(t, _)| hinted_twin_of(t, rt));
+    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, hinted_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
 /// A declared param `p` with the borrow mode its runtime spelling `r` takes
