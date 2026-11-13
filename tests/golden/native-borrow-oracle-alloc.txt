@@ -2,10 +2,10 @@
 # program (tests/native_borrow_oracle_test.rs) counted by ALMIDE_ALLOC_COUNT over __almide_main;
 # `~` = calibrated out (two runs disagreed). Regenerate: ALMIDE_UPDATE_ALLOC=1 cargo test --test native_borrow_oracle_test alloc
 233	233	str
-348	348	list
-420	418	strs
-355	355	map
+338	338	list
+417	415	strs
+352	352	map
 486	486	set
-465	465	bytes
+462	462	bytes
 233	233	rec
 678	678	recs
