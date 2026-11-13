@@ -319,3 +319,55 @@ fn a_mut_record_param_is_lent_and_its_scalar_fields_written_in_place() {
     }
     assert_eq!(run_native(RECORD), "3 46 -34 true 1\n");
 }
+
+const RECORD_HEAP: &str = r#"
+type B = { left: Int, memo: Map[Int, Int], trail: List[Int] }
+
+fn count(n: Int, mut b: B) -> Int =
+  if n <= 0 then 0
+  else if b.left <= 0 then -1
+  else {
+    b.left = b.left - 1
+    b.trail = b.trail + [n]
+    let sub = count(n - 1, b)
+    b.memo = map.set(b.memo, n, sub)
+    sub + 1
+  }
+
+fn two(mut xs: List[Int], mut b: B, x: Int) -> Unit = {
+  xs = xs + [x]
+  if x % 2 == 0 then { b.trail = b.trail + [x * 10] } else { b.left = b.left + x }
+}
+
+fn early(mut b: B, k: Int) -> Int = {
+  if k > 3 then { b.left = 0 } else { b.memo = map.set(b.memo, k, k) }
+  b.left
+}
+
+effect fn main() -> Unit = {
+  var b = { left: 4, memo: map.new(), trail: [] }
+  let c = count(6, b)
+  var xs: List[Int] = []
+  for i in 0..<5 { two(xs, b, i) }
+  var e = { left: 9, memo: map.new(), trail: [1] }
+  let r1 = early(e, 2)
+  let r2 = early(e, 5)
+  println("${c} ${b.left} ${map.len(b.memo)} ${list.len(b.trail)} ${list.len(xs)} ${r1} ${r2} ${map.len(e.memo)}")
+}
+"#;
+
+#[test]
+fn a_mut_record_param_moves_a_rebound_heap_field_out_of_the_place() {
+    // `b.f = op(b.f, ..)` on a lent record: the field leaves the caller's
+    // record into the op and the rest moves into the rebuilt record, which
+    // `*p = ..` writes back; no field is copied. Several in-out params and
+    // a non-tail self call lend the places on.
+    let out = render(RECORD_HEAP).expect("renders");
+    for name in ["count", "two", "early"] {
+        assert!(header_of(&out, name).contains("&mut AlmdRec"), "{name} borrows the caller's record:\n{out}");
+        let body = body_of(&out, name);
+        assert!(!body.contains(".clone()") && !body.contains(".to_vec()"), "{name} copies no field:\n{body}");
+    }
+    assert!(header_of(&out, "two").contains("&mut Vec<i64>"), "{out}");
+    assert_eq!(run_native(RECORD_HEAP), "3 4 4 7 5 9 0 1\n");
+}
