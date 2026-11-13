@@ -384,6 +384,26 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
     })
 }
 
+/// [`takes_by_value`] holds only through the `@reuse` twin (the plain body
+/// borrows `k`): taking the container over pays only where the caller hands
+/// it over, and a caller that keeps it copies the whole container where the
+/// borrowing body copies what it returns (`list.take(xs, 8)` of a hundred).
+pub(crate) fn by_value_only_through_twin(call: &str, k: usize) -> bool {
+    takes_by_value(call, k)
+        && declared(call).is_some_and(|f| {
+            let f = f.by_ref.as_deref().unwrap_or(f);
+            !plain_by_value(f.params.get(k))
+        })
+}
+
+/// A declared param the runtime body itself takes by value: an owned
+/// container, or an element it stores (`set.insert(s, x)`'s `x`). A map's
+/// key is not: its set has a twin that borrows a `String` key.
+fn plain_by_value(p: Option<&FloorParam>) -> bool {
+    matches!(p, Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)
+        | FloorParam::Elem(false) | FloorParam::SetElem(false)))
+}
+
 /// The declared return of the self-hosted body registered under `call`.
 /// Whether the declared floor fn of `call` takes its param `k` by value (the
 /// runtime body consumes it, or its `@reuse` twin does at a last use, where
@@ -396,7 +416,7 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
         // The render calls the `_ref` twin where there is one: it lends.
         let f = f.by_ref.as_deref().unwrap_or(f);
-        matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)))
+        plain_by_value(f.params.get(k))
             || f.twin.as_ref().is_some_and(|t| {
                 t.0 == k
                     && matches!(

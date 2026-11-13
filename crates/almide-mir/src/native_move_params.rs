@@ -165,11 +165,12 @@ fn consumed_params(
             Op::Dup { src, .. } => *src == p.value && crate::render_native_borrow_read::lent_param_copy(func, i, &root).is_none(),
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
-                    && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        by_value(name, k)
-                            || owned.moves(&func.ops[i], k)
+                    && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|j| {
+                        // A reuse twin pays only where every caller hands over.
+                        (by_value(name, j) && (hands(k) || !crate::native_floor::by_value_only_through_twin(name, j)))
+                            || owned.moves(&func.ops[i], j)
                             // The list or string a concatenation grows in place.
-                            || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
+                            || (j == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
                     })
             }
             Op::CallIndirect { args, .. } => {
