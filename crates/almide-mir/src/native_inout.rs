@@ -47,6 +47,8 @@ thread_local! {
     static INOUT: RefCell<BTreeMap<String, Vec<usize>>> = const { RefCell::new(BTreeMap::new()) };
     /// The in-out param vars of the function being lowered.
     static LOWERING: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
+    /// The non-generic record types the program declares, for [`select`].
+    static RECORDS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
 /// One native render: the in-out registry exists only inside it.
@@ -118,12 +120,29 @@ impl Drop for LoweringScope {
     }
 }
 
-/// A buffer type a caller can lend: a list, string, map or set. (Bytes keep
-/// the move-mode convention: their in-place appends render through floor
-/// calls that answer no value.)
+/// A buffer type a caller can lend: a list, string, map or set, or a
+/// declared non-generic record. (Bytes keep the move-mode convention: their
+/// in-place appends render through floor calls that answer no value.)
 fn lendable(ty: &Ty) -> bool {
     matches!(ty, Ty::String)
         || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set, _))
+        || is_record(ty)
+}
+
+/// A declared non-generic record type ([`RECORDS`]).
+fn is_record(ty: &Ty) -> bool {
+    let name = match ty {
+        Ty::Named(n, args) if args.is_empty() => n.to_string(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), args) if args.is_empty() => n.to_string(),
+        _ => return false,
+    };
+    RECORDS.with(|r| r.borrow().contains(&name))
+}
+
+/// A field write the in-out convention carries: a scalar value stored into
+/// the record in place (`p.f = e`); a heap value keeps the move-mode rebind.
+fn field_write_ok(value: &IrExpr) -> bool {
+    !crate::lower::is_heap_ty(&value.ty)
 }
 
 /// Does `body` write `p` — an assignment, an in-place mutator, or a lend to
@@ -133,7 +152,7 @@ fn writes(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>) -> bool {
     struct W<'a>(VarId, &'a BTreeMap<String, usize>, bool);
     impl IrVisitor for W<'_> {
         fn visit_stmt(&mut self, s: &IrStmt) {
-            if matches!(s.kind, IrStmtKind::Assign { var, .. } if var == self.0) {
+            if matches!(s.kind, IrStmtKind::Assign { var, .. } | IrStmtKind::FieldAssign { target: var, .. } if var == self.0) {
                 self.2 = true;
             }
             walk_stmt(self, s);
@@ -294,6 +313,9 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>, writes
             }
             match &s.kind {
                 IrStmtKind::Assign { value, .. } => self.read_assign(value),
+                IrStmtKind::FieldAssign { target, value, .. } if *target == self.p && field_write_ok(value) => {
+                    self.visit_expr(value)
+                }
                 IrStmtKind::FieldAssign { target, .. }
                 | IrStmtKind::IndexAssign { target, .. }
                 | IrStmtKind::MapInsert { target, .. }
@@ -497,6 +519,14 @@ pub(crate) fn select(ir: &mut IrProgram) {
     if !ACTIVE.with(|a| a.get()) || !ir.modules.is_empty() {
         return;
     }
+    RECORDS.with(|r| {
+        *r.borrow_mut() = ir
+            .type_decls
+            .iter()
+            .filter(|d| matches!(d.kind, almide_ir::IrTypeDeclKind::Record { .. }) && d.generics.as_ref().is_none_or(|g| g.is_empty()))
+            .map(|d| d.name.to_string())
+            .collect()
+    });
     let mut names: HashMap<String, usize> = HashMap::new();
     for f in &ir.functions {
         *names.entry(f.name.to_string()).or_insert(0) += 1;
@@ -526,7 +556,10 @@ fn candidate_position(f: &IrFunction, names: &HashMap<String, usize>) -> Option<
     ks.dedup();
     let [k] = ks.as_slice() else { return None };
     let p = f.params.get(*k)?;
-    let plain = !name.contains('.') && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
+    // A program module's fn (`kernel.spend`) is as plain as an entry fn; a
+    // library module's keeps its own convention.
+    let library = name.split_once('.').is_some_and(|(m, _)| almide_lang::stdlib_info::is_any_stdlib(m));
+    let plain = !library && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
     let generic = f.generics.as_ref().is_some_and(|g| !g.is_empty());
     // A self-recursive fn stays out: its tail call becomes the loop
     // rewrite's carried params, which this convention does not carry.
