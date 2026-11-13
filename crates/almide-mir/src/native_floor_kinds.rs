@@ -198,6 +198,7 @@ fn floor_ret_simple(name: &str) -> Option<FloorRet> {
         "String" => Some(FloorRet::Str),
         "Bytes" => Some(FloorRet::Bytes),
         "Matrix" => Some(FloorRet::Matrix),
+        "Handle" => Some(FloorRet::Runtime(crate::native_runtime_types::FFI_BLOCK)),
         n if n == VALUE_TYPE => Some(FloorRet::Value),
         n if RuntimeType::of(n).is_some() => Some(FloorRet::Runtime(RuntimeType::of(n)?)),
         _ => None,

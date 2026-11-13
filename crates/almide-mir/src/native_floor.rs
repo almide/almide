@@ -650,6 +650,9 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "String" => Some(FloorParam::Str),
             "Bytes" => Some(FloorParam::Bytes),
             "Matrix" => Some(FloorParam::Matrix(false)),
+            // A `Handle` that reaches the native render is a Region's shared
+            // block (`native_region.rs`); an address is never rendered.
+            "Handle" => Some(FloorParam::Runtime(crate::native_runtime_types::FFI_BLOCK, false)),
             n if n == VALUE_TYPE => Some(FloorParam::Value(false)),
             n if RuntimeType::of(n).is_some() => Some(FloorParam::Runtime(RuntimeType::of(n)?, false)),
             // Whether it is a list's element is checked against the params,

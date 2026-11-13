@@ -1,14 +1,24 @@
-//! Native storage for the closed, Almide-owned Region bridge.
+//! Native storage for the Region bridge.
 //!
-//! A Region's internal address becomes a closure over a shared Bytes cell.
-//! Its copies share that cell, so a slice observes writes through its parent
-//! and outlives the parent. The input Bytes remains a value snapshot. The
-//! public bounds/permission checks stay in the checked ffi.almd bodies.
-//! The generated closure and cell use the ordinary MIR ownership rules;
-//! no raw address, foreign lifetime, or new writable-borrow rule is asserted.
-//! Foreign addresses and exported ABI boundaries remain outside this pass:
-//! a program whose live code can pass an address across `@extern`/`@export`
-//! is refused (see `closed`).
+//! A v1 Bytes is an owned value that a record copy clones, so a Region's
+//! address cannot be the address of its Bytes: a copy would keep the old
+//! address while owning another buffer. The address becomes storage that
+//! every copy of the Region shares instead, in one of two forms:
+//!
+//! - **Closed** (no address can cross a host boundary): a closure over a
+//!   shared Bytes cell. It uses the ordinary MIR ownership rules; no raw
+//!   address, foreign lifetime, or new writable-borrow rule is asserted.
+//! - **Lent** (a Region is passed to an `@extern(rust)` fn): the runtime's
+//!   `AlmideFfiBlock`, one fixed-size `Rc` allocation, an ordinary counted
+//!   value. The foreign call gets `(address + off, len)` of the block for
+//!   the call (`native_foreign.rs`); that address is the one trusted step.
+//!
+//! In both forms a slice observes writes through its parent and outlives the
+//! parent, and the input Bytes remains a value snapshot. The public bounds
+//! and permission checks stay in the checked ffi.almd bodies. Any other way
+//! an address could cross a boundary (an `@export`, a C binding, a Region
+//! inside another value, a returned or callback Region, a host call that
+//! takes the address itself) is refused (see `lent`).
 use almide_ir::{visit_mut::{walk_expr_mut, walk_stmt_mut, walk_pattern_mut}, *};
 use almide_lang::{intern::sym, types::Ty};
 use crate::lower::LowerError;
@@ -17,8 +27,14 @@ use std::collections::HashSet;
 fn memory_ty() -> Ty {
     Ty::Fn { params: vec![Ty::Int, Ty::Bytes], ret: Box::new(Ty::Bytes), is_effect: false }
 }
-fn physical(t: &Ty) -> Ty {
-    if *t == Ty::RawPtr { memory_ty() } else { t.map_children(&physical) }
+#[derive(Clone, Copy, PartialEq)]
+enum Form { Closed, Lent }
+fn physical(t: &Ty, form: Form) -> Ty {
+    match (t, form) {
+        (Ty::RawPtr, Form::Closed) => memory_ty(),
+        (Ty::RawPtr, Form::Lent) => Ty::Named(sym(crate::native_runtime_types::FFI_BLOCK.0), vec![].into()),
+        _ => t.map_children(&|c| physical(c, form)),
+    }
 }
 fn has_address(t: &Ty) -> bool { t.any_node(&mut |t| *t == Ty::RawPtr) }
 
@@ -39,31 +55,33 @@ pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
     let gate = Gate::over(ir);
     if !gate.mint { return Ok(()); }
     let reach = AddressReach::new(&ir.type_decls);
-    if !closed(ir, &gate, &reach) {
-        return Err(LowerError::at(gate.address_span,
-            "native: Region storage needs a closed Almide-owned address domain"));
-    }
+    let form = if closed(ir, &gate, &reach) { Form::Closed }
+        else if lent(ir, &gate, &reach) { Form::Lent }
+        else {
+            return Err(LowerError::at(gate.address_span,
+                "native: Region storage needs a closed Almide-owned address domain"));
+        };
     // Map every annotation together: the checked logical Handle becomes a
     // physical closure, including records, signatures and local binders.
-    for info in &mut ir.var_table.entries { info.ty = physical(&info.ty); }
-    let mut pass = Storage { vars: &mut ir.var_table };
+    for info in &mut ir.var_table.entries { info.ty = physical(&info.ty, form); }
+    let mut pass = Storage { vars: &mut ir.var_table, form };
     for f in &mut ir.functions {
-        f.ret_ty = physical(&f.ret_ty);
+        f.ret_ty = physical(&f.ret_ty, form);
         for p in &mut f.params {
-            p.ty = physical(&p.ty);
+            p.ty = physical(&p.ty, form);
             if let Some(e) = &mut p.default { pass.visit_expr_mut(e); }
         }
         pass.visit_expr_mut(&mut f.body);
     }
-    for t in &mut ir.top_lets { t.ty = physical(&t.ty); pass.visit_expr_mut(&mut t.value); }
+    for t in &mut ir.top_lets { t.ty = physical(&t.ty, form); pass.visit_expr_mut(&mut t.value); }
     for d in &mut ir.type_decls {
         match &mut d.kind {
             IrTypeDeclKind::Record { fields } => pass.fields(fields),
-            IrTypeDeclKind::Alias { target } => *target = physical(target),
+            IrTypeDeclKind::Alias { target } => *target = physical(target, form),
             IrTypeDeclKind::Variant { cases, .. } => for c in cases {
                 match &mut c.kind {
                     IrVariantKind::Unit => {},
-                    IrVariantKind::Tuple { fields } => for t in fields { *t = physical(t); },
+                    IrVariantKind::Tuple { fields } => for t in fields { *t = physical(t, form); },
                     IrVariantKind::Record { fields } => pass.fields(fields),
                 }
             },
@@ -81,6 +99,21 @@ pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
 fn closed(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
     !gate.foreign && !almide_ir::meter_plan::program_has_regions(ir)
         && !ir.functions.iter().any(|f| is_boundary(f) && signature_carries(f, reach))
+}
+/// The domain is lent when every boundary that can carry an address is an
+/// `@extern(rust)` fn taking a Region directly as a by-value parameter (its
+/// `(ptr, len)` pair, the shape v0 and wasm hand their hosts), and no host
+/// call takes or makes an address itself. Nothing returns a Region, holds one
+/// inside another value, or reaches one through a callback or a type
+/// parameter, so foreign code sees the block only for the call.
+fn lent(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
+    use almide_lang::types::extern_abi::{is_region, NativeExtern};
+    let lends = |f: &IrFunction| f.export_attrs.is_empty()
+        && matches!(crate::native_foreign::selected(f), Some((NativeExtern::Rust, _)))
+        && !reach.carries(&f.ret_ty)
+        && f.params.iter().all(|p| !reach.carries(&p.ty) || (is_region(&p.ty) && !p.is_mut));
+    !gate.foreign && !almide_ir::meter_plan::program_has_regions(ir)
+        && ir.functions.iter().all(|f| !is_boundary(f) || !signature_carries(f, reach) || lends(f))
 }
 fn is_boundary(f: &IrFunction) -> bool { !f.extern_attrs.is_empty() || !f.export_attrs.is_empty() }
 fn signature_carries(f: &IrFunction, reach: &AddressReach) -> bool {
@@ -164,10 +197,10 @@ impl IrVisitor for Gate {
     }
 }
 
-struct Storage<'a> { vars: &'a mut VarTable }
+struct Storage<'a> { vars: &'a mut VarTable, form: Form }
 impl Storage<'_> {
     fn fields(&mut self, fields: &mut [IrFieldDecl]) {
-        for f in fields { f.ty = physical(&f.ty); if let Some(e) = &mut f.default { self.visit_expr_mut(e); } }
+        for f in fields { f.ty = physical(&f.ty, self.form); if let Some(e) = &mut f.default { self.visit_expr_mut(e); } }
     }
     fn fresh(&mut self, name: &str, ty: Ty, mutable: bool) -> VarId {
         self.vars.alloc_fresh(name, ty, if mutable { Mutability::Var } else { Mutability::Let }, None)
@@ -217,14 +250,20 @@ impl Storage<'_> {
 impl IrMutVisitor for Storage<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
-        e.ty = physical(&e.ty);
+        let form = self.form;
+        e.ty = physical(&e.ty, form);
         match &mut e.kind {
-            IrExprKind::Call { type_args, .. } => for t in type_args { *t = physical(t); },
-            IrExprKind::Lambda { params, .. } => for (_, t) in params { *t = physical(t); },
+            IrExprKind::Call { type_args, .. } => for t in type_args { *t = physical(t, form); },
+            IrExprKind::Lambda { params, .. } => for (_, t) in params { *t = physical(t, form); },
             _ => {},
         }
         let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind else { return; };
         if module.as_str() != "ffi" { return; }
+        if form == Form::Lent {
+            let Some(operation) = region_operation(func.as_str(), args.len()) else { return };
+            *e = IrExpr { span: e.span, ..block_operation(operation, args.clone(), e.ty.clone()) };
+            return;
+        }
         let replacement = match region_operation(func.as_str(), args.len()) {
             Some(RegionOp::Address) => self.address(args[0].clone()),
             Some(RegionOp::Load) => self.access(args, false),
@@ -235,11 +274,27 @@ impl IrMutVisitor for Storage<'_> {
     }
     fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
         walk_stmt_mut(self, s);
-        if let IrStmtKind::Bind { ty, .. } = &mut s.kind { *ty = physical(ty); }
+        if let IrStmtKind::Bind { ty, .. } = &mut s.kind { *ty = physical(ty, self.form); }
     }
     fn visit_pattern_mut(&mut self, p: &mut IrPattern) {
         walk_pattern_mut(self, p);
-        if let IrPattern::Bind { ty, .. } = p { *ty = physical(ty); }
+        if let IrPattern::Bind { ty, .. } = p { *ty = physical(ty, self.form); }
+    }
+}
+/// A Region operation over the lent block: the same operands, renamed to the
+/// block forms ffi.almd declares. The store's Result is always `ok`; it is
+/// unwrapped in place, inside the checked `ffi.write` that reached it.
+fn block_operation(operation: RegionOp, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+    let call = |func: &str, ty: Ty| node(IrExprKind::Call {
+        target: CallTarget::Module { module: sym("ffi"), func: sym(func), def_id: None },
+        args, type_args: vec![] }, ty);
+    match operation {
+        RegionOp::Address => call("__block", ty),
+        RegionOp::Load => call("__block_load", ty),
+        RegionOp::Store => {
+            let result = Ty::Applied(almide_lang::types::TypeConstructorId::Result, vec![Ty::Unit, Ty::String].into());
+            node(IrExprKind::Unwrap { expr: Box::new(call("__block_store", result)) }, ty)
+        }
     }
 }
 fn node(kind: IrExprKind, ty: Ty) -> IrExpr { IrExpr { kind, ty, span: None, def_id: None } }

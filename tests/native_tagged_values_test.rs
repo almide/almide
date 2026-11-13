@@ -1752,20 +1752,24 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// The native Region storage has no real address, so a program whose live
-/// code can hand one across a host boundary is refused: directly, through a
-/// declared record, through a callback's parameter, or through a type
-/// parameter the host could instantiate with a Region.
+/// A Region reaches a host only as a by-value parameter of an
+/// `@extern(rust)` fn, lent as its block's `(ptr, len)` for the call. Any
+/// other way a live boundary could carry its address is refused: a C binding
+/// (no loan adapter), a written-back parameter, a declared record holding
+/// one, a callback's parameter, a returned Region, or a type parameter
+/// instantiated with a value holding one.
 #[test]
 fn a_live_host_boundary_that_can_carry_a_region_address_is_refused() {
     let host_max = "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n";
     for (name, decls, call) in [
-        ("direct", "@extern(rust, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n", "take(r)"),
+        ("c binding", "@extern(c, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n", "take(r)"),
+        ("written back", "@extern(rust, \"host\", \"take\")\nfn take(mut r: Region) -> Int = _\n\
+            fn lend(r: Region) -> Int = {\n var w = r\n take(w)\n}\n", "lend(r)"),
         ("declared", "type Holder = { inner: Region, n: Int }\n@extern(rust, \"host\", \"take\")\nfn take(h: Holder) -> Int = _\n",
             "take({ inner: r, n: 1 })"),
         ("callback", "@extern(rust, \"host\", \"take\")\nfn take(k: (Int) -> Region) -> Int = _\n", "take((n) => r)"),
         ("returned", "@extern(rust, \"host\", \"take\")\nfn take(n: Int) -> List[Region] = _\n", "list.len(take(1))"),
-        ("generic", "@extern(rust, \"host\", \"take\")\nfn take[T](x: T) -> Int = _\n", "take(r)"),
+        ("generic", "@extern(rust, \"host\", \"take\")\nfn take[T](x: T) -> Int = _\n", "take([r])"),
     ] {
         let source = format!("import ffi\n{host_max}{decls}{}",
             REGION_PROGRAM_MAIN.replace(" println(\"${imax", &format!(" println(\"${{{call}}}\")\n println(\"${{imax")));
@@ -1815,6 +1819,60 @@ fn a_host_binding_over_plain_data_keeps_the_domain_closed() {
         assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
         let v0 = Command::new(oracle).output().unwrap();
         assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
+
+/// A Region lent to an `@extern(rust)` host is its shared block: the host
+/// writes through `(ptr + off, len)` of a slice, and every copy of the parent
+/// sees the write, including a copy kept in a list after the parent's
+/// variable is rebound (the copy owns the block, so the address stays live).
+#[test]
+fn a_region_lent_to_a_rust_host_shares_its_block_with_every_copy() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-region-lent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = r#"import ffi
+@extern(rust, "host", "fill")
+fn fill(r: Region, start: Int) -> Int = _
+
+effect fn main() -> Unit = {
+  var parent = ffi.alloc(4)!
+  let aliases = [parent]
+  let view = ffi.slice(parent, 1, 2)!
+  parent = ffi.alloc(1)!
+  println("${fill(view, 7)}")
+  println("${bytes.to_list(ffi.to_bytes(list.get(aliases, 0) ?? parent)!)}")
+  println("${bytes.to_list(ffi.to_bytes(view)!)}")
+  println("${bytes.to_list(ffi.to_bytes(parent)!)}")
+  println("${fill(ffi.region(bytes.new()), 1)}")
+}
+"#;
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        assert!(rust.contains("almide_rt_ffi_block_ptr("), "the Region was not lent from its block");
+        let host = "\nmod host {\n    pub fn fill(p: *mut u8, n: usize, start: i64) -> i64 {\n        \
+            if !p.is_null() { for i in 0..n { unsafe { *p.add(i) = (start as u8).wrapping_add(i as u8) } } }\n        \
+            n as i64\n    }\n}\n";
+        let rs = dir.join("region_lent.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, format!("{rust}{host}")).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("region_lent");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "region_lent", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "2\n[0, 7, 8, 0]\n[7, 8]\n[0]\n0\n",
+            "{}", String::from_utf8_lossy(&native.stderr));
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
 }
