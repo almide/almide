@@ -247,6 +247,11 @@ impl LowerCtx {
             self.seed_variant_value_shape(v, &m.ty);
             if track_result && is_heap_ty(&m.ty) {
                 self.live_heap_handles.push(v);
+                // On the native render a bound record/tuple merge is a real block
+                // of its type, read and dropped as a bound heap match's merge is.
+                if crate::lower::owned_tco_slots() {
+                    self.seed_aggregate_merge(v, &m.ty);
+                }
             }
         }
         crate::trace::trace("ALMIDE_DBG_QQ", || match out {

@@ -603,7 +603,15 @@ impl LowerCtx {
             // A List-valued merge binds as a REAL populated block —
             // register it so later element reads take the executing path.
             self.materialized_lists.insert(obj);
-        } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+        } else {
+            self.seed_aggregate_merge(obj, ty);
+        }
+    }
+
+    /// A RECORD/TUPLE-valued merge's read shape, heap-slot mask and recursive
+    /// drop route (no-op for any other type).
+    pub(crate) fn seed_aggregate_merge(&mut self, obj: ValueId, ty: &Ty) {
+        if let Some((_, tys)) = self.aggregate_field_tys(ty) {
             // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
             // block: every arm materializes + Consumes its value (a
             // some/ok-arm payload is the variant's real payload block, a
