@@ -22,7 +22,7 @@ mod generated_index_tests {
         for (name, item) in &scanned.items {
             let loaded = &generated.items[name];
             assert_eq!(loaded.text, item.text, "{name}");
-            assert_eq!(is_fs_host_text_in(generated, loaded.text), is_fs_host_text_in(&scanned, item.text), "fs provenance: {name}");
+            assert_eq!(host_module_of_text_in(generated, loaded.text), host_module_of_text_in(&scanned, item.text), "host provenance: {name}");
         }
     }
 }

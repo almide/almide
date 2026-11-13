@@ -197,10 +197,35 @@ effect fn main() -> Unit = {
     assert!(out.starts_with("Node(Node(Node("), "{}", &out[..80]);
 }
 
+/// The native leg built, then run on a main-thread stack of `kib` KiB, so
+/// the verdict is the program's and not the host's default stack limit
+/// (#4676: a machine whose limit was large enough passed what another's
+/// overflowed).
+#[cfg(unix)]
+fn run_native_on_stack(name: &str, src: &str, kib: u32) -> String {
+    let dir = std::env::temp_dir().join(format!("almd_rec_depth_{name}_stack_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("prog.almd");
+    std::fs::write(&file, src).unwrap();
+    let bin = dir.join("prog.bin");
+    let built = Command::new(almide()).current_dir(&dir).arg("build").arg(&file).arg("-o").arg(&bin).output().expect("almide build");
+    assert!(built.status.success(), "{name}: native build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    let out = Command::new("sh").arg("-c").arg(format!("ulimit -s {kib} && exec \"$0\"")).arg(&bin).output().expect("sh");
+    assert!(
+        out.status.success(),
+        "{name}: native run on a {kib} KiB stack failed (exit {:?}):\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    String::from_utf8_lossy(&out.stdout).trim_end().to_string()
+}
+
 /// #4252: a 200 000-deep value is dropped without one frame per level after
 /// its program has printed — through an `Option`, through a variant holding
 /// a record, through a `List`, across two records, and through a generic
-/// parameter.
+/// parameter. The native leg runs on a 1 MiB stack: a release of one frame
+/// per level needs tens of MiB at this depth.
 #[test]
 fn a_deep_value_drops_on_a_bounded_stack() {
     let src = r#"type O = { v: Int, next: O? }
@@ -221,4 +246,6 @@ effect fn main() -> Unit = {
 }
 "#;
     assert_eq!(run_both("deep_drop", src), "199999 199999 199999 q b");
+    #[cfg(unix)]
+    assert_eq!(run_native_on_stack("deep_drop", src, 1024), "199999 199999 199999 q b");
 }

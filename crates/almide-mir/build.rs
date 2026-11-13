@@ -20,7 +20,7 @@ fn main() {
         println!("cargo:rerun-if-changed={file}");
     }
     let index = build_runtime_index();
-    let mut out = String::from("{\nlet mut items = HashMap::new();\nlet mut fs = BTreeSet::new();\n");
+    let mut out = String::from("{\nlet mut items = HashMap::new();\nlet mut host = std::collections::BTreeMap::new();\n");
     let sorted: BTreeMap<_, _> = index.items.iter().collect();
     for (name, item) in sorted {
         // Preserve module slices: fs provenance and callers' slice identity
@@ -37,12 +37,12 @@ fn main() {
         } else {
             writeln!(out, "let text: &'static str = {:?};", item.text).expect("writing to a String cannot fail");
         }
-        if is_fs_host_text_in(&index, item.text) {
-            out.push_str("fs.insert(text.as_ptr() as usize);\n");
+        if let Some(module) = index.host_built.get(&(item.text.as_ptr() as usize)) {
+            writeln!(out, "host.insert(text.as_ptr() as usize, {module:?});").expect("writing to a String cannot fail");
         }
         writeln!(out, "items.insert({name:?}, RtItem {{ text }});").expect("writing to a String cannot fail");
     }
-    out.push_str("RuntimeIndex { items, fs_built: fs,\n");
+    out.push_str("RuntimeIndex { items, host_built: host,\n");
     for (name, set) in [("defined", index.defined), ("trait_methods", index.trait_methods), ("fns", index.fns)] {
         writeln!(out, "{name}: {:?}.into_iter().collect(),", set.into_iter().collect::<Vec<_>>()).expect("writing to a String cannot fail");
     }
