@@ -496,6 +496,10 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     crate::native_mutation_places::expand(&mut ir);
     crate::native_map_upsert::expand(&mut ir);
     crate::native_group_count::expand(&mut ir);
+    crate::native_reduce_fusion::expand(&mut ir);
+    crate::native_range_loops::expand(&mut ir);
+    native_bundled::snapshot_range_bounds(&mut ir);
+    crate::native_invariant_eq::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
@@ -532,6 +536,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     let _callback_types = crate::native_callbacks::HostTypes::enter(&ir);
     prepare_native_top_lets(&mut ir);
     let _fusion = crate::native_fusion::Scope::enter(&ir);
+    let _decode_slots = crate::native_decode_hint::Scope::enter(&ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.

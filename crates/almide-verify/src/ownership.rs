@@ -422,6 +422,23 @@ mod tests {
     }
 
     #[test]
+    fn a_taken_over_param_through_sibling_exits() {
+        // A param taken over (`i`) by a body whose nested tail branch is
+        // spelled as sibling early returns (almide-mir `native_unnest_tail`):
+        // each leaving arm ends at zero, the tail path releases last.
+        assert!(check_xc(b"i{|dx}{|dx}d"));
+        assert!(check_xc(b"i{|dx}{|dx}d\n{|imx}{|x}\n{|imx}\nim"));
+        // A second release on a leaving path.
+        assert!(!check_xc(b"i{|ddx}{|dx}d"));
+        // A read after the release on the tail path.
+        assert!(!check_xc(b"i{|dx}{|dx}dad"));
+        // Released in one staying arm only, read afterwards.
+        assert!(!check_xc(b"i{|d}add"));
+        // A leaving arm that keeps it.
+        assert!(!check_xc(b"i{|x}d"));
+    }
+
+    #[test]
     fn a_loop_opened_inside_a_branch_region_is_not_a_loop() {
         // Inside `{…}` the paren bytes are skipped, exactly as parse_xc does.
         assert_eq!(parse(b"{(i)|}"), vec![vec![Item::Branch(vec![Op::Inc], vec![])]]);
