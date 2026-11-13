@@ -469,6 +469,16 @@ fn drop_emptied_line(before: &str, after: String, line: usize) -> String {
         lines.push("");
     }
     let removed = lines.remove(line - 1);
+    // The blank line that separated the removed block from what follows is
+    // now orphaned when it starts the file or doubles a blank line before
+    // it: `almide fmt` writes neither, so it goes too (#4608 — removing
+    // every import left the file starting with an empty line).
+    let is_blank = |l: &str| l.trim().is_empty();
+    let orphaned = lines.get(line - 1).is_some_and(|l| is_blank(l) && l.ends_with('\n'))
+        && (line == 1 || lines.get(line - 2).is_some_and(|l| is_blank(l)));
+    if orphaned {
+        lines.remove(line - 1);
+    }
     let mut out: String = lines.concat();
     // The last line had no newline of its own: take the one before it.
     if !removed.ends_with('\n') && out.ends_with('\n') {
@@ -1033,6 +1043,19 @@ mod batching_tests {
         let (out, applied) = apply_batch(src, &diags);
         assert_eq!(applied.len(), 2);
         assert_eq!(out, "import json\n\nfn main() -> Unit = println(\"hi\")\n");
+    }
+
+    #[test]
+    fn removing_every_import_leaves_no_orphaned_blank_line() {
+        // #4608: the blank line after the import block is orphaned when the
+        // whole block goes — at the start of the file, or doubled against
+        // the blank line before the block.
+        let src = "import json\nimport int\n\nfn main() -> Unit = println(\"hi\")\n";
+        let (out, _) = apply_batch(src, &[drop_import(1, "import json"), drop_import(2, "import int")]);
+        assert_eq!(out, "fn main() -> Unit = println(\"hi\")\n");
+        let headed = "// head\n\nimport int\n\nfn main() -> Unit = ()\n";
+        let (out, _) = apply_batch(headed, &[drop_import(3, "import int")]);
+        assert_eq!(out, "// head\n\nfn main() -> Unit = ()\n");
     }
 
     #[test]
