@@ -477,9 +477,13 @@ pub(crate) fn borrowed_options(
         }
         let mut lists = 0;
         let sources_lent = floor.params.iter().zip(args).all(|(p, a)| match (p, a) {
+            // A borrowed list param of a heap element kind; or a local list
+            // the function holds unchanged while what it lends is read
+            // (`list.get(xs, i) ?? fallback` over a local list of Values),
+            // whose element the program reads as a heap payload.
             (FloorParam::List(ListElem::Any), CallArg::Handle(v)) => {
                 lists += 1;
-                lent_elem(*v)
+                lent_elem(*v) || (heap_payload(func, *d, &root) && crate::native_held_list::held_while_lent(func, *v, i, *d, &root))
             }
             (FloorParam::Int, _) => true,
             _ => false,
@@ -489,6 +493,15 @@ pub(crate) fn borrowed_options(
         }
     }
     out
+}
+
+/// The Option `d`'s payload is read as a heap handle (`LoadHandle`), and
+/// never as a scalar word.
+fn heap_payload(func: &MirFunction, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> bool {
+    let through = |args: &[ValueId]| args.first().is_some_and(|a| root.get(a) == Some(&d));
+    let handle = func.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::LoadHandle, args, .. } if through(args)));
+    let word = func.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::Load { width: 8 }, args, .. } if through(args)));
+    handle && !word
 }
 
 /// Every use of the Option carrier `d` after `ops[at]` reads its tag word or

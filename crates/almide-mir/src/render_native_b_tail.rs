@@ -328,6 +328,16 @@ fn render_end_if(
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
         if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef | NTy::RecRef(_)) {
+            // An arm's default-built value (borrow_join's `default_arm`):
+            // held in a slot declared before the `if`, the join borrows it.
+            if let (NTy::Rec(i), NTy::RecRef(j)) = (t, join_t) {
+                if i == j && hoist_arm_slot(out, d, v, i) {
+                    line!("{} = &{};", var(d), var(v));
+                    *indent -= 1;
+                    line!("}}");
+                    return Ok(());
+                }
+            }
             if t != join_t {
                 return Err(wall("native: borrow-join arms disagree on type"));
             }
@@ -353,6 +363,24 @@ fn render_end_if(
     *indent -= 1;
     line!("}}");
     Ok(())
+}
+
+/// Move the arm's `let mut v: T = …;` out of the arm: `let mut v: T;` right
+/// after the join's declaration, the arm assigning it. `false` (nothing
+/// changed) when either line is not in `out` as rendered.
+fn hoist_arm_slot(out: &mut String, d: ValueId, v: ValueId, i: u16) -> bool {
+    let ty = crate::render_native_rec::struct_name(i);
+    let decl = format!("let {}: &{ty};", var(d));
+    let def = format!("let mut {}: {ty} = ", var(v));
+    let (Some(at), Some(def_at)) = (out.find(&decl), out.find(&def)) else { return false };
+    if def_at < at || out.matches(&def).count() != 1 {
+        return false;
+    }
+    out.replace_range(def_at..def_at + def.len(), &format!("{} = ", var(v)));
+    let end = at + decl.len();
+    let pad: String = out[..at].rsplit('\n').next().unwrap_or("").chars().take_while(|c| *c == ' ').collect();
+    out.insert_str(end, &format!("\n{pad}let mut {}: {ty};", var(v)));
+    true
 }
 
 /// The owned copy of `v`, by its NTy: an if-value arm's yield copied into the

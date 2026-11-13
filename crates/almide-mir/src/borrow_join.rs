@@ -151,7 +151,7 @@ impl Facts {
         let src_a = self.selected_source(func, a, i, (i, else_at)).or_else(|| self.lent_source(func, a, i, else_at))?;
         let src_b = self.selected_source(func, b, i, (else_at, end_at));
         if src_b.is_none() {
-            self.literal_arm(func, b, (else_at, end_at))?;
+            self.literal_arm(func, b, (else_at, end_at)).or_else(|| self.default_arm(func, b, (else_at, end_at)))?;
         }
         let last = self.last_read_of_join(func, d, i, end_at)?;
         let written = |s: ValueId| func.ops[i..=last].iter().any(|op| writes(op, s) || self.stores_into(op, s));
@@ -189,6 +189,29 @@ impl Facts {
         });
         let literal = matches!(func.ops[at], Op::Alloc { init: crate::Init::Str(_), .. });
         (literal && lo < at && at < hi && only_consumed && func.ret != Some(y)).then_some(())
+    }
+
+    /// Condition 1 for an arm that yields a value it builds as its type's
+    /// default (`value.null()`): `y` is a block allocated inside `(lo, hi)`
+    /// whose only writes store a zero (its tag), touched otherwise only by its
+    /// address, its `Consume` and the yield at `hi`. The render holds it in a
+    /// slot declared before the `if`, so the join may borrow it.
+    fn default_arm(&self, func: &MirFunction, y: ValueId, (lo, hi): (usize, usize)) -> Option<()> {
+        let at = *self.def_at.get(&y)?;
+        let fresh = matches!(func.ops[at], Op::Alloc { init: crate::Init::DynList { .. } | crate::Init::Empty, .. });
+        if !fresh || at <= lo || at >= hi || func.ret == Some(y) {
+            return None;
+        }
+        let zero = |x: &ValueId| self.def_at.get(x).is_some_and(|&k| matches!(func.ops[k], Op::ConstInt { value: 0, .. }));
+        let only_built = self.touches(y).iter().all(|&k| {
+            k == at || k == hi || matches!(&func.ops[k], Op::Consume { v } if *v == y)
+                || matches!(&func.ops[k], Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [y])
+        });
+        let stores_zero = func.ops[lo..hi].iter().all(|op| match op {
+            Op::Prim { kind: PrimKind::Store { .. }, args, .. } if args.first().and_then(|a| self.root.get(a)) == Some(&y) => args.get(1).is_some_and(zero),
+            _ => true,
+        });
+        (only_built && stores_zero).then_some(())
     }
 
     /// Condition 1 for the present arm of an element Option's `?? fallback`
