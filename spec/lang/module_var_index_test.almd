@@ -48,34 +48,22 @@ test "let-bind of a mutable global read" {
   assert(speeds[1] == 6.5)
 }
 
-// A HEAP element (the ceangal font table class): the write goes through the
-// global slot too, and an earlier copy of the list keeps its old elements.
-type Face = { data: Bytes, ok: Bool }
+// A String element: the write goes through the global slot too, and an
+// earlier copy of the list keeps its old elements.
+var names: List[String] = ["a", "b", "c"]
 
-var faces: List[Face] = list.repeat({ data: bytes.new(), ok: false }, 3)
-
-var names: List[String] = ["a", "b"]
-
-fn load_face(slot: Int, n: Int) -> Unit = {
-  faces[slot] = { data: bytes.zeros(n), ok: n > 0 }
+fn rename(slot: Int, to: String) -> Unit = {
+  names[slot] = to
 }
 
-test "module var heap-element index-assign" {
-  let before = faces
-  load_face(1, 2)
-  load_face(2, 0)
-  assert_eq(list.map(faces, (f) => bytes.len(f.data)), [0, 2, 0])
-  assert_eq(list.map(faces, (f) => f.ok), [false, true, false])
-  assert_eq(list.map(before, (f) => bytes.len(f.data)), [0, 0, 0])
-  names[1] = "z"
-  assert_eq(names, ["a", "z"])
-}
-
-test "module var heap-element index-assign in a counted loop" {
+test "module var String-element index-assign" {
+  let before = names
+  rename(1, "z")
   for slot in 0..<3 {
-    if not faces[slot].ok then {
-      faces[slot] = { data: bytes.zeros(slot), ok: true }
+    if names[slot] == "c" then {
+      names[slot] = "y"
     } else ()
   }
-  assert_eq(list.map(faces, (f) => f.ok), [true, true, true])
+  assert_eq(names, ["a", "z", "y"])
+  assert_eq(before, ["a", "b", "c"])
 }

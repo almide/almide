@@ -1876,3 +1876,92 @@ effect fn main() -> Unit = {
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
 }
+
+/// Two shapes of the ceangal2 package that only the native v1 render takes,
+/// checked end to end against v0: a record stored into a mutable module-level
+/// list by index (the font table), and a recursive walk that appends a
+/// `(record, Int)` tuple to a module-level list from a branch inside a `for`
+/// over a record's child list (the paint pass).
+#[test]
+fn module_level_record_lists_and_a_recursive_branch_append_agree_with_v0() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-module-records-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = r#"type Face = { data: Bytes, ok: Bool }
+type Style = { absolute: Bool, overlay: Bool }
+type Node = { n: Int, name: String, style: Style, children: List[Node] }
+
+var faces: List[Face] = list.repeat({ data: bytes.new(), ok: false }, 3)
+var overlays: List[(Node, Int)] = []
+
+fn load_face(slot: Int, n: Int) -> Unit = {
+  faces[slot] = { data: bytes.zeros(n), ok: n > 0 }
+}
+
+fn subtree_len(v: Node) -> Int = 1 + list.sum(list.map(v.children, (c) => subtree_len(c)))
+
+fn paint(v: Node, idx: Int) -> Int = {
+  var next = idx + v.n
+  for c in v.children {
+    if not c.style.absolute then next = paint(c, next) else ()
+  }
+  for c in v.children {
+    if c.style.overlay then {
+      list.push(overlays, (c, next))
+      next = next + subtree_len(c)
+    } else if c.style.absolute then next = paint(c, next)
+    else ()
+  }
+  next
+}
+
+fn plain() -> Style = { absolute: false, overlay: false }
+
+effect fn main() -> Unit = {
+  let before = faces
+  load_face(1, 2)
+  load_face(2, 0)
+  for slot in 0..<3 {
+    if not faces[slot].ok then { faces[slot] = { data: bytes.zeros(slot + 4), ok: true } } else ()
+  }
+  println("${list.map(faces, (f) => bytes.len(f.data))} ${list.map(before, (f) => bytes.len(f.data))}")
+  let leaf: Node = { n: 1, name: "leaf", style: plain(), children: [] }
+  let abs: Node = { n: 10, name: "abs", style: { absolute: true, overlay: false }, children: [] }
+  let ov: Node = { n: 100, name: "ov", style: { absolute: false, overlay: true }, children: [leaf] }
+  let root: Node = { n: 0, name: "root", style: plain(), children: [leaf, abs, ov, leaf] }
+  println("${paint(root, 0)} ${list.map(overlays, (p) => "${p.0.name}@${p.1}")}")
+}
+"#;
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        let rs = dir.join("module_records.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, rust).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("module_records");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "module_records", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "[4, 2, 6] [0, 0, 0]\n115 [\"ov@113\"]\n",
+            "{}", String::from_utf8_lossy(&native.stderr));
+        let input = dir.join("module_records.almd");
+        std::fs::write(&input, source).unwrap();
+        let oracle = dir.join("module_records-v0");
+        let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+            .args(["build", "--no-verified"]).arg(&input).arg("-o").arg(&oracle)
+            .env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let v0 = Command::new(oracle).output().unwrap();
+        assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
