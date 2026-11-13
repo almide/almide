@@ -40,6 +40,53 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
     out
 }
 
+/// The borrow-only reads of `func` taken at an index that is rebound while
+/// the read is still used (`let w = ws[j]; j = j + 1; … w …`). The reference
+/// such a read holds stays on the element it was taken from, but its place,
+/// spelled again over the index variable, names another element: a copy of
+/// the read must not be made by reading the place again (#4661).
+pub(crate) fn moved_index_reads(func: &MirFunction) -> BTreeSet<ValueId> {
+    let root = roots(func);
+    let defs: BTreeMap<ValueId, &Op> = func.ops.iter().filter_map(|o| match o {
+        Op::Prim { dst: Some(d), .. } | Op::IntBinOp { dst: d, .. } => Some((*d, o)),
+        _ => None,
+    }).collect();
+    let mut out = BTreeSet::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
+        let Some(addr) = args.first() else { continue };
+        let indices = index_values(&defs, *addr, &root);
+        let end = through_enclosing_loops(func, i, borrow_span(func, i, *d).0);
+        if func.ops[i + 1..=end].iter().any(|o| matches!(o, Op::SetLocal { local, .. } if indices.contains(local))) {
+            out.insert(*d);
+        }
+    }
+    out
+}
+
+/// Every value the address `addr` is computed from other than its root
+/// block: an element index, a byte offset, and what those were computed from
+/// (`defs`: the arithmetic and prim ops of the function by result).
+fn index_values(defs: &BTreeMap<ValueId, &Op>, addr: ValueId, root: &BTreeMap<ValueId, ValueId>) -> BTreeSet<ValueId> {
+    let mut out = BTreeSet::new();
+    let mut todo = vec![addr];
+    while let Some(v) = todo.pop() {
+        // The block's own handle is the base, not an index.
+        let read: &[ValueId] = match defs.get(&v) {
+            Some(Op::Prim { kind: PrimKind::ElemAddr, args, .. }) => args,
+            Some(Op::IntBinOp { a, b, .. }) => &[*a, *b],
+            _ => &[],
+        };
+        for x in read {
+            let base = matches!(defs.get(x), Some(Op::Prim { kind: PrimKind::Handle, .. }));
+            if !base && (root.contains_key(x) || out.insert(*x)) {
+                todo.push(*x);
+            }
+        }
+    }
+    out
+}
+
 /// The copies (`Dup`) of borrow-only reads that may stay references: every
 /// use of the copy only borrows too, it is never rebound, returned or
 /// handed over, and
