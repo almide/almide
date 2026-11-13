@@ -340,9 +340,17 @@ impl LowerCtx {
         v: ValueId,
         adm: &BangAdmission,
         void_msg_pieces: Option<(ValueId, Option<ValueId>)>,
-    ) {
+        err_text: Option<&(VarId, Ty, IrExpr)>,
+    ) -> Option<()> {
         use crate::PrimKind;
         let BangAdmission { void_fn, callee_is_option, rebox_repr, .. } = *adm;
+        // A converted err (a fn that returns its err, never a void one): its String
+        // is computed here, on the exit path only, and OWNED — it moves into the
+        // fresh err block.
+        let text = match err_text {
+            Some((evar, err_ty, conv)) => Some(self.bang_err_text_value(h, *evar, err_ty, conv)?),
+            None => None,
+        };
         // The exit path never mutates `live_heap_handles` — the surviving ok
         // continuation still owns everything; the arm only EMITS the drops.
         if void_fn {
@@ -392,7 +400,9 @@ impl LowerCtx {
             // none — manufacture the desugar-identical "none" message; a
             // Result carrier's err String is extracted @12 and Dup'd (inc
             // strictly before any release — the Lean oproj law).
-            let e_dup = if callee_is_option {
+            let e_dup = if let Some(t) = text {
+                t
+            } else if callee_is_option {
                 let msg = self.fresh_value();
                 self.ops.push(Op::Alloc {
                     dst: msg,
@@ -431,6 +441,56 @@ impl LowerCtx {
             }
             self.ops.push(Op::Return { val: Some(v) });
         }
+        Some(())
+    }
+
+    /// The `!` rule over a callee whose err type is not this fn's: admitted when
+    /// this fn's channel is `String` and the err is a heap value, with the SAME
+    /// conversion the propagation desugar writes (`let_unwrap_err_payload`: the
+    /// repr text, or the ", " join of a `List[String]`), over a fresh var the exit
+    /// arm binds to the carrier's err payload. The fresh err needs the rebox exit.
+    fn bang_err_text_admission(&self, expr: &IrExpr, adm: &mut BangAdmission) -> Option<(VarId, Ty, IrExpr)> {
+        // A void fn's abort line is read by the native render only on the shape it
+        // proves (the carrier's own err String); a converted one declines there.
+        if self.decl_fn_err != Some(Ty::String) || adm.void_fn {
+            return None;
+        }
+        let err_ty = expr.ty.result_err_ty()?;
+        if !is_heap_ty(&err_ty) {
+            return None;
+        }
+        let evar = VarId(crate::lower::desugar_var_seed());
+        let conv = super::let_unwrap_err_payload(expr, evar, &err_ty, &Ty::String)?;
+        if adm.rebox_repr.is_none() {
+            adm.rebox_repr = Some(crate::lower::repr_of(&expr.ty).ok()?);
+            adm.rebox = true;
+        }
+        Some((evar, err_ty, conv))
+    }
+
+    /// The converted err String on the exit path: the err payload (a borrow of
+    /// the carrier's @12 slot) is bound to `evar` and `conv` lowers through the
+    /// ordinary bind. Every handle the lowering leaves live but the result is a
+    /// leak this arm cannot balance — decline; the result itself is handed back
+    /// OWNED and untracked, since the continuation's handles are unchanged.
+    fn bang_err_text_value(&mut self, h: ValueId, evar: VarId, err_ty: &Ty, conv: &IrExpr) -> Option<ValueId> {
+        use crate::PrimKind;
+        let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+        self.param_values.insert(eb);
+        self.seed_call_named_heap_read_shape(eb, err_ty);
+        self.seed_variant_value_shape(eb, err_ty);
+        self.value_of.insert(evar, eb);
+        let before = self.live_heap_handles.clone();
+        let tvar = VarId(crate::lower::desugar_var_seed());
+        self.lower_bind(tvar, &Ty::String, conv).ok()?;
+        let s = *self.value_of.get(&tvar)?;
+        let fresh: Vec<ValueId> =
+            self.live_heap_handles.iter().copied().filter(|x| !before.contains(x)).collect();
+        if fresh != [s] {
+            return None;
+        }
+        self.live_heap_handles = before;
+        Some(s)
     }
 
     /// Verbatim from `try_lower_bind_unwrap_return`: the straight-line ok
