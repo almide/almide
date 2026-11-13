@@ -237,8 +237,6 @@ impl LowerCtx {
                     if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
                 || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a)
                     if a.len() == 1 && !is_heap_ty(&a[0]))
-                // Bytes: one flat block with no owned children, freed whole.
-                || matches!(ty, Ty::Bytes)
                 || matches!(ty, Ty::Tuple(ts)
                     if ts.iter().all(|f| !is_heap_ty(f) || matches!(f, Ty::String)))
                 // The native render owns each slot by its Rust type, so there a tuple of
