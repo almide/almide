@@ -205,20 +205,72 @@ fn rewrite_at(lines: &[String], s: usize) -> Option<Vec<String>> {
             out.push(format!("{pad}}}));"));
         }
         _ => {
+            let mut body = rewrite_body(&body);
+            let iter = source_iter(lines, (s, e), source.as_ref(), &elem, &mut body);
             let head = match &source {
-                Some((src, _)) => format!("{pad}for ({i}, {elem}) in {src}.iter().enumerate() {{"),
+                Some((src, _)) => format!("{pad}for ({i}, {elem}) in {src}.{iter}().enumerate() {{"),
                 None => format!("{pad}for {i} in 0i64..{len} {{"),
             };
             out.push(head);
             if source.is_some() {
                 out.push(counter);
             }
-            out.extend(rewrite_body(&body));
+            out.extend(body);
             out.push(format!("{pad}}}"));
         }
     }
     out.extend(lines[e + 1..].iter().cloned());
     Some(out)
+}
+
+/// The iterator over the loop's source: by `iter_mut` where the body moves
+/// out of a dying source ([`moves_out_of_dying_source`]), else by `iter`.
+fn source_iter(lines: &[String], at: (usize, usize), source: Option<&(String, String)>, elem: &str, body: &mut [String]) -> &'static str {
+    match source {
+        Some((src, _)) if moves_out_of_dying_source(lines, at, src, elem, body) => "iter_mut",
+        _ => "iter",
+    }
+}
+
+/// A loop over an owned list `src` that is dropped right after it, whose body
+/// copies the element once (`(*elem).clone()`) and reads neither the element
+/// nor a reference taken in the body after that copy: the element is taken
+/// out instead (a filter keeping a dying list's values moves them). The copy
+/// must sit in the iteration itself, under `if`s only, so it runs at most
+/// once per element. Rewrites `body` and answers whether it did.
+fn moves_out_of_dying_source(lines: &[String], (s, e): (usize, usize), src: &str, elem: &str, body: &mut [String]) -> bool {
+    let owned = (0..s).rev().find_map(|k| let_parts(&lines[k]).filter(|(v, _, _)| *v == src))
+        .is_some_and(|(_, ty, _)| ty == "Vec<AlmideString>" || ty.starts_with("Vec<Vec<"));
+    let dies = lines[e + 1..].iter().find(|l| !is_note(l)).is_some_and(|l| l.trim() == format!("drop({src});"));
+    let copy = format!("(*{elem}).clone()");
+    let at: Vec<usize> = (0..body.len()).filter(|&k| body[k].contains(&copy)).collect();
+    let [c] = at[..] else { return false };
+    if !owned || !dies || body[c].matches(&copy).count() != 1 {
+        return false;
+    }
+    // Every block around the copy is an `if` arm: no inner loop or closure repeats it.
+    let level = body.iter().filter(|l| !l.trim().is_empty()).map(|l| indent_of(l)).min().unwrap_or(0);
+    let mut ind = indent_of(&body[c]);
+    for l in body[..c].iter().rev() {
+        if ind <= level {
+            break;
+        }
+        if !l.trim().is_empty() && indent_of(l) < ind {
+            let t = l.trim();
+            if !(t.ends_with('{') && (t.starts_with("if ") || t.starts_with("} else"))) {
+                return false;
+            }
+            ind = indent_of(l);
+        }
+    }
+    // References taken in the body (`let mut vN: &…`) and the element itself
+    // are not read once the element is gone.
+    let refs: Vec<&str> = body[..c].iter().filter_map(|l| let_parts(l).filter(|(_, ty, _)| ty.starts_with('&')).map(|(v, _, _)| v)).collect();
+    if body[c + 1..].iter().any(|l| mentions(l, elem) || refs.iter().any(|r| mentions(l, r))) {
+        return false;
+    }
+    body[c] = body[c].replace(&copy, &format!("std::mem::take(&mut *{elem})"));
+    true
 }
 
 /// `vS` and the index text `vS[IDX]` to replace, when `vLEN` is `vS.len()`, the
@@ -345,5 +397,52 @@ mod tests {
         let src = MAP.replace("        v9.push(v21);\n", "        if v21 > 3 { break; }\n        v9.push(v21);\n");
         let got = iterator_loops(src);
         assert!(got.contains("for (v11, __e_v11) in v4.iter().enumerate() {") && got.contains("v9.push(v21);"), "{got}");
+    }
+
+    /// A filter over a list of strings dropped right after the loop.
+    const FILTER: &str = r#"    let mut v4: Vec<AlmideString> = almd_build(v3);
+    let mut v8: i64 = v4.len() as i64;
+    let mut v9: Vec<AlmideString> = (0..v8.max(0)).map(|_| AlmideString::new()).collect();
+    let mut v10: i64 = 0i64;
+    let mut v11: i64 = 0i64;
+    let mut v12: i64 = 1i64;
+    loop {
+        let v13: bool = v11 < v8;
+        if !v13 { break; }
+        let mut v15: i64 = 8i64;
+        let mut v14: i64 = v11.wrapping_mul(v15);
+        let mut v16: &str = &v4[(0usize + ((v14 as u64) >> 3u32) as usize)][..];
+        let mut v17: i64 = rt_string_eq(v16, "x");
+        if v17 != 0 {
+            let mut v18 = v4[(0usize + ((v14 as u64) >> 3u32) as usize)].clone();
+            v9[(0usize + ((v10 as u64) >> 3u32) as usize)] = v18;
+            v10 = v10.wrapping_add(v12);
+        } else {
+        }
+        let mut v25: i64 = v11.wrapping_add(v12);
+        v11 = v25;
+    }
+    drop(v4);
+    v9.truncate(v10 as usize);
+}
+"#;
+
+    #[test]
+    fn a_filter_over_a_dying_list_moves_the_kept_values() {
+        let got = iterator_loops(FILTER.to_string());
+        assert!(got.contains("for (v11, __e_v11) in v4.iter_mut().enumerate() {"), "{got}");
+        assert!(got.contains("let mut v18 = std::mem::take(&mut *__e_v11);") && !got.contains(".clone()"), "{got}");
+    }
+
+    #[test]
+    fn a_filter_keeps_the_copy_where_the_value_is_read_after_it_or_the_list_lives_on() {
+        for src in [
+            FILTER.replace("            v10 = v10.wrapping_add(v12);\n", "            v10 = v10.wrapping_add(v12);\n            let mut v19: i64 = rt_string_eq(v16, \"y\");\n"),
+            FILTER.replace("    drop(v4);\n", "    let mut v30: i64 = v4.len() as i64;\n    drop(v4);\n"),
+            FILTER.replace("Vec<AlmideString> = almd_build", "Vec<AlmdRec0> = almd_build"),
+        ] {
+            let got = iterator_loops(src);
+            assert!(got.contains("v4.iter().enumerate()") && got.contains("(*__e_v11).clone()") && !got.contains("mem::take"), "{got}");
+        }
     }
 }
