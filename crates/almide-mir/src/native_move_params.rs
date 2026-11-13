@@ -120,6 +120,7 @@ fn consumed_params(
     func: &MirFunction,
     takes: &dyn Fn(usize) -> bool,
     hands: &dyn Fn(usize) -> bool,
+    keeps: &dyn Fn(usize) -> bool,
     owned: &Modes<'_>,
 ) -> Vec<(usize, usize)> {
     let depth = depths(func);
@@ -137,10 +138,11 @@ fn consumed_params(
         // A declared floor or runtime call that takes the param by value has
         // a lending form too: handed a value its caller keeps, it reads the
         // borrow and builds only its result (`list.take(xs, n)` copies `n`
-        // elements). Taking the param over for it pays only where every call
-        // site hands over its own value: a site that keeps reading its
-        // argument copies all of it for the call (#4701).
-        let by_value_handed = |name: &str, at: usize| by_value(name, at) && hands(k);
+        // elements). Taking the param over for it pays only where no named
+        // call site keeps reading its argument: such a site copies all of it
+        // for the call (#4701). A closure call's callers are the runtime's
+        // adapters, which hand over what they are given.
+        let by_value_handed = |name: &str, at: usize| by_value(name, at) && !keeps(k);
         let grows = matches!(&func.ops[last], Op::CallFn { name, args, .. }
             if (((crate::native_list_ops::is_list_concat(name) || name == "__str_concat")
                 && matches!(args.first(), Some(crate::CallArg::Handle(v)) if *v == p.value))
@@ -340,10 +342,11 @@ fn own_params(
     func: &MirFunction,
     takes: &dyn Fn(usize) -> bool,
     hands: &dyn Fn(usize) -> bool,
+    keeps: &dyn Fn(usize) -> bool,
     owned: &Modes<'_>,
 ) -> Option<MirFunction> {
     let movable = movable_params(func, takes);
-    let consumed: Vec<(usize, usize)> = consumed_params(func, takes, hands, owned)
+    let consumed: Vec<(usize, usize)> = consumed_params(func, takes, hands, keeps, owned)
         .into_iter()
         .filter(|(k, _)| !movable.iter().any(|m| m.0 == *k))
         .collect();
@@ -652,7 +655,8 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     let table = closure_table(functions, &taken);
     let not_handle = not_handle_positions(functions, &table);
     let kept = kept_positions(functions);
-    let hands_at = |f: &MirFunction, k: usize| !taken.contains(&f.name) && !kept.contains(&(f.name.clone(), k));
+    let kept_at = |f: &MirFunction, k: usize| kept.contains(&(f.name.clone(), k));
+    let hands_at = |f: &MirFunction, k: usize| !taken.contains(&f.name) && !kept_at(f, k);
     let representation_pinned = crate::native_hof::representation_adapters_needed(functions, sigs);
     let mut pinned: BTreeSet<String> = BTreeSet::new();
     loop {
@@ -675,7 +679,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
         let takes_at = |f: &MirFunction, k: usize| {
             !not_handle.contains(&(f.name.clone(), k)) && !(closure(f) && k == 0) && !native_result(&f.name, k)
         };
-        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at) else {
+        let Some((best, owned)) = solve_modes(functions, &table, &eligible, &takes_at, &hands_at, &kept_at) else {
             // A closure call the mirror refuses to hand over at leaves every
             // closure borrowing, as before closures took part.
             let closures: Vec<String> = functions.iter().filter(|f| closure(f)).map(|f| f.name.clone()).collect();
@@ -730,6 +734,7 @@ fn solve_modes<'t>(
     eligible: &dyn Fn(&MirFunction) -> bool,
     takes_at: &dyn Fn(&MirFunction, usize) -> bool,
     hands_at: &dyn Fn(&MirFunction, usize) -> bool,
+    kept_at: &dyn Fn(&MirFunction, usize) -> bool,
 ) -> Option<(Vec<MirFunction>, Modes<'t>)> {
     let solve = |start: BTreeMap<String, Vec<bool>>, strict: bool| -> Option<(Vec<MirFunction>, Modes<'t>)> {
         let mut owned = Modes { by_name: start, table };
@@ -741,7 +746,8 @@ fn solve_modes<'t>(
                 .map(|f| {
                     let takes = |k: usize| takes_at(f, k);
                     let hands = |k: usize| hands_at(f, k);
-                    if eligible(f) { own_params(f, &takes, &hands, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
+                    let keeps = |k: usize| kept_at(f, k);
+                    if eligible(f) { own_params(f, &takes, &hands, &keeps, &owned).unwrap_or_else(|| f.clone()) } else { f.clone() }
                 })
                 .collect();
             let modes: BTreeMap<String, Vec<bool>> = next
