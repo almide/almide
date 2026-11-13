@@ -497,41 +497,56 @@ pub(crate) fn select(ir: &mut IrProgram) {
     if !ACTIVE.with(|a| a.get()) || !ir.modules.is_empty() {
         return;
     }
-    let mut cands: BTreeMap<String, usize> = BTreeMap::new();
     let mut names: HashMap<String, usize> = HashMap::new();
     for f in &ir.functions {
         *names.entry(f.name.to_string()).or_insert(0) += 1;
     }
-    for f in &ir.functions {
-        let name = f.name.as_str();
-        let mut ks = f.mutated_params.clone();
-        ks.sort_unstable();
-        ks.dedup();
-        let [k] = ks.as_slice() else { continue };
-        let Some(p) = f.params.get(*k) else { continue };
-        let plain = !name.contains('.') && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
-        let generic = f.generics.as_ref().is_some_and(|g| !g.is_empty());
-        // A self-recursive fn stays out: its tail call becomes the loop
-        // rewrite's carried params, which this convention does not carry.
-        let recursive = calls_named(&f.body, name);
-        // A function the host's native code calls back keeps the move-mode
-        // convention its callback adapter writes back from.
-        let host_called = crate::native_callbacks::is_root(name);
-        if plain && !generic && !recursive && !host_called && !f.is_test && f.extern_attrs.is_empty() && f.export_attrs.is_empty()
-            && p.is_mut && lendable(&p.ty)
-        {
-            cands.insert(name.to_string(), *k);
+    let mut cands: BTreeMap<String, usize> =
+        ir.functions.iter().filter_map(|f| Some((f.name.to_string(), candidate_position(f, &names)?))).collect();
+    // Every caller is a direct call site: a candidate no function calls is
+    // reached some other way (the host, an export) and keeps its convention.
+    cands.retain(|n, _| ir.functions.iter().any(|f| calls_named(&f.body, n)));
+    prune(ir, &mut cands);
+    for f in ir.functions.iter_mut() {
+        if let Some(&k) = cands.get(f.name.as_str()) {
+            f.mutated_params.clear();
+            let p = f.params[k].var;
+            statement_mutators(f, p);
         }
     }
+    INOUT.with(|m| *m.borrow_mut() = cands.into_iter().map(|(n, k)| (n, vec![k])).collect());
+}
+
+/// [`select`]'s shape test: `f`'s one written `mut` param, a lendable
+/// buffer, where `f` is a plain, uniquely named, non-generic user fn.
+fn candidate_position(f: &IrFunction, names: &HashMap<String, usize>) -> Option<usize> {
+    let name = f.name.as_str();
+    let mut ks = f.mutated_params.clone();
+    ks.sort_unstable();
+    ks.dedup();
+    let [k] = ks.as_slice() else { return None };
+    let p = f.params.get(*k)?;
+    let plain = !name.contains('.') && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
+    let generic = f.generics.as_ref().is_some_and(|g| !g.is_empty());
+    // A self-recursive fn stays out: its tail call becomes the loop
+    // rewrite's carried params, which this convention does not carry.
+    let recursive = calls_named(&f.body, name);
+    // A function the host's native code calls back keeps the move-mode
+    // convention its callback adapter writes back from.
+    let host_called = crate::native_callbacks::is_root(name);
+    let attrs = f.extern_attrs.is_empty() && f.export_attrs.is_empty();
+    (plain && !generic && !recursive && !host_called && !f.is_test && attrs && p.is_mut && lendable(&p.ty)).then_some(*k)
+}
+
+/// [`select`]'s fixpoint: drop every candidate whose body or one of whose
+/// call sites leaves the subset, until none does.
+fn prune(ir: &IrProgram, cands: &mut BTreeMap<String, usize>) {
     // The positions every user fn writes back through (`mut` params).
     let writes: HashMap<String, Vec<usize>> = ir
         .functions
         .iter()
         .map(|f| (f.name.to_string(), f.params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect()))
         .collect();
-    // Every caller is a direct call site: a candidate no function calls is
-    // reached some other way (the host, an export) and keeps its convention.
-    cands.retain(|n, _| ir.functions.iter().any(|f| calls_named(&f.body, n)));
     loop {
         let mut refused: BTreeSet<String> = BTreeSet::new();
         for f in &ir.functions {
@@ -558,14 +573,6 @@ pub(crate) fn select(ir: &mut IrProgram) {
         }
         cands.retain(|n, _| !refused.contains(n));
     }
-    for f in ir.functions.iter_mut() {
-        if let Some(&k) = cands.get(f.name.as_str()) {
-            f.mutated_params.clear();
-            let p = f.params[k].var;
-            statement_mutators(f, p);
-        }
-    }
-    INOUT.with(|m| *m.borrow_mut() = cands.into_iter().map(|(n, k)| (n, vec![k])).collect());
 }
 
 /// Every exit of an in-out function hands its slots back: a `Consume` of each

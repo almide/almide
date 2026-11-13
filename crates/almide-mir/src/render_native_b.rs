@@ -576,6 +576,22 @@ fn lent_payload(ret: Option<NTy>) -> Option<NTy> {
     matches!(p, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr).then_some(p)
 }
 
+/// [`render_declared_floor_call`]'s borrowing twin (its symbol, its items):
+/// a result read only through borrows, from a Value the function borrows
+/// (v0's decode path), or an element Option whose list the function borrows
+/// — the element lent (`Option<&A>`), no copy of it (render_native_borrow_read).
+fn borrow_twin_route(
+    dst: Option<&ValueId>,
+    floor: &'static crate::native_floor::FloorFn,
+    unedited: bool,
+    ret: Option<NTy>,
+) -> Option<(&'static str, &'static Vec<&'static str>)> {
+    let (d, (twin, items)) = (dst?, floor.borrow_twin.as_ref()?);
+    let result = crate::render_native_borrow_read::borrowed_result(*d) && unedited;
+    let option = crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some();
+    (result || option).then_some((twin.as_str(), items))
+}
+
 fn render_declared_floor_call(
     call: NativeCall<'_>,
     floor: &'static crate::native_floor::FloorFn,
@@ -614,17 +630,7 @@ fn render_declared_floor_call(
     let (expr, ret) = crate::native_floor::render_call(floor, name, &rendered, &dying, dst_map)?;
     // A result read only through borrows, from a Value the function borrows:
     // the runtime's borrowing twin, no copy of the field (v0's decode path).
-    let by_ref = match (dst, &floor.borrow_twin) {
-        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_result(*d) && edited.is_none() => {
-            Some((twin.as_str(), items))
-        }
-        // An element Option whose list the function borrows: the element
-        // lent (`Option<&A>`), no copy of it (render_native_borrow_read).
-        (Some(d), Some((twin, items))) if crate::render_native_borrow_read::borrowed_option(*d) && lent_payload(ret).is_some() => {
-            Some((twin.as_str(), items))
-        }
-        _ => None,
-    };
+    let by_ref = borrow_twin_route(dst.as_ref(), floor, edited.is_none(), ret);
     let expr = match by_ref {
         Some((twin, _)) => expr.replacen(&format!("{}(", floor.symbol), &format!("{twin}("), 1),
         None => expr,

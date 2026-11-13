@@ -497,6 +497,23 @@ pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::int
     ir = almide_codegen::pass_unify_var_tables::UnifyVarTablesPass.run(ir, Target::Rust).program;
     almide_frontend::ir_link::ir_link_flatten(&mut ir);
     global_aliases::resolve(&mut ir);
+    let type_aliases = bare_type_aliases(&ir);
+    almide_codegen::pass_ir_link_flatten::rename_declared_type_references(&mut ir, &type_aliases);
+    almide_codegen::pass_ir_link_flatten::canonicalize_structural_twins(&mut ir);
+    let mut names = HashSet::new();
+    for f in &ir.functions {
+        if !names.insert(f.name) {
+            return Err(LowerError::at(f.body.span, format!("native: linked function name collision: {}", f.name)));
+        }
+    }
+    retain_reached(&mut ir, roots);
+    Ok(ir)
+}
+
+/// [`flatten`]'s bare type names: a linked record or variant declared under a
+/// module-qualified name keeps the bare name its references still spell,
+/// where that name is unambiguous and no root declaration owns it.
+fn bare_type_aliases(ir: &IrProgram) -> std::collections::HashMap<String, almide_lang::intern::Sym> {
     // Lowering already resolves unambiguous imported record references via
     // this registry. Carry the same identity into lambda signatures and
     // nested container types before deriving native representations.
@@ -525,14 +542,13 @@ pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::int
             type_aliases.insert(bare.to_string(), almide_lang::intern::sym(name));
         }
     }
-    almide_codegen::pass_ir_link_flatten::rename_declared_type_references(&mut ir, &type_aliases);
-    almide_codegen::pass_ir_link_flatten::canonicalize_structural_twins(&mut ir);
-    let mut names = HashSet::new();
-    for f in &ir.functions {
-        if !names.insert(f.name) {
-            return Err(LowerError::at(f.body.span, format!("native: linked function name collision: {}", f.name)));
-        }
-    }
+    type_aliases
+}
+
+/// [`flatten`]'s reachability: keep the functions the roots (the entry
+/// module's own, test entries, host callbacks, C exports, top-level values and
+/// defaults) reach through calls.
+fn retain_reached(ir: &mut IrProgram, roots: HashSet<String>) {
     let mut refs = References(roots);
     refs.0.extend(ir.functions.iter().filter(|f| crate::native_test_harness::is_entry(f.name.as_str()))
         .map(|f| f.name.to_string()));
@@ -556,7 +572,6 @@ pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::int
         if !changed { break; }
     }
     ir.functions.retain(|f| refs.0.contains(f.name.as_str()));
-    Ok(ir)
 }
 
 #[cfg(test)]

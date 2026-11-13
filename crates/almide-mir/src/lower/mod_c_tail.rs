@@ -343,32 +343,33 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         }
         IrExprKind::Call { target: CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
         | IrExprKind::TailCall { .. } => false,
-        _ => {
-            // A VALUE in return position. Wrap it when it produces the declared
-            // type; anything else (a Never-typed die, an already-Result
-            // propagation) is left for the existing machinery.
-            if expr.ty == *decl_ty {
-                let inner = std::mem::replace(
-                    expr,
-                    IrExpr {
-                        kind: IrExprKind::Unit,
-                        ty: Ty::Unit,
-                        span: None,
-                        def_id: None,
-                    },
-                );
-                *expr = IrExpr {
-                    span: inner.span.clone(),
-                    def_id: inner.def_id,
-                    kind: IrExprKind::ResultOk { expr: Box::new(inner) },
-                    ty: result_ty.clone(),
-                };
-                true
-            } else {
-                false
-            }
-        }
+        _ => wrap_value_in_ok(expr, decl_ty, result_ty),
     }
+}
+
+/// [`wrap_return_positions_go`]'s VALUE in return position: wrapped in `ok`
+/// when it produces the declared type; anything else (a Never-typed die, an
+/// already-Result propagation) is left for the existing machinery.
+fn wrap_value_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
+    if expr.ty != *decl_ty {
+        return false;
+    }
+    let inner = std::mem::replace(
+        expr,
+        IrExpr {
+            kind: IrExprKind::Unit,
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        },
+    );
+    *expr = IrExpr {
+        span: inner.span.clone(),
+        def_id: inner.def_id,
+        kind: IrExprKind::ResultOk { expr: Box::new(inner) },
+        ty: result_ty.clone(),
+    };
+    true
 }
 
 fn lower_function_all_impl(

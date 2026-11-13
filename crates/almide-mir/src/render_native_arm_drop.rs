@@ -103,8 +103,36 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
     if !matches!(ops[i0], Op::IfThen { cond, dst: None } if cond == t) {
         return None;
     }
+    let (i1, i2) = arms(ops, i0, flag_exits)?;
+    let (addrs, loaded) = views_of(ops, c);
+    let carrier = Carrier { c, addrs: &addrs, loaded: &loaded };
+    let release = release_at(ops, i2, &carrier)?;
+    only_views_before(ops, (k, i2, release), &carrier).then_some((i1, i2))
+}
+
+/// The carrier `c` and its views (addresses off it, handles loaded through them).
+struct Carrier<'a> {
+    c: ValueId,
+    addrs: &'a BTreeSet<ValueId>,
+    loaded: &'a BTreeSet<ValueId>,
+}
+
+impl Carrier<'_> {
+    /// Whether `op` reads the carrier or a view of it (`reads` left holding
+    /// what `op` reads).
+    fn read_by(&self, op: &Op, reads: &mut Vec<ValueId>) -> bool {
+        reads.clear();
+        crate::mir_ops::op_reads(op, reads);
+        reads.iter().any(|r| *r == self.c || self.addrs.contains(r) || self.loaded.contains(r))
+    }
+}
+
+/// [`dispatch`]'s two arms of the `if` at `i0`: its `Else` and `EndIf`, where
+/// both are valueless and no arm leaves the dispatch or may end without
+/// reaching its own end.
+fn arms(ops: &[Op], i0: usize, flag_exits: &BTreeSet<usize>) -> Option<(usize, usize)> {
     let (mut depth, mut loops) = (0i32, 0i32);
-    let (mut i1, mut i2) = (None, None);
+    let mut i1 = None;
     for (i, op) in ops.iter().enumerate().skip(i0 + 1) {
         match op {
             Op::IfThen { .. } => depth += 1,
@@ -114,13 +142,7 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
                 }
                 i1 = Some(i);
             }
-            Op::EndIf { val } if depth == 0 => {
-                if val.is_some() {
-                    return None;
-                }
-                i2 = Some(i);
-                break;
-            }
+            Op::EndIf { val } if depth == 0 => return if val.is_some() { None } else { Some((i1?, i)) },
             Op::EndIf { .. } => depth -= 1,
             Op::LoopStart => loops += 1,
             Op::LoopEnd => loops -= 1,
@@ -135,32 +157,23 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
             return None;
         }
     }
-    let (i1, i2) = (i1?, i2?);
-    let (addrs, loaded) = views_of(ops, c);
-    let mut reads = Vec::new();
-    let reads_carrier = |op: &Op, reads: &mut Vec<ValueId>| {
-        reads.clear();
-        crate::mir_ops::op_reads(op, reads);
-        reads.iter().any(|r| *r == c || addrs.contains(r) || loaded.contains(r))
-    };
-    // The carrier's release at the dispatch's block level: the first op past
-    // the `if` that reads the carrier (or a view of it), reached with every
-    // `if` and loop opened since closed again.
+    None
+}
+
+/// The carrier's release at the dispatch's block level: the first op past
+/// the `if` (ending at `i2`) that reads the carrier (or a view of it),
+/// reached with every `if` and loop opened since closed again.
+fn release_at(ops: &[Op], i2: usize, carrier: &Carrier) -> Option<usize> {
     let (mut depth, mut loops) = (0i32, 0i32);
-    let mut release = None;
+    let mut reads = Vec::new();
     for (i, op) in ops.iter().enumerate().skip(i2 + 1) {
-        if reads_carrier(op, &mut reads) {
-            let dropped = matches!(op, Op::Drop { v } | Op::DropListStr { v } if *v == c);
-            if !dropped || depth != 0 || loops != 0 {
-                return None;
-            }
-            release = Some(i);
-            break;
+        if carrier.read_by(op, &mut reads) {
+            let dropped = matches!(op, Op::Drop { v } | Op::DropListStr { v } if *v == carrier.c);
+            return (dropped && depth == 0 && loops == 0).then_some(i);
         }
         match op {
             Op::IfThen { .. } => depth += 1,
-            Op::Else { .. } if depth == 0 => return None,
-            Op::EndIf { .. } if depth == 0 => return None,
+            Op::Else { .. } | Op::EndIf { .. } if depth == 0 => return None,
             Op::EndIf { .. } => depth -= 1,
             Op::LoopStart => loops += 1,
             Op::LoopEnd if loops == 0 => return None,
@@ -168,24 +181,32 @@ fn dispatch(ops: &[Op], k: usize, t: ValueId, c: ValueId, flag_exits: &BTreeSet<
             _ => {}
         }
     }
-    let release = release?;
+    None
+}
+
+/// Whether every read of the carrier from `k` on, other than its release,
+/// sits before the dispatch's end `i2` and only views it (its tag, its
+/// scalar Ok, its err string, its handle, an address or load off a view).
+fn only_views_before(ops: &[Op], (k, i2, release): (usize, usize, usize), carrier: &Carrier) -> bool {
+    let c = carrier.c;
+    let mut reads = Vec::new();
     for (i, op) in ops.iter().enumerate().skip(k + 1) {
-        if i == release || !reads_carrier(op, &mut reads) {
+        if i == release || !carrier.read_by(op, &mut reads) {
             continue;
         }
         let views = matches!(op, Op::Prim { kind: PrimKind::ResTag | PrimKind::ResOkScalar | PrimKind::ResErrStr, .. })
             || matches!(op, Op::Prim { kind: PrimKind::Handle, args, .. } if args.as_slice() == [c])
             || (!reads.contains(&c)
-                && !reads.iter().any(|r| loaded.contains(r))
+                && !reads.iter().any(|r| carrier.loaded.contains(r))
                 && matches!(
                     op,
                     Op::IntBinOp { op: IntOp::Add, .. } | Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, .. }
                 ));
         if i > i2 || !views {
-            return None;
+            return false;
         }
     }
-    Some((i1, i2))
+    true
 }
 
 /// The release line for carrier `name` at an arm's end, when the text so far
