@@ -35,7 +35,10 @@ impl LowerCtx {
             IrExprKind::Match { subject, arms }
                 if self.is_variant_shaped_match_subject(&subject.ty) =>
             {
-                self.lower_variant_subject_match_arm(subject, arms, result_ty)
+                // A shape the value dispatchers decline (a guarded arm) is still a
+                // match the desugared `if` chain carries.
+                self.speculate(|this| this.lower_variant_subject_match_arm(subject, arms, result_ty))
+                    .or_else(|| self.lower_desugarable_match_arm(subject, arms, result_ty))
             }
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_nested_heap_result_if_arm(cond, then, else_, result_ty)
@@ -101,8 +104,26 @@ impl LowerCtx {
             {
                 self.lower_fresh_container_projection_arm(arm, object, result_ty)
             }
+            _ if is_heap_ty(&arm.ty) && arm.ty == *result_ty && !matches!(arm.kind, IrExprKind::Var { .. }) => {
+                self.speculate(|this| this.lower_bound_value_arm(arm))
+            }
             _ => None,
         }
+    }
+
+    /// Any other heap arm that IS the result value (`ok(ds) => (list.first(ds) ??
+    /// d).decl`): bind it to a synthetic `let` and move that local out — the
+    /// block arm `{ let t = <arm>; t }` the source could have spelled, which the
+    /// bind lowering already carries for every value it can name. The tail is a
+    /// `Var`, which this arm never claims, so it cannot recurse.
+    fn lower_bound_value_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
+        let tmp = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: arm.ty.clone(), value: arm.clone() },
+            span: arm.span,
+        };
+        let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: arm.ty.clone(), span: arm.span, def_id: None };
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(var)), &arm.ty)
     }
 
     /// A heap projection off a FRESH container (`ok(ds) => check_all(k, ds).error`): the
