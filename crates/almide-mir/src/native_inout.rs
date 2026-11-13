@@ -325,6 +325,9 @@ fn uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String, Vec<
                 IrStmtKind::Assign { var, .. } | IrStmtKind::FieldAssign { target: var, .. } if self.read_only && *var == self.p => {
                     self.no("read-only write")
                 }
+                // A snapshot of the place (`var trial = sol`): the bind owns a
+                // copy of what the place holds now, as any bind of a var does.
+                IrStmtKind::Bind { value, .. } if is_var(value, self.p) => {}
                 IrStmtKind::Assign { value, .. } => self.read_assign(value),
                 IrStmtKind::FieldAssign { target, value, .. } if *target == self.p && field_write_ok(value) => {
                     self.visit_expr(value)

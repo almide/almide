@@ -464,3 +464,43 @@ fn a_closure_that_only_reads_a_mut_param_for_one_call_keeps_it_lent() {
     assert!(body_of(&out, "settle").contains("almd_new_meta(&mut *v0"), "{out}");
     assert_eq!(run_native(CLOSURE_READ), "229 11 5 -2 3 5 z 3,z 1\n");
 }
+
+const TRIAL: &str = r#"
+type Sol = { terms: Map[Int, Int], levels: List[Int], n: Int }
+
+fn try_unify(a: Int, mut s: Sol) -> Bool =
+  if a < 0 then false
+  else {
+    s.terms = map.set(s.terms, a, a * 2)
+    s.n = s.n + 1
+    true
+  }
+
+fn same(a: Int, b: Int, mut sol: Sol) -> Bool = {
+  var trial = sol
+  let ok1 = try_unify(a, trial)
+  let ok2 = try_unify(b, trial)
+  if ok1 and ok2 then {
+    sol.terms = trial.terms
+    sol.levels = trial.levels + [a]
+    true
+  } else false
+}
+
+effect fn main() -> Unit = {
+  var s = { terms: map.new(), levels: [1], n: 0 }
+  let r1 = same(1, 2, s)
+  let r2 = same(3, -1, s)
+  let r3 = same(4, 5, s)
+  println("${r1} ${r2} ${r3} ${map.len(s.terms)} ${list.len(s.levels)} ${s.n}")
+}
+"#;
+
+#[test]
+fn a_bind_of_a_mut_param_snapshots_the_place_and_keeps_it_lent() {
+    // `var trial = sol` owns a copy of what the place holds; the trial is
+    // lent on, and only the fields written back reach the caller.
+    let out = render(TRIAL).expect("renders");
+    assert!(header_of(&out, "same").contains("&mut AlmdRec"), "{out}");
+    assert_eq!(run_native(TRIAL), "true false true 4 3 0\n");
+}
