@@ -132,6 +132,16 @@ pub(crate) fn lent_param_copy(func: &MirFunction, at: usize, root: &BTreeMap<Val
     if func.ops.iter().any(|o| matches!(o, Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } if held(*x))) {
         return None;
     }
+    // A call the render serves by value there (`map.set(m, k, v)`), or a
+    // concatenation that grows it (`xs + [x]`), takes the copy: it is owned,
+    // not lent.
+    let grows = |name: &str, k: usize| k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat");
+    let given = |o: &Op| matches!(o, Op::CallFn { name, args, .. }
+        if args.iter().enumerate().any(|(k, a)| matches!(a, CallArg::Handle(v) if *v == dst)
+            && (crate::native_move_params::by_value(name, k) || grows(name, k))));
+    if func.ops.iter().any(given) {
+        return None;
+    }
     last_borrowing_use(func, at, dst, root).map(|_| dst)
 }
 
@@ -199,6 +209,17 @@ pub(crate) fn roots(func: &MirFunction) -> BTreeMap<ValueId, ValueId> {
     root
 }
 
+/// A call that names `d` only lends it: never as a scalar, and never where a
+/// declared runtime mutator needs the owned temporary that the lowering
+/// publishes back into its source place.
+fn call_lends(name: &str, args: &[CallArg], d: ValueId) -> bool {
+    args.iter().enumerate().all(|(k, a)| match a {
+        CallArg::Scalar(v) if *v == d => false,
+        CallArg::Handle(v) if *v == d => !crate::native_hof::mutable_argument(name, k),
+        _ => true,
+    })
+}
+
 /// The index of the last op after `at` that uses `d`, when every such use only
 /// borrows it; `None` when some use needs an owned value.
 pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> Option<usize> {
@@ -211,42 +232,41 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
         if !reads.contains(&d) && !names_root {
             continue;
         }
-        let ok = crate::render_native_move::bookkeeping(op)
-            || match op {
-                Op::CallFn { name, args, .. } => args.iter().enumerate().all(|(k, a)| match a {
-                    CallArg::Scalar(v) if *v == d => false,
-                    // A declared runtime mutator needs the owned temporary
-                    // that the lowering publishes back into its source place.
-                    CallArg::Handle(v) if *v == d => !crate::native_hof::mutable_argument(name, k),
-                    _ => true,
-                }),
-                // A closure takes a heap argument by reference unless the
-                // call site hands the value over.
-                Op::CallIndirect { args, .. } => {
-                    !handed_over(func, j, d) && !args.iter().any(|a| matches!(a, CallArg::Scalar(v) if *v == d))
-                }
-                Op::Dup { src, .. } => *src == d,
-                Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
-                // An address into `d`'s own block, or a load through one.
-                Op::IntBinOp { op: IntOp::Add, .. } => names_root,
-                Op::Prim { kind: PrimKind::ElemAddr, args, .. } => {
-                    args.len() == 2 && root.get(&args[0]) == Some(&d) && args[1] != d
-                }
-                Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => {
-                    args.len() == 1 && root.get(&args[0]) == Some(&d)
-                }
-                // A scalar slot read (a variant's tag, a field) only reads.
-                Op::ListGetScalar { list, idx, .. } => *list == d && *idx != d,
-                // A borrowed slot re-pointed at this payload (native_borrowed_slots).
-                Op::SetLocal { local, src } => *src == d && crate::native_borrowed_slots::of(func).contains(local),
-                _ => false,
-            };
+        let ok = crate::render_native_move::bookkeeping(op) || borrowing_op(func, (j, op), d, root, names_root);
         if !ok {
             return None;
         }
         last = j;
     }
     Some(last)
+}
+
+/// `op` (at `j`) only borrows `d`, which it names (`names_root`: through an
+/// address into `d`'s own block).
+fn borrowing_op(func: &MirFunction, (j, op): (usize, &Op), d: ValueId, root: &BTreeMap<ValueId, ValueId>, names_root: bool) -> bool {
+    match op {
+        Op::CallFn { name, args, .. } => call_lends(name, args, d),
+        // A closure takes a heap argument by reference unless the
+        // call site hands the value over.
+        Op::CallIndirect { args, .. } => {
+            !handed_over(func, j, d) && !args.iter().any(|a| matches!(a, CallArg::Scalar(v) if *v == d))
+        }
+        Op::Dup { src, .. } => *src == d,
+        Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],
+        // An address into `d`'s own block, or a load through one.
+        Op::IntBinOp { op: IntOp::Add, .. } => names_root,
+        Op::Prim { kind: PrimKind::ElemAddr, args, .. } => {
+            args.len() == 2 && root.get(&args[0]) == Some(&d) && args[1] != d
+        }
+        Op::Prim { kind: PrimKind::Load { .. } | PrimKind::LoadHandle, args, .. } => {
+            args.len() == 1 && root.get(&args[0]) == Some(&d)
+        }
+        // A scalar slot read (a variant's tag, a field) only reads.
+        Op::ListGetScalar { list, idx, .. } => *list == d && *idx != d,
+        // A borrowed slot re-pointed at this payload (native_borrowed_slots).
+        Op::SetLocal { local, src } => *src == d && crate::native_borrowed_slots::of(func).contains(local),
+        _ => false,
+    }
 }
 
 /// A call-site move right after op `at` of `func` hands `d` over.

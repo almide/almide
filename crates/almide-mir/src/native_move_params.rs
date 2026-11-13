@@ -40,7 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// A declared floor or runtime-served call that takes its argument `k` by
 /// value: handed there at its last use, the argument moves in.
-fn by_value(name: &str, k: usize) -> bool {
+pub(crate) fn by_value(name: &str, k: usize) -> bool {
     // A call the floor declares renders through the floor body, whose own
     // modes decide; only a call it does not reaches the runtime route.
     match crate::native_floor::declared(name) {
