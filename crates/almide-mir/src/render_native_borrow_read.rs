@@ -237,6 +237,8 @@ pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root
                 }
                 // A scalar slot read (a variant's tag, a field) only reads.
                 Op::ListGetScalar { list, idx, .. } => *list == d && *idx != d,
+                // A borrowed slot re-pointed at this payload (native_borrowed_slots).
+                Op::SetLocal { local, src } => *src == d && crate::native_borrowed_slots::of(func).contains(local),
                 _ => false,
             };
         if !ok {
@@ -291,8 +293,14 @@ fn through_enclosing_loops(func: &MirFunction, from: usize, last: usize) -> usiz
 /// name it (or an address into it) are address arithmetic and loads only.
 fn block_untouched(func: &MirFunction, from: usize, to: usize, base: ValueId, root: &BTreeMap<ValueId, ValueId>) -> bool {
     let mut reads = Vec::new();
+    // A borrowed slot re-pointed in place leaves every block it pointed at
+    // as it was (native_borrowed_slots): those are the caller's.
+    let slots = crate::native_borrowed_slots::of(func);
     for op in &func.ops[from + 1..=to] {
         if matches!(op, Op::SetLocal { local, .. } if *local == base) {
+            if slots.contains(&base) {
+                continue;
+            }
             return false;
         }
         reads.clear();

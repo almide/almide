@@ -8,7 +8,7 @@ use wasm_encoder::{BlockType, Function, ValType};
 use crate::*;
 // Diverging values in a value slot (#3144): a child of the emitter.
 #[path = "diverge.rs"]
-mod diverge;
+pub(crate) mod diverge;
 use diverge::is_diverging_call;
 
 #[path = "node_marks.rs"]
@@ -84,6 +84,9 @@ pub(crate) struct Emitter<'a> {
     /// and the `rc::site_window` id anchoring it to its shipped `if` / `else`
     /// — a select site recorded over that `if` later reuses the anchor.
     pub(crate) if_sites: std::collections::HashMap<*const almide_ir::IrExpr, u64>,
+    /// The window an enclosing unit `if` just tested (bytes_rw.rs
+    /// `proven_room`): (buffer var, position var, width), taken by the set.
+    pub(crate) room_proven: Option<(VarId, VarId, i64)>,
     /// The frame variable a top-level `${part}` reads (set by
     /// `lower_interp_part`, taken by `emit_display_value`): a declared repr
     /// that owns its param takes a share of it, recorded on that variable.

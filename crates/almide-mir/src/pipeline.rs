@@ -505,10 +505,24 @@ fn prepare_checked_ir(
     mut checker: Checker,
     native_bodies: bool,
 ) -> Result<almide_ir::IrProgram, LowerError> {
+    let mut user_modules = std::collections::HashSet::new();
     if native_bodies {
         // A module's C export can be unreferenced by Almide but still be
         // required by an external caller. Check before reachability pruning.
         crate::native_foreign::check_exports(&ir)?;
+        // The modules the program itself brought, read before the link loads
+        // the bundled ones: a package may carry a library module's name.
+        // The driver registers the library modules it loaded from their
+        // bundled source as modules too; those stay the library's. A module
+        // named like a library one is the program's own when it is the
+        // package itself or comes from a package (a versioned name).
+        let env = &checker.env;
+        user_modules = env.user_modules.iter()
+            .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.as_str())
+                || env.self_module_name == Some(**m)
+                || env.module_versioned_names.contains_key(*m))
+            .copied()
+            .collect();
         native_bundled::link(&mut ir, &mut checker)?;
     } else {
         resolve_user_module_calls(&mut ir);
@@ -518,7 +532,7 @@ fn prepare_checked_ir(
     // sibling convention impls the round-1 pass could not see; mangle them so
     // the link set carries them (user modules only — see the impl doc).
     if native_bodies {
-        ir = native_bundled::flatten(ir)?;
+        ir = native_bundled::flatten(ir, &user_modules)?;
         crate::native_region::expand(&mut ir)?;
     } else {
         resolve_user_module_calls_round2(&mut ir);
