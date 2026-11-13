@@ -152,3 +152,38 @@ effect fn main() -> Unit = {
 fn a_bound_branch_of_two_bangs_propagates_once() {
     both(BRANCH_OF_BANGS, "3\n3\nE LexError { at: 1, msg: \"none\" }\n");
 }
+
+// A `??` arm with a record payload and a computed-call operand: lowered as the
+// match it means, the fallback only on the absent side.
+const UNWRAP_OR_ARM: &str = r#"
+type T = { name: String, xs: List[Int] }
+fn dflt() -> T = T { name: "default", xs: [1] }
+fn builtin() -> List[T] = [T { name: "a", xs: [2, 3] }, T { name: "b", xs: [] }]
+fn named(n: String) -> Option[T] = list.find(builtin(), (t) => t.name == n)
+fn apply(t: T, k: Int) -> T = { ...t, xs: t.xs + [k] }
+fn pick(n: String, dark: Bool, load: (String) -> Option[T]) -> T = {
+  let name = if dark then n + "!" else n
+  let base = match named(name) {
+    some(t) => t,
+    none => load(name) ?? dflt(),
+  }
+  apply(base, 9)
+}
+effect fn main() -> Unit = {
+  let none_loaded = (n: String) => {
+    let missing: Option[T] = none
+    missing
+  }
+  let some_loaded = (n: String) => some(T { name: "file:" + n, xs: [] })
+  for (n, d) in [("a", false), ("b", true), ("zz", false)] {
+    let t = pick(n, d, none_loaded)
+    let u = pick(n, d, some_loaded)
+    println(t.name + " " + int.to_string(list.len(t.xs)) + " / " + u.name)
+  }
+}
+"#;
+
+#[test]
+fn a_record_unwrap_or_arm_lowers_as_its_match() {
+    both(UNWRAP_OR_ARM, "a 3 / a\ndefault 2 / file:b!\ndefault 2 / file:zz\n");
+}
