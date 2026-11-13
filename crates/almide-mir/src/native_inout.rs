@@ -51,6 +51,9 @@ thread_local! {
     static RECORDS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
+/// The in-out candidates: fn name → its in-out param positions.
+type Cands = BTreeMap<String, Vec<usize>>;
+
 /// One native render: the in-out registry exists only inside it.
 pub(crate) struct ProgramScope(bool);
 
@@ -148,8 +151,8 @@ fn field_write_ok(value: &IrExpr) -> bool {
 /// Does `body` write `p` — an assignment, an in-place mutator, or a lend to
 /// an in-out position of a candidate? A `mut` param the body never writes
 /// has nothing to lend back and keeps the move-mode convention.
-fn writes(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>) -> bool {
-    struct W<'a>(VarId, &'a BTreeMap<String, usize>, bool);
+fn writes(body: &IrExpr, p: VarId, cands: &Cands) -> bool {
+    struct W<'a>(VarId, &'a Cands, bool);
     impl IrVisitor for W<'_> {
         fn visit_stmt(&mut self, s: &IrStmt) {
             if matches!(s.kind, IrStmtKind::Assign { var, .. } | IrStmtKind::FieldAssign { target: var, .. } if var == self.0) {
@@ -162,7 +165,7 @@ fn writes(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>) -> bool {
                 self.2 = true;
             }
             if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
-                if self.1.get(name.as_str()).is_some_and(|&k| args.get(k).is_some_and(|a| is_var(a, self.0))) {
+                if self.1.get(name.as_str()).is_some_and(|ks| ks.iter().any(|&k| args.get(k).is_some_and(|a| is_var(a, self.0)))) {
                     self.2 = true;
                 }
             }
@@ -226,10 +229,10 @@ fn mentions(e: &IrExpr, p: VarId) -> bool {
 /// rebound by an assignment or an in-place mutator; lent to an in-out
 /// position of a candidate. A bind, a return, a capture, a container
 /// element, a match subject or an iteration keeps the move-mode convention.
-fn body_uses_ok(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>, writes: &HashMap<String, Vec<usize>>) -> bool {
+fn body_uses_ok(body: &IrExpr, p: VarId, cands: &Cands, writes: &HashMap<String, Vec<usize>>) -> bool {
     struct C<'a> {
         p: VarId,
-        cands: &'a BTreeMap<String, usize>,
+        cands: &'a Cands,
         writes: &'a HashMap<String, Vec<usize>>,
         ok: bool,
     }
@@ -247,7 +250,7 @@ fn body_uses_ok(body: &IrExpr, p: VarId, cands: &BTreeMap<String, usize>, writes
                 }
                 let lent = match target {
                     CallTarget::Named { name } => match self.cands.get(name.as_str()) {
-                        Some(&k) => k == i && !args.iter().enumerate().any(|(j, b)| j != i && (mentions(b, self.p) || !simple_operand(b))),
+                        Some(ks) => ks.contains(&i) && !args.iter().enumerate().any(|(j, b)| j != i && (mentions(b, self.p) || !simple_operand(b))),
                         None => !self.writes.get(name.as_str()).is_some_and(|ks| ks.contains(&i)),
                     },
                     CallTarget::Module { module, func, .. } => {
@@ -374,9 +377,9 @@ fn lendable_vars(f: &IrFunction) -> HashSet<VarId> {
 /// Every call to a candidate in `e` lends a var of `ok_vars` at the in-out
 /// position, outside any closure and named by no other argument; returns the
 /// candidates some call refuses.
-fn refused_sites(e: &IrExpr, cands: &BTreeMap<String, usize>, ok_vars: &HashSet<VarId>, refused: &mut BTreeSet<String>) {
+fn refused_sites(e: &IrExpr, cands: &Cands, ok_vars: &HashSet<VarId>, refused: &mut BTreeSet<String>) {
     struct S<'a> {
-        cands: &'a BTreeMap<String, usize>,
+        cands: &'a Cands,
         ok_vars: &'a HashSet<VarId>,
         refused: &'a mut BTreeSet<String>,
         in_lambda: usize,
@@ -406,16 +409,16 @@ fn refused_sites(e: &IrExpr, cands: &BTreeMap<String, usize>, ok_vars: &HashSet<
                         _ => None,
                     };
                     if let Some(name) = named {
-                        if let Some(&k) = self.cands.get(&name) {
+                        if let Some(ks) = self.cands.get(&name) {
                             let good = !matches!(target, CallTarget::Module { .. })
                                 && self.in_lambda == 0
-                                && match args.get(k).map(|a| &a.kind) {
+                                && ks.iter().all(|&k| match args.get(k).map(|a| &a.kind) {
                                     Some(IrExprKind::Var { id }) => {
                                         self.ok_vars.contains(id)
                                             && !args.iter().enumerate().any(|(j, b)| j != k && (mentions(b, *id) || !simple_operand(b)))
                                     }
                                     _ => false,
-                                };
+                                });
                             if !good {
                                 self.refused.insert(name);
                             }
@@ -470,6 +473,20 @@ fn statement_mutators(f: &mut IrFunction, p: VarId) {
     W(p).visit_expr_mut(&mut f.body);
 }
 
+/// Whether a call to `name` sits in a tail position of `e` (a block's
+/// tail, an `if` or `match` arm in tail position), the self-call shape the
+/// lowering turns into a loop.
+fn tail_calls_named(e: &IrExpr, name: &str) -> bool {
+    match &e.kind {
+        IrExprKind::Call { target: CallTarget::Named { name: n }, .. }
+        | IrExprKind::TailCall { target: CallTarget::Named { name: n }, .. } => n.as_str() == name,
+        IrExprKind::Block { expr: Some(tail), .. } => tail_calls_named(tail, name),
+        IrExprKind::If { then, else_, .. } => tail_calls_named(then, name) || tail_calls_named(else_, name),
+        IrExprKind::Match { arms, .. } => arms.iter().any(|a| tail_calls_named(&a.body, name)),
+        _ => false,
+    }
+}
+
 fn calls_named(e: &IrExpr, name: &str) -> bool {
     struct N<'a>(&'a str, bool);
     impl IrVisitor for N<'_> {
@@ -490,8 +507,8 @@ fn calls_named(e: &IrExpr, name: &str) -> bool {
 }
 
 /// The vars `e` passes to a `mut` position of a user fn outside `cands`.
-fn tuple_written_vars(e: &IrExpr, writes: &HashMap<String, Vec<usize>>, cands: &BTreeMap<String, usize>) -> HashSet<VarId> {
-    struct T<'a>(&'a HashMap<String, Vec<usize>>, &'a BTreeMap<String, usize>, HashSet<VarId>);
+fn tuple_written_vars(e: &IrExpr, writes: &HashMap<String, Vec<usize>>, cands: &Cands) -> HashSet<VarId> {
+    struct T<'a>(&'a HashMap<String, Vec<usize>>, &'a Cands, HashSet<VarId>);
     impl IrVisitor for T<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
@@ -531,49 +548,53 @@ pub(crate) fn select(ir: &mut IrProgram) {
     for f in &ir.functions {
         *names.entry(f.name.to_string()).or_insert(0) += 1;
     }
-    let mut cands: BTreeMap<String, usize> =
-        ir.functions.iter().filter_map(|f| Some((f.name.to_string(), candidate_position(f, &names)?))).collect();
+    let mut cands: Cands =
+        ir.functions.iter().filter_map(|f| Some((f.name.to_string(), candidate_positions(f, &names)?))).collect();
     // Every caller is a direct call site: a candidate no function calls is
     // reached some other way (the host, an export) and keeps its convention.
     cands.retain(|n, _| ir.functions.iter().any(|f| calls_named(&f.body, n)));
     prune(ir, &mut cands);
     for f in ir.functions.iter_mut() {
-        if let Some(&k) = cands.get(f.name.as_str()) {
+        if let Some(ks) = cands.get(f.name.as_str()) {
             f.mutated_params.clear();
-            let p = f.params[k].var;
-            statement_mutators(f, p);
+            for &k in ks {
+                let p = f.params[k].var;
+                statement_mutators(f, p);
+            }
         }
     }
-    INOUT.with(|m| *m.borrow_mut() = cands.into_iter().map(|(n, k)| (n, vec![k])).collect());
+    INOUT.with(|m| *m.borrow_mut() = cands);
 }
 
-/// [`select`]'s shape test: `f`'s one written `mut` param, a lendable
+/// [`select`]'s shape test: `f`'s written `mut` params, each a lendable
 /// buffer, where `f` is a plain, uniquely named, non-generic user fn.
-fn candidate_position(f: &IrFunction, names: &HashMap<String, usize>) -> Option<usize> {
+fn candidate_positions(f: &IrFunction, names: &HashMap<String, usize>) -> Option<Vec<usize>> {
     let name = f.name.as_str();
     let mut ks = f.mutated_params.clone();
     ks.sort_unstable();
     ks.dedup();
-    let [k] = ks.as_slice() else { return None };
-    let p = f.params.get(*k)?;
+    if ks.is_empty() || !ks.iter().all(|&k| f.params.get(k).is_some_and(|p| p.is_mut && lendable(&p.ty))) {
+        return None;
+    }
     // A program module's fn (`kernel.spend`) is as plain as an entry fn; a
     // library module's keeps its own convention.
     let library = name.split_once('.').is_some_and(|(m, _)| almide_lang::stdlib_info::is_any_stdlib(m));
     let plain = !library && !name.starts_with("__") && name != "main" && names.get(name) == Some(&1);
     let generic = f.generics.as_ref().is_some_and(|g| !g.is_empty());
-    // A self-recursive fn stays out: its tail call becomes the loop
-    // rewrite's carried params, which this convention does not carry.
-    let recursive = calls_named(&f.body, name);
+    // A self tail call stays out: it becomes the loop rewrite's carried
+    // params, which this convention does not carry. A non-tail self call
+    // lends the place on, as a call to any other candidate does.
+    let recursive = tail_calls_named(&f.body, name);
     // A function the host's native code calls back keeps the move-mode
     // convention its callback adapter writes back from.
     let host_called = crate::native_callbacks::is_root(name);
     let attrs = f.extern_attrs.is_empty() && f.export_attrs.is_empty();
-    (plain && !generic && !recursive && !host_called && !f.is_test && attrs && p.is_mut && lendable(&p.ty)).then_some(*k)
+    (plain && !generic && !recursive && !host_called && !f.is_test && attrs).then_some(ks)
 }
 
 /// [`select`]'s fixpoint: drop every candidate whose body or one of whose
 /// call sites leaves the subset, until none does.
-fn prune(ir: &IrProgram, cands: &mut BTreeMap<String, usize>) {
+fn prune(ir: &IrProgram, cands: &mut Cands) {
     // The positions every user fn writes back through (`mut` params).
     let writes: HashMap<String, Vec<usize>> = ir
         .functions
@@ -583,9 +604,12 @@ fn prune(ir: &IrProgram, cands: &mut BTreeMap<String, usize>) {
     loop {
         let mut refused: BTreeSet<String> = BTreeSet::new();
         for f in &ir.functions {
-            if let Some(&k) = cands.get(f.name.as_str()) {
-                let p = f.params[k].var;
-                if !body_uses_ok(&f.body, p, &cands, &writes) || !self::writes(&f.body, p, &cands) {
+            if let Some(ks) = cands.get(f.name.as_str()) {
+                let ok = ks.iter().all(|&k| {
+                    let p = f.params[k].var;
+                    body_uses_ok(&f.body, p, cands, &writes) && self::writes(&f.body, p, cands)
+                });
+                if !ok {
                     refused.insert(f.name.to_string());
                 }
             }
