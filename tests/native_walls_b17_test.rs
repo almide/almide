@@ -312,3 +312,42 @@ effect fn main() -> Unit = {
 fn a_spread_override_of_an_option_ctor_over_a_field_builds_like_a_record_field() {
     both(SPREAD_OPTION_FIELD_OVERRIDE, "1/1/2\n1/2/5\n1/0/7 3/0.1/-\n");
 }
+
+// `some(ok(resp))` / `some(err(e))` over an `Option[Result[record, String]]`
+// in a `while` with a Result slot: the inner match reads the heap-Ok payload's tag.
+const NESTED_OPTION_RESULT_MATCH: &str = r#"
+type Resp = { code: Int, body: String }
+fn poll(i: Int) -> Option[Result[Resp, String]] =
+  if i < 2 then none else if i == 9 then some(err("conn")) else some(ok({ code: 200 + i, body: "b${i}" }))
+fn run(stop: Int) -> Result[Unit, String] = {
+  var running = true
+  var outcome: Result[Unit, String] = ok(())
+  var i = 0
+  while running {
+    i = i + 1
+    match poll(if i >= stop then stop else 0) {
+      none => (),
+      some(ok(resp)) => {
+        let code = resp.code
+        outcome = if code >= 200 and code < 204 then ok(()) else err("HTTP ${code}: ${resp.body}")
+        running = false
+      },
+      some(err(e)) => {
+        outcome = err(e)
+        running = false
+      },
+    }
+  }
+  outcome
+}
+effect fn main() -> Unit = {
+  for s in [2, 5, 9] {
+    match run(s) { ok(_) => println("ok"), err(e) => println("E " + e) }
+  }
+}
+"#;
+
+#[test]
+fn a_nested_some_ok_match_reads_the_heap_ok_payload_tag() {
+    both(NESTED_OPTION_RESULT_MATCH, "ok\nE HTTP 205: b5\nE conn\n");
+}
