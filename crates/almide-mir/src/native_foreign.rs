@@ -91,6 +91,8 @@ pub(crate) fn check_decl(f: &IrFunction, kind: NativeExtern) -> Result<(), Lower
             }
         }
         if param && kind == NativeExtern::Rust {
+            // A Region is lent as its block's `(ptr, len)` (`push_rust`).
+            if almide_lang::types::extern_abi::is_region(ty) { continue; }
             if let Ty::Fn { params, ret, .. } = ty {
                 for p in params { check_value_type(p)?; }
                 check_value_type(ret)?;
@@ -199,6 +201,14 @@ impl ForeignArgs {
             self.actuals.push(format!("&({callback})"));
             return Ok(());
         }
+        if almide_lang::types::extern_abi::is_region(&p.ty) {
+            if p.is_mut { return Err(wall("native: a foreign Region is lent, never written back")); }
+            let (base, off, len) = lent_region(k)?;
+            let r = var(v);
+            self.actuals.push(format!("almide_rt_ffi_block_ptr(&{r}.f{base}, {r}.f{off})"));
+            self.actuals.push(format!("({r}.f{len}).max(0) as usize"));
+            return Ok(());
+        }
         let value = convert(&format!("&{}", var(v)), &p.ty, k, true, 0)?;
         let borrowed = matches!(&p.ty, Ty::String | Ty::Bytes | Ty::Applied(C::List | C::Set | C::Map, _)) || crate::render_native_rec::is_matrix_ty(&p.ty);
         if p.is_mut {
@@ -226,7 +236,26 @@ impl ForeignArgs {
         });
         Ok(())
     }
+}
 
+/// The slots of a Region value lent to a Rust host: its block, its offset and
+/// its length. The block must be the shared `AlmideFfiBlock` the Region pass
+/// gave it; a Region with any other storage has no address to lend.
+fn lent_region(k: NTy) -> Result<(usize, usize, usize), LowerError> {
+    let (NTy::Rec(i) | NTy::RecRef(i)) = k else { return Err(wall("native: a foreign Region must be the ffi record")) };
+    let (_, fields) = crate::render_native_rec::record_fields(i)
+        .ok_or_else(|| wall("native: a foreign Region must be the ffi record"))?;
+    let slot = |name: &str| fields.iter().position(|(n, _)| n == name)
+        .ok_or_else(|| wall("native: a foreign Region must be the ffi record"));
+    let (base, off, len) = (slot("base")?, slot("off")?, slot("len")?);
+    let block = crate::native_runtime_types::FFI_BLOCK;
+    if !block.accepts(fields[base].1) || fields[off].1 != NTy::I64 || fields[len].1 != NTy::I64 {
+        return Err(wall("native: a foreign Region needs its shared block"));
+    }
+    Ok((base, off, len))
+}
+
+impl ForeignArgs {
     /// The call expression; a C target's declaration joins the prelude.
     fn call(&mut self, kind: NativeExtern, module: &str, name: &str, ret_ty: &Ty) -> Result<String, LowerError> {
         if kind == NativeExtern::Rust {
@@ -254,6 +283,10 @@ pub(crate) fn runtime_items() -> Result<Vec<&'static str>, LowerError> {
         let mut types = String::new();
         for decl in d.borrow().values() {
             for p in &decl.host.params {
+                // A lent Region's address comes from its block.
+                if almide_lang::types::extern_abi::is_region(&p.ty) {
+                    types.push_str("almide_rt_ffi_block_ptr\n");
+                }
                 if let Ty::Fn { params, ret, .. } = &p.ty {
                     for t in params.iter().chain(std::iter::once(ret.as_ref())) {
                         types.push_str(&host_type(t)?);

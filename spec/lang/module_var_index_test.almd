@@ -47,3 +47,23 @@ test "let-bind of a mutable global read" {
   assert(region_count == 2)
   assert(speeds[1] == 6.5)
 }
+
+// A String element: the write goes through the global slot too, and an
+// earlier copy of the list keeps its old elements.
+var names: List[String] = ["a", "b", "c"]
+
+fn rename(slot: Int, to: String) -> Unit = {
+  names[slot] = to
+}
+
+test "module var String-element index-assign" {
+  let before = names
+  rename(1, "z")
+  for slot in 0..<3 {
+    if names[slot] == "c" then {
+      names[slot] = "y"
+    } else ()
+  }
+  assert_eq(names, ["a", "z", "y"])
+  assert_eq(before, ["a", "b", "c"])
+}

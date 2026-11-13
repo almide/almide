@@ -100,6 +100,27 @@
 # against the 2.64 ceiling. A program that loads json without parsing reads as
 # develop does (37 sources, not 78), since the reader waits for json.parse.
 # The anchor returns to 2.20 once the reader stops pulling those sources.
+#
+# Back to 2.20 (#4695, 2026-11-13). Most of the extra sources were not the
+# reader's own: looking up a `@value_op` declaration parsed every bundled
+# module until it found one (math, http, datetime, hash, ...), the effect bit
+# of an intrinsic symbol parsed every module whose text held the symbol as a
+# substring, and the qualifier of `map.set(..)` counted as a bare `map`,
+# which woke `bytes.map` and the bytes self-host source behind it. Each
+# lookup now parses only a source that spells what it looks for, and a module
+# qualifier names no function. jsonround parses 56 sources / 256 KB instead
+# of 70 / 363 KB. One n2-standard-8 (asia-northeast1-b), the script, two
+# rounds each:
+#
+#   tree                                   check    wasm    jsonround
+#   develop 3a12b21d3                      14.96    26.21   2.706
+#                                          14.80    25.87   2.619
+#   this tree                              14.07    26.58   2.473
+#                                          14.04    24.99   2.507
+#
+# The reader's own code is still compiled for a program that parses (it is
+# what makes the parse fast), which is what is left over the pre-reader tree
+# (3dff2f16a, 2.017 on the same machine).
 check 14.4
 wasm 25.7
-jsonround 2.80
+jsonround 2.20

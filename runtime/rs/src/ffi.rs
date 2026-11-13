@@ -32,6 +32,48 @@ pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &Vec<u8>) {
     unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), base.add(off as usize), b.len()); }
 }
 
+// The native v1 memory of a Region whose address can reach an `@extern(rust)`
+// call. A v1 Bytes is an owned `Vec<u8>` that a record copy clones, so its
+// address cannot stand for a Region that every copy shares. The block is
+// one fixed-size allocation behind an `Rc`: copying a Region shares the
+// block, the block never grows, shrinks or moves, and it lives until the last
+// copy goes away. Reads and writes from Almide are bounds-checked here as
+// well as in ffi.almd, so they need no `unsafe`; only the address handed to a
+// foreign call does.
+#[derive(Clone)]
+pub struct AlmideFfiBlock(std::rc::Rc<[std::cell::Cell<u8>]>);
+
+// A block holding a copy of b: `ffi.region` views b read-only and `ffi.alloc`
+// hands a fresh zeroed buffer, so a copy observes the same bytes.
+pub fn almide_rt_ffi_block(b: &Vec<u8>) -> AlmideFfiBlock {
+    AlmideFfiBlock(b.iter().map(|&x| std::cell::Cell::new(x)).collect())
+}
+
+pub fn almide_rt_ffi_block_load(base: &AlmideFfiBlock, off: i64, n: i64) -> Vec<u8> {
+    let (Ok(off), Ok(n)) = (usize::try_from(off), usize::try_from(n)) else { return Vec::new() };
+    off.checked_add(n).and_then(|end| base.0.get(off..end))
+        .map(|cells| cells.iter().map(std::cell::Cell::get).collect()).unwrap_or_default()
+}
+
+pub fn almide_rt_ffi_block_store(base: &AlmideFfiBlock, off: i64, b: &Vec<u8>) -> Result<(), String> {
+    let Ok(off) = usize::try_from(off) else { return Ok(()) };
+    if let Some(cells) = off.checked_add(b.len()).and_then(|end| base.0.get(off..end)) {
+        for (cell, &x) in cells.iter().zip(b) { cell.set(x); }
+    }
+    Ok(())
+}
+
+// The address a Region hands an `@extern(rust)` call: `off` bytes into its
+// block (the view's own start, as v0 and wasm pass it), null for an empty
+// block. Foreign code may read and write `[ptr, ptr + len)` while the call
+// runs; the Region argument keeps the block alive for the call, and the
+// cells are `UnsafeCell`s, so a write through this pointer is a permitted
+// mutation of shared memory.
+pub fn almide_rt_ffi_block_ptr(base: &AlmideFfiBlock, off: i64) -> *mut u8 {
+    if base.0.is_empty() { return std::ptr::null_mut(); }
+    (base.0.as_ptr() as *mut u8).wrapping_add(off.max(0) as usize)
+}
+
 // The release guard of a foreign Region (ADR-0031 D6): the `@extern(c)`
 // wrapper of a fn declared `@region(len = …, release = "f")` stores this
 // closure in the Region it builds, with `release` the glue's call of `f`.

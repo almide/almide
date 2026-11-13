@@ -1,0 +1,28 @@
+// Appending a `(record, Int)` tuple whose record holds heap fields, inside a
+// `for` over a list of such records: through a `let`-bound tuple and an inline
+// tuple. (The recursive-walk shape, which only native renders, is in
+// tests/native_tagged_values_test.rs.)
+type Style = { absolute: Bool, overlay: Bool }
+
+type Node = { n: Int, name: String, style: Style, children: List[Node] }
+
+fn pairs(vs: List[Node]) -> List[(Node, Int)] = {
+  var out: List[(Node, Int)] = []
+  var k = 0
+  for c in vs {
+    let t = (c, k)
+    list.push(out, t)
+    list.push(out, (c, k + 10))
+    k = k + 1
+  }
+  out
+}
+
+fn plain() -> Style = { absolute: false, overlay: false }
+
+test "a let-bound and an inline tuple append keep each record" {
+  let a: Node = { n: 1, name: "a", style: plain(), children: [] }
+  let b: Node = { n: 2, name: "b", style: plain(), children: [] }
+  let got = pairs([a, b])
+  assert_eq(list.map(got, (p) => "${p.0.name}${p.1}"), ["a0", "a10", "b1", "b11"])
+}
