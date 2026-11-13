@@ -371,3 +371,45 @@ fn a_mut_record_param_moves_a_rebound_heap_field_out_of_the_place() {
     assert!(header_of(&out, "two").contains("&mut Vec<i64>"), "{out}");
     assert_eq!(run_native(RECORD_HEAP), "3 4 4 7 5 9 0 1\n");
 }
+
+const FIELD_LEND: &str = r#"
+type Budget = { left: Int, seen: List[Int] }
+type St = { name: String, budget: Budget, log: List[String] }
+
+fn spend(mut b: Budget, x: Int) -> Bool =
+  if b.left <= 0 then false
+  else {
+    b.left = b.left - 1
+    b.seen = b.seen + [x]
+    true
+  }
+
+fn step(mut st: St, x: Int) -> Unit = {
+  if spend(st.budget, x) then { st.log = st.log + ["ok ${x}"] } else { st.log = st.log + ["no ${x}"] }
+}
+
+effect fn main() -> Unit = {
+  var st = { name: "s", budget: { left: 3, seen: [] }, log: [] }
+  for i in 0..<5 { step(st, i) }
+  var b = { left: 1, seen: [9] }
+  let got = spend(b, 7)
+  var w = { name: "w", budget: { left: 2, seen: [5] }, log: ["start"] }
+  let w1 = spend(w.budget, 8)
+  let w2 = spend(w.budget, 9)
+  let w3 = spend(w.budget, 10)
+  println("${st.budget.left} ${list.len(st.budget.seen)} ${list.join(st.log, ",")} ${got} ${b.left} ${list.len(b.seen)} ${w1} ${w2} ${w3} ${w.budget.left} ${list.len(w.budget.seen)} ${list.len(w.log)}")
+}
+"#;
+
+#[test]
+fn a_record_field_passed_to_a_mut_param_lends_its_place() {
+    // `spend(st.budget, x)` writes the caller's field: the call lends the
+    // field's place (`&mut v0.f1`), never a copy whose writes would be lost.
+    let out = render(FIELD_LEND).expect("renders");
+    assert!(header_of(&out, "spend").contains("&mut AlmdRec"), "{out}");
+    let step = body_of(&out, "step");
+    assert!(step.contains("almd_spend(&mut v0.f"), "step lends its record's field:\n{step}");
+    assert!(!step.contains(".clone()"), "{step}");
+    assert!(out.contains("almd_spend(&mut v"), "{out}");
+    assert_eq!(run_native(FIELD_LEND), "0 3 ok 0,ok 1,ok 2,no 3,no 4 true 0 2 true true false 0 3 1\n");
+}
