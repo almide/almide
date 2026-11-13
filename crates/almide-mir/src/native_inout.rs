@@ -607,6 +607,31 @@ fn lendable_vars(f: &IrFunction, writes: &HashMap<String, Vec<usize>>) -> HashSe
     out
 }
 
+/// The candidate calls inside `e` (outside closures) and the root of each
+/// place they lend.
+fn nested_lends(e: &IrExpr, cands: &Cands) -> Vec<(String, VarId)> {
+    struct N<'a>(&'a Cands, Vec<(String, VarId)>);
+    impl IrVisitor for N<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Lambda { .. } => return,
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                    for &k in self.0.get(name.as_str()).into_iter().flatten() {
+                        if let Some(r) = args.get(k).and_then(place_root) {
+                            self.1.push((name.to_string(), r));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut n = N(cands, Vec::new());
+    n.visit_expr(e);
+    n.1
+}
+
 /// Every call to a candidate in `e` lends a var of `ok_vars` at the in-out
 /// position, outside any closure and named by no other argument; returns the
 /// candidates some call refuses.
@@ -619,6 +644,27 @@ fn refused_sites(e: &IrExpr, cands: &Cands, ok_vars: &HashSet<VarId>, refused: &
     }
     impl IrVisitor for S<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
+            // Operands evaluated side by side: a lend inside one while another
+            // reads the same place would hold a borrow of it across the lend.
+            let siblings: Vec<&IrExpr> = match &e.kind {
+                IrExprKind::StringInterp { parts } => parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        almide_ir::IrStringPart::Expr { expr } => Some(expr),
+                        _ => None,
+                    })
+                    .collect(),
+                IrExprKind::BinOp { left, right, .. } => vec![&**left, &**right],
+                IrExprKind::Call { args, .. } => args.iter().collect(),
+                _ => Vec::new(),
+            };
+            for (j, sib) in siblings.iter().enumerate() {
+                for (name, r) in nested_lends(sib, self.cands) {
+                    if siblings.iter().enumerate().any(|(i, o)| i != j && mentions(o, r)) {
+                        self.refused.insert(name);
+                    }
+                }
+            }
             match &e.kind {
                 IrExprKind::Lambda { .. } => {
                     self.in_lambda += 1;
