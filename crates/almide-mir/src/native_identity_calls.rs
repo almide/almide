@@ -23,8 +23,13 @@ use std::collections::BTreeMap;
 /// of one) is one too, so the rewrite runs until no call is left to replace.
 pub(crate) fn inline(functions: &mut [MirFunction]) {
     loop {
-        let identities: BTreeMap<String, usize> =
-            functions.iter().filter_map(|f| returned_param(f).map(|k| (f.name.clone(), k))).collect();
+        // The test harness's panic marker is an identity too, but its call is
+        // what names a test abort's message (`native_test_panic::is_message`).
+        let identities: BTreeMap<String, usize> = functions
+            .iter()
+            .filter(|f| !crate::native_test_harness::raw_panic(&f.name))
+            .filter_map(|f| returned_param(f).map(|k| (f.name.clone(), k)))
+            .collect();
         if identities.is_empty() {
             return;
         }
