@@ -553,3 +553,171 @@ fn a_tail_call_that_passes_each_place_on_as_itself_keeps_it_lent() {
     }
     assert_eq!(run_native(TAIL), "5 5 33 -1 5 20 v0,v1,v2,v0,v1\n");
 }
+
+const OPERANDS: &str = r#"
+type St = { bu: List[Int], log: List[String] }
+
+fn spend(tag: String, n: Int, mut bu: List[Int]) -> Int = {
+  bu = bu + [n]
+  list.len(bu) * 100 + n + string.len(tag)
+}
+
+fn cost(st: St, k: Int) -> Int = list.len(st.bu) * k + list.len(st.log)
+
+fn step(mut st: St, m: Map[String, Int], k: String) -> Int = {
+  let a = spend(k, map.get(m, k) ?? 7, st.bu)
+  let b = spend("c", cost(st, 2), st.bu)
+  st.log = st.log + ["${a},${b}"]
+  a + b
+}
+
+fn parse_all(mut st: St, xs: List[String]) -> Int! = {
+  let n = spend("p", int.parse(list.get(xs, 0) ?? "x")!, st.bu)
+  st.log = st.log + ["p${n}"]
+  ok(n)
+}
+
+effect fn main() -> Unit = {
+  var st = { bu: [100], log: [] }
+  let r = step(st, map.from_list([("a", 3)]), "a")
+  let r2 = step(st, map.new(), "zz")
+  let p = parse_all(st, ["5"]) ?? -1
+  let q = parse_all(st, ["no"]) ?? -1
+  println("${r} ${r2} ${p} ${q} ${list.len(st.bu)} ${list.join(st.log, "|")}")
+}
+"#;
+
+#[test]
+fn a_lend_beside_a_branching_operand_binds_the_operand_first() {
+    // `spend(k, map.get(m, k) ?? 7, st.bu)`: the `??` operand is bound to a
+    // `let` before the call, so the call lends the field beside plain values.
+    let out = render(OPERANDS).expect("renders");
+    for name in ["step", "parse_all", "spend"] {
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's place:\n{out}");
+    }
+    assert_eq!(run_native(OPERANDS), "509 919 606 -1 6 204,305|409,510|p606\n");
+}
+
+const LOCAL_READ: &str = r#"
+type Sol = { terms: Map[Int, Int], n: Int }
+
+fn bind(k: Int, v: Int, mut sol: Sol) -> Bool =
+  if map.contains(sol.terms, k) then false
+  else {
+    sol.terms = map.set(sol.terms, k, v)
+    sol.n = sol.n + 1
+    true
+  }
+
+fn look(sol: Sol, k: Int) -> Int = map.get(sol.terms, k) ?? -1
+
+fn solve(ks: List[Int]) -> String = {
+  var sol = { terms: map.new(), n: 0 }
+  let a = bind(1, 10, sol)
+  let b = bind(1, 11, sol)
+  let seen = ks |> list.map((k) => look(sol, k))
+  let all = list.all(ks, (k) => look(sol, k) >= 0)
+  let c = bind(2, list.len(seen), sol)
+  "${a} ${b} ${seen} ${all} ${c} ${sol.n} ${look(sol, 2)}"
+}
+
+effect fn main() -> Unit = {
+  println(solve([1, 2]))
+  println(solve([1]))
+}
+"#;
+
+#[test]
+fn a_local_read_by_a_closure_for_one_stdlib_call_stays_lendable() {
+    // `ks |> list.map((k) => look(sol, k))` reads the local `sol` for the call
+    // alone, so `sol` is still lent `&mut` to `bind` around it.
+    let out = render(LOCAL_READ).expect("renders");
+    for name in ["bind"] {
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's place:\n{out}");
+    }
+    assert_eq!(run_native(LOCAL_READ), "true false [10, -1] false true 2 2\ntrue false [10] true true 2 1\n");
+}
+
+const USER_CALLBACK: &str = r#"
+type Env = { names: Map[String, Int], n: Int }
+
+fn add(mut env: Env, k: String) -> Int = {
+  env.names = map.set(env.names, k, env.n)
+  env.n = env.n + 1
+  env.n
+}
+
+fn compile(xs: List[String], named: (String) -> Int, base: Int) -> List[Int] =
+  xs |> list.map((x) => named(x) + base)
+
+fn known(env: Env, k: String) -> Int = map.get(env.names, k) ?? -1
+
+fn defs(mut env: Env, xs: List[String]) -> String = {
+  let a = add(env, "a")
+  let got = compile(xs, (nm) => known(env, nm), 100)
+  let b = add(env, "b")
+  "${a} ${got} ${b} ${known(env, "b")}"
+}
+
+effect fn main() -> Unit = {
+  var env = { names: map.new(), n: 0 }
+  println(defs(env, ["a", "z"]))
+  println(defs(env, ["b"]))
+  println("${env.n}")
+}
+"#;
+
+#[test]
+fn a_closure_passed_to_a_user_fn_that_cannot_keep_it_keeps_the_param_lent() {
+    // `compile(xs, (nm) => known(env, nm), 100)`: `compile` answers a list and
+    // has no `mut` param, so the closure dies with the call.
+    let out = render(USER_CALLBACK).expect("renders");
+    for name in ["defs", "add"] {
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's place:\n{out}");
+    }
+    assert_eq!(run_native(USER_CALLBACK), "1 [100, 99] 2 1\n3 [101] 4 3\n4\n");
+}
+
+const LET_CLOSURE: &str = r#"
+type Env = { names: Map[String, Int], n: Int }
+
+fn add(mut env: Env, k: String) -> Int = {
+  env.names = map.set(env.names, k, env.n)
+  env.n = env.n + 1
+  env.n
+}
+
+fn encode(xs: List[String], member: (String) -> Int, tag: (String) -> String) -> List[String] =
+  xs |> list.map((x) => "${tag(x)}${member(x)}")
+
+fn known(env: Env, k: String) -> Int = map.get(env.names, k) ?? -1
+
+fn family(mut env: Env, xs: List[String]) -> List[String] = {
+  let a = add(env, "a")
+  let member = (n: String) => known(env, n)
+  let tag = (n: String) => "${n}:${env.n}="
+  var out: List[String] = []
+  for line in encode(xs, member, tag) {
+    out = out + ["${line}/${add(env, line)}"]
+  }
+  out + ["${a}"]
+}
+
+effect fn main() -> Unit = {
+  var env = { names: map.new(), n: 0 }
+  println(list.join(family(env, ["a", "z"]), " "))
+  println(list.join(family(env, ["a"]), " "))
+  println("${env.n}")
+}
+"#;
+
+#[test]
+fn a_let_bound_closure_used_before_the_next_write_keeps_the_param_lent() {
+    // `let member = (n) => known(env, n)` is only passed to `encode`, which is
+    // evaluated before the loop body lends `env` to `add` again.
+    let out = render(LET_CLOSURE).expect("renders");
+    for name in ["family", "add"] {
+        assert!(header_of(&out, name).contains("&mut "), "{name} borrows the caller's place:\n{out}");
+    }
+    assert_eq!(run_native(LET_CLOSURE), "a:1=0/2 z:1=-1/3 1\na:4=3/5 4\n5\n");
+}
