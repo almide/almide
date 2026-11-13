@@ -752,6 +752,34 @@ checker; callback bodies and call adapters still undergo their existing checks.
 A program built under `[permissions] fs` takes the
 standard build, whose fs calls the scope wraps.
 
+**Native unix host calls.** (Owner ruling 2026-11-10, moved before rc1 on
+2026-11-13.) A program on the certified native render calls the runtime's
+own unix functions (Unix-domain sockets, descriptor passing and shared-memory
+files) as trusted host calls, under the same contract as the fs class above:
+the certificate covers how the program hands each call its arguments and takes
+its result (borrowed arguments, a fresh owned result, `Net` counted), not what
+the host does with the descriptors. The render carries those functions' code
+from the runtime's `unix` module (`runtime/rs/src/unix.rs` with the rt-core
+files it includes: `net_unix_core.rs` and its one sanctioned `unsafe` syscall
+module `net_unix_sys.rs`), the text the standard build compiles, each
+`#[cfg(unix)]` / `#[cfg(not(unix))]` twin under its own gate and the
+descriptor table's gated impls with it (`crates/almide-mir/src/native_floor_host.rs`).
+NEWLY TRUSTED here is nothing the project did not already trust: the embedded
+wasm host serves this same core (`net_unix_core.rs`) as its interim ops
+104..=116, and the standard native build compiles it unchanged. The named set,
+in witness-id order after the fs set's: `almide_rt_unix___os_connect`, `almide_rt_unix___os_listen`, `almide_rt_unix___os_accept`, `almide_rt_unix___os_send`, `almide_rt_unix___os_recv`, `almide_rt_unix___os_close`, `almide_rt_unix___os_wait`, `almide_rt_unix___os_take_fds`, `almide_rt_unix___os_shm_create`, `almide_rt_unix___os_shm_resize`, `almide_rt_unix___os_shm_write`, `almide_rt_unix___os_shm_read`. Every call the render makes to
+one of them is recorded by that id in the `native-calls` witness;
+`NativeCalls.hosts_ok` accepts an id below the length of
+`native_host_calls` (the fs set, then this set), and a floor body outside the
+set that would carry unix code is refused by the render, as is a body that
+would carry the other class's module. `tests/native_fs_host_calls_test.rs`
+holds this list, `host_ops::NATIVE_UNIX_HOST_CALLS`,
+`NativeCalls.native_unix_host_calls` and almide-verify's copy to one list.
+TRUSTED: the runtime unix code itself (descriptor bookkeeping, `sendmsg` /
+`recvmsg` / `poll` / `fcntl` system calls), tested on both legs by the
+`spec/embedded_cross/net_unix_*.almd` and `net_huge_read_lengths.almd`
+fixtures, not proven.
+
 
 ## Historical implementation progression (retained evidence)
 

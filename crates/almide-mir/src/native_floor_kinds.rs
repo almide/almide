@@ -251,7 +251,7 @@ pub(crate) fn specializes(call: &str) -> Option<String> {
 /// The exact callback-bearing host definition. Its checked dependencies
 /// stay intact; only this definition gets a static twin.
 pub(crate) fn native_host_callback_body(symbol: &str) -> Option<&'static str> {
-    is_native_fs_host_body(symbol)
+    is_native_host_body("fs", symbol)
         .then(|| signature_text(runtime_index(), symbol)).flatten()
 }
 

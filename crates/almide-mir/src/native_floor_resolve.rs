@@ -16,7 +16,7 @@ fn closure_using(
     refs: impl Fn(&str) -> Result<Vec<String>, String>,
 ) -> Result<Vec<&'static str>, String> {
     let out = closure_contents_using(symbol, rt, refs)?;
-    fs_host_gate(symbol, &out)?;
+    host_gate(symbol, &out)?;
     Ok(out)
 }
 
@@ -76,9 +76,9 @@ fn references(text: &str) -> Result<Vec<String>, String> {
         let own = OWN.get_or_init(|| defined_names(almide_codegen::generated::rust_runtime::ALMIDE_KERNEL_INLINE));
         return references_seeded(runtime_index(), text, own);
     }
-    if is_fs_host_text(text) {
-        // The fs host module's own names, at any depth, are its own.
-        return references_seeded(runtime_index(), text, fs_host_own_names());
+    if let Some(module) = host_module_of_text(text) {
+        // A host module's own names, at any depth, are its own.
+        return references_seeded(runtime_index(), text, host_own_names(module));
     }
     references_in(runtime_index(), text)
 }
@@ -95,38 +95,44 @@ pub(crate) fn is_runtime_text(text: &str) -> bool {
 /// A runtime implementation of a named host operation. The generated
 /// Send-free twin has the same operation identity and capability witness;
 /// it changes callback scheduling, not the admitted host interface.
-fn is_native_fs_host_body(symbol: &str) -> bool {
-    crate::host_ops::is_native_fs_host_call(symbol)
-        || crate::host_ops::NATIVE_FS_HOST_CALLS.iter().any(|host|
-            almide_codegen::generated::runtime_fn_modes::send_free_twin(host) == Some(symbol))
+fn is_native_host_body(module: &str, symbol: &str) -> bool {
+    crate::host_ops::native_host_class(module).is_some_and(|calls| {
+        calls.contains(&symbol)
+            || calls.iter().any(|host| almide_codegen::generated::runtime_fn_modes::send_free_twin(host) == Some(symbol))
+    })
 }
 
-/// `Err` when the closure carries fs code but implements neither a named
-/// host call nor its generated Send-free twin. Witnesses name the operation.
-fn fs_host_gate(symbol: &str, items: &[&'static str]) -> Result<(), String> {
-    if items.iter().any(|t| is_fs_host_text(t)) && !is_native_fs_host_body(symbol) {
-        return Err(format!(
-            "`{symbol}` reaches the native fs host module, which only the named native fs host calls may (proofs/TRUSTED_BASE.md)"
-        ));
+/// `Err` when the closure carries a host module's code but implements
+/// neither a call named for that module's class nor its generated Send-free
+/// twin. Witnesses name the operation.
+fn host_gate(symbol: &str, items: &[&'static str]) -> Result<(), String> {
+    for module in items.iter().filter_map(|t| host_module_of_text(t)) {
+        if !is_native_host_body(module, symbol) {
+            return Err(format!(
+                "`{symbol}` reaches the native {module} host module, which only the named native {module} host calls may (proofs/TRUSTED_BASE.md)"
+            ));
+        }
     }
     Ok(())
 }
 
 /// The text a runtime fn's signature is read from: its own item, or, for a
-/// fn of the fs host module (whose name resolves to the whole module), its
-/// own definition inside the module.
+/// fn of a host module (whose name resolves to the whole module), its own
+/// definition inside the module.
 fn signature_text(rt: &'static RuntimeIndex, symbol: &str) -> Option<&'static str> {
     let item = rt.items.get(symbol)?.text;
-    if !is_fs_host_text(item) {
+    if host_module_of_text(item).is_none() {
         return Some(item);
     }
     static FNS: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     FNS.get_or_init(|| {
         let mut out = HashMap::new();
         let mut twice = BTreeSet::new();
-        for (kind, name, text, attributed) in fs_host_source().map(top_level_items).unwrap_or_default() {
-            if kind == ItemKind::Fn && !attributed && out.insert(name, text).is_some() {
-                twice.insert(name);
+        for src in HOST_MODULES.iter().filter_map(|m| host_source(m)) {
+            for (kind, name, text, attributed) in top_level_items(src) {
+                if kind == ItemKind::Fn && !attributed && out.insert(name, text).is_some() {
+                    twice.insert(name);
+                }
             }
         }
         out.retain(|n, _| !twice.contains(n));
@@ -137,7 +143,7 @@ fn signature_text(rt: &'static RuntimeIndex, symbol: &str) -> Option<&'static st
 }
 
 #[cfg(test)]
-mod fs_host_tests {
+mod host_tests {
     use super::*;
 
     /// A floor body outside the named set whose closure reaches fs host code
@@ -146,37 +152,78 @@ mod fs_host_tests {
     fn only_a_named_call_may_carry_fs_host_code() {
         let fs_item = runtime_index().items.get("almide_rt_fs_write").expect("fs.write_text's body is an item").text;
         assert!(is_fs_host_text(fs_item));
-        assert!(fs_host_gate("almide_rt_fs_write", &[fs_item]).is_ok());
+        assert!(host_gate("almide_rt_fs_write", &[fs_item]).is_ok());
         for host in crate::host_ops::NATIVE_FS_HOST_CALLS {
             if let Some(twin) = almide_codegen::generated::runtime_fn_modes::send_free_twin(host) {
-                assert!(fs_host_gate(twin, &[fs_item]).is_ok());
+                assert!(host_gate(twin, &[fs_item]).is_ok());
             }
         }
-        assert!(fs_host_gate("almide_rt_fs_write_seq", &[fs_item]).is_err());
-        let refused = fs_host_gate("almide_rt_string_len", &[fs_item]).unwrap_err();
+        assert!(host_gate("almide_rt_fs_write_seq", &[fs_item]).is_err());
+        let refused = host_gate("almide_rt_string_len", &[fs_item]).unwrap_err();
         assert!(refused.contains("native fs host module"), "{refused}");
-        assert!(fs_host_gate("almide_rt_string_len", &["fn f() {}"]).is_ok());
+        assert!(host_gate("almide_rt_string_len", &["fn f() {}"]).is_ok());
+    }
+
+    /// The unix class gates its own module: a named unix call may carry it,
+    /// an fs host call or any other body may not, and a unix call may not
+    /// carry fs code.
+    #[test]
+    fn only_a_named_unix_call_may_carry_unix_host_code() {
+        let rt = runtime_index();
+        let unix_item = rt.items.get("almide_rt_unix___os_close").expect("unix.__os_close's body is an item").text;
+        assert_eq!(host_module_of_text(unix_item), Some("unix"));
+        for host in crate::host_ops::NATIVE_UNIX_HOST_CALLS {
+            assert!(host_gate(host, &[unix_item]).is_ok(), "{host}");
+        }
+        let refused = host_gate("almide_rt_fs_write", &[unix_item]).unwrap_err();
+        assert!(refused.contains("native unix host module"), "{refused}");
+        assert!(host_gate("almide_rt_net___os_tcp_close", &[unix_item]).is_err());
+        let fs_item = rt.items.get("almide_rt_fs_write").expect("fs.write_text's body is an item").text;
+        assert!(host_gate("almide_rt_unix___os_close", &[fs_item]).is_err());
+    }
+
+    /// Every named unix call carries its module's closure: the cfg-gated
+    /// table impls and the syscall module travel with it.
+    #[test]
+    fn every_named_unix_call_resolves_with_its_module() {
+        for host in crate::host_ops::NATIVE_UNIX_HOST_CALLS {
+            let items = closure(host, runtime_index()).unwrap_or_else(|e| panic!("{host}: {e}"));
+            assert!(items.iter().any(|t| t.contains("impl AlmideUnixTables")), "{host}: the table's impls travel");
+        }
+    }
+
+    /// The build-script copy of the module list is the classes' list.
+    #[test]
+    fn host_modules_are_the_host_classes() {
+        let classes: Vec<&str> = crate::host_ops::NATIVE_HOST_CLASSES.iter().map(|(m, _)| *m).collect();
+        assert_eq!(HOST_MODULES, classes.as_slice());
     }
 
     /// The module's `#[cfg]` twins travel together: the name resolves to an
     /// item holding every gated definition.
     #[test]
-    fn a_cfg_twinned_fs_name_carries_every_twin() {
-        let src = fs_host_source().expect("the runtime has an fs module");
-        let twinned = scan_items(src, true)
-            .into_iter()
-            .filter(|(k, _, _, a)| *k != ItemKind::Impl && *a)
-            .map(|(_, n, _, _)| n)
-            .next()
-            .expect("the fs module has a #[cfg] item");
-        let item = runtime_index().items.get(twinned).expect("the twinned name is takeable").text;
-        assert!(is_fs_host_text(item));
-        assert!(item.contains("#[cfg"), "{twinned}: the gate travels with the item");
+    fn a_cfg_twinned_host_name_carries_every_twin() {
+        for module in HOST_MODULES {
+            let src = host_source(module).expect("the runtime has the host module");
+            let twinned = scan_items(src, true)
+                .into_iter()
+                .filter(|(k, _, _, a)| *k != ItemKind::Impl && *a)
+                .map(|(_, n, _, _)| n)
+                .next()
+                .expect("the host module has a #[cfg] item");
+            let item = runtime_index().items.get(twinned).expect("the twinned name is takeable").text;
+            assert_eq!(host_module_of_text(item), Some(*module));
+            assert!(item.contains("#[cfg"), "{twinned}: the gate travels with the item");
+        }
     }
 }
 
+fn host_module_of_text(text: &str) -> Option<&'static str> {
+    host_module_of_text_in(runtime_index(), text)
+}
+
 fn is_fs_host_text(text: &str) -> bool {
-    is_fs_host_text_in(runtime_index(), text)
+    host_module_of_text(text) == Some("fs")
 }
 
 /// Additional trusted runtime support for a scoped host implementation. This
