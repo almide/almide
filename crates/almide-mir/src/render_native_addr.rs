@@ -30,6 +30,7 @@ mod map;
 mod slots;
 #[path = "render_native_heap_slot.rs"]
 mod heap_slot;
+pub(crate) use heap_slot::{store_text, take_text};
 #[path = "render_native_value.rs"]
 mod value;
 #[path = "render_native_byte_slots.rs"]
@@ -307,6 +308,7 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
     PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().clear());
     FIELD_COPIES.with(|m| m.borrow_mut().clear());
 }
 
@@ -349,6 +351,46 @@ pub(crate) fn payload_take_of(v: ValueId) -> Option<(ValueId, String)> {
 /// Every borrowed read noted with the move-out expression `take`.
 pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
     PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == take).map(|(v, _)| *v).collect())
+}
+
+/// Whether some other borrowed payload read of the carrier `base` (one `take`
+/// does not move out) is read on a path after `ops[at]`. A move-out borrows
+/// the whole carrier (`v.take_s3_r0()` takes `&mut self`), which a sibling
+/// payload still lent there forbids: `Link(name, xs, rest) => walk(rest, k +
+/// list.len(xs))` took `rest` while `xs` was a slice of the same block.
+///
+/// A sibling read is lent as long as the binding it made is read, not as long
+/// as the value is live: in a loop the next round reads a NEW binding of it
+/// (`acc = step(acc, i)!` reads the Err side's text in one arm of every
+/// round, and the Ok side moves out in the other).
+pub(crate) fn other_payload_live(func: &MirFunction, at: usize, base: ValueId, take: &str) -> bool {
+    let mut others: Vec<ValueId> = PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.0 == base && p.1 != take).map(|(v, _)| *v).collect());
+    others.extend(PAYLOAD_VIEWS.with(|m| m.borrow().iter().filter(|(_, b)| **b == base).map(|(v, _)| *v).collect::<Vec<_>>()));
+    others.into_iter().any(|v| crate::mir_liveness::bound_read_after(func, at, v))
+}
+
+thread_local! {
+    static PAYLOAD_VIEWS: std::cell::RefCell<BTreeMap<ValueId, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// Whether a read planned as a move out of `base` (`planned`) may be one: no
+/// borrowed view of another payload of `base` was rendered before it, which
+/// a move out through `&mut base` would end.
+pub(crate) fn may_move_payload(planned: bool, base: ValueId) -> bool {
+    planned && !PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+}
+
+/// Whether any payload of the carrier `base` was read by reference (a read
+/// with a noted move-out, or a view): a later move out of it would empty
+/// what that reference still names.
+pub(crate) fn payload_lent(base: ValueId) -> bool {
+    PAYLOAD_TAKES.with(|m| m.borrow().values().any(|p| p.0 == base)) || PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+}
+
+/// A borrowed view of a payload of the carrier `base` that is never moved
+/// out itself (a list slot's slice, a guarded record payload).
+pub(crate) fn note_payload_view(v: ValueId, base: ValueId) {
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().insert(v, base));
 }
 
 /// The move of a heap field out of a borrowed PAYLOAD whose carrier dies at

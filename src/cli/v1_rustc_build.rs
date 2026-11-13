@@ -66,10 +66,17 @@ fn program_profile_args(rs_code: &str, release: bool) -> Vec<String> {
 /// CPU and LLVM options (fat LTO does not inline across differing target
 /// features) and the split's `--sysroot` (an rlib must be built against the
 /// std it is linked with).
+///
+/// A release runtime is one codegen unit, as the manifest's
+/// `[profile.release]` (`codegen-units = 1`) gives every package of the cargo
+/// build. Without it rustc split the runtime into 16 units joined by a local
+/// ThinLTO pass before the program's fat LTO saw it: `decode 5000000` ran
+/// 330 ms against v0.69.1's 271 ms (GCE c4-standard-8, 2026-11-12), 290 ms
+/// with the one unit and nothing else changed.
 fn runtime_profile_args(rs_code: &str, release: bool) -> Vec<String> {
     let mut args: Vec<String> = vec!["-C".into(), "debug-assertions=off".into()];
     if release {
-        args.extend(["-C".into(), "opt-level=3".into()]);
+        args.extend(["-C".into(), "opt-level=3".into(), "-C".into(), "codegen-units=1".into()]);
         args.extend(super::native_target::release_codegen_rustc_args());
         if let Some(split) = release_split_for(rs_code) {
             args.extend(split.rustc_args().into_iter().take(2)); // the sysroot, not the link arg
@@ -248,6 +255,25 @@ mod tests {
                 assert!(args.windows(2).any(|w| w == off), "{what} release={release}: {args:?}");
             }
         }
+    }
+
+    /// The release runtime crate is built with the codegen-unit count the
+    /// generated manifest's `[profile.release]` gives every package of the
+    /// cargo build (one): rustc's default for a library splits it into 16
+    /// units, which made `decode` 1.2x v0.69.1.
+    #[test]
+    fn release_runtime_has_the_manifests_codegen_units() {
+        let release = super::super::cargo_toml::GENERATED_CARGO_TOML
+            .split("[profile.release]")
+            .nth(1)
+            .expect("a release profile");
+        let units = release
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("codegen-units = "))
+            .expect("the release profile names its codegen units");
+        let want = format!("codegen-units={units}");
+        let r = runtime_profile_args("fn main() {}", true);
+        assert!(r.windows(2).any(|w| w[0] == "-C" && w[1] == want), "release runtime args {r:?} lack -C {want}");
     }
 
     /// A release program links with fat LTO and one codegen unit.

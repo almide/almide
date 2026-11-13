@@ -4,8 +4,8 @@
 //! body that reassigned the bound variable moved the bound under the loop:
 //! `var n = 5; for _i in 0..<n { n = n + 10 }` ran 5 rounds on wasm and never
 //! ended natively. `snapshot_range_bounds` binds such a bound ahead of the
-//! loop. `for i in list.range(a, b)` over moving bounds is held to the same
-//! promise.
+//! loop, and `native_range_loops.rs` counts `for i in list.range(a, b)` over
+//! variable bounds on the same promise.
 //!
 //! Each program prints one fixed text on the native render (ownership
 //! certificate required, no fallback to the standard render) and on wasm.
