@@ -57,6 +57,20 @@ pub fn rewrite_option_ops(
 }
 
 impl OptionTracker {
+    /// A module slot holding a scalar Option (native_slot_rewrite): its read
+    /// is the Option value itself, owning no object. `true` when `op` is such
+    /// a read and its result was noted as a minted Option (the op stays).
+    fn notes_scalar_slot_read(&mut self, op: &Op) -> bool {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { return false };
+        let slot = args.len() == 1
+            && self.const_vals.get(&args[0]).is_some_and(|a| crate::native_slot_rewrite::scalar_option_slot_at(*a));
+        if slot {
+            self.opt_vals.insert(*d);
+            self.minted.insert(*d);
+        }
+        slot
+    }
+
     /// A 0-or-1 block filled in place (`crate::option_blocks`): None until
     /// its hit stores the payload, then its length word 1. `true` when `op`
     /// is one of the block's ops and was rewritten; any other length word is
@@ -117,6 +131,10 @@ impl OptionTracker {
     /// window. Hands `op` back when none of them applies.
     fn carrier_op(&mut self, op: Op, out: &mut Vec<Op>, carriers: &BTreeSet<ValueId>) -> Option<Op> {
         if self.filled_block_op(&op, out) {
+            return None;
+        }
+        if self.notes_scalar_slot_read(&op) {
+            out.push(op);
             return None;
         }
         match &op {
