@@ -211,13 +211,11 @@ pub(crate) fn dying_after(
 /// of one of its scalar slots (`ListGetScalar`, or the address `prim.handle`
 /// takes of it and nothing reads) does not see the field, which the move
 /// leaves empty, so it does not keep the record alive.
-pub(crate) fn carrier_dies_after(
-    func: &MirFunction,
-    at: usize,
-    src: ValueId,
-    borrow_arms: &std::collections::BTreeSet<ValueId>,
-) -> bool {
-    carrier_dies_after_reading(func, at, src, borrow_arms, false)
+pub(crate) fn carrier_dies_after(func: &MirFunction, at: usize, src: ValueId, borrow_arms: &std::collections::BTreeSet<ValueId>) -> bool {
+    // An in-out param is the caller's place: the caller reads it after the
+    // call, so it never dies here (a field leaves it only through
+    // `native_inout::field_moves_out`, which puts the field back).
+    !func.inout_params.contains(&src) && carrier_dies_after_reading(func, at, src, borrow_arms, false)
 }
 
 /// [`carrier_dies_after`], where `slots` also leaves out a record's scalar
@@ -629,8 +627,9 @@ pub(crate) fn set_moving_args(
                         (base, format!("std::mem::take(&mut {place})"), reads)
                     }
                 };
+                let inout = crate::native_inout::field_moves_out(func, at, base, take.trim_start_matches("std::mem::take(&mut ").trim_end_matches(')'));
                 let ok = payload_carrier(tys.get(&base).copied())
-                    && carrier_dies_after_reading(func, at, base, borrow_arms, true)
+                    && (inout || carrier_dies_after_reading(func, at, base, borrow_arms, true))
                     && reads.iter().all(|r| dying_after(func, at, *r, borrow_arms));
                 ok.then(|| (v, payload_move(func, at, base, tys.get(&base).copied(), take)))
             })

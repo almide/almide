@@ -50,8 +50,12 @@ pub(crate) fn tail_calls(f: &MirFunction) -> BTreeSet<usize> {
     if !stack.is_empty() { return BTreeSet::new(); }
     f.ops.iter().enumerate().filter_map(|(i, op)| {
         let Op::CallFn { name, dst: Some(value), args, .. } = op else { return None; };
+        // An in-out param passed on at its own position is the caller's place,
+        // lent again: nothing of it is released after the call.
+        let released = |k: usize, a: &CallArg| matches!(a, CallArg::Handle(v)
+            if !(f.inout_params.contains(v) && f.params.get(k).is_some_and(|p| p.value == *v)));
         if name != &f.name || args.len() != f.params.len()
-            || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) { return None; }
+            || !args.iter().enumerate().any(|(k, a)| released(k, a)) { return None; }
         let (mut at, mut value) = (i + 1, *value);
         loop {
             match f.ops.get(at) {

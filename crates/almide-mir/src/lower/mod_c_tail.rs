@@ -364,7 +364,7 @@ fn wrap_value_in_ok(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty) -> bool {
         },
     );
     *expr = IrExpr {
-        span: inner.span.clone(),
+        span: inner.span,
         def_id: inner.def_id,
         kind: IrExprKind::ResultOk { expr: Box::new(inner) },
         ty: result_ty.clone(),
