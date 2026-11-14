@@ -86,24 +86,23 @@ fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = {
   dst + len
 }
 
-// The bytes `from`..`from + nbytes` of `s` (block `h`, `blen` bytes) as the
-// result. All of `s` is `s` itself. The registry's prim body owns its
-// parameter, so a sole owner (rc 1) is trimmed in place: its bytes move to
-// the front and its length shrinks. A pooled literal also carries rc 1 but
-// always cap = len, so spare capacity is required too, as `string.to_upper`
-// requires it (string_to_upper.almd). Anything else is copied out.
-fn __trim_keep(s: String, h: Int, blen: Int, from: Int, nbytes: Int) -> String =
-  if nbytes == blen then s
-  else if prim.load32(h) == 1 and prim.load32(h + 8) > blen then {
-    let _e = __trim_copy(from, h + 12, nbytes)
-    prim.store32(h + 4, nbytes)
-    s
-  } else {
-    let buf = prim.alloc_str(nbytes)
-    let _e = __trim_copy(from, prim.handle(buf) + 12, nbytes)
-    buf
-  }
+// The registry's prim body owns its parameter, so a sole owner (rc 1) may
+// be trimmed in place: its bytes move to the front and its length shrinks.
+// A pooled literal also carries rc 1 but always cap = len, so spare capacity
+// is required too, as `string.to_upper` requires it (string_to_upper.almd).
+// Each trim judges its own parameter in its own body: handed to a helper,
+// the parameter would carry the helper's credit too and never read as sole.
+fn __trim_sole(h: Int, blen: Int) -> Bool = prim.load32(h) == 1 and prim.load32(h + 8) > blen
 
+// The bytes `from`..`from + nbytes` as a new string.
+fn __trim_copied(from: Int, nbytes: Int) -> String = {
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(from, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+// All of `s` is `s` itself; a sole owner keeps its block; anything else is
+// copied out.
 fn string_trim(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
@@ -111,7 +110,12 @@ fn string_trim(s: String) -> String = {
   let ws_start = __trim_start(base, base + blen)
   let ws_end = __trim_end(ws_start, base + blen)
   let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
-  __trim_keep(s, h, blen, ws_start, nbytes)
+  if nbytes == blen then s
+  else if __trim_sole(h, blen) then {
+    let _e = __trim_copy(ws_start, base, nbytes)
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(ws_start, nbytes)
 }
 
 // Strip Unicode whitespace from the START only (leading), keeping the remainder.
@@ -121,15 +125,25 @@ fn string_trim_start(s: String) -> String = {
   let base = h + 12
   let end = base + blen
   let ws_start = __trim_start(base, end)
-  __trim_keep(s, h, blen, ws_start, end - ws_start)
+  let nbytes = end - ws_start
+  if nbytes == blen then s
+  else if __trim_sole(h, blen) then {
+    let _e = __trim_copy(ws_start, base, nbytes)
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(ws_start, nbytes)
 }
 
-// Strip Unicode whitespace from the END only (trailing), keeping the prefix.
+// Strip Unicode whitespace from the END only (trailing), keeping the prefix:
+// a sole owner only shortens its length.
 fn string_trim_end(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
-  let end = base + blen
-  let ws_end = __trim_end(base, end)
-  __trim_keep(s, h, blen, base, ws_end - base)
+  let nbytes = __trim_end(base, base + blen) - base
+  if nbytes == blen then s
+  else if __trim_sole(h, blen) then {
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(base, nbytes)
 }
