@@ -271,7 +271,7 @@ impl WitnessRecorder {
 
     /// #4648: an early exit releases a loop-carried local before this path
     /// reached its bind: the dec-old its next rebind would have done.
-    pub fn release_unbound(&mut self, local: u32) {
+    pub(crate) fn release_unbound(&mut self, local: u32) {
         self.log(Ev::DecOld(local));
     }
 

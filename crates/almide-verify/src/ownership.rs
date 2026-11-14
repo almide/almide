@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn a_taken_over_param_through_sibling_exits() {
         // A param taken over (`i`) by a body whose nested tail branch is
-        // spelled as sibling early returns (almide-mir `native_unnest_tail`):
+        // spelled as sibling early returns (almide-mir `native_tail_unnest`):
         // each leaving arm ends at zero, the tail path releases last.
         assert!(check_xc(b"i{|dx}{|dx}d"));
         assert!(check_xc(b"i{|dx}{|dx}d\n{|imx}{|x}\n{|imx}\nim"));

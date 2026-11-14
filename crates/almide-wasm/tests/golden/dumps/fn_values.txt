@@ -134,7 +134,7 @@ code locals=[1xI32,1xI64,1xI32]
   I64Sub
   I64Add
   I32WrapI64
-  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, target: Memory(0), ordering: None } }
   LocalGet { local_index: 2 }
   I64Const { value: 10 }
   I64DivS
@@ -152,7 +152,7 @@ code locals=[1xI32,1xI64,1xI32]
   LocalSet { local_index: 1 }
   LocalGet { local_index: 1 }
   I32Const { value: 45 }
-  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, target: Memory(0), ordering: None } }
   End
   I32Const { value: 48 }
   LocalGet { local_index: 1 }
@@ -286,7 +286,7 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32
   LocalGet { local_index: 9 }
   I64Const { value: 41 }
   LocalGet { local_index: 9 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, target: Memory(0), ordering: None } }
   CallIndirect { type_index: 21, table_index: 0 }
   Call { function_index: 46 }
   LocalGet { local_index: 1 }
@@ -301,7 +301,7 @@ code locals=[]
   End
   LocalGet { local_index: 0 }
   LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 16, memory: 0 } }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 16, target: Memory(0), ordering: None } }
   CallIndirect { type_index: 20, table_index: 0 }
   End
 code locals=[1xI32]
