@@ -125,7 +125,7 @@
 # not cover (a cited test that holds the invalid corpus without routing it into
 # its producer, and an unevidenced none / message / typed / obligation verdict
 # that is wrong) as UNCOMPENSATED: 44 -> 46, a newly mapped blind spot.
-# uncompensated_blind_ceiling = "46"
+# uncompensated_blind_ceiling = "50"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -854,6 +854,16 @@ evidence = "#2413 (landing PR, 2026-09-21), run through the Almide gate `main.al
 measures = "per stdlib hole (`fn f(...) = _`), the triple (native @intrinsic, `fn lower_<mod>_<fn>[_suffix]` definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in self_host_registry.rs) re-derived by scripts/lib/impl-count-enumerate.py against proofs/impl-count-ledger.toml: any total that grew, any triple that differs, any hole added or gone"
 varies = "#2413 landing: four forged inputs each read as a finding (a grown total, a new hole, a ledger above reality, a blinded enumerator)"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "tools/almide-gates:structure"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "introduction (2026-11-10, on develop 79cdadd28), run through the Almide gate `main.almd --target wasm -- structure .`: five forged inputs, each run, tree restored and green after each — (1) `crates/almide-ir/src/zz_structure_probe.rs` holding one `pub fn`, declared by no `mod` => exit 1 with 'NEW orphan-file crates/almide-ir/src/zz_structure_probe.rs', 'NEW orphan-fn ...::zz_never_declared' and 'pub-unused almide-ir: 37 -> 38 GREW'; (2) `pub struct ZzStructureProbeExport;` appended to crates/almide-ir/src/effect.rs => exit 1 with 'pub-unused almide-ir: 37 -> 38 GREW'; (3) `crates/almide-ir/tests/zz_probe_b.rs` => exit 1 with 'NEW split-file almide-ir (1) is not in the ledger'; (4) a root holding one crate with one Rust file => exit 1 with 'the enumerator read only 1 Rust file(s) in 1 crate(s) — refusing to judge', and `--update` on the same root refused too, the ledger byte-identical after; (5) the ledger raised above the tree (almide-ir 37 written as 42, a row added for a function that does not exist) => exit 0 naming both rows as slack, which is the designed verdict: a shrink is never demanded of the PR that earned it."
+measures = "four counts re-derived from the Rust under crates/, src/ and tests/ by scripts/lib/structure-enumerate.py against proofs/structure-ledger.toml: per crate, the `pub` items named nowhere outside that crate's src/, and the files whose stem ends in a letter, number or part marker; per finding, each .rs file no `mod`, `#[path]` or `include!` reaches, and each function whose name occurs once. A count that grew, a crate with a non-zero count and no row, or a named finding with no row fails"
+varies = "introduction: 756 unused exports across 28 crates (almide-frontend 159, almide-mir 138, almide-codegen 127), 95 size-cut files (87 in almide-mir), 3 orphan files (1,318 lines) and 12 orphan functions (242 lines) on the clean tree; each of the three planted findings read as growth, a one-file root read as blinded"
+blind = "two unused functions that call each other, and an unused item that shares its name with any other item, read as used: the match is by name -> UNCOMPENSATED; an item reached only through a macro-built name reads as unused and is pinned as debt it is not -> UNCOMPENSATED; a `pub` item used only by its own crate's tests or examples reads as used -> UNCOMPENSATED; a ledger left above the tree lets a count grow back up to its old value unseen until someone runs --update -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-downstream-grammar.sh"

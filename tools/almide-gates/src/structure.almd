@@ -1,0 +1,157 @@
+// `structure` — what only shows across files.
+//
+// codopsy grades one function and one file at a time, and every crate holds its
+// A. Four things stayed invisible to it, and were found by hand on 2026-11-10:
+// almide-mir exported 324 `pub` items and 92 were named outside it; 87 of its
+// files were `desugar_b.rs` / `binds_p2.rs`, cut by the 800-line rule and not by
+// what they do; `pass_lambda_type_lookup.rs` (493 lines) was reached by no `mod`
+// while three later commits edited it and ARCHITECTURE.md cited it; and
+// `rust_templates_inline` (113 lines) was called by nothing. Each is a number,
+// so each is pinned.
+//
+// The counting half is `scripts/lib/structure-enumerate.py` — it reads the Rust
+// and prints one TSV row per finding, so it stays a script (#2128). This half
+// reads the pinned ledger `proofs/structure-ledger.toml`, compares, and is the
+// only writer of that ledger (`--update`).
+//
+// Verdicts. Only growth fails:
+//   - a per-crate count (`pub-unused`, `split-file`) that GREW, or a crate with
+//     a non-zero count and no row;
+//   - a named finding (`orphan-file`, `orphan-fn`) that is not in the ledger.
+// A count that SHRANK and a named row that is gone are reported and pass: a
+// ledger every cleanup had to rewrite would put two cleanups in conflict at the
+// merge queue (the lesson proofs/ledger-counts.toml records), so the slack is
+// taken up by `--update` at any time, never demanded of the PR that earned it.
+import fs
+import process
+import toml
+
+type Verdict = { lines: List[String], ok: Bool }
+
+type Row = { kind: String, key: String, value: Int }
+
+fn id(r: Row) -> String = r.kind + " " + r.key
+
+fn num(s: String) -> Int = int.parse(string.trim(s)) ?? 0
+
+// One enumerator line: kind, key, value — tab-separated.
+fn tsv_row(line: String) -> Row? = {
+  let f = string.split(line, "\t")
+  if list.len(f) != 3 then none
+  else some(Row {
+    kind: list.get(f, 0) ?? "",
+    key: list.get(f, 1) ?? "",
+    value: num(list.get(f, 2) ?? "0"),
+  })
+}
+
+fn ledger_row(t: toml.Table) -> Row = Row {
+  kind: toml.table_get(t, "kind"),
+  key: toml.table_get(t, "key"),
+  value: num(toml.table_get(t, "value")),
+}
+
+// A count is one number per crate; the other kinds are one row per finding.
+fn is_count(kind: String) -> Bool = match kind {
+  "pub-unused" => true,
+  "split-file" => true,
+  _ => false,
+}
+
+fn remedy(kind: String) -> String = match kind {
+  "pub-unused" => "a `pub` nothing outside the crate names: write `pub(crate)` (list them: python3 scripts/lib/structure-enumerate.py . --list pub-unused <crate>)",
+  "split-file" => "a file cut by size: name it for what it does, or fold it into the module it continues",
+  "orphan-file" => "no `mod`, `#[path]` or `include!` reaches this file: declare it or delete it",
+  "orphan-fn" => "nothing names this function: call it or delete it",
+  _ => "unknown kind",
+}
+
+fn row_toml(r: Row) -> String = """
+  [[row]]
+  kind  = "${r.kind}"
+  key   = "${r.key}"
+  value = ${int.to_string(r.value)}
+
+  """
+
+fn total(rows: List[Row], kind: String) -> Int = rows |> list.filter((r) => r.kind == kind) |> list.fold(
+  0,
+  (acc, r) => acc + r.value,
+)
+
+fn count_of(rows: List[Row], kind: String) -> Int = rows |> list.filter((r) => r.kind == kind) |> list.len
+
+// What the ledger keeps: every named finding, and every count that is not zero.
+fn pinned_form(rows: List[Row]) -> List[Row] = rows |> list.filter((r) => not is_count(r.kind) or r.value > 0) |> list.sort_by((r) => id(r))
+
+fn summary(rows: List[Row]) -> String = "pub-unused " + int.to_string(total(rows, "pub-unused")) + ", split-file " + int.to_string(total(rows, "split-file")) + ", orphan-file " + int.to_string(count_of(rows, "orphan-file")) + " (" + int.to_string(total(rows, "orphan-file")) + " lines), orphan-fn " + int.to_string(count_of(rows, "orphan-fn")) + " (" + int.to_string(total(rows, "orphan-fn")) + " lines)"
+
+fn ledger_text(rows: List[Row]) -> String = {
+  let head = """
+    # STRUCTURE LEDGER — written by `almide-gates structure --update`.
+    # What only shows across files, re-derived by scripts/lib/structure-enumerate.py:
+    #   pub-unused   per crate, `pub` items named nowhere outside the crate's src/
+    #   split-file   per crate, files whose stem ends in a letter, number or part marker
+    #   orphan-file  a .rs file no `mod`, `#[path]` or `include!` reaches (value = lines)
+    #   orphan-fn    a function nothing names (value = lines)
+    # Gated by tools/almide-gates structure: a count may not grow and a named row
+    # may not be added. A shrink passes; take it up with --update.
+    # ${summary(rows)}
+
+    """
+  head + (rows |> list.map((r) => row_toml(r)) |> list.join(""))
+}
+
+// A current row the ledger does not cover, if any.
+fn growth(pinned: Map[String, Row], c: Row) -> String? = match map.get(pinned, id(c)) {
+  none => if is_count(c.kind) and c.value == 0 then none
+  else some("NEW " + id(c) + " (" + int.to_string(c.value) + ") is not in the ledger — " + remedy(c.kind)),
+  some(p) => if is_count(c.kind) and c.value > p.value then some(id(c) + ": " + int.to_string(p.value) + " -> " + int.to_string(c.value) + " GREW — " + remedy(c.kind))
+  else none,
+}
+
+// A ledger row that now sits above the tree, if any.
+fn slack(current: Map[String, Row], p: Row) -> String? = match map.get(current, id(p)) {
+  none => some(id(p) + " is gone"),
+  some(c) => if is_count(p.kind) and c.value < p.value then some(id(p) + ": " + int.to_string(p.value) + " -> " + int.to_string(c.value))
+  else none,
+}
+
+fn slack_lines(found: List[String]) -> List[String] = if list.len(found) == 0 then []
+else [
+  "structure: " + int.to_string(list.len(found)) + " ledger row(s) sit above the tree — lower them with --update:"
+] + (found |> list.map((s) => "  " + s))
+
+effect fn run(root: String, update: Bool) -> Verdict = {
+  let enumerator = root + "/scripts/lib/structure-enumerate.py"
+  let out = process.exec("python3", [enumerator, root])!
+  let rows = string.split(string.trim_end(out), "\n") |> list.filter_map((l) => tsv_row(l))
+  let scanned = total(rows, "scanned")
+  let current = rows |> list.filter((r) => r.kind != "scanned")
+  let path = root + "/proofs/structure-ledger.toml"
+  // A blinded enumerator reads no Rust and so finds nothing: refuse to write or judge
+  // against that rather than pin an empty ledger as clean.
+  if scanned < 1000 or count_of(current, "pub-unused") < 10 then Verdict {
+    lines: [
+      "::error::structure: the enumerator read only " + int.to_string(scanned) + " Rust file(s) in " + int.to_string(count_of(current, "pub-unused")) + " crate(s) — refusing to judge"
+    ],
+    ok: false,
+  } else if update then {
+    fs.write_text(path, ledger_text(pinned_form(current)))!
+    Verdict { lines: ["structure: ledger rewritten — " + summary(current)], ok: true }
+  } else {
+    let text = fs.read_text(path)!
+    let pinned_rows = toml.parse_tables(text) |> list.filter((t) => toml.table_get(t, "kind") != "") |> list.map((t) => ledger_row(t))
+    let pinned = map.from_list(pinned_rows |> list.map((r) => (id(r), r)))
+    let cur = map.from_list(current |> list.map((r) => (id(r), r)))
+    let bad = current |> list.filter_map((c) => growth(pinned, c))
+    let loose = slack_lines(pinned_rows |> list.filter_map((p) => slack(cur, p)))
+    if list.len(bad) == 0 then Verdict {
+      lines: ["structure OK: " + summary(current) + " — pinned, none grew"] + loose,
+      ok: true,
+    } else Verdict {
+      lines: (bad |> list.map((b) => "::error::structure: " + b)) + ["structure: FAILED — " + int.to_string(list.len(bad)) + " growth(s) against " + path],
+      ok: false,
+    }
+  }
+}
