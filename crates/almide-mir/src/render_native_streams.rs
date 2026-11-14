@@ -258,5 +258,10 @@ mod tests {
         let got = run(src);
         assert!(got.contains("for (v53, __e_v53) in almide_rt_bytes_to_list_iter(&v64).enumerate() {"), "{got}");
         assert!(got.contains("let mut v66: i64 = __e_v53;") && !got.contains("v65"), "{got}");
+        // A list left to scope end streams too; one read again does not.
+        let scoped = src.replace("    drop(v65);", "    let mut v80: i64 = v70;");
+        assert!(run(&scoped).contains("almide_rt_bytes_to_list_iter(&v64).enumerate()"), "{scoped}");
+        let read_later = src.replace("    drop(v65);", "    let mut v80: i64 = v65.len() as i64;");
+        assert_eq!(run(&read_later), read_later);
     }
 }
