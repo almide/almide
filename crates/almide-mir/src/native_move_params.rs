@@ -375,9 +375,9 @@ fn own_params(
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    if crate::verify_ownership(&f).is_err() { return None; }
-    // Consumed in an arm of an arm: the same body as sibling early returns.
-    if newly_poisoned(func, &f) { return own_unnested(func, takes, hands, owned); }
+    let (verified, poisoned) = judged(func, &f, &movable, &consumed);
+    // Unverified: no takeover. Consumed in an arm of an arm: the same body as sibling early returns.
+    if !verified { return None; } else if poisoned { return own_unnested(func, takes, hands, owned); }
     Some(f)
 }
 
@@ -648,7 +648,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
         return;
     }
     let taken = taken_functions(functions);
-    DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions)); JUDGED.with(|j| j.borrow_mut().clear());
     BODIES.with(|d| *d.borrow_mut() = functions.iter().map(|f| f.name.clone()).collect());
     NATIVE_RESULTS.with(|d| *d.borrow_mut() = native_result_params(sigs));
     let reached_otherwise = reached_otherwise(functions);
