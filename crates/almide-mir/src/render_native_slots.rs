@@ -236,9 +236,18 @@ impl BlockTyping<'_, '_> {
         // Its elements may come from tag-guarded Result reads, whose kind
         // deliberately remains unknown to the flow-insensitive prepass.
         for (v, key) in &self.func.aggregate_blocks {
-            if rec::declared_kind(key) == Some(NTy::VecStr) {
-                self.known.insert(*v, NTy::VecStr);
-                self.str_lists.insert(*v);
+            match rec::declared_kind(key) {
+                Some(NTy::VecStr) => {
+                    self.known.insert(*v, NTy::VecStr);
+                    self.str_lists.insert(*v);
+                }
+                // A checked String (a payload field bound under its tag
+                // dispatch): the kind its slot read has no single answer for
+                // when the variant's cases disagree at that slot.
+                Some(NTy::Str) => {
+                    self.known.entry(*v).or_insert(NTy::Str);
+                }
+                _ => {}
             }
         }
         if let (Some(v), Some((_, Some(NativeSigKind::ListStr)))) =
