@@ -97,10 +97,14 @@ fn registry_entry(call_name: &str) -> Option<(usize, &'static str)> {
 }
 
 fn lower_source_sigs(idx: usize) -> Option<SourceSigs> {
-    let (source, _) = crate::mir_ops::self_host_runtime()[idx];
+    let (source, entries) = crate::mir_ops::self_host_runtime()[idx];
     // Lowering this source installs its own ABI facts; the caller's stay (#3058).
     let _facts = crate::lower::AbiFactsScope::save();
-    let ir = crate::pipeline::source_to_ir(source).ok()?;
+    // #4685: lowered as the linker lowers it (stdlib mode). The entry-program
+    // route escapes every `__` name (`almide_fn___list_concat`), so the impl
+    // names the registry maps to were never found and those entries read
+    // as unregistered.
+    let ir = crate::pipeline::self_host_source_to_ir(source, entries).ok()?;
     let sigs = ir
         .functions
         .iter()
@@ -246,5 +250,15 @@ mod declared_route_tests {
             assert_eq!(declared_route_or("set", "contains", wall.clone()), "set.contains");
         }
         assert_eq!(declared_route_or("set", "contains", wall.clone()), wall);
+    }
+
+    /// #4685: every registry entry has a declared signature. The table used
+    /// to be keyed by the entry-program route's escaped names, so 87 entries
+    /// whose impls are spelled in the `__` space (`__list_concat`,
+    /// `net.__os_tcp_*`, …) read as unregistered and skipped the fit check.
+    #[test]
+    fn every_registry_entry_has_a_signature() {
+        let missing: Vec<&str> = registered_call_names().into_iter().filter(|c| registry_signature(c).is_none()).collect();
+        assert!(missing.is_empty(), "{} registry entr(ies) without a signature: {missing:?}", missing.len());
     }
 }
