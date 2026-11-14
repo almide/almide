@@ -491,6 +491,15 @@ impl LowerCtx {
             self.drop_arm_locals(arm_mark);
             return Some(dst);
         }
+        // The per-constructor TUPLE sub-match the variant regroup builds over a ctor's
+        // borrowed payload fields (`EWith(s, arms) => match (s, arms) { … }`): the
+        // ordered refinement chain, merged the same way (no extra Consume).
+        if let IrExprKind::Tuple { elements } = &subject.kind {
+            if let Some(dst) = self.try_lower_tuple_refinement_rows(elements, arms, result_ty) {
+                self.drop_arm_locals(arm_mark);
+                return Some(dst);
+            }
+        }
         if let Some(if_expr) = self.desugar_match_to_if(subject, arms, result_ty) {
             if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                 if let Some(dst) =
