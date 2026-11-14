@@ -661,6 +661,12 @@ fn render_native_drop_op(
         | Op::DropResultValueInt { v }
         | Op::DropResultListValueInt { v } => match tys.get(v) {
             Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
+            // A value of a generated type read in place (a cell slot, a record
+            // field): the release ends the borrow and the owner frees, as the
+            // `DropListStr` and `DropVariant` arms already do for the same read.
+            Some(NTy::RecRef(_)) if crate::render_native_keyed::in_place(*v) => {
+                line!("// drop(value-holding): read in place, the borrow ends")
+            }
             other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
         },
         Op::Drop { v } if EARLY_DROPPED.with(|e| e.borrow().contains(v)) => {

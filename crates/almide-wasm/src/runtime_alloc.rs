@@ -30,7 +30,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool, o
     // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
     // large-list walk (pp, p, q, z, r — runtime_large.rs)
     let (len, base, next, want, head) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
     if let Some(c) = counters {
@@ -241,7 +241,7 @@ pub(crate) fn emit_add_len_sat(i: &mut wasm_encoder::InstructionSink<'_>, a: u32
 pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     // params: 0=block; locals: 1=total, 2=class, 3..=5 the large-list walk
     let (block, total, class) = (0u32, 1u32, 2u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(5, ValType::I32)]);
     let mut i = f.instructions();
     if let Some(c) = counters {
@@ -294,7 +294,7 @@ fn bump_counter(i: &mut wasm_encoder::InstructionSink<'_>, global: u32) {
 /// untouchable.
 pub(crate) fn emit_inc() -> Function {
     let block = 0u32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -314,7 +314,7 @@ pub(crate) fn emit_inc() -> Function {
 pub(crate) fn emit_dec_flat() -> Function {
     // params: 0=block; locals: 1=rc
     let (block, rc) = (0u32, 1u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -347,7 +347,7 @@ pub(crate) fn emit_dec_flat() -> Function {
 pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     // params: 0=block; locals: 1=rc, 2=p, 3=end
     let (block, rc, p, end) = (0u32, 1u32, 2u32, 3u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -380,7 +380,7 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
 pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
     // params: 0=block; locals: 1=rc
     let (block, rc) = (0u32, 1u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -417,8 +417,8 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
 /// freed. The op's i64 answer carries nothing and is dropped.
 pub(crate) fn emit_drop_http_call() -> Function {
     let (block, rc) = (0u32, 1u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let dword = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
+    let dword = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -447,7 +447,7 @@ pub(crate) fn emit_drop_http_call() -> Function {
 /// array freed. Entries keep their credits (Map stage a).
 pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     let (block, rc) = (0u32, 1u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -476,7 +476,7 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
 pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32) -> Function {
     // params: 0=block; locals: 1=rc, 2=p, 3=end
     let (block, rc, p, end) = (0u32, 1u32, 2u32, 3u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
@@ -512,7 +512,7 @@ pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], sid
 pub(crate) fn emit_inc_entries(stride: u32, slots: [Option<u32>; 2]) -> Function {
     // params: 0=block, 1=nbytes; locals: 2=p, 3=end
     let (block, nbytes, p, end) = (0u32, 1u32, 2u32, 3u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -532,7 +532,7 @@ pub(crate) fn emit_inc_entries(stride: u32, slots: [Option<u32>; 2]) -> Function
 /// the credits of every entry it holds.
 pub(crate) fn emit_copy_entries(inc_entries: u32) -> Function {
     let block = 0u32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).call(F_BLOCK_COPY).local_tee(1);
@@ -546,7 +546,7 @@ pub(crate) fn emit_copy_entries(inc_entries: u32) -> Function {
 /// (the tagged half per case, as `emit_drop_shape`).
 pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
     let block = 0u32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([]);
     let mut i = f.instructions();
     for &(off, _) in slots {
@@ -571,7 +571,7 @@ pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32
 pub(crate) fn emit_inc_elems() -> Function {
     // params: 0=block; locals: 1=p, 2=end
     let (block, p, end) = (0u32, 1u32, 2u32);
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -628,7 +628,7 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> (Function, crate::helper_sig::He
 /// does the credit arithmetic itself (`emit_drop_shape`), so this is the
 /// whole release of a closure value.
 pub(crate) fn emit_drop_fn(ti: u32) -> Function {
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.local_get(0).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);

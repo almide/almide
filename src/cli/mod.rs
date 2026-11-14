@@ -60,7 +60,7 @@ mod wasm_debug;
 use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generated_with_native, cargo_build_test_with_native};
 
 pub use run::{cmd_run, RunArgs};
-pub(crate) use run::PhaseTimer;
+pub(crate) use run::{phase_lap, PhaseTimer};
 pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;

@@ -15,7 +15,7 @@ use crate::*;
 pub(crate) const BYTES: SliceTy = SliceTy::Scalar(Scalar::Bytes);
 
 pub(crate) fn byte_at() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// Payload-relative byte address: byte k of the current window.
@@ -23,7 +23,7 @@ pub(crate) fn byte_k(k: u8) -> MemArg {
     MemArg {
         offset: u64::from(almide_layout::PAYLOAD) + u64::from(k),
         align: 0,
-        memory_index: 0,
+        target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
     }
 }
 

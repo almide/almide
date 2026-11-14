@@ -121,7 +121,7 @@ fn lift_spine_arm(arm: IrExpr, res_ty: &Ty, mk: &impl Fn(IrExprKind, Ty) -> IrEx
 /// the destructuring spelling reached the lowering with its `!` still inside an
 /// arm and the function was refused. Bind the branch whole and destructure it
 /// as the next statement: `let $t = <branch>; let (a, b) = $t`.
-pub fn desugar_destructure_branch_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+pub(crate) fn desugar_destructure_branch_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };

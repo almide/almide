@@ -392,7 +392,7 @@ mod tests {
     fn the_wasm_run_cache_is_bounded_with_the_native_artifacts() {
         let dir = scratch("wasm-artifacts");
         let old_mod = dir.join("target/wasm/almide-aaaaaaaaaaaaaaaa");
-        let old_sum = dir.join("target/wasm/almide-aaaaaaaaaaaaaaaa.sha256");
+        let old_sum = dir.join("target/wasm/almide-aaaaaaaaaaaaaaaa.blake3");
         let new_bin = dir.join("target/debug/almide-bbbbbbbbbbbbbbbb");
         write_aged(&old_mod, 3_000, 50_000);
         write_aged(&old_sum, 64, 50_000);

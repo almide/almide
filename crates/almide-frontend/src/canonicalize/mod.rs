@@ -78,6 +78,18 @@ pub fn canonicalize_program_in<'a>(
     canonicalize_program_with(program, modules, entry_bundled_module, false)
 }
 
+/// [`canonicalize_program_in`] for a reader that needs only the registered
+/// declarations (`check_only`, as [`canonicalize_program`]): the declared
+/// self-host signature table (#4682 / #4685) names and types a registry
+/// source's fns as its owning module, without the concurrency facts.
+pub fn canonicalize_program_check_in<'a>(
+    program: &ast::Program,
+    modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
+    entry_bundled_module: Option<&str>,
+) -> CanonicalizationResult {
+    canonicalize_program_with(program, modules, entry_bundled_module, true)
+}
+
 fn canonicalize_program_with<'a>(
     program: &ast::Program,
     modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,

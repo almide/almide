@@ -74,7 +74,7 @@ const I_MASK: u32 = 8;
 const I_SLOTS: u32 = 12;
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 fn rc() -> MemArg {

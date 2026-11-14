@@ -17,7 +17,7 @@ pub(crate) fn emit_map_reserve() -> Function {
     // params: 0=block i32, 1=esz i32; locals: 2=la i32, 3=cap i32, 4=base i32
     let (block, esz, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).i32_load(len_memarg()).local_set(la);
@@ -71,7 +71,7 @@ pub(crate) fn emit_cow() -> (Function, crate::helper_sig::HelperSig) {
     let mut sig = HelperSig::new(&[Mode::C]);
     let fresh = sig.object(None);
     let b = block as usize;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);

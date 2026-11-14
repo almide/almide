@@ -190,6 +190,9 @@ fn main() {
 }
 
 fn run_main() {
+    // ALMIDE_TIME_PHASES (#4683): the phase clock's origin is process start,
+    // so the first lap includes argument parsing and dispatch.
+    cli::PhaseTimer::start();
     crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     // `args_os`, not `args`: `std::env::args` panics on an argument that is

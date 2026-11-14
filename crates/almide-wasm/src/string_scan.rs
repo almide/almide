@@ -12,7 +12,7 @@ use crate::*;
 /// Payload-relative byte address (align 0 — a byte load may not carry
 /// the 4-byte hint slot_memarg advertises).
 pub(crate) fn str_byte() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {
@@ -137,7 +137,7 @@ impl Emitter<'_> {
         i.local_get(hsc).i32_const(32).i32_store8(MemArg {
             offset: 0,
             align: 0,
-            memory_index: 0,
+            target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
         });
         i.else_();
         i.local_get(hsc);

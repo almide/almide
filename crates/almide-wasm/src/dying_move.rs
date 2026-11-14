@@ -616,7 +616,7 @@ impl Emitter<'_> {
         // while the field values read it.
         let (copy, dec) = (self.copy_fn_of(ty), self.dec_fn_of(ty));
         let hold = self.hold_i32()?;
-        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         {
             let mut i = self.f.instructions();
             i.local_get(idx).local_tee(hold).global_get(G_LINE_END).i32_ge_u();

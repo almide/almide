@@ -184,7 +184,7 @@
 2941	spec/wasm_cross/effect_tco_err_rewrap.almd
 4110	spec/wasm_cross/effect_tuple_result_tco.almd
 4787	spec/wasm_cross/effect_unit_yields_result.almd
-17655	spec/wasm_cross/effect_unwrap_in_loop.almd
+17883	spec/wasm_cross/effect_unwrap_in_loop.almd
 5758	spec/wasm_cross/empty_collection_annotated.almd
 9652	spec/wasm_cross/empty_collection_fold.almd
 9355	spec/wasm_cross/empty_from_list_mono.almd
@@ -357,7 +357,7 @@
 3534	spec/wasm_cross/guard_let_statement.almd
 3027	spec/wasm_cross/guard_only_use_liveness.almd
 2230	spec/wasm_cross/guard_statement.almd
-6815	spec/wasm_cross/guard_value_exit_in_loop.almd
+6819	spec/wasm_cross/guard_value_exit_in_loop.almd
 23740	spec/wasm_cross/gzip_inflate_members.almd
 5887	spec/wasm_cross/hash_digests.almd
 31127	spec/wasm_cross/hash_hmac_rfc4231.almd
@@ -452,7 +452,7 @@
 1603	spec/wasm_cross/let_wildcard_discard.almd
 2306	spec/wasm_cross/letbound_variant_match.almd
 6189	spec/wasm_cross/letbound_variant_match_heap_payload.almd
-11354	spec/wasm_cross/licm_mut_param_named_call.almd
+11362	spec/wasm_cross/licm_mut_param_named_call.almd
 2449	spec/wasm_cross/licm_zero_trip_hoist.almd
 8810	spec/wasm_cross/line_endings_bare_cr.almd
 27324	spec/wasm_cross/list_arg_map_view.almd

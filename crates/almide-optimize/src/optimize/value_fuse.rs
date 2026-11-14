@@ -64,7 +64,7 @@ fn is_kernel(name: &str) -> bool {
 /// `on_demand::prune_unreached` drops
 /// them after mono unless a rewrite named them. Runs whether or not the
 /// rewrites do.
-pub fn stamp_kernels(program: &mut IrProgram) {
+pub(crate) fn stamp_kernels(program: &mut IrProgram) {
     for m in program.modules.iter_mut().filter(|m| m.name.as_str() == "json") {
         for f in m.functions.iter_mut().filter(|f| is_kernel(f.name.as_str())) {
             if !f.attrs.iter().any(|a| a.name.as_str() == ON_DEMAND_ATTR) {
@@ -74,7 +74,7 @@ pub fn stamp_kernels(program: &mut IrProgram) {
     }
 }
 
-pub fn fuse_value_round_trips(program: &mut IrProgram) {
+pub(crate) fn fuse_value_round_trips(program: &mut IrProgram) {
     if almide_base::env::flag(ABLATION_ENV) {
         return;
     }

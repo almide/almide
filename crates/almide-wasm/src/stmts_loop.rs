@@ -91,9 +91,13 @@ impl Emitter<'_> {
         }
         // #3345: each iteration starts with no bounds facts (bounds_facts.rs).
         let outer_facts = self.bounds_facts.replace(Vec::new());
+        // #4648: an early exit inside the body also releases the body's binds
+        // (exit_plan.rs `carry_loop_body_binds`).
+        let carried = self.carry_loop_body_binds(body);
         crate::witness::bounds::open();
         let lowered = self.lower_stmts_moving(body, None, Self::lower_stmt_with_facts);
         crate::witness::bounds::close();
+        (self.loop_carried, self.loop_carried_raw) = carried;
         // Restored before the error leaves (#4654): an enclosing arm closes
         // its own label (`shift_loop_labels(-1)`) on the way out of a refusal,
         // and it must find the context it opened that label in — this body's

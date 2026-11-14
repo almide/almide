@@ -1,4 +1,4 @@
-//! `native_unnest_tail`: the flat spelling of a nested tail branch, what the
+//! `native_tail_unnest`: the flat spelling of a nested tail branch, what the
 //! ownership mirror and the certificate say of it once a param is taken
 //! over, and the bodies they refuse. The certificate lines pinned here are
 //! the ones `almide-verify` judges (`a_taken_over_param_through_sibling_exits`).
