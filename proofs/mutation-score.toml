@@ -12,13 +12,13 @@
 #           PR never refreshes it; a mutant PR (ci/mutations/) does not
 #           either — the next sweep judges the tree and names the drift.
 # Rendered into docs/benchmarks/README.md by scripts/gen-mutation-score.sh --render.
-date            = "2026-09-22"
-source          = "https://github.com/almide/almide/actions/runs/35650396971"
-head_sha        = "3b02f7dc433e664c244b661973421071ecdbe0f1"
-mutants         = 41
-caught          = 41
+date            = "2026-11-15"
+source          = "https://github.com/almide/almide/actions/runs/43603614076"
+head_sha        = "08544f101c63c6f47e8457ad85b29a621e0d12a3"
+mutants         = 42
+caught          = 42
 survived        = 0
 stale           = 0
 score_pct       = 100.0
-mutants_in_tree = 41
-killers         = "backend_parity 40, lib 1"
+mutants_in_tree = 42
+killers         = "backend_parity 40, lib 1, literal_globals 1"
