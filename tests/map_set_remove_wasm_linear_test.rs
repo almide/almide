@@ -18,14 +18,20 @@
 //! a fold started from, removes under `if`, reads inside the fold body,
 //! rebinds interleaved with `set` / `get` / `len` / iteration, Int and String
 //! sets, removing everything, released heap values. The scaling cell times
-//! only the remove loop at n and 4n: a linear remove takes ~4× per op, a
-//! constant one ~1×; the bound 2.5 sits between them. Release-only (CI's
+//! only the remove loop at n and 4n, divided by the growth of a constant-time
+//! lookup on the same collection in the same run (#4644): a linear remove
+//! takes ~4× per op, a constant one ~1×; the bound 2.5 sits between them.
+//! The linear control pins that the measure still sees ~4. Release-only (CI's
 //! release-only root step names this file); every run is capped.
 
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+#[path = "support/scaling_ratio.rs"]
+mod scaling_ratio;
+use scaling_ratio::scaling;
 
 const SEMANTICS: &str = r#"fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007)
 
@@ -98,6 +104,17 @@ effect fn run(mode: Int, n: Int) -> Unit = {
   let keys = list.range(0, n)
   let m0: Map[Int, Int] = keys |> list.map((i) => (i, i)) |> map.from_list
   let s0: Set[Int] = keys |> set.from_list
+  // #4644: the constant-time reference, timed on the same collection in the
+  // same process — a lookup per key, newest first.
+  let on_set = mode == 1 or mode == 3
+  let r0 = datetime.monotonic_ns()!
+  var hits = 0
+  for i in 0..<n {
+    let k = n - 1 - i
+    let found = if on_set then set.contains(s0, k) else map.get(m0, k) != none
+    if found then hits = hits + 1 else ()
+  }
+  let r1 = datetime.monotonic_ns()!
   let t0 = datetime.monotonic_ns()!
   let left = match mode {
     0 => map.len(keys |> list.fold(m0, (m, i) => map.remove(m, i))),
@@ -109,16 +126,23 @@ effect fn run(mode: Int, n: Int) -> Unit = {
       }
       map.len(m)
     },
-    _ => {
+    3 => {
       var s = s0
       for i in 0..<n {
         s = set.remove(s, n - 1 - i)
       }
       set.len(s)
     },
+    _ => {
+      var m = m0
+      for i in 0..<n {
+        m = map.to_list(m) |> list.filter(((k, _)) => k != i) |> map.from_list
+      }
+      map.len(m)
+    },
   }
   let t1 = datetime.monotonic_ns()!
-  println("${left} ${t1 - t0}")
+  println("${left} ${t1 - t0} ${r1 - r0} ${hits}")
 }
 
 effect fn main() -> Unit = {
@@ -130,6 +154,13 @@ effect fn main() -> Unit = {
 "#;
 
 const MODES: [&str; 4] = ["map.remove in a fold", "set.remove in a fold", "m = map.remove(m, k)", "s = set.remove(s, x)"];
+
+/// The SCALING program's linear negative control (#4644).
+const LINEAR_MODE: usize = 4;
+
+fn label(mode: usize) -> &'static str {
+    MODES.get(mode).copied().unwrap_or("linear control")
+}
 
 /// Wall-clock cap on one subprocess (a compile included).
 const PER_RUN_LIMIT: Duration = Duration::from_secs(180);
@@ -193,19 +224,17 @@ fn removes_keep_every_observable_on_both_legs() {
     }
 }
 
-/// Nanoseconds per remove at size `n`: the best of three runs.
-fn ns_per_remove(file: &Path, wasm: bool, mode: usize, n: u64) -> f64 {
+/// Nanoseconds per remove and per reference lookup at size `n`, one run.
+fn ns_per_remove(file: &Path, wasm: bool, mode: usize, n: u64) -> (f64, f64) {
     let (m_s, n_s) = (mode.to_string(), n.to_string());
-    (0..3)
-        .map(|_| {
-            let (code, out, err) = run_capped(file, wasm, &[&m_s, &n_s]);
-            assert_eq!(code, 0, "wasm={wasm} {} n={n}: exit {code}\n{err}", MODES[mode]);
-            let fields: Vec<&str> = out.split_whitespace().collect();
-            assert_eq!(fields.len(), 2, "wasm={wasm} {} n={n}: unexpected output {out:?}", MODES[mode]);
-            assert_eq!(fields[0], "0", "wasm={wasm} {} n={n}: entries survived the removal", MODES[mode]);
-            fields[1].parse::<f64>().expect("elapsed ns") / n as f64
-        })
-        .fold(f64::INFINITY, f64::min)
+    let (code, out, err) = run_capped(file, wasm, &[&m_s, &n_s]);
+    assert_eq!(code, 0, "wasm={wasm} {} n={n}: exit {code}\n{err}", label(mode));
+    let fields: Vec<&str> = out.split_whitespace().collect();
+    assert_eq!(fields.len(), 4, "wasm={wasm} {} n={n}: unexpected output {out:?}", label(mode));
+    assert_eq!(fields[0], "0", "wasm={wasm} {} n={n}: entries survived the removal", label(mode));
+    assert_eq!(fields[3], n_s, "wasm={wasm} {} n={n}: a reference lookup missed", label(mode));
+    let per_op = |f: &str| f.parse::<f64>().expect("elapsed ns") / n as f64;
+    (per_op(fields[1]), per_op(fields[2]))
 }
 
 #[test]
@@ -217,18 +246,30 @@ fn four_times_the_collection_is_not_four_times_the_remove() {
     let mut failures = Vec::new();
     for wasm in [false, true] {
         for mode in 0..MODES.len() {
-            let small = ns_per_remove(&file, wasm, mode, n);
-            let large = ns_per_remove(&file, wasm, mode, 4 * n);
-            let ratio = large / small.max(1.0);
-            eprintln!("wasm={wasm} {}: {small:.0} ns at {n}, {large:.0} ns at {} — ratio {ratio:.2}", MODES[mode], 4 * n);
-            if ratio >= 2.5 {
-                failures.push(format!(
-                    "wasm={wasm} {}: a remove took {large:.0} ns at {} entries against {small:.0} ns at {n} — ratio {ratio:.1}, linear in the size again",
-                    MODES[mode],
-                    4 * n
-                ));
+            let s = scaling(|k| ns_per_remove(&file, wasm, mode, k), n);
+            eprintln!("wasm={wasm} {}: {}", MODES[mode], s.describe(n));
+            if s.normalized() >= 2.5 {
+                failures.push(format!("wasm={wasm} {}: {} — linear in the size again", MODES[mode], s.describe(n)));
             }
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// #4644 negative control: the same measurement over a remove that IS linear
+/// (the whole map rebuilt without the key per removal, the SCALING
+/// program's mode 4) must read at or above the bound on both legs, so the
+/// normalized ratio cannot hide a linear remove. Smaller sizes keep the
+/// quadratic loop short; a linear op's ratio is ~4 at any n.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "times the remove loop: runs in CI's release-only root step")]
+fn a_linear_remove_still_reads_as_linear() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = write(&dir, "remove_scaling.almd", SCALING);
+    let n = 2_000u64;
+    for wasm in [false, true] {
+        let s = scaling(|k| ns_per_remove(&file, wasm, LINEAR_MODE, k), n);
+        eprintln!("wasm={wasm} linear control: {}", s.describe(n));
+        assert!(s.normalized() >= 2.5, "wasm={wasm}: the linear control read {}, under the bound the gate uses", s.describe(n));
+    }
 }
