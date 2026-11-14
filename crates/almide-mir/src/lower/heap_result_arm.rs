@@ -282,8 +282,18 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A nested `if` arm is lowered HERE only: a decline rolls back what it emitted and
+            // is final for this arm (the `_ctrl` router no longer retries the same if, which
+            // made a chain of N nested ifs cost 2^N lowerings).
             IrExprKind::If { cond, then, else_ } => {
-                self.lower_heap_result_if_inner(cond, then, else_, result_ty)
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let out = self.lower_heap_result_if_inner(cond, then, else_, result_ty);
+                if out.is_none() {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                }
+                out
             }
             _ => None,
         }

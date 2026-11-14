@@ -37,9 +37,11 @@ impl LowerCtx {
             {
                 self.lower_variant_subject_match_arm(subject, arms, result_ty)
             }
-            IrExprKind::If { cond, then, else_ } => {
-                self.lower_nested_heap_result_if_arm(cond, then, else_, result_ty)
-            }
+            // A nested `if` arm already ran through `lower_heap_result_arm_literal` (always tried
+            // first, the same `lower_heap_result_if_inner`): its decline is final. Retrying it
+            // here doubled the work at every nesting level — a 34-arm string match (an if
+            // chain) never finished. The arm stays here so it cannot reach the `_` catch-all.
+            IrExprKind::If { .. } => None,
             IrExprKind::List { elements }
                 if Self::is_heap_elem_list_literal_result(result_ty) =>
             {
@@ -198,28 +200,6 @@ impl LowerCtx {
         Some(obj)
     }
 
-    /// Extracted from [`Self::lower_heap_result_arm_ctrl`] (codopsy r2, #852): the
-    /// nested heap-result `If` arm body, verbatim.
-    ///
-    /// A NESTED heap-result `if` arm: the branch desugar stacks one
-    /// hoisted `if`-bind per level, so a two-`if` element chain
-    /// arrives as `if c { … tail: if c' {…} else {…} } else …` (the
-    /// ceangal todo_item). Recurse through the same if-lowering —
-    /// level-by-level release parity is exactly the invariant
-    /// `lower_heap_result_if_inner` maintains — and move the merged
-    /// result out (`Consume`, the same `im` balance the Call arm
-    /// carries).
-    fn lower_nested_heap_result_if_arm(
-        &mut self,
-        cond: &IrExpr,
-        then: &IrExpr,
-        else_: &IrExpr,
-        result_ty: &Ty,
-    ) -> Option<ValueId> {
-        let dst = self.try_lower_heap_result_if(cond, then, else_, result_ty)?;
-        self.ops.push(crate::Op::Consume { v: dst });
-        Some(dst)
-    }
 
     /// Extracted from [`Self::lower_heap_result_arm_ctrl`] (codopsy r2, #852): the
     /// `List`-literal arm's guard — the result type is a `List` of exactly one HEAP
