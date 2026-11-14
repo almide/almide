@@ -601,6 +601,7 @@ pub(crate) fn owned_nty(t: NTy) -> NTy {
 }
 
 include!("render_native_loop.rs");
+include!("render_native_loop_helpers.rs");
 include!("render_native_tail.rs");
 include!("render_native_b.rs");
 include!("render_native_b_tail.rs");

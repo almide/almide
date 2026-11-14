@@ -185,8 +185,8 @@ fn consumed_params(
             }
             _ => false,
         };
-        // Reads before them stay reads of the param it still holds.
-        let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
+        let (live, liveness) = (std::cell::OnceCell::new(), || crate::mir_liveness::live_after_sites(func, p.value)); // reads before them stay the param's; liveness built once
+        let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !live.get_or_init(liveness)(i)).collect();
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
