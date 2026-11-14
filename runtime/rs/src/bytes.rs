@@ -60,7 +60,11 @@ pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
 // `&[i64]` — passes directly, while a local `Vec<i64>` still deref-coerces. The
 // `&Vec` form rejected the param with E0308 (#665).
 pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
-pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { b.iter().map(|&x| x as i64).collect() }
+pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { almide_rt_bytes_to_list_iter(b).collect() }
+// The streaming twin of `to_list` (native render, `render_native_loops`): the
+// same Ints in the same order, read off the bytes; a loop over the list that
+// dies at the loop walks this and builds no list.
+pub fn almide_rt_bytes_to_list_iter(b: &Vec<u8>) -> impl Iterator<Item = i64> + '_ { b.iter().map(|&x| x as i64) }
 pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
 /// `bytes.__join` (the Text requirement `list.join` reads): the parts with `sep` between them.
 pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = Vec<u8>>>(xs: &[B], sep: &Vec<u8>) -> Vec<u8> {

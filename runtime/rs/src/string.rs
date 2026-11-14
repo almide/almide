@@ -60,6 +60,15 @@ pub fn almide_rt_string_trim(s: &str) -> AlmideString { almide_trim_ws(s).into()
 pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { s.trim_start().into() }
 #[inline]
 pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { s.trim_end().into() }
+// The viewing twins of the trims (native render, `render_native_slices`):
+// the same bytes as a slice of `s`, for a result that is only read while `s`
+// is still alive. No block is made.
+#[inline]
+pub fn almide_rt_string_trim_ref<'a>(s: &'a str) -> &'a str { almide_trim_ws(s) }
+#[inline]
+pub fn almide_rt_string_trim_start_ref<'a>(s: &'a str) -> &'a str { s.trim_start() }
+#[inline]
+pub fn almide_rt_string_trim_end_ref<'a>(s: &'a str) -> &'a str { s.trim_end() }
 // The declaration's @reuse(s) selects these only for an owned last use or
 // temporary. Unique buffers survive trim/case pipelines; shared/static
 // buffers retain their other owners' bytes. Unicode keeps the ordinary path.
@@ -128,12 +137,36 @@ fn almide_string_ascii_sep(sep: &str) -> Option<char> {
 }
 // Each piece is built as the Almide String directly: collecting `String`s and
 // converting the Vec would allocate, copy and free every piece twice under
-// the shared buffer.
+// the shared buffer. The pieces are the streaming twin's, collected, so the
+// list and the stream cannot disagree.
 pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
-    match almide_string_ascii_sep(sep) {
-        Some(c) => s.split(c).map(AlmideString::from).collect(),
-        None => s.split(sep).map(AlmideString::from).collect(),
-    }
+    almide_rt_string_split_iter(s, sep).map(AlmideString::from).collect()
+}
+// The streaming twin of `split` (native render, `render_native_loops`): the
+// same pieces in the same order, each a slice of `s`. A loop over a split
+// list that dies at the loop walks this instead, building neither the list
+// nor a block per piece. A one-byte ASCII separator is found with a `char`
+// search (memchr), as above; any other with `str::split`, made on first use.
+pub fn almide_rt_string_split_iter<'a>(s: &'a str, sep: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    let byte = almide_string_ascii_sep(sep);
+    let mut rest = Some(s);
+    let mut general: Option<std::str::Split<'a, &'a str>> = None;
+    std::iter::from_fn(move || match byte {
+        Some(c) => {
+            let r = rest?;
+            match r.find(c) {
+                Some(i) => {
+                    rest = Some(&r[i + 1..]);
+                    Some(&r[..i])
+                }
+                None => {
+                    rest = None;
+                    Some(r)
+                }
+            }
+        }
+        None => general.get_or_insert_with(|| s.split(sep)).next(),
+    })
 }
 // Two allocations and no Vec — the hot-loop form when only the first
 // separator matters (`station;temp` parsing). None ⇔ sep absent.

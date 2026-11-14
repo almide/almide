@@ -45,6 +45,9 @@ enum Step {
     Payload { of: ValueId, pair: bool },
     /// Field `k` of the pair.
     Field { of: ValueId, k: u32 },
+    /// A string result bound as a slice of its argument, through the body's
+    /// viewing twin (its name, its items).
+    View { twin: String, items: Vec<&'static str> },
 }
 
 thread_local! {
@@ -96,6 +99,12 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
         else {
             continue;
         };
+        if let Some((twin, from, items)) = crate::native_floor::view_twin(symbol) {
+            if read_while_sources_live(func, i, *o, args, &from, &fixed) {
+                steps.insert(i, Step::View { twin, items });
+            }
+            continue;
+        }
         let Some((twin, pair, from, items)) = crate::native_floor::slice_twin(symbol) else { continue };
         let sources_lent = args.len() == from.len()
             && args.iter().zip(&from).all(|(a, borrowed_from)| matches!(a, CallArg::Handle(v) if !*borrowed_from || lent(*v)));
@@ -108,6 +117,32 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
         }
     }
     steps
+}
+
+/// Whether the string result `o` of the call at `ops[at]` may be the slice
+/// its viewing twin returns: `o` is bound once, not returned, and handed only
+/// to calls that lend it (or released); every argument the slice borrows
+/// from is bound once, and from the call to the last use of `o` no other op
+/// runs but integer constants and arithmetic — nothing is released, written,
+/// rebound or moved while the slice is read, so whatever the argument
+/// borrows from is still alive at each read.
+fn read_while_sources_live(func: &MirFunction, at: usize, o: ValueId, args: &[CallArg], from: &[bool], fixed: &dyn Fn(&ValueId) -> bool) -> bool {
+    let sources_fixed = args.len() == from.len()
+        && args.iter().zip(from).all(|(a, borrowed_from)| matches!(a, CallArg::Handle(v) if !*borrowed_from || fixed(v)));
+    if !sources_fixed || !fixed(&o) || func.ret == Some(o) {
+        return false;
+    }
+    let root = crate::render_native_borrow_read::roots(func);
+    let Some(last) = crate::render_native_borrow_read::last_borrowing_use(func, at, o, &root) else { return false };
+    let mut vs = Vec::new();
+    func.ops[at + 1..=last].iter().all(|op| {
+        vs.clear();
+        crate::mir_ops::op_values(op, &mut vs);
+        if vs.contains(&o) {
+            return matches!(op, Op::CallFn { .. }) || (vs.len() == 1 && crate::native_move_params::is_release(op, o));
+        }
+        matches!(op, Op::ConstInt { .. } | Op::IntBinOp { .. })
+    }) && last > at
 }
 
 /// The step of every op that names the Option `o` (bound at `ops[at]`), its
@@ -210,6 +245,23 @@ pub(crate) fn render(
             used_shims.extend(items);
             let ty = if pair { "Option<(&str, &str)>" } else { "Option<&str>" };
             emit(out, indent, &format!("let {}: {ty} = {twin}({});", var(o), codes.join(", ")));
+        }
+        (Step::View { twin, items }, Some(o)) => {
+            let Op::CallFn { args, .. } = op else { return Err(wall("native: a string view's call is not a call")) };
+            let mut codes = Vec::with_capacity(args.len());
+            for a in args {
+                let CallArg::Handle(v) = a else { return Err(wall("native: a string view's argument is not a string")) };
+                codes.push(match (crate::render_native_move::static_str_operand(*v), tys.get(v)) {
+                    (Some(literal), _) => literal,
+                    (None, Some(NTy::StrRef)) => var(*v),
+                    (None, Some(NTy::Str)) => format!("&{}", var(*v)),
+                    (None, other) => return Err(wall(format!("native: a {other:?} argument of a string view"))),
+                });
+            }
+            used_shims.push(crate::native_floor::floor_header());
+            used_shims.extend(items);
+            tys.insert(o, NTy::StrRef);
+            emit(out, indent, &format!("let {}: &str = {twin}({});", var(o), codes.join(", ")));
         }
         (Step::Tag(o), Some(d)) => {
             tys.insert(d, NTy::I64);
