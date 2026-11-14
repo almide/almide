@@ -123,7 +123,8 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
 /// its viewing twin returns: `o` is bound once, not returned, and handed only
 /// to calls that lend it (or released); every argument the slice borrows
 /// from is bound once, and from the call to the last use of `o` no other op
-/// runs but integer constants and arithmetic — nothing is released, written,
+/// runs but integer constants, arithmetic and the ownership marks (which
+/// render to nothing here) — nothing is released, written,
 /// rebound or moved while the slice is read, so whatever the argument
 /// borrows from is still alive at each read.
 fn read_while_sources_live(func: &MirFunction, at: usize, o: ValueId, args: &[CallArg], from: &[bool], fixed: &dyn Fn(&ValueId) -> bool) -> bool {
@@ -141,7 +142,8 @@ fn read_while_sources_live(func: &MirFunction, at: usize, o: ValueId, args: &[Ca
         if vs.contains(&o) {
             return matches!(op, Op::CallFn { .. }) || (vs.len() == 1 && crate::native_move_params::is_release(op, o));
         }
-        matches!(op, Op::ConstInt { .. } | Op::IntBinOp { .. })
+        // The ownership marks render to nothing on this target.
+        matches!(op, Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
     }) && last > at
 }
 

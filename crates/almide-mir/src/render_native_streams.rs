@@ -26,9 +26,10 @@
 //! element only through `&(*e)[..]` (the twin yields the `&str` itself), an
 //! Int element only as `(*e)` (the twin yields the Int, so `(*e)` becomes
 //! `e`). The list must be named by nothing but its declaration, its length
-//! reads before the loop, the loop head and the `drop` right after the loop,
-//! and each argument by nothing between the list's declaration and that drop
-//! but its own early release. Anything else stays as rendered.
+//! reads before the loop, the loop head and the `drop` right after the loop
+//! (or none: the list then lives to scope end, named by no later line), and
+//! each argument by nothing between the list's declaration and the loop's
+//! end but its own early release. Anything else stays as rendered.
 
 use crate::native_floor::StreamItem;
 use crate::render_native_loops::{indent_of, is_note, is_var, let_parts, mentions};
@@ -104,11 +105,9 @@ fn producer_call(rhs: &str) -> Option<(&str, Vec<&str>)> {
 
 fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     let (src, elem, e) = loop_head(lines, h)?;
-    // The list dies right after the loop.
-    let dl = (e + 1..lines.len()).find(|&k| !is_note(&lines[k]))?;
-    if lines[dl].trim() != format!("drop({src});") {
-        return None;
-    }
+    // The list dies at the loop: released right after it, or at scope end
+    // (no later line names it, checked below).
+    let dl = (e + 1..lines.len()).find(|&k| !is_note(&lines[k])).filter(|&k| lines[k].trim() == format!("drop({src});"));
     let d = (0..h).rev().find(|&k| let_parts(&lines[k]).is_some_and(|(v, _, _)| v == src))?;
     let (_, _, rhs) = let_parts(&lines[d])?;
     let (symbol, args) = producer_call(rhs)?;
@@ -118,7 +117,7 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     let len_read = format!("{src}.len() as i64");
     let mut lens = Vec::new();
     for (k, l) in lines.iter().enumerate() {
-        if k == d || k == h || k == dl || is_note(l) || !mentions(l, &src) {
+        if k == d || k == h || Some(k) == dl || is_note(l) || !mentions(l, &src) {
             continue;
         }
         match let_parts(l) {
@@ -140,7 +139,7 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     // drop but its own early release, which moves after the loop.
     let vars: Vec<&str> = args.iter().map(|a| a.strip_prefix('&').unwrap_or(a)).filter(|a| is_var(a)).collect();
     let mut released = Vec::new();
-    for (k, l) in lines.iter().enumerate().take(dl).skip(d + 1) {
+    for (k, l) in lines.iter().enumerate().take(dl.unwrap_or(e + 1)).skip(d + 1) {
         if is_note(l) {
             continue;
         }
@@ -165,10 +164,13 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
             out.push(l.replace(&format!("{src}.iter().enumerate()"), &format!("{call}.enumerate()")));
         } else if k > h && k < e && item == StreamItem::Int {
             out.push(l.replace(&star, &elem));
-        } else if k == dl {
+        } else if Some(k) == dl {
             out.extend(released.iter().map(|&r| lines[r].clone()));
         } else {
             out.push(l.clone());
+            if k == e && dl.is_none() {
+                out.extend(released.iter().map(|&r| lines[r].clone()));
+            }
         }
     }
     Some(out)
