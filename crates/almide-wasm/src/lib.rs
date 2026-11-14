@@ -599,7 +599,7 @@ impl SliceTy {
 // ── literal pool ────────────────────────────────────────────────────────
 
 fn len_memarg() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::LEN.offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::LEN.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// Payload-relative slot address as an absolute-from-base MemArg. All
@@ -608,7 +608,7 @@ fn slot_memarg(payload_relative: u32) -> MemArg {
     MemArg {
         offset: u64::from(almide_layout::PAYLOAD + payload_relative),
         align: 2,
-        memory_index: 0,
+        target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
     }
 }
 

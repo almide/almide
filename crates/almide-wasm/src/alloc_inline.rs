@@ -41,7 +41,7 @@ use crate::emitter::Emitter;
 use crate::*;
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// The size class `$alloc` files a `len`-byte payload under, and that

@@ -77,7 +77,7 @@ pub(crate) fn emit_block_print(import: u32) -> Function {
 pub(crate) fn emit_scan_w64() -> Function {
     // params: 0=block, 1=stride, 2=off, 3=needle i64; locals: 4=p, 5=end
     let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
-    let slot = MemArg { offset: 0, align: 2, memory_index: 0 };
+    let slot = MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(blk).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
@@ -100,7 +100,7 @@ pub(crate) fn emit_scan_w64() -> Function {
 /// verbatim (-0.0 matches 0.0, NaN matches nothing).
 pub(crate) fn emit_scan_f64() -> Function {
     let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
-    let slot = MemArg { offset: 0, align: 2, memory_index: 0 };
+    let slot = MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(blk).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
@@ -120,7 +120,7 @@ pub(crate) fn emit_scan_f64() -> Function {
 
 pub(crate) fn emit_scan_w32() -> Function {
     let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
-    let slot = MemArg { offset: 0, align: 2, memory_index: 0 };
+    let slot = MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(blk).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
@@ -140,7 +140,7 @@ pub(crate) fn emit_scan_w32() -> Function {
 
 pub(crate) fn emit_scan_str() -> Function {
     let (blk, stride, off, needle, p, end) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
-    let slot = MemArg { offset: 0, align: 2, memory_index: 0 };
+    let slot = MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(blk).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p);
@@ -206,7 +206,7 @@ pub(crate) fn emit_f16_to_f64() -> Function {
 pub(crate) fn emit_cp_off() -> Function {
     // params: 0=base, 1=idx i64; locals: 2=p i32, 3=blen i32, 4=n i64
     let (bbase, idx, p, blen, n) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
@@ -334,7 +334,7 @@ pub(crate) fn emit_str_repeat(repeat_msg: u32) -> Function {
 pub(crate) fn emit_str_len_chars() -> Function {
     // params: 0=base i32; locals: 1=i i32, 2=blen i32, 3=n i64
     let (bbase, idx, blen, n) = (0u32, 1u32, 2u32, 3u32);
-    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
@@ -368,7 +368,7 @@ pub(crate) fn emit_itoa() -> Function {
     // params: 0=v i64; locals: 1=p i32, 2=u i64, 3=neg i32
     let (v, p, u, neg) = (0u32, 1u32, 2u32, 3u32);
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I64), (1, ValType::I32)]);
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut i = f.instructions();
     // p = ITOA_END; neg = v < 0; u = neg ? v : 0 - v
     i.i32_const(ITOA_END as i32).local_set(p);
@@ -425,7 +425,7 @@ pub(crate) fn emit_concat() -> Function {
     let (a, b, la, lb, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let (dst, src, endp) = (5u32, 6u32, 7u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(a).i32_load(len_memarg()).local_set(la);
@@ -490,7 +490,7 @@ pub(crate) fn emit_append_bool(true_base: u32, false_base: u32) -> Function {
 pub(crate) fn emit_str_eq() -> Function {
     // params: 0=a i32, 1=b i32; locals: 2=la i32, 3=i i32
     let (a, b, la, idx) = (0u32, 1u32, 2u32, 3u32);
-    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     // The same block is equal to itself.
@@ -506,7 +506,7 @@ pub(crate) fn emit_str_eq() -> Function {
     // alignment), then the tail byte by byte. A byte loop cost about ten
     // instructions per byte, and where it stopped depended on how long a
     // prefix the two strings shared.
-    let word = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let word = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(idx).i32_const(8).i32_add().local_get(la).i32_gt_u().br_if(1);
     i.local_get(a).local_get(idx).i32_add().i64_load(word);
@@ -645,7 +645,7 @@ pub(crate) fn emit_list_join() -> Function {
 /// does not support an overlapping move toward higher addresses.
 pub(crate) fn emit_copy() -> Function {
     let (dst, src, len, endp) = (0u32, 1u32, 2u32, 3u32);
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(len).i32_const(16).i32_lt_u().if_(BlockType::Empty);
@@ -653,7 +653,7 @@ pub(crate) fn emit_copy() -> Function {
     // #4612: under 16 bytes, one 8-byte word and one 4-byte word go whole
     // (each loaded before it is stored, so a forward overlapping move stays
     // exact), and only the last 0..=3 bytes walk.
-    let word = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let word = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     for (w, wide) in [(8, true), (4, false)] {
         i.local_get(endp).local_get(src).i32_sub().i32_const(w).i32_ge_u().if_(BlockType::Empty);
         i.local_get(dst).local_get(src);

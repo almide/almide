@@ -14,10 +14,10 @@ use crate::*;
 const Q_MAX: i64 = 268_435_456;
 
 fn raw16() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 fn raw32() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {

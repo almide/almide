@@ -107,7 +107,7 @@ pub(crate) fn global_base(top_lets: usize) -> u32 {
 }
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// Push the i32 on top of the stack onto the queue in global `gq`
