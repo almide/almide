@@ -43,25 +43,62 @@ else if c == 8239 then true
 else if c == 8287 then true
 else if c == 12288 then true else false
 
+// An ASCII byte of White_Space: TAB..CR or SPACE. Every other ASCII byte is
+// not, and a byte >= 128 starts (or continues) a multi-byte codepoint.
+fn __trim_ascii_ws(b: Int) -> Bool = b == 32 or (b >= 9 and b <= 13)
+
 // First non-WS byte address scanning forward from `addr` (codepoint steps).
+// An ASCII byte is judged by itself; only a multi-byte codepoint is decoded.
 fn __trim_start(addr: Int, end: Int) -> Int = if addr >= end then addr
 else {
-  let packed = __trim_cp(addr)
-  if __trim_is_uws(__trim_cp_of(packed)) then __trim_start(addr + __trim_cp_len(packed), end) else addr
+  let b = prim.load8(addr)
+  if b < 128 then (if __trim_ascii_ws(b) then __trim_start(addr + 1, end) else addr)
+  else {
+    let packed = __trim_cp(addr)
+    if __trim_is_uws(__trim_cp_of(packed)) then __trim_start(addr + __trim_cp_len(packed), end) else addr
+  }
 }
 
 // Address just past the last non-WS codepoint scanning backward from `end`.
 fn __trim_end(start: Int, end: Int) -> Int = if end <= start then end
 else {
-  let cb = __trim_cp_begin(start, end - 1)
-  if __trim_is_uws(__trim_cp_of(__trim_cp(cb))) then __trim_end(start, cb) else end
+  let b = prim.load8(end - 1)
+  if b < 128 then (if __trim_ascii_ws(b) then __trim_end(start, end - 1) else end)
+  else {
+    let cb = __trim_cp_begin(start, end - 1)
+    if __trim_is_uws(__trim_cp_of(__trim_cp(cb))) then __trim_end(start, cb) else end
+  }
 }
 
-fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
+// Copy `len` bytes from `src` to `dst`, eight at a time while eight remain.
+// Front to back, so `dst <= src` may overlap: every word is read before the
+// write that could reach it.
+fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = if len >= 8 then {
+  prim.store64(dst, prim.load64(src))
+  __trim_copy(src + 8, dst + 8, len - 8)
+} else if len <= 0 then dst
 else {
   prim.store8(dst, prim.load8(src))
   __trim_copy(src + 1, dst + 1, len - 1)
 }
+
+// The bytes `from`..`from + nbytes` of `s` (block `h`, `blen` bytes) as the
+// result. All of `s` is `s` itself. The registry's prim body owns its
+// parameter, so a sole owner (rc 1) is trimmed in place: its bytes move to
+// the front and its length shrinks. A pooled literal also carries rc 1 but
+// always cap = len, so spare capacity is required too, as `string.to_upper`
+// requires it (string_to_upper.almd). Anything else is copied out.
+fn __trim_keep(s: String, h: Int, blen: Int, from: Int, nbytes: Int) -> String =
+  if nbytes == blen then s
+  else if prim.load32(h) == 1 and prim.load32(h + 8) > blen then {
+    let _e = __trim_copy(from, h + 12, nbytes)
+    prim.store32(h + 4, nbytes)
+    s
+  } else {
+    let buf = prim.alloc_str(nbytes)
+    let _e = __trim_copy(from, prim.handle(buf) + 12, nbytes)
+    buf
+  }
 
 fn string_trim(s: String) -> String = {
   let h = prim.handle(s)
@@ -70,33 +107,25 @@ fn string_trim(s: String) -> String = {
   let ws_start = __trim_start(base, base + blen)
   let ws_end = __trim_end(ws_start, base + blen)
   let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
-  buf
+  __trim_keep(s, h, blen, ws_start, nbytes)
 }
 
-// Strip Unicode whitespace from the START only (leading), copying the remainder.
+// Strip Unicode whitespace from the START only (leading), keeping the remainder.
 fn string_trim_start(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
   let end = base + blen
   let ws_start = __trim_start(base, end)
-  let nbytes = end - ws_start
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
-  buf
+  __trim_keep(s, h, blen, ws_start, end - ws_start)
 }
 
-// Strip Unicode whitespace from the END only (trailing), copying the prefix.
+// Strip Unicode whitespace from the END only (trailing), keeping the prefix.
 fn string_trim_end(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
   let end = base + blen
   let ws_end = __trim_end(base, end)
-  let nbytes = ws_end - base
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(base, prim.handle(buf) + 12, nbytes)
-  buf
+  __trim_keep(s, h, blen, base, ws_end - base)
 }
