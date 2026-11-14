@@ -57,9 +57,12 @@ pub(crate) struct NodeMarks {
     /// reassignment, or the frame's tail. Keyed like a mark; consumed by
     /// the route that hands the var's credit over.
     dying: HashSet<usize>,
-    /// #3406: the dying Var read being lowered right now as a MOVE (its
-    /// lowering's `forget` does not clear it; the route that set it does).
-    moving: Option<usize>,
+    /// #3406: the dying Var reads being lowered right now as a MOVE (its
+    /// lowering's `forget` does not clear one; the route that set it does).
+    /// A set, so a route that marks one read while another route's read is
+    /// marked (a map callback's element, #4612, around a `map.merge`) clears
+    /// only its own.
+    moving: HashSet<usize>,
     /// #3406: `b.f` reads that MOVE the slot's credit out of a record the
     /// frame holds uniquely (a dying spread base), with the slot's offset.
     takes: std::collections::HashMap<usize, u32>,
@@ -177,12 +180,16 @@ impl NodeMarks {
 
     /// #3406: the Var read `e` is lowered as a move (`on`), or no longer.
     pub(crate) fn set_moving(&mut self, e: &IrExpr, on: bool) {
-        self.moving = on.then(|| expr_key(e));
+        if on {
+            self.moving.insert(expr_key(e));
+        } else {
+            self.moving.remove(&expr_key(e));
+        }
     }
 
     /// Is the Var read `e` being lowered as a move?
     pub(crate) fn is_moving(&self, e: &IrExpr) -> bool {
-        self.moving == Some(expr_key(e))
+        self.moving.contains(&expr_key(e))
     }
 
     /// Does the field read `e` carry a pending slot-take note?

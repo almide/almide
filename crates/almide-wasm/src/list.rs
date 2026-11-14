@@ -544,7 +544,20 @@ impl Emitter<'_> {
         let Some(u) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-map-ret:{}", ty_name(&body.ty)));
         };
+        // Judged before the source is lowered: an owned temporary is one the
+        // arm releases after the loop.
+        let consumed = self.rc_owned_result(xs);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let taken = match &cb.kind {
+            IrExprKind::Lambda { params: ps, .. } if consumed && self.rc_droppable(elem) => {
+                ps.first().and_then(|(p, _)| crate::list_take::sole_call_arg_read(body, *p))
+            }
+            _ => None,
+        };
+        let take = match taken {
+            Some(_) => Some(self.list_take_open(bh)?),
+            None => None,
+        };
         // result = alloc(count * stride_u), same element count as source
         let rh = self.hold_i32()?;
         self.f
@@ -556,6 +569,9 @@ impl Emitter<'_> {
             .local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        if let Some(t) = take {
+            self.list_take_elem(t, elem, (bh, ih), params[0]);
+        }
         self.witness_callback_open(cb, None);
         // dest addr, then value, then store
         self.f
@@ -565,16 +581,25 @@ impl Emitter<'_> {
             .i32_const(u.slot_size() as i32)
             .i32_mul()
             .i32_add();
+        if let Some(read) = taken {
+            self.owned_call_marks.set_moving(read, true);
+        }
         self.lower(body, Some(u))?;
         // A pass-through body (`(x) => x`, a field of x) hands back a
         // VIEW of the source's element: the result spine is a holder and
         // takes the share here (#2010 stage 2b).
         self.rc_share_guard(body, u);
         self.witness_store(body, u);
+        if let Some(read) = taken {
+            self.owned_call_marks.set_moving(read, false);
+        }
         self.store_ty_slot(u, 0);
         self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
+        if take.is_some() {
+            self.release_i32();
+        }
         self.release_i32();
         self.release_i32();
         self.release_i32();
