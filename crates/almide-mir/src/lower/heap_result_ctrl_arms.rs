@@ -106,8 +106,30 @@ impl LowerCtx {
             {
                 self.lower_fresh_container_projection_arm(arm, object, result_ty)
             }
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if is_heap_ty(&arm.ty) && arm.ty == *result_ty =>
+            {
+                self.speculate(|this| this.lower_bound_value_arm(arm))
+            }
             _ => None,
         }
+    }
+
+    /// Any other heap projection arm that IS the result value (`ok(ds) => (list.first(ds)
+    /// ?? d).decl`) — its container is neither a borrowed slot nor a fresh call: bind it
+    /// to a synthetic `let` and move that local out — the block arm `{ let t = <arm>; t }`
+    /// the source could have spelled, which the bind lowering already carries for every
+    /// value it can name. Only projections: a non-projection arm (`c ?? "-"` over a lent
+    /// element) keeps the route it had, whose layout the native render already types.
+    /// The tail is a `Var`, which this arm never claims, so it cannot recurse.
+    fn lower_bound_value_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
+        let tmp = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: arm.ty.clone(), value: arm.clone() },
+            span: arm.span,
+        };
+        let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: arm.ty.clone(), span: arm.span, def_id: None };
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(var)), &arm.ty)
     }
 
     /// A heap projection off a FRESH container (`ok(ds) => check_all(k, ds).error`): the

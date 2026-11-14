@@ -128,17 +128,80 @@ impl LowerCtx {
             }
             return None;
         }
-        // A CTOR-class element (`some(1)`, `err("x")`) materializes through the Option/Result
-        // ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking to callers,
-        // so push it for the uniform Consume below). A Var/call element of the SAME type takes
-        // `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is TYPE-driven,
-        // so both produce blocks the registered list drop frees exactly.
-        match self.lower_classified_list_element(e_ref, elem_ty, &kind) {
+        if matches!(e_ref.kind, IrExprKind::UnwrapOr { .. }) {
+            return self.lower_unwrap_or_list_element(e_ref, forced_elem, elem_ty, kind);
+        }
+        self.lower_shaped_list_element(e_ref, elem_ty, &kind)
+    }
+
+    /// The drop-class arms, then the generic owned-field tail, of
+    /// [`Self::lower_record_list_element`] (moved verbatim so the `??` arm can try them
+    /// first). A CTOR-class element (`some(1)`, `err("x")`) materializes through the
+    /// Option/Result ctor builder (a fresh OWNED wrapper block; the ctor arms leave tracking
+    /// to callers, so push it for the uniform Consume below). A Var/call element of the SAME
+    /// type takes `lower_owned_heap_field` (Dup / fresh CallFn result) — the drop class is
+    /// TYPE-driven, so both produce blocks the registered list drop frees exactly.
+    fn lower_shaped_list_element(
+        &mut self,
+        e_ref: &IrExpr,
+        elem_ty: &Ty,
+        kind: &ListElemDrop,
+    ) -> Option<Option<ValueId>> {
+        match self.lower_classified_list_element(e_ref, elem_ty, kind) {
             ListElemArm::Built(obj) => return self.track_list_element_handle(obj),
             ListElemArm::Decline => return None,
             ListElemArm::Fallthrough => {}
         }
         Some(Some(self.lower_owned_heap_field(e_ref)?))
+    }
+
+    /// A `??` ELEMENT (`acc + [pe ?? ("", "")]`, the `list.push(prems, pe ?? (h, h))`
+    /// premise accumulator). The shape arms run first, so every `??` element that lowered
+    /// before takes the same route. When they decline, the element is ANF-lifted through
+    /// the SAME `lower_bind` a user-written `let p = pe ?? ("", "")` takes (a scope-tracked
+    /// synthetic temp, dropped at scope end), and the element becomes that temp — the Var
+    /// arm, a `Dup` the list's drop releases. Writing the `let` by hand always lowered;
+    /// this makes the inline spelling reach it. A bind that declines or defers to an
+    /// Opaque skeleton rolls back, and the literal declines as before.
+    fn lower_unwrap_or_list_element(
+        &mut self,
+        e_ref: &IrExpr,
+        forced_elem: Option<&Ty>,
+        elem_ty: &Ty,
+        kind: ListElemDrop,
+    ) -> Option<Option<ValueId>> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
+        if let Some(out) = self.lower_shaped_list_element(e_ref, elem_ty, &kind) {
+            return Some(out);
+        }
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        self.lifted.truncate(lifted_mark);
+        if !crate::lower::is_heap_ty(&e_ref.ty) {
+            return None;
+        }
+        let tmp = self.fresh_synth_var();
+        let bound = self.lower_bind(tmp, &e_ref.ty, e_ref).is_ok()
+            && !self
+                .value_of
+                .get(&tmp)
+                .is_some_and(|v| self.deferred_opaque_binds.contains(v));
+        if !bound {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            self.lifted.truncate(lifted_mark);
+            self.value_of.remove(&tmp);
+            return None;
+        }
+        let synth = IrExpr {
+            kind: IrExprKind::Var { id: tmp },
+            ty: e_ref.ty.clone(),
+            span: e_ref.span,
+            def_id: None,
+        };
+        self.lower_record_list_element(&synth, forced_elem, elem_ty, kind)
     }
 
     /// Register a freshly built element handle as live and yield it as
