@@ -49,6 +49,11 @@ pub(crate) fn by_value(name: &str, k: usize) -> bool {
     }
 }
 
+/// Does the program define `name` (a call to it reaches a body here)?
+pub(crate) fn has_program_body(name: &str) -> bool {
+    has_body(name)
+}
+
 fn values(op: &Op) -> Vec<ValueId> {
     let mut out = Vec::new();
     crate::mir_ops::op_values(op, &mut out);

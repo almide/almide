@@ -300,10 +300,12 @@ fn sites(func: &MirFunction, lends: &dyn Fn(&str, usize) -> bool) -> Vec<Site> {
 }
 
 /// The payload kinds a borrowed slot can hold: the borrowed spellings the
-/// native render already reads a capture through.
+/// native render already reads a capture through, a closure aside.
 fn supported(t: crate::render_native::NTy) -> bool {
     use crate::render_native::NTy;
-    matches!(t, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr)
+    // A captured closure keeps its own copy: its borrowed spelling has a
+    // lifetime of its own, which the `'static` alias cannot name.
+    matches!(t, NTy::Rec(_) | NTy::Str | NTy::Vec | NTy::VecStr) && !crate::render_native_rec::is_closure(t)
 }
 
 /// The payload kind of capture slot `k` of `lambda`, when it can borrow.
@@ -395,11 +397,11 @@ pub(crate) fn collapsed(v: ValueId) -> bool {
 /// closure can borrow it instead of the caller copying it in.
 pub(crate) fn lent_to_closure(func: &MirFunction, at: usize) -> bool {
     let Some(Op::Dup { dst, .. }) = func.ops.get(at) else { return false };
-    let lends = |name: &str, k: usize| !crate::native_move_params::by_value(name, k);
+    // The render's rule ahead of the final param modes: a program function's
+    // borrowed position (a runtime route keeps its own convention).
+    let lends = |name: &str, k: usize| !crate::native_move_params::by_value(name, k) && crate::native_move_params::has_program_body(name);
     sites(func, &lends).iter().any(|s| {
-        // Ahead of the render the payload's native kind is not resolved yet:
-        // the capture's declared shape decides.
-        s.slots.as_ref().is_some_and(|v| v.iter().any(|x| x.dup == *dst && rich_matches(&s.lambda, x)))
+        s.slots.as_ref().is_some_and(|v| v.iter().any(|x| x.dup == *dst && slot_kind(&s.lambda, x.k).is_some() && rich_matches(&s.lambda, x)))
     })
 }
 
