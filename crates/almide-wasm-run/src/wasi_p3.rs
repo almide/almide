@@ -480,7 +480,7 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
 
 /// 8-byte MemArg.
 fn mem64(offset: u64) -> MemArg {
-    MemArg { offset, align: 3, memory_index: 0 }
+    MemArg { offset, align: 3, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 // The stock serve export (`to_p3_service`'s shims): wasi_p3_serve.rs.

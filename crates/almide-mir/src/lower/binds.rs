@@ -625,6 +625,7 @@ impl LowerCtx {
         }).collect());
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
+        self.absorb_synth_eq_fns(std::mem::take(&mut sub.synth_eq_fns));
         Some(name)
     }
 

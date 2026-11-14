@@ -68,7 +68,7 @@ impl Emitter<'_> {
         let append = self.keyed_append(kt);
         let reserve = self.work.helper(Helper::MapReserve);
         let (koff, voff, esz) = entry_layout(kt, INT);
-        let value_slot = MemArg { offset: u64::from(voff), align: 2, memory_index: 0 };
+        let value_slot = MemArg { offset: u64::from(voff), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         let hm = self.hold_i32()?;
         let he = self.hold_i32()?;
         let ho = self.hold_i32()?;

@@ -155,7 +155,7 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_set(hc);
         i.i32_const(op).i32_const(0);
-        i.local_get(hc).i64_load(MemArg { offset: u64::from(almide_layout::PAYLOAD + off), align: 2, memory_index: 0 });
+        i.local_get(hc).i64_load(MemArg { offset: u64::from(almide_layout::PAYLOAD + off), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
         i.i32_wrap_i64();
         i.i32_const(0).i32_const(0);
         i.call(F_FS_CALL);
@@ -197,7 +197,7 @@ impl Emitter<'_> {
         // ok(HttpCall { id })
         i.i32_const(size as i32).call(F_ALLOC).local_set(hb);
         i.local_get(hb).local_get(hret).i64_const(0xFFFF_FFFF).i64_and();
-        i.i64_store(MemArg { offset: u64::from(almide_layout::PAYLOAD + off), align: 2, memory_index: 0 });
+        i.i64_store(MemArg { offset: u64::from(almide_layout::PAYLOAD + off), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
