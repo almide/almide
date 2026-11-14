@@ -67,6 +67,10 @@ wasmparser = "0.262"
 # `almide verify` pins the SHA-256 of the file it certifies (#4011); almide-verify
 # recomputes it with its own implementation.
 sha2 = "0.11"
+# The native build cache's artifact digest (#4180, #4682): BLAKE3 hashes a built
+# binary in about a tenth of SHA-256's time on CPUs without SHA extensions, on
+# every build and every cache hit.
+blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -160,13 +164,18 @@ opt-level = 1
 debug = 0
 strip = "debuginfo"
 
-# The native build cache hashes every cached binary with SHA-256 on each hit
-# and after each build (#4180), the second inside the shared build-dir lock.
-# Unoptimized, `sha2` hashed at ~25 MB/s: a fifth of a debug `almide build`,
-# serialized across every test that builds natively. Optimizing this one leaf
-# crate changes no semantics (debug_assertions and overflow checks stay on for
-# the compiler's own crates).
+# The native build cache hashes every cached binary on each hit and after each
+# build (#4180), the second inside the shared build-dir lock. Unoptimized,
+# `sha2` hashed at ~25 MB/s: a fifth of a debug `almide build`, serialized
+# across every test that builds natively. Optimizing these leaf crates changes
+# no semantics (debug_assertions and overflow checks stay on for the
+# compiler's own crates). The cache digest is BLAKE3 since #4682; `sha2` still
+# hashes for `almide verify`.
 [profile.dev.package.sha2]
 opt-level = 3
 [profile.ci-test.package.sha2]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.ci-test.package.blake3]
 opt-level = 3

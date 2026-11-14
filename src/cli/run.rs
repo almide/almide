@@ -307,38 +307,37 @@ fn build_native_cached_in(
     }
 }
 
-/// Where the content digest of a cached binary is kept (#4180).
+/// Where the content digest of a cached binary is kept (#4180). The suffix
+/// names the algorithm: a sidecar from before #4682 (`.sha256`) is not read,
+/// so its binary is a miss and is rebuilt; the age and size sweeps then evict
+/// the orphaned sidecar like any other artifact.
 pub(super) fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
     let mut name = bin.file_name().unwrap_or_default().to_os_string();
-    name.push(".sha256");
+    name.push(".blake3");
     bin.with_file_name(name)
 }
 
-/// The lowercase hex SHA-256 of the file at `path`.
-fn file_sha256(path: &std::path::Path) -> Option<String> {
+/// The lowercase hex BLAKE3 of the file at `path` (#4682). BLAKE3 replaced
+/// SHA-256 here: the same 256-bit collision and preimage margin against a
+/// planted binary (#4180's threat), at about a tenth of the time on CPUs
+/// without SHA extensions, where SHA-256 took about 15 ms of every native
+/// build and every cache hit.
+fn file_digest(path: &std::path::Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
-    #[cfg(any(unix, windows))]
-    let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
-    #[cfg(not(any(unix, windows)))]
-    let digest = {
-        use sha2::{Digest, Sha256};
-        Sha256::digest(&bytes)
-    };
-    let digest: &[u8] = digest.as_ref();
-    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
+    Some(blake3::hash(&bytes).to_hex().to_string())
 }
 
 /// Is the cached binary at `bin` the one this compiler built there: present,
 /// with a recorded digest its bytes still hash to (#4180)?
 pub(crate) fn cached_binary_intact(bin: &std::path::Path) -> bool {
     let Ok(want) = std::fs::read_to_string(binary_digest_path(bin)) else { return false };
-    file_sha256(bin).is_some_and(|got| got == want.trim())
+    file_digest(bin).is_some_and(|got| got == want.trim())
 }
 
 /// Record the digest of the binary just installed at `bin`, through a staged
 /// file and a rename like the binary itself.
 pub(super) fn record_binary_digest(bin: &std::path::Path) -> Result<(), String> {
-    let digest = file_sha256(bin).ok_or_else(|| format!("cannot read the built binary {}", bin.display()))?;
+    let digest = file_digest(bin).ok_or_else(|| format!("cannot read the built binary {}", bin.display()))?;
     let path = binary_digest_path(bin);
     let staged = path.with_extension(format!("stage-{}", std::process::id()));
     std::fs::write(&staged, digest).map_err(|e| format!("cannot record the binary digest {}: {e}", staged.display()))?;
