@@ -25,6 +25,18 @@ fn has_body(name: &str) -> bool {
     BODIES.with(|d| d.borrow().contains(name))
 }
 
+/// Does the program define `name` (a call to it reaches a body here)?
+pub(crate) fn has_program_body(name: &str) -> bool {
+    has_body(name)
+}
+
+/// A copy of a param that only lends it: a borrow-only read's copy, or the
+/// co-own of a closure that cannot escape (native_capture_borrow), which
+/// borrows the param instead.
+fn lent_copy(func: &MirFunction, at: usize, root: &BTreeMap<ValueId, ValueId>) -> bool {
+    crate::render_native_borrow_read::lent_param_copy(func, at, root).is_some() || crate::native_capture_borrow::lent_to_closure(func, at)
+}
+
 fn native_result(name: &str, k: usize) -> bool {
     NATIVE_RESULTS.with(|d| d.borrow().contains(&(name.to_string(), k)))
 }

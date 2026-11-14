@@ -250,6 +250,22 @@ fn borrowed_only(text: &str, name: &str) -> bool {
     seen && !text.contains(": &")
 }
 
+/// A test's failing assertion or panic message, through the native test
+/// harness. `true` = rendered.
+fn render_test_die(st: &mut FnLoop<'_>, op: &Op) -> bool {
+    let Op::Prim { kind: crate::PrimKind::Die, dst: None, args } = op else { return false };
+    let [message] = args.as_slice() else { return false };
+    let call = if let Some(call) = crate::native_test_assert::failure(st.func, *message) {
+        call
+    } else if crate::native_test_panic::is_message(st.func, *message) && matches!(st.tys.get(message), Some(NTy::Str | NTy::StrRef)) {
+        format!("__almd_native_test_panic({})", var(*message))
+    } else {
+        return false;
+    };
+    let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
+    true
+}
+
 /// One op of the [`render_fn`] loop. The phases run in order and the first
 /// that renders the op ends it; `Ok(true)` = the op rendered through the
 /// general op match, the only path the tail-recursion flag-exit `break`
@@ -269,18 +285,8 @@ fn render_fn_step<'a>(
     if crate::native_foreign::render(st.func, op, st.sigs, &mut st.tys, &mut st.out, st.indent)? {
         return Ok(false);
     }
-    if let Op::Prim { kind: crate::PrimKind::Die, dst: None, args } = op {
-        if let [message] = args.as_slice() {
-            if let Some(call) = crate::native_test_assert::failure(st.func, *message) {
-                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
-                return Ok(true);
-            }
-            if crate::native_test_panic::is_message(st.func, *message) && matches!(st.tys.get(message), Some(NTy::Str | NTy::StrRef)) {
-                let call = format!("__almd_native_test_panic({})", var(*message));
-                let _ = writeln!(st.out, "{}{call};", "    ".repeat(st.indent));
-                return Ok(true);
-            }
-        }
+    if render_test_die(st, op) {
+        return Ok(true);
     }
     if st.borrowed_tails.contains(&i) {
         crate::native_borrowed_tco::render(st.func, op, &mut st.tys, &mut st.out, st.indent)?;

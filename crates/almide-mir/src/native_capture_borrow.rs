@@ -518,3 +518,9 @@ pub(crate) fn spell_closure_refs(text: &str, names: &[String]) -> String {
     }
     out
 }
+
+/// The target of a type alias: a closure's carries the lifetime when the
+/// render borrows captures, `'static` for an owned closure.
+pub(crate) fn alias_spelling(t: &str, closure: bool) -> String {
+    if closure && active() { format!("{t}<'static>") } else { t.to_string() }
+}

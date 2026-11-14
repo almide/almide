@@ -69,6 +69,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
         }
     }
     if !ty(tys, &ad.base).is_some_and(rec::is_closure) { return None; }
+    if let Some(done) = lent_slot(st, &ad, kind, dst, args, tys, out) { return Some(done); }
     Some((|| {
         if matches!(kind, PrimKind::Load { width: 4 }) && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
             let dst = dst.ok_or_else(|| wall("native: closure length read without destination"))?;
@@ -88,11 +89,6 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             (PrimKind::LoadHandle, Some(d), [_]) => {
                 let current = crate::native_hof::current_fn().ok_or_else(|| wall("native: missing closure context"))?;
                 let fields = rec::closure_slots(&current).ok_or_else(|| wall("native: a closure capture without a checked native layout"))?;
-                if let Some(line) = crate::native_capture_borrow::read_line(&current, ad.base, k, *d, tys) {
-                    crate::render_native_bounds::access(slot);
-                    writeln!(out, "{}", line?).expect("writing to a String cannot fail");
-                    return Ok(());
-                }
                 let t = *fields.get(k).filter(|t| **t != NTy::I64).ok_or_else(|| wall("native: a heap closure read of a scalar or absent capture"))?;
                 let variant = rec::capture_variant(t);
                 crate::render_native_bounds::access(slot);
@@ -108,10 +104,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             (PrimKind::Store { width: 8 }, None, [_, rhs]) => {
                 if matches!(ty(tys, &ad.base), Some(NTy::RecRef(_))) { return Err(wall("native: write into a borrowed closure environment")); }
                 crate::render_native_bounds::store(slot);
-                let lent = crate::native_hof::current_fn().and_then(|f| crate::native_capture_borrow::slot_value(&f, *rhs));
-                if let Some(d) = lent {
-                    writeln!(out, "{}", crate::native_capture_borrow::put_line(ad.base, k, d, tys)?).expect("writing to a String cannot fail");
-                } else if let Some(src) = st.addrs.get(rhs) {
+                if let Some(src) = st.addrs.get(rhs) {
                     if src.off != 0 || src.idx.is_some() { return Err(wall("native: a closure stores a partial heap address")); }
                     let t = ty(tys, &src.base).ok_or_else(|| wall("native: an untyped closure capture"))?;
                     let variant = rec::capture_variant(t);
@@ -136,6 +129,25 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
         }
         Ok(())
     })())
+}
+
+/// A closure slot that holds a borrowed capture (native_capture_borrow):
+/// its read in the lambda, or its store where the closure is built.
+fn lent_slot(st: &AddrState, ad: &Addr, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId], tys: &mut BTreeMap<ValueId, NTy>, out: &mut String) -> Option<Result<(), LowerError>> {
+    let current = crate::native_hof::current_fn()?;
+    let k = rec_slot(ad)?;
+    let (line, read) = match (kind, dst, args) {
+        (PrimKind::LoadHandle, Some(d), [_]) => (crate::native_capture_borrow::read_line(&current, ad.base, k, *d, tys)?, true),
+        (PrimKind::Store { width: 8 }, None, [_, rhs]) => {
+            let d = crate::native_capture_borrow::slot_value(&current, *rhs)?;
+            (crate::native_capture_borrow::put_line(ad.base, k, d, tys), false)
+        }
+        _ => return None,
+    };
+    let (guard, slot) = bounds_guard(st, ad, &format!("{k}usize"));
+    if let Some(guard) = guard { writeln!(out, "{guard}").expect("writing to a String cannot fail"); }
+    if read { crate::render_native_bounds::access(slot) } else { crate::render_native_bounds::store(slot) }
+    Some(line.map(|l| writeln!(out, "{l}").expect("writing to a String cannot fail")))
 }
 
 pub(super) fn word(v: ValueId, tys: &BTreeMap<ValueId, NTy>) -> Result<String, LowerError> {
