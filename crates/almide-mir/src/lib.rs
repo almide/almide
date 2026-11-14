@@ -54,6 +54,7 @@ mod render_native_loops;
 mod render_native_fold_loops;
 mod native_borrowed_tco;
 mod native_borrowed_slots;
+mod native_capture_borrow;
 mod native_never;
 mod native_fn_aliases;
 mod native_region;

@@ -24,14 +24,18 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
         if let Some(i) = st.alloc_rec.get(&dst).copied().filter(|i| rec::closure_sig(*i).is_some()) {
             return Some((|| {
                 tys.insert(dst, NTy::Rec(i));
+                // A closure holding a borrowed capture lives no longer than
+                // its frame (native_capture_borrow).
+                let lends = crate::native_hof::current_fn().is_some_and(|f| crate::native_capture_borrow::lends_block(&f, dst));
+                let spelled = if lends { "__AlmdClosure<'_>".to_string() } else { rec::struct_name(i) };
                 if let Some(elems) = elems {
                     let words: Vec<String> = elems.iter().map(|v| word(*v, tys)).collect::<Result<_, _>>()?;
-                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: {}, heaps: Default::default() }};", var(dst), rec::struct_name(i), rec::closure_words(&words)).expect("writing to a String cannot fail");
+                    writeln!(out, "let mut {}: {} = __AlmdClosure {{ words: {}, heaps: Default::default() }};", var(dst), spelled, rec::closure_words(&words)).expect("writing to a String cannot fail");
                 } else {
                     let len = len.expect("a closure literal without elems carries a length");
                     if ty(tys, &len) != Some(NTy::I64) { return Err(wall("native: untyped closure length")); }
                     rec::note_wide_closure();
-                    writeln!(out, "let mut {}: {} = __AlmdClosure::new({}.max(0) as usize);", var(dst), rec::struct_name(i), var(len)).expect("writing to a String cannot fail");
+                    writeln!(out, "let mut {}: {} = __AlmdClosure::new({}.max(0) as usize);", var(dst), spelled, var(len)).expect("writing to a String cannot fail");
                 }
                 Ok(())
             })());
@@ -54,6 +58,16 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
     }
     let Op::Prim { kind, dst, args } = op else { return None };
     let ad = *st.addrs.get(args.first()?)?;
+    // The payload read of a borrowed rich capture: the borrow stands for its
+    // wrapper (native_capture_borrow), so the payload is the borrow itself.
+    if let (PrimKind::LoadHandle, Some(d)) = (kind, dst) {
+        if crate::native_capture_borrow::collapsed(ad.base) && ad.idx.is_none() && ad.off == 20 {
+            let t = *tys.get(&ad.base)?;
+            tys.insert(*d, t);
+            writeln!(out, "let mut {} = {};", var(*d), var(ad.base)).expect("writing to a String cannot fail");
+            return Some(Ok(()));
+        }
+    }
     if !ty(tys, &ad.base).is_some_and(rec::is_closure) { return None; }
     Some((|| {
         if matches!(kind, PrimKind::Load { width: 4 }) && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
@@ -74,6 +88,11 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             (PrimKind::LoadHandle, Some(d), [_]) => {
                 let current = crate::native_hof::current_fn().ok_or_else(|| wall("native: missing closure context"))?;
                 let fields = rec::closure_slots(&current).ok_or_else(|| wall("native: a closure capture without a checked native layout"))?;
+                if let Some(line) = crate::native_capture_borrow::read_line(&current, ad.base, k, *d, tys) {
+                    crate::render_native_bounds::access(slot);
+                    writeln!(out, "{}", line?).expect("writing to a String cannot fail");
+                    return Ok(());
+                }
                 let t = *fields.get(k).filter(|t| **t != NTy::I64).ok_or_else(|| wall("native: a heap closure read of a scalar or absent capture"))?;
                 let variant = rec::capture_variant(t);
                 crate::render_native_bounds::access(slot);
@@ -89,7 +108,10 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
             (PrimKind::Store { width: 8 }, None, [_, rhs]) => {
                 if matches!(ty(tys, &ad.base), Some(NTy::RecRef(_))) { return Err(wall("native: write into a borrowed closure environment")); }
                 crate::render_native_bounds::store(slot);
-                if let Some(src) = st.addrs.get(rhs) {
+                let lent = crate::native_hof::current_fn().and_then(|f| crate::native_capture_borrow::slot_value(&f, *rhs));
+                if let Some(d) = lent {
+                    writeln!(out, "{}", crate::native_capture_borrow::put_line(ad.base, k, d, tys)?).expect("writing to a String cannot fail");
+                } else if let Some(src) = st.addrs.get(rhs) {
                     if src.off != 0 || src.idx.is_some() { return Err(wall("native: a closure stores a partial heap address")); }
                     let t = ty(tys, &src.base).ok_or_else(|| wall("native: an untyped closure capture"))?;
                     let variant = rec::capture_variant(t);

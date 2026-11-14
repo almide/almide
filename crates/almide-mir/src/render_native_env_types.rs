@@ -4,9 +4,21 @@ thread_local! {
     /// Some closure of the render holds more words than the inline four, or
     /// a number known only at run time.
     static WIDE_CLOSURES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The payload kinds closures borrow (native_capture_borrow): variant
+    /// `R{i}` holds the borrow, `O{i}` the copy an escaping clone takes.
+    static BORROW_KINDS: RefCell<Vec<NTy>> = const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) fn reset_capture_kinds() { CAPTURE_KINDS.with(|k| k.borrow_mut().clear()); WIDE_CLOSURES.with(|w| w.set(false)); }
+pub(crate) fn reset_capture_kinds() { CAPTURE_KINDS.with(|k| k.borrow_mut().clear()); WIDE_CLOSURES.with(|w| w.set(false)); BORROW_KINDS.with(|k| k.borrow_mut().clear()); }
+
+/// The variant index of a borrowed capture of payload kind `t`.
+pub(crate) fn borrow_variant(t: NTy) -> Option<usize> {
+    crate::native_capture_borrow::ref_kind(t, "")?;
+    Some(BORROW_KINDS.with(|ks| {
+        let mut ks = ks.borrow_mut();
+        if let Some(i) = ks.iter().position(|k| crate::native_value_repr::same_owned(*k, t)) { i } else { ks.push(t); ks.len() - 1 }
+    }))
+}
 
 /// The closure construction of `words` (render_native_env_slots): `n` words
 /// padded to at least the inline four, so the array's length `m` picks the
@@ -74,7 +86,8 @@ pub(crate) fn capture_variant(t: NTy) -> String {
 
 pub(crate) fn closure_env_defs() -> String {
     if !RECS.with(|r| r.borrow().iter().any(|d| d.closure_of.is_some())) { return String::new(); }
-    if !WIDE_CLOSURES.with(|w| w.get()) && CAPTURE_KINDS.with(|ks| ks.borrow().is_empty()) {
+    let borrows = crate::native_capture_borrow::active();
+    if !borrows && !WIDE_CLOSURES.with(|w| w.get()) && CAPTURE_KINDS.with(|ks| ks.borrow().is_empty()) {
         return LEAN_CLOSURE_ENV.to_string();
     }
     let mut out = String::from("#[derive(Clone, Default)]\nstruct __AlmdClosure { words: __AlmdWords, heaps: __AlmdHeaps }\n#[derive(Clone, Default)]\nenum __AlmdHeaps { #[default] Empty, One(usize, Box<__AlmdCapture>), Many(Vec<Option<__AlmdCapture>>) }\n#[derive(Clone)]\nenum __AlmdWords { Inline(u8, [i64; 4]), Heap(Vec<i64>) }\nimpl Default for __AlmdWords { fn default() -> Self { __AlmdWords::Inline(0, [0; 4]) } }\nimpl __AlmdWords { #[inline(always)] fn of<const N: usize, const M: usize>(w: [i64; M]) -> Self { if M == 4 { __AlmdWords::Inline(N as u8, std::array::from_fn(|i| w[i])) } else { __AlmdWords::Heap(w.to_vec()) } } fn zeroed(n: usize) -> Self { if n <= 4 { __AlmdWords::Inline(n as u8, [0; 4]) } else { __AlmdWords::Heap(vec![0; n]) } } }\nimpl std::ops::Deref for __AlmdWords { type Target = [i64]; #[inline] fn deref(&self) -> &[i64] { match self { __AlmdWords::Inline(n, a) => &a[..*n as usize], __AlmdWords::Heap(v) => v } } }\nimpl std::ops::DerefMut for __AlmdWords { #[inline] fn deref_mut(&mut self) -> &mut [i64] { match self { __AlmdWords::Inline(n, a) => &mut a[..*n as usize], __AlmdWords::Heap(v) => v } } }\nimpl __AlmdClosure { fn new(n: usize) -> Self { Self { words: __AlmdWords::zeroed(n), heaps: __AlmdHeaps::Empty } } fn put(&mut self, k: usize, v: __AlmdCapture) { self.heaps = match std::mem::take(&mut self.heaps) { __AlmdHeaps::Empty => __AlmdHeaps::One(k, Box::new(v)), __AlmdHeaps::One(j, _) if j == k => __AlmdHeaps::One(k, Box::new(v)), __AlmdHeaps::One(j, w) => { let mut h = Vec::new(); h.resize_with(self.words.len().max(j.max(k) + 1), || None); h[j] = Some(*w); h[k] = Some(v); __AlmdHeaps::Many(h) } __AlmdHeaps::Many(mut h) => { if h.len() <= k { h.resize_with(k + 1, || None); } h[k] = Some(v); __AlmdHeaps::Many(h) } }; } }\ntrait __AlmdEnv { fn words(&self) -> &[i64]; fn len(&self) -> usize { self.words().len() } fn heap(&self, _: usize) -> Option<&__AlmdCapture> { None } }\nimpl __AlmdEnv for __AlmdClosure { fn words(&self) -> &[i64] { &*self.words } fn heap(&self, k: usize) -> Option<&__AlmdCapture> { match &self.heaps { __AlmdHeaps::One(j, w) if *j == k => Some(&**w), __AlmdHeaps::Many(h) => h.get(k).and_then(Option::as_ref), _ => None } } }\nimpl<T: __AlmdEnv + ?Sized> __AlmdEnv for &T { fn words(&self) -> &[i64] { (**self).words() } fn heap(&self, k: usize) -> Option<&__AlmdCapture> { (**self).heap(k) } }\nimpl<const N: usize> __AlmdEnv for [i64; N] { fn words(&self) -> &[i64] { self } }\n#[derive(Clone)]\nenum __AlmdCapture {\n");
@@ -83,8 +96,60 @@ pub(crate) fn closure_env_defs() -> String {
             out.push_str(&format!("    K{i}({}),\n", owned_ty(*t)));
         }
     });
-    out.push_str("}\n\n");
+    if !borrows {
+        out.push_str("}\n\n");
+        return out;
+    }
+    lifetime_env(out)
+}
+
+/// The environment of a render whose closures borrow captures: the closure
+/// carries the borrow's lifetime, a borrowed capture `R{i}` has an owned twin
+/// `O{i}`, and a closure copied out of a borrowed one (`.clone()`, the only
+/// way one leaves its frame) owns every capture: `__AlmdClosure<'static>`.
+fn lifetime_env(out: String) -> String {
+    let mut out = out
+        .replace("struct __AlmdClosure {", "struct __AlmdClosure<'a> {")
+        .replace("heaps: __AlmdHeaps }", "heaps: __AlmdHeaps<'a> }")
+        .replace("enum __AlmdHeaps {", "enum __AlmdHeaps<'a> {")
+        .replace("Box<__AlmdCapture>", "Box<__AlmdCapture<'a>>")
+        .replace("Vec<Option<__AlmdCapture>>", "Vec<Option<__AlmdCapture<'a>>>")
+        .replace("impl __AlmdClosure {", "impl<'a> __AlmdClosure<'a> {")
+        .replace("v: __AlmdCapture)", "v: __AlmdCapture<'a>)")
+        .replace("Option<&__AlmdCapture>", "Option<&__AlmdCapture<'_>>")
+        .replace("impl __AlmdEnv for __AlmdClosure {", "impl<'a> __AlmdEnv for __AlmdClosure<'a> {")
+        .replace("enum __AlmdCapture {", "enum __AlmdCapture<'a> {");
+    let kinds = BORROW_KINDS.with(|k| k.borrow().clone());
+    let mut owned_arms = String::new();
+    for (i, t) in kinds.iter().enumerate() {
+        let (_, spelled) = crate::native_capture_borrow::ref_kind(*t, "'a").expect("a registered borrow kind");
+        out.push_str(&format!("    R{i}({spelled}),\n    O{i}({}),\n", owned_ty(*t)));
+        let copy = match t {
+            NTy::Str => "AlmideString::from(*x)",
+            NTy::Rec(_) => "(**x).clone()",
+            _ => "x.to_vec()",
+        };
+        owned_arms.push_str(&format!(" Self::R{i}(x) => __AlmdCapture::O{i}({copy}), Self::O{i}(x) => __AlmdCapture::O{i}(x.clone()),"));
+    }
+    out.push_str("}\n");
+    let mut kept = String::new();
+    CAPTURE_KINDS.with(|ks| {
+        for i in 0..ks.borrow().len() {
+            kept.push_str(&format!(" Self::K{i}(x) => __AlmdCapture::K{i}(x.clone()),"));
+        }
+    });
+    out.push_str(&format!(
+        "impl<'a> __AlmdCapture<'a> {{ fn to_static(&self) -> __AlmdCapture<'static> {{ match self {{{kept}{owned_arms} }} }} }}\n\
+         impl<'a> __AlmdClosure<'a> {{ fn clone(&self) -> __AlmdClosure<'static> {{ __AlmdClosure {{ words: self.words.clone(), heaps: match &self.heaps {{ __AlmdHeaps::Empty => __AlmdHeaps::Empty, __AlmdHeaps::One(k, w) => __AlmdHeaps::One(*k, Box::new(w.to_static())), __AlmdHeaps::Many(h) => __AlmdHeaps::Many(h.iter().map(|c| c.as_ref().map(__AlmdCapture::to_static)).collect()) }} }} }} }}\n\n"
+    ));
     out
+}
+
+/// The closure aliases a render borrowing captures spells by reference as
+/// `&__AlmdClosure<'_>`: a borrowed closure parameter accepts a closure of
+/// any lifetime, while an owned one stays `'static`.
+pub(crate) fn closure_ref_names() -> Vec<String> {
+    RECS.with(|r| r.borrow().iter().enumerate().filter(|(_, d)| d.closure_of.is_some()).map(|(i, _)| struct_name(i as u16)).collect())
 }
 
 pub(crate) fn closure_source(i: u16) -> Option<(Vec<almide_lang::types::Ty>, almide_lang::types::Ty)> {

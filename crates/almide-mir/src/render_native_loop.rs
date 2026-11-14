@@ -298,6 +298,10 @@ fn render_fn_step<'a>(
     if render_printed_scalar(st, i)? || render_chain_final(st, i)? {
         return Ok(false);
     }
+    // A copy a non-escaping closure borrows, and the wrapper that carried it.
+    if crate::native_capture_borrow::render(st.func, i, op, &mut st.tys, &mut st.out, st.indent)? {
+        return Ok(false);
+    }
     // A string floor call bound as slices of a borrowed param, and its reads.
     if crate::render_native_slices::render(i, op, &mut st.tys, &mut st.out, st.indent, &mut *st.used_shims)? {
         return Ok(false);

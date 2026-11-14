@@ -7,6 +7,9 @@ pub(crate) fn struct_defs() -> String {
         for (i, d) in r.borrow().iter().enumerate() {
             let target = alias_target(d);
             if let (true, Some(t)) = (d.alias.is_some() || d.cell_of.is_some(), &target) {
+                // A render whose closures borrow captures: the closure type
+                // carries a lifetime, `'static` for an owned one.
+                let t = if d.closure_of.is_some() && crate::native_capture_borrow::active() { format!("{t}<'static>") } else { t.to_string() };
                 out.push_str(&format!("type {} = {t};\n\n", struct_name(i as u16)));
                 continue;
             }
