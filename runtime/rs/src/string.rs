@@ -145,8 +145,10 @@ pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
 // The streaming twin of `split` (native render, `render_native_loops`): the
 // same pieces in the same order, each a slice of `s`. A loop over a split
 // list that dies at the loop walks this instead, building neither the list
-// nor a block per piece. A one-byte ASCII separator is found with a `char`
-// search (memchr), as above; any other with `str::split`, made on first use.
+// nor a block per piece. A one-byte ASCII separator is found byte by byte in
+// a short rest (a short piece pays no searcher set-up: measured 2026-11-14 on
+// `strchurn`, 62.7 → 58.3 ms) and with a `char` search (memchr), as above, in
+// a long one; any other separator with `str::split`, made on first use.
 pub fn almide_rt_string_split_iter<'a>(s: &'a str, sep: &'a str) -> impl Iterator<Item = &'a str> + 'a {
     let byte = almide_string_ascii_sep(sep);
     let mut rest = Some(s);
@@ -154,7 +156,8 @@ pub fn almide_rt_string_split_iter<'a>(s: &'a str, sep: &'a str) -> impl Iterato
     std::iter::from_fn(move || match byte {
         Some(c) => {
             let r = rest?;
-            match r.find(c) {
+            let at = if r.len() <= 64 { r.as_bytes().iter().position(|&x| x == c as u8) } else { r.find(c) };
+            match at {
                 Some(i) => {
                     rest = Some(&r[i + 1..]);
                     Some(&r[..i])

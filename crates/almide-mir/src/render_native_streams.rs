@@ -152,12 +152,28 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
         }
     }
     let call = format!("{twin}({})", args.join(", "));
+    // A length read only to size the collected list is not counted: the list
+    // grows as the stream fills it (counting would walk the stream twice).
+    let mut sized: Vec<(usize, usize)> = Vec::new();
+    for &k in &lens {
+        let (v, _, _) = let_parts(&lines[k])?;
+        let reserve = format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({v}.max(0) as usize).is_err() {{");
+        let uses: Vec<usize> = (0..lines.len()).filter(|&j| j != k && !is_note(&lines[j]) && mentions(&lines[j], v)).collect();
+        if let [j] = uses[..] {
+            if let_parts(&lines[j]).is_some_and(|(_, ty, rhs)| ty.starts_with("Vec<") && rhs.starts_with(&reserve) && !mentions(&rhs.replacen(&reserve, "", 1), v)) {
+                sized.push((k, j));
+            }
+        }
+    }
     let mut out = Vec::with_capacity(lines.len());
     for (k, l) in lines.iter().enumerate() {
-        if k == d || released.contains(&k) {
+        if k == d || released.contains(&k) || sized.iter().any(|&(n, _)| n == k) {
             continue;
         }
-        if lens.contains(&k) {
+        if sized.iter().any(|&(_, j)| j == k) {
+            let (v, ty, _) = let_parts(l)?;
+            out.push(format!("{}let mut {v}: {ty} = Vec::new();", " ".repeat(indent_of(l))));
+        } else if lens.contains(&k) {
             let (v, _, _) = let_parts(l)?;
             out.push(format!("{}let mut {v}: i64 = {call}.count() as i64;", " ".repeat(indent_of(l))));
         } else if k == h {
@@ -203,6 +219,9 @@ mod tests {
         let got = run(SPLIT_MAP);
         assert!(got.contains("v28.extend(almide_rt_string_split_iter(&v21, \",\").enumerate().map(|(v30, __e_v30)| {"), "{got}");
         assert!(got.contains("let mut v27: i64 = almide_rt_string_split_iter(&v21, \",\").count() as i64;"), "{got}");
+        // A length that only sizes the collected list is not counted.
+        let sized = run(&SPLIT_MAP.replace("let mut v28: Vec<AlmideString> = Vec::new();", "let mut v28: Vec<AlmideString> = { let mut r = Vec::new(); if r.try_reserve_exact(v27.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); almide_host_exit(1); } r };"));
+        assert!(!sized.contains("v27") && sized.contains("let mut v28: Vec<AlmideString> = Vec::new();"), "{sized}");
         assert!(!got.contains("let mut v23") && !got.contains("drop(v23)"), "{got}");
         // The argument is released after the loop, not before it.
         let at = got.find("drop(v21);").expect("released");
