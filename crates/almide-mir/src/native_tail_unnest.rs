@@ -159,5 +159,5 @@ pub(crate) fn unnest(func: &MirFunction) -> Option<MirFunction> {
 }
 
 #[cfg(test)]
-#[path = "native_unnest_tail_test.rs"]
+#[path = "native_tail_unnest_test.rs"]
 mod tests;

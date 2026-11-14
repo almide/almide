@@ -362,7 +362,7 @@ pub fn native_host_call_count() -> usize {
 }
 
 /// The named calls of the native host class served by runtime `module`.
-pub fn native_host_class(module: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn native_host_class(module: &str) -> Option<&'static [&'static str]> {
     NATIVE_HOST_CLASSES.iter().find(|(m, _)| *m == module).map(|(_, calls)| *calls)
 }
 
