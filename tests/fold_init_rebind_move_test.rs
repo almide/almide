@@ -28,10 +28,11 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
-fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("almd_fold_init_rebind_{name}_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A directory of the calling test's own: the tests run in parallel and
+/// several emit the same program, so a shared directory let one test read a
+/// file another was rewriting.
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("almd_fold_init_rebind_{name}_")).tempdir().unwrap()
 }
 
 const PROGRAM: &str = r#"fn a0() -> List[String] = list.range(0, 2) |> list.map((i) => "s${100000000 + i}")
@@ -123,7 +124,8 @@ effect fn main() -> Unit = {
 const EXPECTED: &str = "100\nfs1s1s1s1\nbssss\nske~~ke~~\n2\nccccccc\nw--w--w--w\nkk++\ntgggg\n";
 
 fn emit_rust() -> String {
-    let file = scratch("emit").join("prog.almd");
+    let dir = scratch("emit");
+    let file = dir.path().join("prog.almd");
     std::fs::write(&file, PROGRAM).unwrap();
     let out = Command::new(almide())
         .args([file.to_str().unwrap(), "--target", "rust"])
@@ -175,7 +177,8 @@ fn an_accumulator_read_again_is_still_copied() {
 
 #[test]
 fn native_and_wasm_agree() {
-    let file = scratch("run").join("prog.almd");
+    let dir = scratch("run");
+    let file = dir.path().join("prog.almd");
     std::fs::write(&file, PROGRAM).unwrap();
     for target in [None, Some("wasm")] {
         let mut cmd = Command::new(almide());

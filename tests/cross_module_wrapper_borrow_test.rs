@@ -47,8 +47,11 @@ const MAIN: &str = "import self.other\n\
       println(via_far(ts, 0).kind + via_here(ts, 0).kind)\n\
     }\n";
 
+/// Each call gets its own package directory: two tests emit in parallel, and
+/// with one shared directory one test's cleanup removed the other's sources.
 fn emitted_package() -> String {
-    let dir = std::env::temp_dir().join(format!("almide-xmod-borrow-{}", std::process::id()));
+    let tmp = tempfile::Builder::new().prefix("almide-xmod-borrow-").tempdir().unwrap();
+    let dir = tmp.path().to_path_buf();
     std::fs::create_dir_all(dir.join("src")).unwrap();
     std::fs::write(dir.join("almide.toml"), "[package]\nname = \"xmod\"\nversion = \"0.1.0\"\n").unwrap();
     std::fs::write(dir.join("src/other.almd"), OTHER).unwrap();
@@ -59,7 +62,6 @@ fn emitted_package() -> String {
         .output()
         .expect("failed to spawn almide");
     let rust = String::from_utf8_lossy(&output.stdout).to_string();
-    std::fs::remove_dir_all(&dir).ok();
     assert!(output.status.success(), "--target rust emit failed:\n{}", String::from_utf8_lossy(&output.stderr));
     rust
 }
