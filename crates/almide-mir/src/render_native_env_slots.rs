@@ -69,7 +69,7 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
         }
     }
     if !ty(tys, &ad.base).is_some_and(rec::is_closure) { return None; }
-    if let Some(done) = lent_slot(st, &ad, kind, dst, args, tys, out) { return Some(done); }
+    if let Some(done) = lent_slot(st, &ad, op, tys, out) { return Some(done); }
     Some((|| {
         if matches!(kind, PrimKind::Load { width: 4 }) && ad.off == i64::from(BLOCK_LEN_OFFSET) && ad.idx.is_none() {
             let dst = dst.ok_or_else(|| wall("native: closure length read without destination"))?;
@@ -133,10 +133,11 @@ fn render_inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, o
 
 /// A closure slot that holds a borrowed capture (native_capture_borrow):
 /// its read in the lambda, or its store where the closure is built.
-fn lent_slot(st: &AddrState, ad: &Addr, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId], tys: &mut BTreeMap<ValueId, NTy>, out: &mut String) -> Option<Result<(), LowerError>> {
+fn lent_slot(st: &AddrState, ad: &Addr, op: &Op, tys: &mut BTreeMap<ValueId, NTy>, out: &mut String) -> Option<Result<(), LowerError>> {
+    let Op::Prim { kind, dst, args } = op else { return None };
     let current = crate::native_hof::current_fn()?;
     let k = rec_slot(ad)?;
-    let (line, read) = match (kind, dst, args) {
+    let (line, read) = match (kind, dst, args.as_slice()) {
         (PrimKind::LoadHandle, Some(d), [_]) => (crate::native_capture_borrow::read_line(&current, ad.base, k, *d, tys)?, true),
         (PrimKind::Store { width: 8 }, None, [_, rhs]) => {
             let d = crate::native_capture_borrow::slot_value(&current, *rhs)?;
