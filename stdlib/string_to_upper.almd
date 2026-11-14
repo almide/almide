@@ -165,7 +165,27 @@ fn string_to_upper(s: String) -> String = {
   // strings conservatively take the allocating path. Pool::intern and its
   // layout regression test maintain this premise.
   let unique = prim.load32(h) == 1 and prim.load32(h + 8) > blen
-  let done = if unique then __to_upper_ascii(p, p, blen, __to_upper_words(p, p, blen, 0)) else 0 - 1
+  // In place, in the body: eight bytes at a time, then byte by byte, up to
+  // the first byte that is not ASCII.
+  var done = 0 - 1
+  if unique then {
+    done = 0
+    while done + 8 <= blen {
+      let w = prim.load64(p + done)
+      if prim.band(w, -9187201950435737472) != 0 then break
+      else ()
+      let m = prim.band(prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)), -9187201950435737472)
+      prim.store64(p + done, prim.bxor(w, prim.bshr_u(m, 2)))
+      done = done + 8
+    }
+    while done < blen {
+      let b = prim.load8(p + done)
+      if b >= 128 then break
+      else ()
+      prim.store8(p + done, if b >= 97 and b <= 122 then b - 32 else b)
+      done = done + 1
+    }
+  } else ()
   if done == blen then s
   else if __to_upper_ascii_end(p, blen) == blen then {
     // All ASCII: byte for byte into a block of the same length.

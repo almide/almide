@@ -102,16 +102,32 @@ fn __trim_copied(from: Int, nbytes: Int) -> String = {
 }
 
 // All of `s` is `s` itself; a sole owner keeps its block; anything else is
-// copied out.
+// copied out. The ASCII ends are scanned here, in the body, byte by byte; an
+// end that is a multi-byte codepoint goes through the decoding scanners.
 fn string_trim(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
-  let ws_start = __trim_start(base, base + blen)
-  let ws_end = __trim_end(ws_start, base + blen)
-  let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
+  let end = base + blen
+  var a = base
+  while a < end {
+    let b = prim.load8(a)
+    if b != 32 and (b < 9 or b > 13) then break
+    else ()
+    a = a + 1
+  }
+  let ws_start = if a < end and prim.load8(a) >= 128 then __trim_start(a, end) else a
+  var z = end
+  while z > ws_start {
+    let b = prim.load8(z - 1)
+    if b != 32 and (b < 9 or b > 13) then break
+    else ()
+    z = z - 1
+  }
+  let ws_end = if z > ws_start and prim.load8(z - 1) >= 128 then __trim_end(ws_start, z) else z
+  let nbytes = ws_end - ws_start
   if nbytes == blen then s
-  else if __trim_sole(h, blen) then {
+  else if prim.load32(h) == 1 and prim.load32(h + 8) > blen then {
     let _e = __trim_copy(ws_start, base, nbytes)
     prim.store32(h + 4, nbytes)
     s
