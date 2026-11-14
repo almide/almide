@@ -59,6 +59,7 @@ fn render_fn(
 ) -> Result<(String, Option<NTy>), LowerError> {
     let tys = seed_param_ntys(func, sigs)?;
     let _inout = crate::native_inout::RenderScope::enter(func);
+    let _flow = crate::mir_liveness::FlowScope::enter(func);
     crate::render_native_bounds::begin(func);
     let _rem_divisors = rem_divisor_scope(func);
     let is_main = func.name == "main";
