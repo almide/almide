@@ -252,6 +252,7 @@ impl Emitter<'_> {
                 for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
+                self.witness_release_unbound(&plan.unbound);
                 // These were the frame's last events on this path; the dead
                 // epilogue the emitter still writes after the jump records
                 // nothing. A self tail call (loop form, #2757) is certified
@@ -287,6 +288,7 @@ impl Emitter<'_> {
                 for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
+                self.witness_release_unbound(&plan.unbound);
             }
             // #2755: a guard's early return releases what the success exit
             // does (its value already settled, `witness_exit_value`); the
@@ -295,6 +297,7 @@ impl Emitter<'_> {
                 for &idx in plan.released.difference(&plan.unbound) {
                     self.witness_dec(idx);
                 }
+                self.witness_release_unbound(&plan.unbound);
                 if let Some(w) = self.witness.as_mut() {
                     w.frame_replaced();
                 }
