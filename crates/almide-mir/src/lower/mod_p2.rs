@@ -238,12 +238,15 @@ pub fn settle_effect_abi(program: &mut almide_ir::IrProgram) {
 /// The installed ABI facts, saved on creation and put back on drop: a nested
 /// pipeline run (the registry signature lookup lowers a stdlib source in the
 /// middle of a caller's per-fn lowering) installs ITS program's facts, which
-/// must not outlive it.
+/// must not outlive it. Test-only since #4682: the lookup no longer lowers,
+/// and only its gate's reference route still nests a pipeline run.
+#[cfg(test)]
 pub(crate) struct AbiFactsScope(
     almide_ir::effect_abi::EffectAbiFacts,
     std::collections::HashMap<u32, (u32, Ty)>,
 );
 
+#[cfg(test)]
 impl AbiFactsScope {
     pub(crate) fn save() -> Self {
         let facts = almide_ir::effect_abi::EffectAbiFacts {
@@ -257,6 +260,7 @@ impl AbiFactsScope {
     }
 }
 
+#[cfg(test)]
 impl Drop for AbiFactsScope {
     fn drop(&mut self) {
         install(std::mem::take(&mut self.0));
