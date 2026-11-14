@@ -221,3 +221,70 @@ effect fn main() -> Unit = {
         assert!(peak >= 1, "the sampler never saw the process");
     }
 }
+
+/// #4618: `ALMIDE_FAN_SEQUENTIAL=1` is the sequential oracle for `fan { }`
+/// blocks too: no arm gets a thread, every arm runs inline in arm order. It
+/// used to serialize only `fan.*` calls, so a block fan under it still ran
+/// its arms on threads. The deep fan below, sampled the same way, must hold
+/// nothing but its main thread and print the same answer; without the switch
+/// it takes arm threads (the negative half).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_sequential_switch_runs_block_fan_arms_inline() {
+    let dir = tempfile::Builder::new().prefix("t4618").tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("main.almd"),
+        r#"fn churn(x: Int, k: Int) -> Int = {
+  var acc = x
+  var i = 0
+  while i < k {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn f(n: Int) -> Int = if n == 0 then {
+  if churn(n, 2000000) >= 0 then 1 else 0
+} else {
+  let (a, b) = fan { f(n - 1)!, f(n - 1)! }
+  a + b
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(f(5)!))
+}
+"#,
+    )
+    .expect("write");
+    let bin = dir.path().join("fanseq");
+    let b = Command::new(almide()).args(["build", "main.almd", "-o"]).arg(&bin).current_dir(dir.path()).output().expect("almide build");
+    assert!(b.status.success(), "build failed:\n{}", String::from_utf8_lossy(&b.stderr));
+    let peak_of = |sequential: bool| {
+        let mut cmd = Command::new(&bin);
+        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        if sequential {
+            cmd.env("ALMIDE_FAN_SEQUENTIAL", "1");
+        }
+        let mut child = cmd.spawn().expect("run");
+        let task = format!("/proc/{}/task", child.id());
+        let mut peak = 0usize;
+        while child.try_wait().expect("wait").is_none() {
+            if let Ok(rd) = std::fs::read_dir(&task) {
+                peak = peak.max(rd.count());
+            }
+            std::thread::sleep(std::time::Duration::from_micros(500));
+        }
+        let out = child.wait_with_output().expect("output");
+        assert_eq!(out.status.code(), Some(0), "sequential={sequential}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "32\n", "sequential={sequential}");
+        peak
+    };
+    let sequential = peak_of(true);
+    assert!(sequential >= 1, "the sampler never saw the process");
+    assert_eq!(sequential, 1, "ALMIDE_FAN_SEQUENTIAL=1: the run held {sequential} threads at once; a block fan's arms must run inline");
+    if std::thread::available_parallelism().map_or(1, |n| n.get()) > 1 {
+        let threaded = peak_of(false);
+        assert!(threaded > 1, "without the switch the arms took no thread ({threaded}): the control no longer tells the two apart");
+    }
+}
