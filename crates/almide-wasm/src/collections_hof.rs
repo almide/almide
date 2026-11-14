@@ -676,7 +676,7 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             // present: push into the entry's list, patch the slot back
             i.local_get(he);
-            i.local_get(he).i32_load(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            i.local_get(he).i32_load(MemArg { offset: u64::from(voff), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
             i.local_get(params[0]);
         }
         // the group list co-owns the element it copied out of xs
@@ -687,7 +687,7 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.call(push);
-            i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            i.i32_store(MemArg { offset: u64::from(voff), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
             i.else_();
             // absent: the group's `[x]` first (no allocation may sit
             // between the reserve and the append hook — the hook is what
@@ -719,7 +719,7 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(he).local_get(hl);
-            i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
+            i.i32_store(MemArg { offset: u64::from(voff), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
             i.local_get(hm);
             i.local_get(hm).i32_load(len_memarg()).i32_const(esz as i32).i32_add();
             i.i32_store(len_memarg());

@@ -20,8 +20,10 @@
 //! compiler's output; the two legs must match it byte for byte.
 //!
 //! The scaling cell times only the delete loop (the program reads the
-//! monotonic clock around it) at n and 4n entries: a linear delete takes about
-//! 4× per op, a constant one about 1×; the bound 2.5 sits between them.
+//! monotonic clock around it) at n and 4n entries, both maps churned in one
+//! run in alternating chunks (#4644, support/scaling_ratio.rs): a linear
+//! delete takes about 4× per op, a constant one about 1×; the bound 2.5 sits
+//! between them. The linear control pins that the measure still sees ~4.
 //!
 //! Every subprocess runs under a wall-clock cap, so a regression to the linear
 //! delete fails instead of hanging the suite. The scaling cell is release-only
@@ -32,6 +34,10 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+#[path = "support/scaling_ratio.rs"]
+mod scaling_ratio;
+use scaling_ratio::scaling;
 
 const SEMANTICS: &str = r#"type Holder = { snap: Map[String, Int], tag: Int }
 
@@ -205,25 +211,70 @@ set.from_list(["s0", "s3", "s6", "s9", "s12", "s15", "s18", "s21", "s24", "s27"]
 /// append a new one" — the delete has to cross the whole map's order.
 const SCALING: &str = r#"import env
 
-effect fn churn(n: Int, d: Int) -> Unit = {
-  var m: Map[Int, Int] = map.new()
-  for i in 0..<n {
-    m = map.set(m, i, i)
+/// #4644: churn an n-entry and a 4n-entry map in ONE run — `d` rounds each of
+/// delete-the-oldest-then-append, worked in alternating timed chunks of `c`
+/// rounds, so both see the same load and each other's cache pressure.
+/// `linear` swaps in the negative control's whole-map rebuild for the delete.
+/// Prints both sizes, both last appends, then the per-round ns at n and 4n.
+effect fn churn(n: Int, d: Int, linear: Bool) -> Unit = {
+  let big = 4 * n
+  let c = 32
+  var ms: Map[Int, Int] = map.new()
+  for k in 0..<n {
+    ms = map.set(ms, k, k)
   }
-  let t0 = datetime.monotonic_ns()!
-  for i in 0..<d {
-    m = map.remove(m, i)
-    m = map.set(m, n + i, i)
+  var ml: Map[Int, Int] = map.new()
+  for k in 0..<big {
+    ml = map.set(ml, k, k)
   }
-  let t1 = datetime.monotonic_ns()!
-  println("${map.len(m)} ${map.get(m, n + d - 1)} ${t1 - t0}")
+  var ts = 0
+  var tl = 0
+  var i = 0
+  if linear then {
+    while i < d {
+      let e = if i + c < d then i + c else d
+      let t0 = datetime.monotonic_ns()!
+      for k in i..<e {
+          ms = map.to_list(ms) |> list.filter(((q, _)) => q != k) |> map.from_list
+          ms = map.set(ms, n + k, k)
+        }
+      let t1 = datetime.monotonic_ns()!
+      for k in i..<e {
+            ml = map.to_list(ml) |> list.filter(((q, _)) => q != k) |> map.from_list
+            ml = map.set(ml, big + k, k)
+          }
+      let t2 = datetime.monotonic_ns()!
+      ts = ts + (t1 - t0)
+      tl = tl + (t2 - t1)
+      i = e
+    }
+  } else {
+    while i < d {
+      let e = if i + c < d then i + c else d
+      let t0 = datetime.monotonic_ns()!
+      for k in i..<e {
+          ms = map.remove(ms, k)
+          ms = map.set(ms, n + k, k)
+        }
+      let t1 = datetime.monotonic_ns()!
+      for k in i..<e {
+            ml = map.remove(ml, k)
+            ml = map.set(ml, big + k, k)
+          }
+      let t2 = datetime.monotonic_ns()!
+      ts = ts + (t1 - t0)
+      tl = tl + (t2 - t1)
+      i = e
+    }
+  }
+  println("${map.len(ms)} ${map.len(ml)} ${map.get(ms, n + d - 1)} ${map.get(ml, big + d - 1)} ${ts / d} ${tl / d}")
 }
 
 effect fn main() -> Unit = {
   let args = env.args()
   let n = int.parse(list.get(args, 0) ?? "0") ?? 0
   let d = int.parse(list.get(args, 1) ?? "0") ?? 0
-  churn(n, d)!
+  churn(n, d, list.get(args, 2) == some("linear"))!
 }
 "#;
 
@@ -290,21 +341,23 @@ fn deletes_keep_every_observable_on_both_legs() {
     }
 }
 
-/// Nanoseconds per delete round at map size `n`: the best of three runs of
-/// the program's own clock around the loop.
-fn ns_per_round(file: &Path, wasm: bool, n: u64, d: u64) -> f64 {
-    let (n_s, d_s) = (n.to_string(), d.to_string());
-    (0..3)
-        .map(|_| {
-            let (code, out, err) = run_capped(file, wasm, &[&n_s, &d_s]);
-            assert_eq!(code, 0, "wasm={wasm} n={n}: exit {code}\n{err}");
-            let fields: Vec<&str> = out.split_whitespace().collect();
-            assert_eq!(fields.len(), 3, "wasm={wasm} n={n}: unexpected output {out:?}");
-            assert_eq!(fields[0], n_s, "wasm={wasm} n={n}: the map lost or gained entries");
-            assert_eq!(fields[1], format!("some({})", d - 1), "wasm={wasm} n={n}: the last append is missing");
-            fields[2].parse::<f64>().expect("elapsed ns") / d as f64
-        })
-        .fold(f64::INFINITY, f64::min)
+/// Nanoseconds per delete round at map size n and 4n, measured in one run;
+/// `linear` swaps in the negative control's whole-map rebuild for the delete.
+fn ns_per_round(file: &Path, wasm: bool, n: u64, d: u64, linear: bool) -> (f64, f64) {
+    let (n_s, d_s, big_s) = (n.to_string(), d.to_string(), (4 * n).to_string());
+    let mut args = vec![n_s.as_str(), d_s.as_str()];
+    if linear {
+        args.push("linear");
+    }
+    let (code, out, err) = run_capped(file, wasm, &args);
+    assert_eq!(code, 0, "wasm={wasm} n={n}: exit {code}\n{err}");
+    let fields: Vec<&str> = out.split_whitespace().collect();
+    assert_eq!(fields.len(), 6, "wasm={wasm} n={n}: unexpected output {out:?}");
+    assert_eq!((fields[0], fields[1]), (n_s.as_str(), big_s.as_str()), "wasm={wasm} n={n}: a map lost or gained entries");
+    let last = format!("some({})", d - 1);
+    assert_eq!((fields[2], fields[3]), (last.as_str(), last.as_str()), "wasm={wasm} n={n}: the last append is missing");
+    let ns = |f: &str| f.parse::<f64>().expect("elapsed ns");
+    (ns(fields[4]), ns(fields[5]))
 }
 
 #[test]
@@ -314,13 +367,25 @@ fn four_times_the_map_is_not_four_times_the_delete() {
     let file = write(&dir, "map_delete_scaling.almd", SCALING);
     let (n, d) = (25_000u64, 100_000u64);
     for wasm in [false, true] {
-        let small = ns_per_round(&file, wasm, n, d);
-        let large = ns_per_round(&file, wasm, 4 * n, d);
-        let ratio = large / small.max(1.0);
-        assert!(
-            ratio < 2.5,
-            "wasm={wasm}: a delete round took {large:.0} ns at {} entries against {small:.0} ns at {n} — ratio {ratio:.1}, linear in the map's size again",
-            4 * n
-        );
+        let s = scaling(|| ns_per_round(&file, wasm, n, d, false));
+        eprintln!("wasm={wasm} delete: {}", s.describe(n));
+        assert!(s.ratio() < 2.5, "wasm={wasm}: a delete round took {} — linear in the map's size again", s.describe(n));
+    }
+}
+
+/// #4644 negative control: the same measurement over a delete that IS linear
+/// (the whole map rebuilt without the key) must read at or above the bound on
+/// both legs, so the judge cannot hide a linear delete. Smaller sizes keep the
+/// quadratic loop short; a linear op's ratio is ~4 at any n.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "times the delete loop: runs in CI's release-only root step")]
+fn a_linear_delete_still_reads_as_linear() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = write(&dir, "map_delete_scaling.almd", SCALING);
+    let (n, d) = (2_000u64, 1_000u64);
+    for wasm in [false, true] {
+        let s = scaling(|| ns_per_round(&file, wasm, n, d, true));
+        eprintln!("wasm={wasm} linear control: {}", s.describe(n));
+        assert!(s.ratio() >= 2.5, "wasm={wasm}: the linear control read {}, under the bound the gate uses", s.describe(n));
     }
 }

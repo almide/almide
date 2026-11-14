@@ -143,6 +143,9 @@ pub(crate) enum FloorRet {
     /// `Result[List[Value], String]` — the generated carrier of the runtime's
     /// `Vec<AlmideValue>`.
     ResListValue,
+    /// `Result[List[Int], String]` — the generated carrier of a `Vec<i64>`
+    /// (`unix.__os_wait`'s ready descriptors).
+    ResListInt,
     ResStrValuePairs,
     /// The builtin `Matrix` — the runtime's own `AlmideMatrix`.
     Matrix,
@@ -234,6 +237,9 @@ pub(crate) struct FloorFn {
     /// The runtime's borrowing `_ref` twin of a `Result[Value, String]` body
     /// (its symbol, its items): the Ok side a reference into the Value arg.
     pub borrow_twin: Option<(String, Vec<&'static str>)>,
+    /// The slot-hinted `_at` form of the borrowing twin (its symbol, its
+    /// items): the twin's params, then the position the lookup tries first.
+    pub hinted_twin: Option<(String, Vec<&'static str>)>,
     /// The runtime's `_ref` twin taking each by-value Value param by reference.
     pub by_ref: Option<Box<FloorFn>>,
 }
@@ -381,6 +387,26 @@ pub(crate) fn elem_option_is_scalar(call: &str) -> bool {
     })
 }
 
+/// [`takes_by_value`] holds only through the `@reuse` twin (the plain body
+/// borrows `k`): taking the container over pays only where the caller hands
+/// it over, and a caller that keeps it copies the whole container where the
+/// borrowing body copies what it returns (`list.take(xs, 8)` of a hundred).
+pub(crate) fn by_value_only_through_twin(call: &str, k: usize) -> bool {
+    takes_by_value(call, k)
+        && declared(call).is_some_and(|f| {
+            let f = f.by_ref.as_deref().unwrap_or(f);
+            !plain_by_value(f.params.get(k))
+        })
+}
+
+/// A declared param the runtime body itself takes by value: an owned
+/// container, or an element it stores (`set.insert(s, x)`'s `x`). A map's
+/// key is not: its set has a twin that borrows a `String` key.
+fn plain_by_value(p: Option<&FloorParam>) -> bool {
+    matches!(p, Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)
+        | FloorParam::Elem(false) | FloorParam::SetElem(false)))
+}
+
 /// The declared return of the self-hosted body registered under `call`.
 /// Whether the declared floor fn of `call` takes its param `k` by value (the
 /// runtime body consumes it, or its `@reuse` twin does at a last use, where
@@ -393,7 +419,7 @@ pub(crate) fn takes_by_value(call: &str, k: usize) -> bool {
     declared(call).is_some_and(|f| {
         // The render calls the `_ref` twin where there is one: it lends.
         let f = f.by_ref.as_deref().unwrap_or(f);
-        matches!(f.params.get(k), Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)))
+        plain_by_value(f.params.get(k))
             || f.twin.as_ref().is_some_and(|t| {
                 t.0 == k
                     && matches!(
@@ -647,6 +673,9 @@ fn floor_param(t: &TypeExpr, type_params: &BTreeSet<String>) -> Option<FloorPara
             "String" => Some(FloorParam::Str),
             "Bytes" => Some(FloorParam::Bytes),
             "Matrix" => Some(FloorParam::Matrix(false)),
+            // A `Handle` that reaches the native render is a Region's shared
+            // block (`native_region.rs`); an address is never rendered.
+            "Handle" => Some(FloorParam::Runtime(crate::native_runtime_types::FFI_BLOCK, false)),
             n if n == VALUE_TYPE => Some(FloorParam::Value(false)),
             n if RuntimeType::of(n).is_some() => Some(FloorParam::Runtime(RuntimeType::of(n)?, false)),
             // Whether it is a list's element is checked against the params,
@@ -712,6 +741,7 @@ fn is_option_name(n: &str) -> bool {
 }
 
 include!("native_floor_sig.rs");
+include!("native_floor_slices.rs");
 include!("native_floor_index.rs");
 include!("native_floor_host.rs");
 include!("native_floor_scan.rs");

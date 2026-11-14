@@ -181,7 +181,7 @@ impl Emitter<'_> {
 
     /// Load / store a slot of type `t` at the address on the stack + `off`.
     pub(crate) fn load_slot_off(&mut self, t: crate::SliceTy, off: u64) {
-        let m = wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 };
+        let m = wasm_encoder::MemArg { offset: off, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_load(m),
@@ -190,7 +190,7 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn store_slot_off(&mut self, t: crate::SliceTy, off: u64) {
-        let m = wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 };
+        let m = wasm_encoder::MemArg { offset: off, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_store(m),

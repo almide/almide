@@ -355,13 +355,15 @@
 
     #[test]
     fn effectful_module_call_is_walled() {
-        // Unix FFI is still outside the admitted host-op matrix. A heap
-        // Result exercises the value-call purity gate; admitting it without
-        // a declared capability would leave the transitive witness incomplete.
+        // A capability-module call with no host-op row stays outside the
+        // admitted matrix (the twelve `unix.__os_*` leaves are rows now; this
+        // one is not). A heap Result exercises the value-call purity gate;
+        // admitting it without a declared capability would leave the
+        // transitive witness incomplete.
         let ty = Ty::result(Ty::Int, Ty::String);
         let b = body(vec![
             bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
-            bind(1, ty.clone(), module_call("unix", "__os_connect",
+            bind(1, ty.clone(), module_call("unix", "__os_unlisted",
                 vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)], ty)),
         ]);
         match lower_body(&b, "main") {

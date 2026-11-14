@@ -24,3 +24,46 @@ fn expose_short_circuit_tails(e: &mut IrExpr) {
         _ => {}
     }
 }
+
+/// A `guard c else E` among the statements of a function-tail block is a
+/// branch of the tail: `{ pre; guard c else E; rest }` is `{ pre; if c then
+/// { rest } else E }`, the else being the function's result there. Spell it
+/// so before the loop conversion, which reads a tail `if` arm by arm and left
+/// a guard statement in the loop body with no way to deliver its else
+/// (#4640). Only where the else has the block's own type — a value, never a
+/// diverging else — and only on function-tail positions.
+fn expose_guard_tails(e: &mut IrExpr, ret: &Ty) {
+    match &mut e.kind {
+        IrExprKind::If { then, else_, .. } => {
+            expose_guard_tails(then, ret);
+            expose_guard_tails(else_, ret);
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms { expose_guard_tails(&mut arm.body, ret); }
+        }
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let ty = tail.ty.clone();
+            // The else is the function's result: it has the block's type, or
+            // the function's where the tail is a propagated self call (an
+            // effect fn's `f(..)` tail reads as its Ok side). A bare `err(e)`
+            // may still carry a Result type of its own spelling; the tail-err
+            // retyping that follows gives it the function's.
+            let fits = |else_: &IrExpr| {
+                else_.ty == ty || else_.ty == *ret || (matches!(else_.kind, IrExprKind::ResultErr { .. }) && is_result_ty(ret))
+            };
+            let at = stmts.iter().position(|s| matches!(&s.kind, IrStmtKind::Guard { else_, .. } if fits(else_)));
+            let Some(at) = at else { return expose_guard_tails(tail, ret) };
+            let rest: Vec<IrStmt> = stmts.drain(at + 1..).collect();
+            let Some(IrStmt { kind: IrStmtKind::Guard { cond, else_ }, .. }) = stmts.pop() else { unreachable!() };
+            let old_tail = std::mem::replace(&mut **tail, tco_ir(IrExprKind::Unit, Ty::Unit));
+            let mut then = if rest.is_empty() {
+                old_tail
+            } else {
+                tco_ir(IrExprKind::Block { stmts: rest, expr: Some(Box::new(old_tail)) }, ty.clone())
+            };
+            expose_guard_tails(&mut then, ret);
+            **tail = tco_ir(IrExprKind::If { cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_) }, ty);
+        }
+        _ => {}
+    }
+}

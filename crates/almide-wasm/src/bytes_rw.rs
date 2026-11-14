@@ -2,7 +2,7 @@
 //! builders — split from bytes.rs for the file budget. The layout
 //! doctrine lives in bytes.rs's module doc.
 
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind, VarId};
 use wasm_encoder::{BlockType, ValType};
 
 use crate::bytes::{byte_k, BYTES};
@@ -198,6 +198,12 @@ impl Emitter<'_> {
         // through a block that owner may share is exactly the aliasing
         // miscompile the two gates exist for (the nested path printed the
         // write through its alias); it keeps bytes_recv.rs's honest wall.
+        let proven = match (self.room_proven.take(), &b.kind, &pos.kind) {
+            (Some((pb, pp, w)), IrExprKind::Var { id: bid }, IrExprKind::Var { id: pid }) => {
+                pb == *bid && pp == *pid && i64::from(width) <= w
+            }
+            _ => false,
+        };
         if let almide_ir::IrExprKind::Var { id } = &b.kind
             && let Some((var_idx, var_ty, vglob)) = self.mut_var(id)
             && var_ty == BYTES
@@ -225,9 +231,11 @@ impl Emitter<'_> {
         let hv = self.hold_i64()?;
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(hv);
-        self.bytes_room(bh, ih, width);
+        if !proven {
+            self.bytes_room(bh, ih, width);
+            self.f.instructions().if_(BlockType::Empty);
+        }
         let mut i = self.f.instructions();
-        i.if_(BlockType::Empty);
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
         if be {
             i.local_set(ha);
@@ -248,7 +256,9 @@ impl Emitter<'_> {
                 _ => i.i64_store(byte_k(0)),
             };
         }
-        i.end();
+        if !proven {
+            i.end();
+        }
         let _ = i;
         self.release_i32();
         self.release_i64();
@@ -322,5 +332,41 @@ impl Emitter<'_> {
             }
             _ => Ok(None),
         }
+    }
+    /// A unit `if` whose condition is the room test of a byte window and
+    /// whose then-arm is exactly one in-place set of that window — what a
+    /// checked writer becomes once inlined (inline_calls.rs `writer_body`):
+    /// `if p >= 0 and p <= bytes.len(b) - W then bytes.__set_*(b, p, x)`.
+    /// The set's own room test (`bytes_room`) asks the same question of the
+    /// same block, so the arm's set may skip it: Some((b, p, W)), taken by
+    /// `lower_bytes_set`, which checks its receiver and position are those
+    /// variables and its width at most W. Sound because nothing runs between
+    /// the condition and the set's room test but the set's own receiver
+    /// read — its COW gate copies the block at the same length and writes
+    /// no local — and its position read, so `p` and the length still hold
+    /// what the condition read; the set's value is evaluated after both are
+    /// held, as the skipped test would have used those same held values.
+    pub(crate) fn proven_room(&self, cond: &IrExpr, then: &IrExpr) -> Option<(VarId, VarId, i64)> {
+        use almide_ir::{BinOp, CallTarget};
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &then.kind else { return None };
+        if module.as_str() != "bytes" || !func.as_str().starts_with("__set_") {
+            return None;
+        }
+        let (Some(IrExprKind::Var { id: b }), Some(IrExprKind::Var { id: p })) =
+            (args.first().map(|a| &a.kind), args.get(1).map(|a| &a.kind))
+        else {
+            return None;
+        };
+        let var = |e: &IrExpr, v: &VarId| matches!(&e.kind, IrExprKind::Var { id } if id == v);
+        let IrExprKind::BinOp { op: BinOp::And, left, right } = &cond.kind else { return None };
+        let IrExprKind::BinOp { op: BinOp::Gte, left: l0, right: zero } = &left.kind else { return None };
+        let IrExprKind::BinOp { op: BinOp::Lte, left: l1, right: room } = &right.kind else { return None };
+        let IrExprKind::BinOp { op: BinOp::SubInt, left: len, right: w } = &room.kind else { return None };
+        let IrExprKind::Call { target: CallTarget::Module { module: lm, func: lf, .. }, args: largs, .. } = &len.kind else {
+            return None;
+        };
+        let (IrExprKind::LitInt { value: 0 }, IrExprKind::LitInt { value: w }) = (&zero.kind, &w.kind) else { return None };
+        let reads_b = lm.as_str() == "bytes" && lf.as_str() == "len" && largs.len() == 1 && var(&largs[0], b);
+        (var(l0, p) && var(l1, p) && reads_b && *w > 0).then_some((*b, *p, *w))
     }
 }

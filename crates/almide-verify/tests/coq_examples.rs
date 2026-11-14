@@ -56,6 +56,19 @@ fn ownership_checker_examples() {
             ("{d|d}", false),
             // check_bc
             ("i{i|i}dd", true),
+            // check_xc strict structure (#4631)
+            ("{|id}", true),
+            ("{id}", false),
+            ("{|id", false),
+            ("{im}", false),
+            ("{|im", false),
+            ("{|id|}", false),
+            ("i|d", false),
+            ("id)", false),
+            ("(id", false),
+            ("[id|", false),
+            ("i(id(di)m", false),
+            ("{(id)|}", false),
             // check_xc (format v5, the arm-exit marker)
             ("i{dx|}d", true),
             ("i{|dx}d", true),
@@ -300,7 +313,8 @@ fn native_calls_examples() {
             ("||| 29\nid", true),
             ("||| 30 31\nid", true),
             ("||| 32 33 34 35 36 37\nid", true),
-            ("||| 38\nid", false),
+            ("||| 38 43 49\nid", true),
+            ("||| 50\nid", false),
         ],
     );
 }

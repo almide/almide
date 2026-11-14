@@ -36,7 +36,7 @@
 //! releases it with the box (rc_ownership.rs `shape_slots`), and a box copy
 //! shares it with a credit (the same glue's inc). The index is a flat block
 //! `[hdr][pairs][count][mask][slot × (mask+1)]` — open addressing over the
-//! keys' FNV-1a hash (map_index.rs `$mapidx_hash_str`), slot = pair ordinal
+//! keys' word-wise hash (map_index.rs `$mapidx_hash_str`), slot = pair ordinal
 //! plus one. It answers only when it agrees with the box: the pairs address and
 //! count it was built over are the box's own and nobody else holds it;
 //! otherwise it is rebuilt from the pairs (below 16 pairs the scan is
@@ -74,7 +74,7 @@ const I_MASK: u32 = 8;
 const I_SLOTS: u32 = 12;
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 fn rc() -> MemArg {

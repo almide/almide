@@ -20,11 +20,11 @@ impl LowerCtx {
                 crate::lower::is_anon_tuple_list_elem(elem_ty)
                     .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
             })
-            // The native render frees a tuple by its slot types: there any heap tuple
-            // whose slots it types is an element, under the same per-shape identity.
+            // The native render frees a tuple by its slot types and a list by its element type:
+            // there any heap tuple or list (`List[Tok]`) it types is an element, per-shape identity.
             .or_else(|| {
                 (crate::lower::owned_tco_slots()
-                    && crate::lower::tuple_needs_recursive_drop(elem_ty)
+                    && (crate::lower::tuple_needs_recursive_drop(elem_ty) || crate::lower::is_heap_list_ty(elem_ty))
                     && self.bang_tuple_slots_typed(elem_ty))
                 .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
             })
@@ -621,7 +621,13 @@ impl LowerCtx {
         for (i, ov) in overrides.iter().enumerate() {
             if let Some(expr) = ov {
                 if is_heap_ty(&tys[i]) {
-                    let Some(obj) = self.lower_owned_heap_field(expr) else {
+                    // The same Option/Result ctor fallback a record literal's field
+                    // takes (`record_field_ctor_fallback`): a spread builds a record
+                    // of the same declared type, freed the same way.
+                    let Some(obj) = self
+                        .lower_owned_heap_field(expr)
+                        .or_else(|| self.record_field_ctor_fallback(expr))
+                    else {
                         crate::trace::trace("ALMIDE_DBG_ELEM", || {
                             format!(
                                 "[spread] heap override {} ({}) declined",

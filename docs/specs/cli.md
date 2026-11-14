@@ -136,8 +136,10 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
   ディレクトリで、実行中の利用者の持ち物で、グループと他人に権限が無いときだけ使う。それ以外は直さずに
   拒否する（exit 1）。中身を他人が書いたかもしれないため。Linux の `/tmp` のような共有の temp で、
   他人が先に作った dir に置いたバイナリが自分の権限で実行される穴を塞ぐ。
-- **ヒットの条件**（#4180）: ビルド時にバイナリの SHA-256 を `almide-<hash>.sha256` に記録し、
+- **ヒットの条件**（#4180）: ビルド時にバイナリの BLAKE3 を `almide-<hash>.blake3` に記録し、
   ヒットはその値とバイナリの中身が一致するときだけ。記録が無いか一致しなければ作り直す。
+  #4682 で SHA-256（`.sha256`）から切り替えた。古い `.sha256` の記録は読まないので、その
+  バイナリは作り直され、古い記録は退避で消える。
   テスト: `tests/build_cache_private_test.rs`
 
 - **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
@@ -164,7 +166,7 @@ key は構造レグが読むもの全部: 入口ファイルのパスとソー�
 実行ファイルのパス・サイズ・mtime。同梱 stdlib はこの中にある）、環境の `ALMIDE_*` 変数すべて。
 パース・型検査（警告も）・`[permissions]`・IR 検証・E081 は毎回ヒットの前に走るので、ヒットでも
 ミスと同じ診断が出て、同じものを拒否する。飛ばすのは描画（構造レグ自身の front・emit・検証）だけ。
-壁で止まった描画はキャッシュしない。ヒットの条件（SHA-256 の記録と一致）・7 日の退避・
+壁で止まった描画はキャッシュしない。ヒットの条件（BLAKE3 の記録と一致）・7 日の退避・
 `ALMIDE_CACHE_MAX_BYTES` の上限・`almide clean` は native の成果物と同じ。
 `ALMIDE_TIME_PHASES=1` の `[phase] render (cache hit)` 行でヒットが見える。
 テスト: `tests/wasm_run_cache_test.rs`
@@ -1435,6 +1437,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
 | `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
+| `ALMIDE_DBG_INOUT` | debug | print why a `mut` param keeps the move-mode convention instead of the in-out lend (native v1) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
 | `ALMIDE_DBG_NESTED_MATCH` | debug | print why a nested-match chain was refused (v1 lowering) |
@@ -1526,6 +1529,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SCOPED_CLOSURE_OFF` | ablation | make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule |
 | `ALMIDE_SELF_INLINE_OFF` | ablation | turn OFF the native legs' one-level self-recursive inlining (`almide_ir::self_inline`, #4456), so a pure scalar recursion gets the accumulator loop again: the ablation leg of the fib row in scripts/check-perf-ratio.sh |
+| `ALMIDE_SELF_PEEL_OFF` | ablation | turn OFF the wasm legs' one-level inlining of an accumulator loop's own call (`almide_ir::self_peel`), so a binary recursion keeps the plain accumulator loop: the ablation leg of the peeled/unpeeled differential |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
@@ -1563,6 +1567,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_STDLIB_COVERAGE` | harness | rewrite the stdlib test-coverage ledger's rows from the measured run |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
+| `ALMIDE_VALUE_FUSE_OFF` | ablation | turn the Value fusion pass off (the directed JSON reader and the direct JSON writer) |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
 | `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |

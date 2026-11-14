@@ -299,7 +299,11 @@ impl LowerCtx {
         // the callee; the match then dispatches on a tracked VAR seeded BY TYPE.
         // The call still runs exactly once, before the arms. `speculate` rolls
         // every side effect back on a decline.
-        if !matches!(subject.kind, IrExprKind::Call { .. }) || !crate::lower::is_variant_ty(&subject.ty) {
+        // A variant-valued `match` subject (a `??` over a match — the shape the
+        // value reader leaves) binds the same way: evaluated once, before the arms.
+        if !matches!(subject.kind, IrExprKind::Call { .. } | IrExprKind::Match { .. })
+            || !crate::lower::is_variant_ty(&subject.ty)
+        {
             return None;
         }
         self.speculate(|ctx| {
@@ -536,7 +540,7 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: then_val });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot.clone();
-        self.materialized_aggregates = ma_snapshot;
+        self.materialized_aggregates.restore_to(ma_snapshot);
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = lower_arm(self, else_body)?;
         if then_val.is_none() && else_val.is_none() { return None; }

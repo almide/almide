@@ -22,11 +22,12 @@
 ///   argument its callee takes over is refused;
 /// - `marks`: for every call-site move (`MirFunction::call_moves`), the line
 ///   of the object it moves — where the certificate wrote its `M`;
-/// - `hosts`: one id per call to a native fs host op (an `fs.*` host op the
-///   render serves from the runtime's fs code, #4006 class E): the index of
-///   its runtime symbol in `host_ops::NATIVE_FS_HOST_CALLS`, or that list's
-///   length when the symbol is not in it, which the checker rejects
-///   (`NativeCalls.hosts_ok`: the named set is the trusted base's row);
+/// - `hosts`: one id per call to a native host op (an `fs.*` or `unix.*` host
+///   op the render serves from the runtime's own module, #4006 class E): the
+///   index of its runtime symbol in `host_ops::NATIVE_HOST_CLASSES`' lists laid
+///   end to end (fs's, then unix's), or their total length when the symbol is
+///   not named, which the checker rejects (`NativeCalls.hosts_ok`: the named
+///   sets are the trusted base's rows);
 /// - the lines: [`certificate_lines`], the heap params' lines first (empty
 ///   when a param has no event), a MOVE param's line without the leading `i`
 ///   (the checker seeds it from the mode), then the rest in emission order.
@@ -96,13 +97,13 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
                         let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
                         let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
                         sites.push(site_row(idx, &borrow_modes(args)));
-                        if crate::host_ops::HOST_OPS.iter().any(|o| o.module == "fs" && o.symbol == key.0) {
-                            hosts.push(crate::host_ops::native_fs_host_id(&key.0)
-                                .unwrap_or(crate::host_ops::NATIVE_FS_HOST_CALLS.len()).to_string());
+                        if crate::host_ops::HOST_OPS.iter().any(|o| crate::host_ops::native_host_class(o.module).is_some() && o.symbol == key.0) {
+                            hosts.push(crate::host_ops::native_host_id(&key.0)
+                                .unwrap_or(crate::host_ops::native_host_call_count()).to_string());
                         }
                     }
                     Op::CallFn { name: callee, args, .. } => {
-                        if let Some(id) = native_fs_host_site(callee) {
+                        if let Some(id) = native_host_site(callee) {
                             hosts.push(id.to_string());
                         }
                         let Some(idx) = direct_callee_index(callee, &index_of, unknown, &known) else { continue };
@@ -181,15 +182,14 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
     blocks.collect::<Vec<_>>().join("#")
 }
 
-/// The witness host id of a `CallFn` to `callee` when it is a native fs host
-/// call: an `fs` host op the render serves from the runtime floor. Its id is
-/// the index of the runtime symbol it calls in the named set, or the set's
-/// length (out of range: refused) when that symbol is not named there.
-fn native_fs_host_site(callee: &str) -> Option<usize> {
+/// The witness host id of a `CallFn` to `callee` when it is a native host
+/// call: a host op of a native host class's module (`fs`, `unix`) the render
+/// serves from the runtime floor. Its id is the index of the runtime symbol it
+/// calls in the named sets laid end to end, or their total length (out of
+/// range: refused) when that symbol is not named there.
+fn native_host_site(callee: &str) -> Option<usize> {
     let row = crate::host_ops::host_op_for_call_name(callee)?;
-    if row.module != "fs" {
-        return None;
-    }
+    crate::host_ops::native_host_class(row.module)?;
     let symbol = crate::native_floor::declared(callee)?.symbol.as_str();
-    Some(crate::host_ops::native_fs_host_id(symbol).unwrap_or(crate::host_ops::NATIVE_FS_HOST_CALLS.len()))
+    Some(crate::host_ops::native_host_id(symbol).unwrap_or(crate::host_ops::native_host_call_count()))
 }

@@ -594,7 +594,7 @@ impl Emitter<'_> {
 
     /// Load a slot whose ABSOLUTE address is already on the stack.
     pub(crate) fn load_ty_slot_at(&mut self, t: SliceTy) {
-        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_load(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_load(m),
@@ -604,7 +604,7 @@ impl Emitter<'_> {
 
     /// `[addr, value]` -> store at addr (absolute, offset 0).
     pub(crate) fn store_ty_slot_at(&mut self, t: SliceTy) {
-        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_store(m),
@@ -614,7 +614,7 @@ impl Emitter<'_> {
 
     pub(crate) fn store_ty_slot_raw(&mut self, t: SliceTy) {
         // addr and value already on the stack, offset 0 (absolute addr).
-        let m = wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 };
+        let m = wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         match t.val_type() {
             wasm_encoder::ValType::I64 => self.f.instructions().i64_store(m),
             wasm_encoder::ValType::F64 => self.f.instructions().f64_store(m),

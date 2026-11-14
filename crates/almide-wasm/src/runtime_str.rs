@@ -12,7 +12,7 @@ pub(crate) fn emit_str_cmp() -> Function {
     // params: 0=a, 1=b; locals: 2=p, 3=n, 4=la, 5=lb, 6=ca, 7=cb
     let (a, b, p, n, la, lb, ca, cb) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let byte = |off: u32| MemArg { offset: u64::from(off), align: 0, memory_index: 0 };
+    let byte = |off: u32| MemArg { offset: u64::from(off), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(a).i32_load(len_memarg()).local_set(la);
@@ -52,7 +52,7 @@ pub(crate) fn emit_str_replace() -> Function {
         (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
     let (tbl, k, c) = (13u32, 14u32, 15u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let byte = |off: u32| MemArg { offset: u64::from(off), align: 0, memory_index: 0 };
+    let byte = |off: u32| MemArg { offset: u64::from(off), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(12, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(s).i32_load(len_memarg()).local_set(slen);
@@ -176,8 +176,8 @@ pub(crate) fn emit_str_append() -> (Function, crate::helper_sig::HelperSig) {
     let d = dst as usize;
     let (p, q, endp, want) = (5u32, 6u32, 7u32, 8u32);
     let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(7, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(dst).i32_load(len_memarg()).local_set(la);

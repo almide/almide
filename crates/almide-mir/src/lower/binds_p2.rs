@@ -136,7 +136,6 @@ impl LowerCtx {
         ty: &Ty,
         value: &IrExpr,
     ) -> Result<bool, LowerError> {
-        use crate::PrimKind;
         if !crate::lower::bang_return_probe() && !crate::lower::owned_tco_slots() {
             return Ok(false);
         }
@@ -166,12 +165,47 @@ impl LowerCtx {
             Ok(adm) => adm,
             Err(gate) => decline!(gate),
         };
-        let BangAdmission { void_fn, callee_is_option, callee_fam, rebox, .. } = adm;
+        let mut adm = adm;
         // The err components must agree — the pass-through would type-pun a
         // mismatched err payload (the collect_map! class; v0 map_err-coerces).
-        if !callee_is_option && self.unwrap_tail_err_mismatch(expr) {
-            decline!("err-mismatch");
+        // A String channel takes the propagation desugar's own conversion of the
+        // callee's err (its repr text, or the ", " join of a List[String]),
+        // computed on the exit path; any other mismatch declines.
+        let err_text = if !adm.callee_is_option && self.unwrap_tail_err_mismatch(expr) {
+            match self.bang_err_text_admission(expr, &mut adm) {
+                Some(t) => Some(t),
+                None => decline!("err-mismatch"),
+            }
+        } else {
+            None
+        };
+        if err_text.is_none() {
+            return Ok(self.emit_bang_return_rule(var, ty, expr, &adm, None, dbg).is_some());
         }
+        // The conversion lowers ordinary calls on the exit path; if any of it
+        // declines, nothing of the rule stays emitted.
+        let fired =
+            self.speculate(|ctx| ctx.emit_bang_return_rule(var, ty, expr, &adm, err_text.as_ref(), dbg));
+        if fired.is_none() {
+            decline!("err-text-lowering");
+        }
+        Ok(true)
+    }
+
+    /// The `!` rule's emission once admitted: the callee carrier, the err-tag
+    /// branch with its exit arm, and the ok-payload bind. `None` = declined;
+    /// the callee lowering rolls itself back, the caller's speculation the rest.
+    fn emit_bang_return_rule(
+        &mut self,
+        var: VarId,
+        ty: &Ty,
+        expr: &IrExpr,
+        adm: &BangAdmission,
+        err_text: Option<&(VarId, Ty, IrExpr)>,
+        dbg: bool,
+    ) -> Option<()> {
+        use crate::PrimKind;
+        let BangAdmission { void_fn, callee_is_option, callee_fam, rebox, .. } = *adm;
         // Lower the callee through the FULL existing bind machinery onto a
         // synthetic var, under a speculation snapshot: a decline (or a carrier
         // the rule's ownership story cannot hold — it needs an OWNED live
@@ -186,7 +220,12 @@ impl LowerCtx {
             }
             Some(v)
         });
-        let Some(v) = attempt else { decline!("callee-lowering") };
+        let Some(v) = attempt else {
+            if dbg {
+                eprintln!("BANG-DECLINE callee-lowering :: {}", self.fn_name);
+            }
+            return None;
+        };
         if dbg {
             eprintln!(
                 "BANG-FIRE {} :: callee_ty={:?} fam={:?} opt={} rebox={} void={}",
@@ -227,10 +266,10 @@ impl LowerCtx {
             tag
         };
         self.ops.push(Op::IfThen { cond: exit_cond, dst: None });
-        self.emit_bang_exit_arm(h, v, &adm, void_msg_pieces);
+        self.emit_bang_exit_arm(h, v, adm, void_msg_pieces, err_text)?;
         self.ops.push(Op::EndIf { val: None });
-        self.bind_bang_ok_payload(var, ty, h, &adm);
-        Ok(true)
+        self.bind_bang_ok_payload(var, ty, h, adm);
+        Some(())
     }
 
     /// The SCALAR half of [`Self::lower_bind`] (`!is_heap_ty(ty)`): Copy values,

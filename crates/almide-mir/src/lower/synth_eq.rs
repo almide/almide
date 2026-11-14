@@ -38,6 +38,18 @@ impl LowerCtx {
         variant_layout_recursive(&self.variant_layouts, tyname)
     }
 
+    /// Take over the eq helpers a lifted lambda's sub-context synthesized. They are
+    /// named after the LAMBDA (the sub-context's `fn_name`), so only that context holds
+    /// them; the parent's function list carries them out beside its lifted lambdas.
+    /// Dropping them left the lambda calling a helper no module defines.
+    pub(crate) fn absorb_synth_eq_fns(&mut self, fns: Vec<MirFunction>) {
+        for f in fns {
+            if !self.synth_eq_fns.iter().any(|g| g.name == f.name) {
+                self.synth_eq_fns.push(f);
+            }
+        }
+    }
+
     fn eq_helper_name(&self, tyname: &str) -> String {
         format!("__eq_{}__{}", sanitize_ty_ident(tyname), sanitize_ty_ident(&self.fn_name))
     }
@@ -128,8 +140,8 @@ impl LowerCtx {
                     declared_caps: Vec::new(),
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
-                    call_moves: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
+                    call_moves: Default::default(), inout_params: Default::default(),
+                    aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -243,8 +255,8 @@ impl LowerCtx {
                     declared_caps: Vec::new(),
                     heap_slot_masks: Default::default(),
                     owned_params: Default::default(),
-                    call_moves: Default::default(),
-                    aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), ty),
+                    call_moves: Default::default(), inout_params: Default::default(),
+                    aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), ty), slot_origins: Default::default(),
                 });
                 true
             }
@@ -310,8 +322,8 @@ impl LowerCtx {
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
-            call_moves: Default::default(),
-            aggregate_blocks: eq_helper_types(std::mem::take(&mut sub.aggregate_blocks), &Ty::option(ty.clone())),
+            call_moves: Default::default(), inout_params: Default::default(),
+            aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), &Ty::option(ty.clone())), slot_origins: Default::default(),
         });
         true
     }
@@ -430,8 +442,8 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String, ty: &Ty) -> MirFunctio
             declared_caps: Vec::new(),
             heap_slot_masks: Default::default(),
             owned_params: Default::default(),
-            call_moves: Default::default(),
-            aggregate_blocks: eq_param_types(ty),
+            call_moves: Default::default(), inout_params: Default::default(),
+            aggregate_blocks: eq_param_types(ty), slot_origins: Default::default(),
         }
     }
 }

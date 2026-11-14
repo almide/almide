@@ -22,7 +22,7 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     let (b, n, k, b0, extra, lo, hi, vlen, j, c, r) =
         (0u32, 1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
     let pay = almide_layout::PAYLOAD as i32;
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
     let mut f = Function::new([(10, ValType::I32)]);
@@ -163,11 +163,11 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(k).local_get(n).i32_ge_u().br_if(1);
     i.local_get(b).i32_const(pay).i32_add().local_get(k).i32_add();
-    i.i32_load8_u(MemArg { offset: 0, align: 0, memory_index: 0 });
+    i.i32_load8_u(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.local_set(b0);
     i.local_get(b0).i32_const(0x80).i32_lt_u().if_(BlockType::Empty);
     // ASCII: one byte through
-    i.local_get(w).local_get(b0).i32_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
+    i.local_get(w).local_get(b0).i32_store8(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.local_get(w).i32_const(1).i32_add().local_set(w);
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.else_();
@@ -213,9 +213,9 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
     i.end();
     i.local_get(extra).i32_eqz().if_(BlockType::Empty);
     // invalid lead: one FFFD, one byte consumed
-    i.local_get(w).i32_const(0xEF).i32_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
-    i.local_get(w).i32_const(0xBF).i32_store8(MemArg { offset: 1, align: 0, memory_index: 0 });
-    i.local_get(w).i32_const(0xBD).i32_store8(MemArg { offset: 2, align: 0, memory_index: 0 });
+    i.local_get(w).i32_const(0xEF).i32_store8(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+    i.local_get(w).i32_const(0xBF).i32_store8(MemArg { offset: 1, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+    i.local_get(w).i32_const(0xBD).i32_store8(MemArg { offset: 2, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.local_get(w).i32_const(3).i32_add().local_set(w);
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.else_();
@@ -230,7 +230,7 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
     i.br(2);
     i.end();
     i.local_get(b).i32_const(pay).i32_add().local_get(k).i32_add().local_get(j).i32_add();
-    i.i32_load8_u(MemArg { offset: 0, align: 0, memory_index: 0 });
+    i.i32_load8_u(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.local_set(c);
     // range: j == 1 uses [lo, hi]; the rest 80..BF
     i.local_get(c);
@@ -256,9 +256,9 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
     i.local_get(k).local_get(extra).i32_add().i32_const(1).i32_add().local_set(k);
     i.else_();
     // maximal invalid subpart: FFFD, consume lead + valid continuations
-    i.local_get(w).i32_const(0xEF).i32_store8(MemArg { offset: 0, align: 0, memory_index: 0 });
-    i.local_get(w).i32_const(0xBF).i32_store8(MemArg { offset: 1, align: 0, memory_index: 0 });
-    i.local_get(w).i32_const(0xBD).i32_store8(MemArg { offset: 2, align: 0, memory_index: 0 });
+    i.local_get(w).i32_const(0xEF).i32_store8(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+    i.local_get(w).i32_const(0xBF).i32_store8(MemArg { offset: 1, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+    i.local_get(w).i32_const(0xBD).i32_store8(MemArg { offset: 2, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.local_get(w).i32_const(3).i32_add().local_set(w);
     i.local_get(k).local_get(vlen).i32_add().local_set(k);
     i.end();
@@ -287,7 +287,7 @@ pub(crate) fn emit_err_text_helper() -> Function {
     let (s, n, out, k, w, b) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
     let (cp, m, sh) = (6u32, 7u32, 8u32);
     let pay = almide_layout::PAYLOAD as i32;
-    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let byte = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(8, ValType::I32)]);
     let anchor = crate::witness::anchor::begin_fn();
     let mut i = f.instructions();
@@ -377,7 +377,7 @@ pub fn emit_errtext_multibyte(
     (cp, m, sh): (u32, u32, u32),
     loop_depth: u32,
 ) {
-    let at = |j: u64| MemArg { offset: j, align: 0, memory_index: 0 };
+    let at = |j: u64| MemArg { offset: j, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let put = |i: &mut wasm_encoder::InstructionSink<'_>, c: u8| {
         i.local_get(w).i32_const(c as i32).i32_store8(at(0));
         i.local_get(w).i32_const(1).i32_add().local_set(w);

@@ -94,6 +94,16 @@ impl Checker {
             return;
         }
         match er {
+            // #4654: the else returns through the lifted channel, so its error
+            // slot is that channel's (`String`), not only its Ok slot — an
+            // `err([..])` else passed check, then failed rustc and the wasm
+            // emitter.
+            Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if args.len() == 2 => {
+                match self.bang_channel_err_ty() {
+                    Some(e) => self.constrain(Ty::result(ret, e), er.clone(), "guard else".to_string()),
+                    None => self.constrain(ret, args[0].clone(), "guard else".to_string()),
+                }
+            }
             Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if !args.is_empty() => {
                 self.constrain(ret, args[0].clone(), "guard else".to_string())
             }

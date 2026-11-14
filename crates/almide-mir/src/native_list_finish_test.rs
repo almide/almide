@@ -120,6 +120,38 @@ fn exclusive_filter_arms_commit_once_but_successive_arms_cannot() {
 }
 
 #[test]
+fn a_nested_loop_may_run_in_the_filter_body_but_may_not_advance_a_counter() {
+    let v = ValueId;
+    // The filter predicate runs a search loop of its own (`list.find` inside the
+    // callback): its breaks leave only that loop, and it touches no counter.
+    let search = [
+        Op::LoopStart,
+        Op::LoopBreakUnless { cond: v(4) },
+        Op::LoopEnd,
+    ];
+    let mut f = builder();
+    f.ops.splice(11..11, search.clone());
+    assert_eq!(finalizers(&f), BTreeMap::from([(ValueId(7), ValueId(1))]));
+
+    // The same loop advancing the write cursor (once per INNER iteration) refuses.
+    let mut f = builder();
+    f.ops.splice(11..11, [
+        search[0].clone(),
+        search[1].clone(),
+        Op::IntBinOp { dst: v(11), op: IntOp::Add, a: v(2), b: v(4) },
+        Op::SetLocal { local: v(2), src: v(11) },
+        search[2].clone(),
+    ]);
+    assert!(finalizers(&f).is_empty(), "inner cursor advance");
+
+    // A filter loop with no exit of its own (only the nested loop's) refuses.
+    let mut f = builder();
+    let outer_exit = f.ops.remove(10);
+    f.ops.splice(10..10, [search[0].clone(), outer_exit, search[2].clone()]);
+    assert!(finalizers(&f).is_empty(), "exit only in the nested loop");
+}
+
+#[test]
 fn counter_or_alias_changes_cannot_be_misread_as_prefix_commitment() {
     let v = ValueId;
     let mut cases = Vec::new();

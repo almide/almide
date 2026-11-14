@@ -1,13 +1,13 @@
 // `include!`d part of wasi_p3.rs (#4306, wasi_p3_net.rs): the net shim's text and address helpers.
 
 fn net_m8(off: u64) -> MemArg {
-    MemArg { offset: off, align: 0, memory_index: 0 }
+    MemArg { offset: off, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 fn net_m16(off: u64) -> MemArg {
-    MemArg { offset: off, align: 1, memory_index: 0 }
+    MemArg { offset: off, align: 1, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 fn net_m32(off: u64) -> MemArg {
-    MemArg { offset: off, align: 2, memory_index: 0 }
+    MemArg { offset: off, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 type Sink<'a> = wasm_encoder::InstructionSink<'a>;

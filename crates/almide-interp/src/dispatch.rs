@@ -401,26 +401,27 @@ impl<'a> Interpreter<'a> {
             if !by_decl && !by_type {
                 continue;
             }
-            let kind = if by_decl { "mut-parameter" } else { "bytes-parameter" };
+            // Only a `mut` param needs the copy-out through an index lvalue:
+            // a by-type `Bytes` param carries no write (above), so an element
+            // or entry passed to one (`f(keys[j])`) has nothing to copy back
+            // and runs like the temporary below.
+            let unsupported = || {
+                Flow::Unsupported(format!(
+                    "mut-parameter argument through an index lvalue \
+                     (`{}` param {i}) — not yet copied out (#1022)",
+                    func.name.as_str()
+                ))
+            };
             match &arg.kind {
                 almide_ir::IrExprKind::Var { .. }
                 | almide_ir::IrExprKind::Member { .. }
                 | almide_ir::IrExprKind::TupleIndex { .. } => match mut_lvalue_path(arg) {
                     Some(lv) => out.push((i, lv)),
-                    None => {
-                        return Err(Flow::Unsupported(format!(
-                            "{kind} argument through an index lvalue \
-                             (`{}` param {i}) — not yet copied out (#1022)",
-                            func.name.as_str()
-                        )))
-                    }
+                    None if by_decl => return Err(unsupported()),
+                    None => {}
                 },
-                almide_ir::IrExprKind::IndexAccess { .. } | almide_ir::IrExprKind::MapAccess { .. } => {
-                    return Err(Flow::Unsupported(format!(
-                        "{kind} argument through an index lvalue \
-                         (`{}` param {i}) — not yet copied out (#1022)",
-                        func.name.as_str()
-                    )))
+                almide_ir::IrExprKind::IndexAccess { .. } | almide_ir::IrExprKind::MapAccess { .. } if by_decl => {
+                    return Err(unsupported())
                 }
                 // A TEMPORARY argument. For a `mut` param this is unreachable
                 // (E032 forbids it); for a by-type `Bytes` param it is legal

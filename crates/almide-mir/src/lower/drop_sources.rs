@@ -143,6 +143,12 @@ pub(crate) fn tuple_needs_recursive_drop(ty: &Ty) -> bool {
     matches!(ty, Ty::Tuple(elems) if elems.iter().any(is_heap_ty))
 }
 
+/// A `List` whose element owns heap (`List[Tok]`, `List[String]`).
+pub(crate) fn is_heap_list_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]))
+}
+
 /// Is `ty` a `List` ELEMENT tuple the fixed pair drops cannot free — the shapes that
 /// route to a synthesized `$__drop_list_anontup_<hash>`: a heap-bearing tuple of THREE or
 /// more slots, or a pair one of whose slots is a `List[String]`, a `List` of heap tuples, or

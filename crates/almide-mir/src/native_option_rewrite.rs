@@ -47,6 +47,10 @@ pub fn rewrite_option_ops(
     // Its checked carrier type still excludes the scalar Option rewrite.
     heap_payloads.extend(carriers.iter().copied());
     t.opt_vals.extend(opt_params.iter().copied());
+    // A slot reassigned anywhere is no constant, whatever its first value.
+    t.reassigned = ops.iter().filter_map(|op| match op { Op::SetLocal { local, .. } => Some(*local), _ => None }).collect();
+    t.slot_of = ops.iter().filter_map(|op| match op { Op::SetLocal { local, src } => Some((*src, *local)), _ => None }).collect();
+    t.heap_payloads = heap_payloads.clone();
     for op in ops {
         let Some(op) = t.carrier_op(op, &mut out, carriers) else { continue };
         t.flow_op(op, &mut out, option_fns, &heap_payloads);
@@ -55,6 +59,20 @@ pub fn rewrite_option_ops(
 }
 
 impl OptionTracker {
+    /// A module slot holding a scalar Option (native_slot_rewrite): its read
+    /// is the Option value itself, owning no object. `true` when `op` is such
+    /// a read and its result was noted as a minted Option (the op stays).
+    fn notes_scalar_slot_read(&mut self, op: &Op) -> bool {
+        let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { return false };
+        let slot = args.len() == 1
+            && self.const_vals.get(&args[0]).is_some_and(|a| crate::native_slot_rewrite::scalar_option_slot_at(*a));
+        if slot {
+            self.opt_vals.insert(*d);
+            self.minted.insert(*d);
+        }
+        slot
+    }
+
     /// A 0-or-1 block filled in place (`crate::option_blocks`): None until
     /// its hit stores the payload, then its length word 1. `true` when `op`
     /// is one of the block's ops and was rewritten; any other length word is
@@ -82,6 +100,22 @@ impl OptionTracker {
                         Some(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(ValueId(self.fresh)), args: vec![] })
                     }
                     Some(1) => self.pending.remove(&o).map(|p| Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(ValueId(self.fresh)), args: vec![p] }),
+                    // A tag computed at run time (a fold's carried tag local):
+                    // the length word is the tag, so a nonzero one is Some.
+                    None if self.pending.contains_key(&o) => {
+                        let p = self.pending.remove(&o).expect("the guard saw the payload");
+                        let (j, s, n) = (ValueId(self.fresh), ValueId(self.fresh + 1), ValueId(self.fresh + 2));
+                        self.fresh += 3;
+                        out.push(Op::IfThen { cond: args[1], dst: Some(j) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeSome, dst: Some(s), args: vec![p] });
+                        out.push(Op::Else { val: Some(s) });
+                        out.push(Op::Prim { kind: PrimKind::OptMakeNone, dst: Some(n), args: vec![] });
+                        out.push(Op::EndIf { val: Some(n) });
+                        self.opt_vals.extend([j, s, n]);
+                        self.minted.extend([j, s, n]);
+                        out.push(Op::SetLocal { local: o, src: j });
+                        return true;
+                    }
                     _ => None,
                 };
                 let Some(made) = made else { return false };
@@ -101,9 +135,15 @@ impl OptionTracker {
         if self.filled_block_op(&op, out) {
             return None;
         }
+        if self.notes_scalar_slot_read(&op) {
+            out.push(op);
+            return None;
+        }
         match &op {
             Op::ConstInt { dst, value } => {
-                self.const_vals.insert(*dst, *value);
+                if !self.reassigned.contains(dst) {
+                    self.const_vals.insert(*dst, *value);
+                }
                 out.push(op);
             }
             Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
@@ -116,7 +156,7 @@ impl OptionTracker {
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
             }
-            Op::Dup { dst, src } if self.minted.contains(src) => {
+            Op::Dup { dst, src } if self.copies_as_value(*dst, *src) => {
                 out.push(Op::Prim { kind: PrimKind::OptCopy, dst: Some(*dst), args: vec![*src] });
                 self.opt_vals.insert(*dst);
                 self.minted.insert(*dst);
@@ -144,6 +184,16 @@ impl OptionTracker {
             _ => return Some(op),
         }
         None
+    }
+
+    /// A `Dup` of a value Option is a value copy. So is a copy of a call's
+    /// Option written into a value-only slot: the slot holds no object on any
+    /// path, and the call result keeps its own release.
+    fn copies_as_value(&self, dst: ValueId, src: ValueId) -> bool {
+        self.minted.contains(&src)
+            || (self.opt_vals.contains(&src)
+                && !self.heap_payloads.contains(&src)
+                && self.slot_of.get(&dst).is_some_and(|l| self.minted.contains(l)))
     }
 
     /// The call, if-join and pass-through arms.
@@ -230,6 +280,12 @@ pub(crate) fn load_window(kind: &PrimKind, off: i64, d: ValueId, o: ValueId) -> 
 #[derive(Default)]
 struct OptionTracker {
     const_vals: BTreeMap<ValueId, i64>,
+    /// Slots some `SetLocal` reassigns: never read as their first constant.
+    reassigned: BTreeSet<ValueId>,
+    /// A `SetLocal`'s source → the slot it is written into.
+    slot_of: BTreeMap<ValueId, ValueId>,
+    /// Options whose payload is a heap value: never a value-only copy.
+    heap_payloads: BTreeSet<ValueId>,
     /// Values known to be scalar Options.
     opt_vals: BTreeSet<ValueId>,
     /// Carriers this pass minted (no object of their own).
@@ -332,5 +388,31 @@ mod tests {
         rewrite_option_ops(&mut mixed, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
         assert!(mixed.ops.iter().any(|op| matches!(op, Op::Dup { dst, src } if *dst == v(4) && *src == v(1))));
         assert!(mixed.ops.iter().any(|op| matches!(op, Op::Drop { v: d } if *d == v(1))));
+    }
+    #[test]
+    fn a_call_option_copied_into_a_value_only_slot_is_a_value_copy() {
+        // `var r = none; if c then r = find()`: the slot holds no object on
+        // either path, so the copy written into it must own none either.
+        let v = ValueId;
+        let mut f = MirFunction {
+            name: "option_slot".into(),
+            ops: vec![
+                Op::Alloc { dst: v(0), repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }, init: Init::OptNone },
+                Op::ConstInt { dst: v(1), value: 1 },
+                Op::IfThen { cond: v(1), dst: None },
+                Op::CallFn { dst: Some(v(2)), name: "find".into(), args: vec![],
+                    result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }) },
+                Op::Dup { dst: v(3), src: v(2) },
+                Op::SetLocal { local: v(0), src: v(3) },
+                Op::Drop { v: v(2) },
+                Op::Else { val: None },
+                Op::EndIf { val: None },
+                Op::Consume { v: v(0) },
+            ],
+            ..Default::default()
+        };
+        rewrite_option_ops(&mut f, &BTreeSet::from(["find".into()]), &[], &Default::default(), &Default::default());
+        assert!(f.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::OptCopy, dst: Some(d), .. } if *d == v(3))));
+        assert!(crate::verify_ownership(&f).is_ok(), "{:?}", crate::verify_ownership(&f));
     }
 }

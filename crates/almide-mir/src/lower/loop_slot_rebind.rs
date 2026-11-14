@@ -76,6 +76,15 @@ impl LowerCtx {
 /// `bytes.push(b, x)` and their Member-receiver forms, which rewrite into
 /// Assign/FieldAssign during lowering). Descends into nested control flow but NOT
 /// into nested loops (each loop pre-copies its own borrowed slots when reached).
+/// The var an in-place mutator call rebinds (`list.push(xs, v)` → `xs`), read
+/// off the statement lowering's own rewrite.
+pub(crate) fn inplace_rebind_target(e: &IrExpr) -> Option<VarId> {
+    match rewrite_inplace_mutation(e)?.kind {
+        IrStmtKind::Assign { var, .. } => Some(var),
+        _ => None,
+    }
+}
+
 pub(crate) fn collect_heap_reassign_vars(stmts: &[IrStmt], out: &mut Vec<VarId>) {
     collect_heap_reassign_vars_from(stmts, None, out);
 }
@@ -150,6 +159,16 @@ fn collect_heap_reassign_vars_from(stmts: &[IrStmt], tail: Option<&IrExpr>, out:
                         Some(IrStmtKind::Assign { var, .. }) => self.push(var),
                         Some(IrStmtKind::FieldAssign { target, .. }) => self.push(target),
                         _ => {}
+                    }
+                    walk_expr(self, e);
+                }
+                // A var lent to an in-out param (`crate::native_inout`) is
+                // written through it: the loop must hold its own copy too.
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                    for (k, a) in args.iter().enumerate() {
+                        if crate::native_inout::is_inout_position(name.as_str(), k) {
+                            self.push_receiver(a);
+                        }
                     }
                     walk_expr(self, e);
                 }

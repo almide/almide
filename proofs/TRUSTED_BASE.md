@@ -475,8 +475,25 @@ Pure mutable foreign parameters use typed copies with the shared IR
 write-back transformation. Borrowed callbacks use native typed dispatch;
 their host signatures retain the program's value types, including shared
 strings and Bytes/Matrix handles. Neither proves properties of host code.
-Fallible mutable, nominal and foreign-address adapters still refuse the v1
-route. Target-priority tests use deliberately different fallback bodies so
+Fallible mutable and nominal adapters, and every other foreign address,
+still refuse the v1 route.
+
+**A Region lent to an `@extern(rust)` call on native.** When a program
+passes an `ffi` Region to an `@extern(rust)` fn, the native v1 render keeps
+the Region's memory in the runtime's `AlmideFfiBlock`: one fixed-size `Rc`
+allocation of `Cell<u8>` that every copy of the Region shares
+(`native_region.rs`; `runtime/rs/src/ffi.rs`). The call passes
+`(ptr, len)`: the Region's offset into its block and its length
+(`native_foreign.rs`, `almide_rt_ffi_block_ptr`), the pair v0 and the wasm
+leg hand their hosts for the same declaration. TRUSTED: while the call runs,
+foreign code may read and write `[ptr, ptr + len)`; the block is fixed-size,
+kept alive by the Region argument, and neither moved nor freed during the
+call; the host stays inside that range and keeps no pointer after it
+returns. Almide's own reads and writes of the block are bounds-checked safe
+code. The ownership witness sees the block as an ordinary counted value. A C
+binding, an export, a Region inside another value, a returned, written-back
+or callback Region, and a host call that takes the address itself are
+refused, so this is the one place a block's address leaves Almide. Target-priority tests use deliberately different fallback bodies so
 an inliner cannot silently substitute them for the selected foreign call.
 
 **Native test harness.** Checked test bodies and their reachable helpers enter
@@ -751,6 +768,34 @@ Host IO and callback scheduling are trusted, not proved by the ownership
 checker; callback bodies and call adapters still undergo their existing checks.
 A program built under `[permissions] fs` takes the
 standard build, whose fs calls the scope wraps.
+
+**Native unix host calls.** (Owner ruling 2026-11-10, moved before rc1 on
+2026-11-13.) A program on the certified native render calls the runtime's
+own unix functions (Unix-domain sockets, descriptor passing and shared-memory
+files) as trusted host calls, under the same contract as the fs class above:
+the certificate covers how the program hands each call its arguments and takes
+its result (borrowed arguments, a fresh owned result, `Net` counted), not what
+the host does with the descriptors. The render carries those functions' code
+from the runtime's `unix` module (`runtime/rs/src/unix.rs` with the rt-core
+files it includes: `net_unix_core.rs` and its one sanctioned `unsafe` syscall
+module `net_unix_sys.rs`), the text the standard build compiles, each
+`#[cfg(unix)]` / `#[cfg(not(unix))]` twin under its own gate and the
+descriptor table's gated impls with it (`crates/almide-mir/src/native_floor_host.rs`).
+NEWLY TRUSTED here is nothing the project did not already trust: the embedded
+wasm host serves this same core (`net_unix_core.rs`) as its interim ops
+104..=116, and the standard native build compiles it unchanged. The named set,
+in witness-id order after the fs set's: `almide_rt_unix___os_connect`, `almide_rt_unix___os_listen`, `almide_rt_unix___os_accept`, `almide_rt_unix___os_send`, `almide_rt_unix___os_recv`, `almide_rt_unix___os_close`, `almide_rt_unix___os_wait`, `almide_rt_unix___os_take_fds`, `almide_rt_unix___os_shm_create`, `almide_rt_unix___os_shm_resize`, `almide_rt_unix___os_shm_write`, `almide_rt_unix___os_shm_read`. Every call the render makes to
+one of them is recorded by that id in the `native-calls` witness;
+`NativeCalls.hosts_ok` accepts an id below the length of
+`native_host_calls` (the fs set, then this set), and a floor body outside the
+set that would carry unix code is refused by the render, as is a body that
+would carry the other class's module. `tests/native_fs_host_calls_test.rs`
+holds this list, `host_ops::NATIVE_UNIX_HOST_CALLS`,
+`NativeCalls.native_unix_host_calls` and almide-verify's copy to one list.
+TRUSTED: the runtime unix code itself (descriptor bookkeeping, `sendmsg` /
+`recvmsg` / `poll` / `fcntl` system calls), tested on both legs by the
+`spec/embedded_cross/net_unix_*.almd` and `net_huge_read_lengths.almd`
+fixtures, not proven.
 
 
 ## Historical implementation progression (retained evidence)

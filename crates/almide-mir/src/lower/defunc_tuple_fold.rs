@@ -311,7 +311,11 @@ impl LowerCtx {
         self.drop_arm_locals(body_mark);
         self.ops.push(Op::SetLocal { local: s1, src: n1 });
         self.ops.push(Op::SetLocal { local: s2, src: n2 });
-        self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
+        // The step into a fresh value, then the counter's own slot: a value
+        // defined twice renders as a second (shadowing) local on native.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
         self.ops.push(Op::LoopEnd);
 
         // Materialize the resulting tuple ONCE (2 uniform slots) and register its

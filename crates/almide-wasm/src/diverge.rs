@@ -22,7 +22,69 @@ pub(crate) fn is_diverging_call(target: &CallTarget) -> bool {
     }
 }
 
+/// The program fns control never comes back from: a body whose every path
+/// ends in a diverging call — `panic(msg)`, `process.exit(code)`, or a call
+/// to a fn of this set (`fn out_of_range(..) -> Unit = panic(..)`). A fixed
+/// point over named and qualified calls, resolved the way the call site
+/// resolves them (module first). Only a call in TAIL position counts: the
+/// tail of a block (or its last statement when it has none) and both arms
+/// of an `if`; anything else — a loop, a match, a lambda — is not claimed.
+/// The witness reads it (`witness_diverged`): such a call ends its path in
+/// the checker's abort terminal, as `panic` itself does.
+pub(crate) fn diverging_fns(program_fns: &[(&almide_ir::IrFunction, Option<String>, u32)], table: &crate::FnTable) -> Vec<bool> {
+    let mut out = vec![false; program_fns.len()];
+    loop {
+        let mut changed = false;
+        for (i, (f, qual, _)) in program_fns.iter().enumerate() {
+            if out[i] {
+                continue;
+            }
+            let module = crate::emit::fn_module(qual.as_deref(), f);
+            let hit = |t: &CallTarget| {
+                let j = match t {
+                    CallTarget::Named { name } => module
+                        .and_then(|m| table.by_name.get(&format!("{m}.{name}")))
+                        .or_else(|| table.by_name.get(name.as_str())),
+                    CallTarget::Module { module, func, .. } => table.by_name.get(&format!("{module}.{func}")),
+                    _ => None,
+                };
+                is_diverging_call(t) || j.is_some_and(|&j| out[j])
+            };
+            if tail_diverges(&f.body, &hit) {
+                out[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return out;
+        }
+    }
+}
+
+fn tail_diverges(e: &IrExpr, hit: &impl Fn(&CallTarget) -> bool) -> bool {
+    match &e.kind {
+        IrExprKind::Call { target, .. } => hit(target),
+        IrExprKind::If { then, else_, .. } => tail_diverges(then, hit) && tail_diverges(else_, hit),
+        IrExprKind::Block { expr: Some(t), .. } => tail_diverges(t, hit),
+        IrExprKind::Block { stmts, expr: None } => matches!(
+            stmts.last().map(|s| &s.kind),
+            Some(almide_ir::IrStmtKind::Expr { expr }) if tail_diverges(expr, hit)
+        ),
+        _ => false,
+    }
+}
+
 impl Emitter<'_> {
+    /// A call to a fn of [`diverging_fns`] returned to no one: the path
+    /// ends in the checker's abort terminal, as after `panic` (#2758).
+    pub(crate) fn witness_diverged(&mut self, callee: usize) {
+        if self.table.infos[callee].diverges
+            && let Some(w) = self.witness.as_mut()
+        {
+            w.abort_end();
+        }
+    }
+
     /// The value of a diverging call that produced none: a builtin already
     /// ended in `unreachable`; a user fn declared `-> Never` has no result,
     /// and `unreachable` states that control does not come back from it.

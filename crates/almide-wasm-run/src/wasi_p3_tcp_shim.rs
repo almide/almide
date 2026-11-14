@@ -165,7 +165,7 @@ fn tcp_init_stream(i: &mut Sink<'_>, l: NetLocals, tl: TcpLocals) {
     for off in [TS_EOF, TS_LOFF, TS_LLEN] {
         i.local_get(tl.p).i32_const(0).i32_store(net_m32(off));
     }
-    i.local_get(tl.p).i64_const(0).i64_store(MemArg { offset: TS_TMO, align: 3, memory_index: 0 });
+    i.local_get(tl.p).i64_const(0).i64_store(MemArg { offset: TS_TMO, align: 3, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
 }
 
 /// Open the stream's receive pair on first use.
@@ -296,7 +296,7 @@ fn shim_tcp(g: P3Globals, a: &NetAbi, t: &NetTexts, parts: NetParts) -> Function
         invalid: t.tcp.invalid_listener, closed: t.tcp.closed_listener,
     };
     let ret = (g.park + STATRET) as i32;
-    let tmo = MemArg { offset: TS_TMO, align: 3, memory_index: 0 };
+    let tmo = MemArg { offset: TS_TMO, align: 3, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(17, ValType::I32), (5, ValType::I64)]);
     let mut i = f.instructions();
 

@@ -351,15 +351,17 @@ impl LowerCtx {
         crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || format!(
             "[tuple-match] entry: subj={:?} arms={}",
             std::mem::discriminant(&subject.kind), arms.len()));
-        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+        if arms.is_empty() {
             return None;
         }
         let IrExprKind::Tuple { elements } = &subject.kind else { return None };
-        if !matches!(arms.last()?.pattern, IrPattern::Wildcard) {
+        // A guard, or a non-`_` last row: the widened row chain (binders, String and
+        // list tests, guards) — the plain chain below admits neither.
+        if arms.iter().any(|a| a.guard.is_some()) || !matches!(arms.last()?.pattern, IrPattern::Wildcard) {
             if dbg {
-                crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || "[tuple-match] last arm not wildcard".to_string());
+                crate::trace::trace("ALMIDE_DBG_NESTED_MATCH", || "[tuple-match] guard or non-wildcard last arm".to_string());
             }
-            return None;
+            return self.try_lower_tuple_refinement_rows(elements, arms, result_ty);
         }
         // The marks precede the ELEMENT resolution: a scalar-EXPRESSION element
         // (`n % 3` — the fizz shape) ANF-lowers here, so every decline below must
@@ -378,7 +380,7 @@ impl LowerCtx {
         // same row subset the UNIT sibling admits, so both share one predicate.
         if !self.tuple_refinement_rows_valid(&elems, arms) {
             rollback(self);
-            return None;
+            return self.try_lower_tuple_refinement_rows(elements, arms, result_ty);
         }
         let dst = self.tuple_refinement_chain(&elems, arms, result_ty);
         if dst.is_none() {

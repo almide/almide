@@ -142,11 +142,11 @@ impl Reencode for Remap {
 }
 
 pub fn mem(offset: u64) -> MemArg {
-    MemArg { offset, align: 2, memory_index: 0 }
+    MemArg { offset, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 pub fn mem8(offset: u64) -> MemArg {
-    MemArg { offset, align: 0, memory_index: 0 }
+    MemArg { offset, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// Find a function type's index, or append it.

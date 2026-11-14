@@ -106,6 +106,22 @@ pub(crate) fn mutable_global_slot_types() -> std::collections::BTreeMap<u32, Ty>
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().map(|(i, t)| (*i, t.clone())).collect())
 }
 
+/// Every mutable module-level binding is plain built-in data (no user type,
+/// no function anywhere in its type), so none can hold a closure.
+pub(crate) fn mutable_globals_hold_no_closure() -> bool {
+    fn plain(t: &Ty) -> bool {
+        match t {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::UserDefined(_), _) => false,
+            Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().all(plain),
+            Ty::Record { fields } => fields.iter().all(|(_, f)| plain(f)),
+            Ty::Fn { .. } | Ty::Named(..) | Ty::OpenRecord { .. } | Ty::Variant { .. } | Ty::Union(_)
+            | Ty::TypeVar(_) | Ty::Unknown => false,
+            _ => true,
+        }
+    }
+    MUTABLE_GLOBAL_VARS.with(|s| s.borrow().values().all(|(_, t)| plain(t)))
+}
+
 /// The (slot index, declared Ty) of a mutable module-level `var`, if `var` is one.
 pub(crate) fn mutable_global_info(var: almide_ir::VarId) -> Option<(u32, Ty)> {
     MUTABLE_GLOBAL_VARS.with(|s| s.borrow().get(&var.0).cloned())
@@ -222,12 +238,15 @@ pub fn settle_effect_abi(program: &mut almide_ir::IrProgram) {
 /// The installed ABI facts, saved on creation and put back on drop: a nested
 /// pipeline run (the registry signature lookup lowers a stdlib source in the
 /// middle of a caller's per-fn lowering) installs ITS program's facts, which
-/// must not outlive it.
+/// must not outlive it. Test-only since #4682: the lookup no longer lowers,
+/// and only its gate's reference route still nests a pipeline run.
+#[cfg(test)]
 pub(crate) struct AbiFactsScope(
     almide_ir::effect_abi::EffectAbiFacts,
     std::collections::HashMap<u32, (u32, Ty)>,
 );
 
+#[cfg(test)]
 impl AbiFactsScope {
     pub(crate) fn save() -> Self {
         let facts = almide_ir::effect_abi::EffectAbiFacts {
@@ -241,6 +260,7 @@ impl AbiFactsScope {
     }
 }
 
+#[cfg(test)]
 impl Drop for AbiFactsScope {
     fn drop(&mut self) {
         install(std::mem::take(&mut self.0));

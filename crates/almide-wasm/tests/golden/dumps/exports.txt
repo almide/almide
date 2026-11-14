@@ -131,7 +131,7 @@ code locals=[1xI32,1xI64,1xI32]
   I64Sub
   I64Add
   I32WrapI64
-  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, target: Memory(0), ordering: None } }
   LocalGet { local_index: 2 }
   I64Const { value: 10 }
   I64DivS
@@ -149,7 +149,7 @@ code locals=[1xI32,1xI64,1xI32]
   LocalSet { local_index: 1 }
   LocalGet { local_index: 1 }
   I32Const { value: 45 }
-  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, target: Memory(0), ordering: None } }
   End
   I32Const { value: 48 }
   LocalGet { local_index: 1 }

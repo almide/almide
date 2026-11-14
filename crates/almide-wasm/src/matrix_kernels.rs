@@ -10,7 +10,7 @@ use crate::*;
 
 /// f64 element at handle + PAYLOAD + 8 + (computed byte offset).
 pub(crate) fn mat_elem() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD) + 8, align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD) + 8, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {

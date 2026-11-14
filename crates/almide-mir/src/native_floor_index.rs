@@ -15,8 +15,9 @@ struct RtItem {
 }
 
 struct RuntimeIndex {
-    /// Addresses of assembled fs items, retained across generated loading.
-    fs_built: BTreeSet<usize>,
+    /// Addresses of assembled host-module items, each with its module,
+    /// retained across generated loading.
+    host_built: std::collections::BTreeMap<usize, &'static str>,
     /// Items defined exactly once at the top level of the runtime modules.
     items: HashMap<&'static str, RtItem>,
     /// Every name the runtime and its prelude define (a type, a macro, a

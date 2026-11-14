@@ -343,7 +343,11 @@ impl LowerCtx {
             bail!();
         }
         self.drop_arm_locals(body_mark);
-        self.ops.push(Op::IntBinOp { dst: i_v, op: IntOp::Add, a: i_v, b: one_v });
+        // The step into a fresh value, then the counter's own slot: a value
+        // defined twice renders as a second (shadowing) local on native.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
         self.ops.push(Op::LoopEnd);
 
         // Materialize the Option ONCE: a cap-1 len-as-tag block — store the payload,
@@ -356,6 +360,9 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: crate::Init::DynList { len: one2 },
         });
+        // A scalar payload (`vloc` is a scalar local): the native leg reads
+        // the block as an `Option<i64>` built from the carried tag.
+        crate::option_blocks::record(&self.fn_name, opt);
         let oh = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![opt] });
         let pslot = self.load_addr(oh, 12);

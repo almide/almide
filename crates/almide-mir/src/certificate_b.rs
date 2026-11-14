@@ -354,6 +354,8 @@ struct CertScan {
     /// Straight-line slots whose pending rebind is a bare credit (no `(`
     /// opened): their `SetLocal` closes nothing.
     unfolded: BTreeSet<ValueId>,
+    /// The streams the open top-level loop's `(` was written on (#4631).
+    loop_streams: Vec<ValueId>,
 }
 
 impl CertScan {
@@ -620,11 +622,22 @@ impl CertScan {
         }
     }
 
-    /// Emit one loop delimiter on every slot stream.
-    fn slot_delimiters(&mut self, ev: char) {
-        for slot in &self.slots {
-            let so = self.s.object_of(*slot);
-            self.s.event(so, ev);
+    /// Open `(` on every slot stream, remembering which streams were opened.
+    fn slot_delimiters_open(&mut self) {
+        let opened: Vec<ValueId> = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+        for &so in &opened {
+            self.s.event(so, '(');
+        }
+        self.loop_streams = opened;
+    }
+
+    /// Close `)` on the streams the loop entry opened (#4631). A slot rebound
+    /// to another object inside the loop resolves to a different stream at
+    /// the exit; closing there left a dangling `(` on one line and a stray
+    /// `)` on the other, which the checker's parser used to read leniently.
+    fn slot_delimiters_close(&mut self) {
+        for so in std::mem::take(&mut self.loop_streams) {
+            self.s.event(so, ')');
         }
     }
 
@@ -733,7 +746,7 @@ impl CertScan {
     /// Top-level loop entry: open `(` on every slot stream (option C).
     fn enter_loop(&mut self) {
         if self.depth == 0 {
-            self.slot_delimiters('(');
+            self.slot_delimiters_open();
         }
         self.depth += 1;
     }
@@ -742,7 +755,7 @@ impl CertScan {
     fn exit_loop(&mut self) {
         self.depth = self.depth.saturating_sub(1);
         if self.depth == 0 {
-            self.slot_delimiters(')');
+            self.slot_delimiters_close();
         }
     }
 }

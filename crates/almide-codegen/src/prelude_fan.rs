@@ -121,6 +121,11 @@ fn almide_fan_arm_threads_max() -> usize {
     *MAX.get_or_init(|| {
         // The generated program's own read of its run-time switch (not a
         // compiler read, so not through almide_base::env).
+        // #4618: `ALMIDE_FAN_SEQUENTIAL` (set, not "0" — list.rs reads it the
+        // same way) is the sequential oracle: no arm gets a thread, every arm
+        // runs inline in arm order, the evaluation the threaded form reproduces.
+        const ALMIDE_FAN_SEQUENTIAL_ENV: &str = "ALMIDE_FAN_SEQUENTIAL";
+        if std::env::var(ALMIDE_FAN_SEQUENTIAL_ENV).is_ok_and(|v| !v.is_empty() && v != "0") { return 0; }
         const ALMIDE_FAN_THREADS_ENV: &str = "ALMIDE_FAN_THREADS";
         let cap = std::env::var(ALMIDE_FAN_THREADS_ENV).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX);
         std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_mul(ALMIDE_FAN_ARM_THREADS_PER_CPU).min(cap).max(1)

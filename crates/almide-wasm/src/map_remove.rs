@@ -269,7 +269,7 @@ impl Emitter<'_> {
             em.emit_release_slot_at(ty);
             Ok(())
         })?;
-        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
+        let at = MemArg { offset: u64::from(off), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
         Ok(())
     }
@@ -361,7 +361,7 @@ impl Emitter<'_> {
     /// holds (see the module doc); `mh` holds the result.
     fn emit_map_remove_judged(&mut self, h: RemoveHolds, (k, v): (SliceTy, SliceTy), fns: RemoveFns) -> Result<(), EmitError> {
         let RemoveHolds { mh, eh } = h;
-        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         let oh = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -457,7 +457,7 @@ impl Emitter<'_> {
         self.f.instructions().local_set(xh);
         let eh = self.hold_i32()?;
         let oh = self.hold_i32()?;
-        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         let stride = e.slot_size() as i32;
         {
             let mut i = self.f.instructions();

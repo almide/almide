@@ -84,13 +84,13 @@ fn cached_binaries(base: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// A new hashing implementation must keep the on-disk SHA-256 format: caches
-/// recorded by the prior compiler remain readable, with the same integrity check.
-fn assert_recorded_sha256(bin: &Path) {
-    use sha2::{Digest, Sha256};
-    let expected = Sha256::digest(std::fs::read(bin).unwrap());
-    let expected: String = expected.iter().map(|b| format!("{b:02x}")).collect();
-    let recorded = bin.with_file_name(format!("{}.sha256", bin.file_name().unwrap().to_string_lossy()));
+/// The recorded digest is the binary's BLAKE3, in a `.blake3` sidecar (#4682).
+/// The suffix names the algorithm, so a pre-#4682 `.sha256` sidecar is never
+/// compared against a BLAKE3 digest: its binary is a miss and is rebuilt
+/// (`a_pre_blake3_cache_entry_is_rebuilt_not_run`).
+fn assert_recorded_digest(bin: &Path) {
+    let expected = blake3::hash(&std::fs::read(bin).unwrap()).to_hex().to_string();
+    let recorded = bin.with_file_name(format!("{}.blake3", bin.file_name().unwrap().to_string_lossy()));
     assert_eq!(std::fs::read_to_string(recorded).unwrap().trim(), expected);
 }
 
@@ -138,7 +138,7 @@ fn a_cached_binary_that_no_longer_matches_its_digest_is_rebuilt_not_run() {
     assert_eq!(meta.permissions().mode() & 0o077, 0, "the base is created private");
     let bins = cached_binaries(&base);
     assert_eq!(bins.len(), 1, "one cached binary under the base: {bins:?}");
-    assert_recorded_sha256(&bins[0]);
+    assert_recorded_digest(&bins[0]);
 
     // Control: an untouched cache is a hit and prints the program's output.
     let o = run(td.path(), &program);
@@ -151,5 +151,29 @@ fn a_cached_binary_that_no_longer_matches_its_digest_is_rebuilt_not_run() {
     let out = text(&o);
     assert!(out.contains("hello from the source"), "the program is rebuilt from source:\n{out}");
     assert!(!out.contains("PLANTED") && !marker.exists(), "a binary that fails its digest must not run:\n{out}");
-    assert_recorded_sha256(&bins[0]);
+    assert_recorded_digest(&bins[0]);
+}
+
+#[test]
+fn a_pre_blake3_cache_entry_is_rebuilt_not_run() {
+    let (td, program) = setup();
+    let tmp = td.path().join("tmp");
+    let o = run(td.path(), &program);
+    assert!(String::from_utf8_lossy(&o.stdout).contains("hello from the source"), "{}", text(&o));
+    let bins = cached_binaries(&base(&tmp));
+    assert_eq!(bins.len(), 1, "one cached binary under the base: {bins:?}");
+    // Turn the entry into what a pre-#4682 compiler left: a planted binary
+    // with a `.sha256` sidecar that matches it, and no `.blake3` sidecar.
+    let marker = td.path().join("planted-ran");
+    plant(&bins[0], &marker);
+    let name = bins[0].file_name().unwrap().to_string_lossy().into_owned();
+    std::fs::remove_file(bins[0].with_file_name(format!("{name}.blake3"))).unwrap();
+    use sha2::{Digest, Sha256};
+    let legacy: String = Sha256::digest(std::fs::read(&bins[0]).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(bins[0].with_file_name(format!("{name}.sha256")), legacy).unwrap();
+    let o = run(td.path(), &program);
+    let out = text(&o);
+    assert!(out.contains("hello from the source"), "the program is rebuilt from source:\n{out}");
+    assert!(!out.contains("PLANTED") && !marker.exists(), "a legacy sidecar is not a hit:\n{out}");
+    assert_recorded_digest(&bins[0]);
 }

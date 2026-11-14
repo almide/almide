@@ -416,6 +416,12 @@ fn counted_call(bytes: &[u8], name: &str, args: &[wasmtime::Val]) -> (i64, i64) 
 /// A call count, not wasmtime fuel: the loop form executes MORE operators
 /// than the two-call form (fuel 3.64M against 2.43M at fib(25)) and still
 /// runs faster, so fuel would gate the wrong direction.
+///
+/// The loop's own call then takes one level inline (`almide_ir::self_peel`):
+/// a round's `fib(m - 1)` runs as a loop of its own that calls only for its
+/// odd steps, so fib(n) enters `fib` exactly fib(n) times — fewer again than
+/// the hand-written accumulator form. Losing the peel reads fib(n + 1);
+/// losing the accumulator rewrite reads 2 fib(n + 1) - 1.
 #[test]
 fn accumulator_recursion_halves_the_calls() {
     let ir = almide_spine::s5::lower_to_ir("perf_ratchet.almd", ACCUM_SRC).expect("front");
@@ -428,11 +434,12 @@ fn accumulator_recursion_halves_the_calls() {
     assert_eq!((a, b), (75_025, 75_025), "fib({N}) answered wrong");
     // Anti-vacuous: the counter sees the hand-written form's calls.
     assert_eq!(acc, FIB_N_PLUS_1, "the call counter is not counting fib_acc's entries");
+    const FIB_N: i64 = 75_025;
     assert_eq!(
-        plain, FIB_N_PLUS_1,
-        "fib({N}) entered `fib` {plain} times, not fib({}) = {FIB_N_PLUS_1} — the second recursive \
-         call is back (almide_ir::accum_tre did not fire on the structural leg, #2577)",
-        N + 1
+        plain, FIB_N,
+        "fib({N}) entered `fib` {plain} times, not fib({N}) = {FIB_N}: {FIB_N_PLUS_1} is the accumulator \
+         loop without its inlined call (almide_ir::self_peel did not fire), more is the second \
+         recursive call back (almide_ir::accum_tre did not fire on the structural leg, #2577)"
     );
 }
 

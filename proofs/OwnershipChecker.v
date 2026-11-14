@@ -1156,14 +1156,28 @@ Definition close_brx (st : brxst) : CertItem :=
       else CBranch (rev th) (rev el)
   end.
 
-(* Flush the in-progress line, defensively closing a dangling `{`-branch first
-   (well-formed certs close every `{` before newline/EOF), else deferring to
-   the format-v3 flush. *)
+(* STRICT STRUCTURE (#4631): a line is a sequence of ops, `(…)` loops,
+   `[…|…]` conditional loops and `{…|…}` branches. Anything else poisons the
+   line instead of being read as some nearby well-formed certificate:
+   - a region still open at newline/EOF (a dropped `}` used to close silently,
+     so `{|id` read as `{|id}`);
+   - a `{…}` or `[…]` without its one `|`, or with a second one (a dropped `|`
+     moved the else arm's ops into the then arm: `{i|d}` REJECT became `{id}`
+     ACCEPT);
+   - a delimiter inside a `{…}` / `[…]` arm (arms are flat; the recorder
+     poisons a nested region itself);
+   - a `|` or closer outside the region it closes, and a `(` inside an open
+     `(` (a dropped `)` used to restart the body, discarding its ops). *)
+Definition is_struct (b : ascii) : bool :=
+  orb (orb (orb (Ascii.eqb b lbrace) (Ascii.eqb b rbrace))
+           (orb (Ascii.eqb b lbracket) (Ascii.eqb b rbracket)))
+      (orb (orb (Ascii.eqb b lparen) (Ascii.eqb b rparen)) (Ascii.eqb b bar)).
+
 Definition finish_line_x (cur : list CertItem) (lp : option (list Op))
                          (cp : option condst) (bp : option brxst) : list CertItem :=
-  match bp with
-  | Some st => rev (close_brx st :: cur)
-  | None => finish_line_c cur lp cp
+  match bp, cp, lp with
+  | None, None, None => rev cur
+  | _, _, _ => rev (CPoison :: cur)
   end.
 
 Fixpoint parse_xc (s : string) (cur : list CertItem)
@@ -1176,9 +1190,14 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
       else match bp with
       | Some (in_else, tx, ex, ta, ea, bad, th, el) =>
           (* inside `{ … | … }` — collect ops / the terminal marker per arm *)
-          if Ascii.eqb b bar then parse_xc rest cur lp cp (Some (true, tx, ex, ta, ea, bad, th, el))
+          if Ascii.eqb b bar then
+            if in_else then parse_xc rest (CPoison :: cur) lp cp None
+            else parse_xc rest cur lp cp (Some (true, tx, ex, ta, ea, bad, th, el))
           else if Ascii.eqb b rbrace then
-            parse_xc rest (close_brx (in_else, tx, ex, ta, ea, bad, th, el) :: cur) lp cp None
+            if in_else
+            then parse_xc rest (close_brx (in_else, tx, ex, ta, ea, bad, th, el) :: cur) lp cp None
+            else parse_xc rest (CPoison :: cur) lp cp None
+          else if is_struct b then parse_xc rest (CPoison :: cur) lp cp None
           else if is_xmark b then
             (* mark the CURRENT arm exited; a second terminal mark on the same
                arm is malformed. *)
@@ -1209,9 +1228,13 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
           else match cp with
           | Some (in_else, th, el) =>
               (* inside `[ … | … ]` — exactly parse_clc's conditional-loop state *)
-              if Ascii.eqb b bar then parse_xc rest cur lp (Some (true, th, el)) None
+              if Ascii.eqb b bar then
+                if in_else then parse_xc rest (CPoison :: cur) lp None None
+                else parse_xc rest cur lp (Some (true, th, el)) None
               else if Ascii.eqb b rbracket then
-                parse_xc rest (CCondLoop (rev th) (rev el) :: cur) lp None None
+                if in_else then parse_xc rest (CCondLoop (rev th) (rev el) :: cur) lp None None
+                else parse_xc rest (CPoison :: cur) lp None None
+              else if is_struct b then parse_xc rest (CPoison :: cur) lp None None
               else match parse_byte b with
                    | Some op =>
                        if in_else then parse_xc rest cur lp (Some (true, th, op :: el)) None
@@ -1221,12 +1244,17 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
           | None =>
               if Ascii.eqb b lbrace then parse_xc rest cur lp None (Some (false, false, false, false, false, false, [], []))
               else if Ascii.eqb b lbracket then parse_xc rest cur lp (Some (false, [], [])) None
-              else if Ascii.eqb b lparen then parse_xc rest cur (Some []) None None
+              else if Ascii.eqb b lparen then
+                match lp with
+                | Some _ => parse_xc rest (CPoison :: cur) None None None
+                | None => parse_xc rest cur (Some []) None None
+                end
               else if Ascii.eqb b rparen then
                 match lp with
                 | Some body => parse_xc rest (CLoop (rev body) :: cur) None None None
-                | None => parse_xc rest cur None None None
+                | None => parse_xc rest (CPoison :: cur) None None None
                 end
+              else if is_struct b then parse_xc rest (CPoison :: cur) lp None None
               else match parse_byte b with
                    | Some op =>
                        match lp with
@@ -1507,6 +1535,32 @@ Proof. reflexivity. Qed.
 Example cert_xc_filter_accepts : check_xc "i[di|]m"%string = true.       (* v3 CCondLoop still accepts *)
 Proof. reflexivity. Qed.
 Example cert_xc_branch_accepts : check_xc "i{i|i}dd"%string = true.      (* v4 CBranch still accepts *)
+Proof. reflexivity. Qed.
+(* #4631 strict structure: the witness mutation lab's drop-`|` and drop-`}`
+   cells, a moved separator, and stray / unterminated delimiters. *)
+Example cert_xc_lab_branch_accepts : check_xc "{|id}"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_lab_drop_bar_rejects : check_xc "{id}"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_lab_drop_rbrace_rejects : check_xc "{|id"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_lab_drop_bar_im_rejects : check_xc "{im}"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_lab_drop_rbrace_im_rejects : check_xc "{|im"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_second_bar_rejects : check_xc "{|id|}"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_stray_bar_rejects : check_xc "i|d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_stray_rparen_rejects : check_xc "id)"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_open_loop_rejects : check_xc "(id"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_open_cond_rejects : check_xc "[id|"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reopened_loop_rejects : check_xc "i(id(di)m"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_nested_arm_rejects : check_xc "{(id)|}"%string = false.
 Proof. reflexivity. Qed.
 Example cert_xc_branch_disagree_rejects : check_xc "i{i|}d"%string = false. (* v4 disagreement still rejects *)
 Proof. reflexivity. Qed.

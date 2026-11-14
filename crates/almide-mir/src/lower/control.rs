@@ -147,6 +147,20 @@ impl LowerCtx {
     /// the arm body verbatim, re-narrowed via `let-else`. Pure text move.
     fn lower_branch_match(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
         let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
+        // A heap BRANCH subject (`match (if c then none else f(x)) { … }`) has no
+        // tracked value an arm dispatch can read, and effectful arms cannot take the
+        // linearization: bind it first, as `let s = <branch>; match s { … }` lowers
+        // (the subject still runs once, before the arms).
+        if is_heap_ty(&subject.ty)
+            && matches!(subject.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+            && arms.iter().any(|a| arm_has_call_or_assign(&a.body))
+        {
+            let tmp = VarId(crate::lower::desugar_var_seed());
+            self.lower_bind(tmp, &subject.ty, subject)?;
+            let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: subject.ty.clone(), span: subject.span, def_id: None };
+            let kind = IrExprKind::Match { subject: Box::new(var), arms: arms.clone() };
+            return self.lower_branch_match(&IrExpr { kind, ..expr.clone() });
+        }
         let payload_bound = self.some_tuple_arms_as_binds(&subject.ty, arms);
         let arms = payload_bound.as_ref().unwrap_or(arms);
         // The subject is inspected once. A heap subject goes through

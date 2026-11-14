@@ -179,6 +179,7 @@ pub(crate) fn build_helper_body(
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             if_sites: Default::default(),
+            room_proven: None,
             display_src: None,
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(),
@@ -266,7 +267,7 @@ pub(crate) fn build_one_scan_helper(
             i.local_get(p_)
                 .local_get(off)
                 .i32_add()
-                .i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 });
+                .i32_load(wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
             i.local_get(needle);
         }
         em.emit_val_eq(kt)?;

@@ -22,6 +22,7 @@ import env_switches_doc
 import fold_seed_source
 import impl_count
 import certified_leaks
+import structure
 import bench
 import env
 
@@ -123,6 +124,7 @@ effect fn main() -> Unit = {
     "fold-seed-source" => ".",
     "impl-count" => ".",
     "certified-leaks" => ".",
+    "structure" => ".",
     "check-contracts" => "docs/contracts",
     "bench" => "docs/benchmarks",
     _ => "docs/roadmap",
@@ -237,6 +239,15 @@ effect fn main() -> Unit = {
     // optionally `--update` (the ledger's only writer).
     "certified-leaks" => {
       let v = certified_leaks.run(root, list.get(args, 2) ?? "" == "--update")!
+      println(list.join(v.lines, "\n"))
+      if v.ok then process.exit(0) else process.exit(1)
+    },
+    // What codopsy's per-file grades cannot see: a crate's unused exports, files cut by
+    // size, files no `mod` reaches, functions nothing names. The enumerator script counts;
+    // this gate compares against proofs/structure-ledger.toml and is the ledger's only
+    // writer. Only growth fails. Args: root, then optionally `--update`.
+    "structure" => {
+      let v = structure.run(root, list.get(args, 2) ?? "" == "--update")!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
     },

@@ -117,7 +117,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
         .is_some_and(|o| o.intrinsic_fn == func && o.symbol == symbol && !o.caps.is_empty());
     if is_effect
         && !matches!(fret, FloorRet::RuntimeResult(..))
-        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat | FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt)
+        && !matches!(fret, FloorRet::Res(_) | FloorRet::ResStr | FloorRet::ResValue | FloorRet::ResListStr | FloorRet::ResListValue | FloorRet::ResListInt | FloorRet::ResStrValuePairs | FloorRet::ResBytes | FloorRet::ResOptStr | FloorRet::ResOptBytes | FloorRet::ResOptListStr | FloorRet::ResFileStat | FloorRet::ResProcessStatus | FloorRet::ResBytesStrInt)
         && !counted_host_op
     {
         return Err("an effect fn whose return is not a Result carrier".into());
@@ -160,7 +160,8 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
     let str_only = elem_typed && almide_lang::capability_bounds::of(module, func).next().is_some();
     let ordered = list_elem_ordered((module, func), generics.iter().flatten().map(|g| g.name.as_str()).collect(), params);
     let borrow_twin = borrow_twin_of(fret, &symbol, &rust_params, &rust_ret, rt);
-    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, by_ref: None }, &rust_params, &rust_ret, rt))
+    let hinted_twin = borrow_twin.as_ref().and_then(|(t, _)| hinted_twin_of(t, rt));
+    Ok(with_by_ref_twin(FloorFn { symbol, params: fparams, ret: fret, items, twin, str_only, ordered, borrow_twin, hinted_twin, by_ref: None }, &rust_params, &rust_ret, rt))
 }
 
 /// A declared param `p` with the borrow mode its runtime spelling `r` takes

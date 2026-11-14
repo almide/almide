@@ -335,6 +335,47 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
 
 include!("effect_fn_types.rs");
 
+/// #4682: each entry fn's IR name and signature as [`lower_program`] gives
+/// them, read from the registered declarations alone, without inferring or
+/// lowering a body. The steps are the ones `lower_fn` and the program
+/// passes take: the name through `ir_fn_name` (#3483 escape, AST-synth
+/// respelling), const generic params first, the return from the registered
+/// sig, and every effect fn type in its `Result` carrier
+/// (`normalize_effect_fn_types`). A fn the checker registered no sig for is
+/// left out: lowering would type it from its body. almide-mir gates this
+/// against a full lowering for every self-host registry entry.
+pub fn entry_fn_ir_signatures(prog: &ast::Program, env: &TypeEnv) -> HashMap<Sym, (Vec<Ty>, Ty)> {
+    let escaped = if env.entry_bundled_module.is_none() { escaped_entry_fns(prog) } else { Default::default() };
+    fn_ir_signatures(prog, env, &escaped)
+}
+
+/// #4685: [`entry_fn_ir_signatures`] as [`lower_stdlib_program`] names the
+/// fns — a self-host registry body keeps its `__` fns under their names, the
+/// names the registry maps call names to and the linker links.
+pub fn stdlib_fn_ir_signatures(prog: &ast::Program, env: &TypeEnv) -> HashMap<Sym, (Vec<Ty>, Ty)> {
+    fn_ir_signatures(prog, env, &Default::default())
+}
+
+fn fn_ir_signatures(prog: &ast::Program, env: &TypeEnv, escaped: &std::collections::HashSet<Sym>) -> HashMap<Sym, (Vec<Ty>, Ty)> {
+    prog.decls.iter().filter_map(|d| {
+        let ast::Decl::Fn { name, generics, .. } = d else { return None };
+        let sig = env.functions.get(name)?;
+        let ir_name = match almide_ir::ast_synth_ir_name(name.as_str()) {
+            Some(synth) => synth,
+            None if escaped.contains(name) => almide_ir::escape_user_fn_name(*name),
+            None => *name,
+        };
+        let consts = generics.iter().flatten().filter_map(|g| {
+            let bounds = g.bounds.as_ref()?;
+            let is_const = bounds.len() == 1
+                && crate::canonicalize::registration::SCALAR_TYPE_NAMES.contains(&bounds[0].as_str());
+            is_const.then(|| resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&bounds[0]) }))
+        });
+        let params = consts.chain(sig.params.iter().map(|(_, t)| norm_effect_fn(t))).collect();
+        Some((ir_name, (params, norm_effect_fn(&sig.ret))))
+    }).collect()
+}
+
 /// #3483: the entry program's fns spelled into the compiler's fn-name space.
 fn escaped_entry_fns(prog: &ast::Program) -> std::collections::HashSet<Sym> {
     prog.decls.iter().filter_map(|d| match d {

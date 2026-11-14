@@ -82,11 +82,12 @@ fn synthesized_calls(text: &str) -> BTreeSet<(String, String)> {
 
 #[test]
 fn every_synthesized_internal_call_is_in_the_compiler_inserted_table() {
-    use almide_frontend::bundled_reach::{COMPILER_INSERTED, TEST_SYNTHESIZED};
+    use almide_frontend::bundled_reach::{COMPILER_INSERTED, REWRITE_INSERTED, TEST_SYNTHESIZED};
     let table: BTreeSet<(String, String)> = COMPILER_INSERTED
         .iter()
         .chain(TEST_SYNTHESIZED)
         .map(|(m, f)| (m.to_string(), f.to_string()))
+        .chain(REWRITE_INSERTED.iter().map(|(m, f, _)| (m.to_string(), f.to_string())))
         .collect();
     let mut found = BTreeSet::new();
     let mut missing = Vec::new();
@@ -118,12 +119,13 @@ fn every_synthesized_internal_call_is_in_the_compiler_inserted_table() {
 
 #[test]
 fn every_table_row_is_a_function_of_its_bundled_module() {
-    use almide_frontend::bundled_reach::{COMPILER_INSERTED, TEST_SYNTHESIZED};
-    for (m, f) in COMPILER_INSERTED.iter().chain(TEST_SYNTHESIZED) {
+    use almide_frontend::bundled_reach::{COMPILER_INSERTED, REWRITE_INSERTED, TEST_SYNTHESIZED};
+    let rewrite_rows = REWRITE_INSERTED.iter().flat_map(|(m, f, t)| [(m, f), (m, t)]);
+    for (m, f) in COMPILER_INSERTED.iter().chain(TEST_SYNTHESIZED).map(|(m, f)| (m, f)).chain(rewrite_rows) {
         let src = almide_lang::stdlib_info::bundled_source(m).unwrap_or_else(|| panic!("{m} is not a bundled module"));
         let prog = almide_lang::parse_cached(src).expect("bundled source parses");
         let declared = prog.decls.iter().any(|d| matches!(d, almide_lang::ast::Decl::Fn { name, .. } if name.as_str() == *f));
-        assert!(declared, "COMPILER_INSERTED lists {m}.{f}, which {m} does not declare");
+        assert!(declared, "a compiler-inserted table lists {m}.{f}, which {m} does not declare");
     }
 }
 

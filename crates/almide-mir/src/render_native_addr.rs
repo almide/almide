@@ -23,13 +23,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 #[path = "render_native_carrier.rs"]
-mod carrier;
+pub(crate) mod carrier;
 #[path = "render_native_map.rs"]
 mod map;
 #[path = "render_native_slots.rs"]
 mod slots;
 #[path = "render_native_heap_slot.rs"]
 mod heap_slot;
+pub(crate) use heap_slot::{store_text, take_text};
 #[path = "render_native_value.rs"]
 mod value;
 #[path = "render_native_byte_slots.rs"]
@@ -258,6 +259,12 @@ fn owned_from(code: &str, t: NTy) -> Option<String> {
     Some(match t {
         NTy::Opt => code.to_string(),
         NTy::Res | NTy::ResStr => format!("{code}.clone()"),
+        // A struct with no `Default` (one holding a Result) cannot be taken
+        // from: it moves as itself on its last use, else it is copied.
+        NTy::Rec(_) if !crate::render_native_rec::has_default(t) => {
+            let moved = crate::render_native_move::take_expr(code);
+            if moved == code { moved } else { format!("{code}.clone()") }
+        }
         NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => crate::render_native_move::take_expr(code),
         NTy::StrRef => format!("AlmideString::from({code})"),
         NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
@@ -307,6 +314,7 @@ pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
 pub(crate) fn clear_str_fields() {
     STR_FIELDS.with(|m| m.borrow_mut().clear());
     PAYLOAD_TAKES.with(|m| m.borrow_mut().clear());
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().clear());
     FIELD_COPIES.with(|m| m.borrow_mut().clear());
 }
 
@@ -349,6 +357,46 @@ pub(crate) fn payload_take_of(v: ValueId) -> Option<(ValueId, String)> {
 /// Every borrowed read noted with the move-out expression `take`.
 pub(crate) fn reads_of_take(take: &str) -> Vec<ValueId> {
     PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == take).map(|(v, _)| *v).collect())
+}
+
+/// Whether some other borrowed payload read of the carrier `base` (one `take`
+/// does not move out) is read on a path after `ops[at]`. A move-out borrows
+/// the whole carrier (`v.take_s3_r0()` takes `&mut self`), which a sibling
+/// payload still lent there forbids: `Link(name, xs, rest) => walk(rest, k +
+/// list.len(xs))` took `rest` while `xs` was a slice of the same block.
+///
+/// A sibling read is lent as long as the binding it made is read, not as long
+/// as the value is live: in a loop the next round reads a NEW binding of it
+/// (`acc = step(acc, i)!` reads the Err side's text in one arm of every
+/// round, and the Ok side moves out in the other).
+pub(crate) fn other_payload_live(func: &MirFunction, at: usize, base: ValueId, take: &str) -> bool {
+    let mut others: Vec<ValueId> = PAYLOAD_TAKES.with(|m| m.borrow().iter().filter(|(_, p)| p.0 == base && p.1 != take).map(|(v, _)| *v).collect());
+    others.extend(PAYLOAD_VIEWS.with(|m| m.borrow().iter().filter(|(_, b)| **b == base).map(|(v, _)| *v).collect::<Vec<_>>()));
+    others.into_iter().any(|v| crate::mir_liveness::bound_read_after(func, at, v))
+}
+
+thread_local! {
+    static PAYLOAD_VIEWS: std::cell::RefCell<BTreeMap<ValueId, ValueId>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// Whether a read planned as a move out of `base` (`planned`) may be one: no
+/// borrowed view of another payload of `base` was rendered before it, which
+/// a move out through `&mut base` would end.
+pub(crate) fn may_move_payload(planned: bool, base: ValueId) -> bool {
+    planned && !PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+}
+
+/// Whether any payload of the carrier `base` was read by reference (a read
+/// with a noted move-out, or a view): a later move out of it would empty
+/// what that reference still names.
+pub(crate) fn payload_lent(base: ValueId) -> bool {
+    PAYLOAD_TAKES.with(|m| m.borrow().values().any(|p| p.0 == base)) || PAYLOAD_VIEWS.with(|m| m.borrow().values().any(|b| *b == base))
+}
+
+/// A borrowed view of a payload of the carrier `base` that is never moved
+/// out itself (a list slot's slice, a guarded record payload).
+pub(crate) fn note_payload_view(v: ValueId, base: ValueId) {
+    PAYLOAD_VIEWS.with(|m| m.borrow_mut().insert(v, base));
 }
 
 /// The move of a heap field out of a borrowed PAYLOAD whose carrier dies at
@@ -418,7 +466,67 @@ pub(crate) fn nested_field_take(
     refs.iter()
         .filter(|r| **r != src && !checked.contains(r))
         .all(|r| dies(*r) || !named_later(*r))
-        .then(|| format!("{{ let mut p = {take}; std::mem::take(&mut p{field}) }}"))
+        .then(|| {
+            // A carrier bound once in this loop round and read on no path
+            // after the copy gives the field up by a plain move: no `Default`
+            // is written into a block about to be dropped, which kept the
+            // whole carrier in memory on every call (#4640).
+            unnamed_on_paths_after(func, at, carrier)
+                .then(|| consuming_side_take(carrier, &take, &field))
+                .flatten()
+                .unwrap_or_else(|| format!("{{ let mut p = {take}; std::mem::take(&mut p{field}) }}"))
+        })
+}
+
+/// Whether the carrier `c` is bound once in the loop round of `ops[at]` and
+/// no op on a path from `ops[at]` to its next binding names it or an address
+/// into its block, its own release apart: a by-value move of `c` at `ops[at]`
+/// is then the last the rendered text says of it.
+fn unnamed_on_paths_after(func: &MirFunction, at: usize, c: ValueId) -> bool {
+    let (Some(def), Some(succ)) =
+        (crate::render_native_move::bound_once_this_round(func, at, c), crate::mir_liveness::successors(func))
+    else {
+        return false;
+    };
+    let mut names: BTreeSet<ValueId> =
+        crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == c).map(|(a, _)| a).collect();
+    names.insert(c);
+    let (mut seen, mut work) = (BTreeSet::new(), succ[at].clone());
+    while let Some(j) = work.pop() {
+        if j == def || !seen.insert(j) {
+            continue;
+        }
+        let op = &func.ops[j];
+        let mut all = Vec::new();
+        crate::mir_ops::op_values(op, &mut all);
+        let release = all == [c] && !matches!(op, Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. });
+        if all.iter().any(|v| names.contains(v)) && !release {
+            return false;
+        }
+        work.extend(succ[j].iter().copied());
+    }
+    true
+}
+
+/// The carrier the nested move `take` of the field read `src` consumed by
+/// value ([`consuming_side_take`]), if it did.
+pub(crate) fn consumed_carrier(src: ValueId, take: &str) -> Option<ValueId> {
+    let (carrier, _) = payload_take_of(field_of(src)?.0)?;
+    take.starts_with(&format!("match {} {{", var(carrier))).then_some(carrier)
+}
+
+/// The by-value form of a Result side's move-out expression `take`
+/// (`match &mut c { Side(v) => std::mem::take(v), Other(_) => unreachable!() }`)
+/// reading `field` off the payload: the carrier itself is consumed. `None`
+/// for any other shape of `take`.
+fn consuming_side_take(carrier: ValueId, take: &str, field: &str) -> Option<String> {
+    let c = var(carrier);
+    let arms = take.strip_prefix(&format!("match &mut {c} {{ "))?.strip_suffix(" }")?;
+    let (taken, absent) = arms.split_once(", ")?;
+    let side = taken.strip_suffix("(v) => std::mem::take(v)")?;
+    let other = absent.strip_suffix("(_) => unreachable!()")?;
+    (matches!((side, other), ("Ok", "Err") | ("Err", "Ok")))
+        .then(|| format!("match {c} {{ {side}(p) => p{field}, {other}(_) => unreachable!() }}"))
 }
 
 /// The borrowed kind of a heap value of kind `f` read in place, its Rust

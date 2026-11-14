@@ -49,7 +49,7 @@ use crate::*;
 
 fn raw(align_unused: ()) -> MemArg {
     let () = align_unused;
-    MemArg { offset: 0, align: 0, memory_index: 0 }
+    MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {

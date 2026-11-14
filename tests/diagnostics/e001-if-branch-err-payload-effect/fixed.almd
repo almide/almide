@@ -1,0 +1,9 @@
+// An `err(..)` branch of an effect fn's tail `if` leaves through the fn's
+// String error channel (#4654): its payload must be a String.
+effect fn work(n: Int) -> Int = {
+  if n > 0 then n else err("a")
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(work(3)!))
+}

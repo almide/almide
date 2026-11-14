@@ -40,12 +40,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// A declared floor or runtime-served call that takes its argument `k` by
 /// value: handed there at its last use, the argument moves in.
-fn by_value(name: &str, k: usize) -> bool {
+pub(crate) fn by_value(name: &str, k: usize) -> bool {
     // A call the floor declares renders through the floor body, whose own
     // modes decide; only a call it does not reaches the runtime route.
     match crate::native_floor::declared(name) {
         Some(_) => crate::native_floor::takes_by_value(name, k),
-        None => crate::native_hof::takes_by_value(name, k),
+        None => crate::native_hof::takes_by_value(name, k) || (!has_body(name) && crate::native_hof::served_by_value(name, k)),
     }
 }
 
@@ -98,7 +98,9 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
             func.ops.iter().enumerate().filter(|(_, op)| values(op).contains(&p.value)).map(|(i, _)| i).collect();
         let [at] = named.as_slice() else { continue };
         let Op::Dup { src, .. } = func.ops[*at] else { continue };
-        if depth[*at] == 0 && src == p.value && takes(k) {
+        // A copy that only lends stays the borrowed param's own reference.
+        let lent = crate::render_native_borrow_read::lent_param_copy(func, *at, &crate::render_native_borrow_read::roots(func)).is_some();
+        if depth[*at] == 0 && src == p.value && takes(k) && !lent {
             out.push((k, *at));
         }
     }
@@ -123,6 +125,8 @@ fn consumed_params(
     owned: &Modes<'_>,
 ) -> Vec<(usize, usize)> {
     let depth = depths(func);
+    let root = crate::render_native_borrow_read::roots(func);
+    let lambda = crate::lambda_sigs::get(&func.name).is_some();
     let mut out = Vec::new();
     for (k, p) in func.params.iter().enumerate() {
         if !p.repr.is_heap() || !takes(k) {
@@ -159,14 +163,17 @@ fn consumed_params(
         // write-back copy) or handed to a by-value position (`if c then
         // grow(xs, x)`): each of those is its last use there.
         let gives = |i: usize| match &func.ops[i] {
-            Op::Dup { src, .. } => *src == p.value,
+            Op::Dup { src, .. } => *src == p.value && crate::render_native_borrow_read::lent_param_copy(func, i, &root).is_none(),
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
-                    && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|k| {
-                        by_value(name, k)
-                            || owned.moves(&func.ops[i], k)
+                    && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|j| {
+                        // A reuse twin pays only where every caller hands over;
+                        // a lambda's caller is the HOF that owns what it passes
+                        // (a fold's accumulator), as before the twin rule.
+                        (by_value(name, j) && (hands(k) || lambda || !crate::native_floor::by_value_only_through_twin(name, j)))
+                            || owned.moves(&func.ops[i], j)
                             // The list or string a concatenation grows in place.
-                            || (k == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
+                            || (j == 0 && (crate::native_list_ops::is_list_concat(name) || name == "__str_concat"))
                     })
             }
             Op::CallIndirect { args, .. } => {
@@ -178,8 +185,8 @@ fn consumed_params(
             }
             _ => false,
         };
-        // Reads before them stay reads of the param it still holds.
-        let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !crate::mir_liveness::live_after(func, i, p.value)).collect();
+        let (live, liveness) = (std::cell::OnceCell::new(), || crate::mir_liveness::live_after_sites(func, p.value)); // reads before them stay the param's; liveness built once
+        let given: Vec<usize> = named.iter().copied().filter(|&i| gives(i) && !live.get_or_init(liveness)(i)).collect();
         if !given.is_empty() && func.ret != Some(p.value) && crate::mir_liveness::last_use_on_every_path(func, p.value, &given) {
             out.extend(given.iter().map(|&i| (k, i)));
             continue;
@@ -368,7 +375,10 @@ fn own_params(
     for i in at.into_iter().rev() {
         f.ops.remove(i);
     }
-    (crate::verify_ownership(&f).is_ok() && !newly_poisoned(func, &f)).then_some(f)
+    if crate::verify_ownership(&f).is_err() { return None; }
+    // Consumed in an arm of an arm: the same body as sibling early returns.
+    if newly_poisoned(func, &f) { return own_unnested(func, takes, hands, owned); }
+    Some(f)
 }
 
 /// The rewrite leaves a certificate the kernel-proven checker cannot accept
@@ -639,6 +649,7 @@ pub(crate) fn rewrite(functions: &mut [MirFunction], own: &BTreeSet<String>, sig
     }
     let taken = taken_functions(functions);
     DYING_SITES.with(|d| *d.borrow_mut() = dying_sites(functions));
+    BODIES.with(|d| *d.borrow_mut() = functions.iter().map(|f| f.name.clone()).collect());
     NATIVE_RESULTS.with(|d| *d.borrow_mut() = native_result_params(sigs));
     let reached_otherwise = reached_otherwise(functions);
     // The closure table: every taken function in the program, by param shape.

@@ -48,59 +48,102 @@ use crate::SliceTy;
 
 type Counts = HashMap<VarId, u32>;
 
-/// How often each tracked var is mentioned (read, or written through) in a
-/// node: `Var` reads and the targets of the statements that write a var.
-struct Mentions<'t> {
-    tracked: &'t HashSet<VarId>,
-    counts: Counts,
-}
-
-impl Mentions<'_> {
-    fn note(&mut self, v: VarId) {
-        if self.tracked.contains(&v) {
-            *self.counts.entry(v).or_default() += 1;
+/// The vars statement `s` itself writes (not its children's): the targets
+/// of the statements that write a var.
+fn written_by(s: &IrStmt, mut note: impl FnMut(VarId)) {
+    match &s.kind {
+        IrStmtKind::Assign { var, .. }
+        | IrStmtKind::IndexAssign { target: var, .. }
+        | IrStmtKind::MapInsert { target: var, .. }
+        | IrStmtKind::FieldAssign { target: var, .. }
+        | IrStmtKind::ListSwap { target: var, .. }
+        | IrStmtKind::ListReverse { target: var, .. }
+        | IrStmtKind::ListRotateLeft { target: var, .. }
+        | IrStmtKind::RcInc { var }
+        | IrStmtKind::RcDec { var } => note(*var),
+        IrStmtKind::ListCopySlice { dst, src, .. } => {
+            note(*dst);
+            note(*src);
         }
+        _ => {}
     }
 }
 
-impl IrVisitor for Mentions<'_> {
+/// How often each tracked var is mentioned (read, or written through) in
+/// each node of the frame body: `Var` reads and [`written_by`] targets,
+/// tallied in one walk (#4695). The liveness walk asks for the counts of
+/// every node it passes and of each statement; counting the subtree afresh
+/// at each ask was quadratic in the depth of a body, which made it the
+/// largest cost of building a program whose `json.parse` the directed JSON
+/// reader serves. A node whose subtree mentions no tracked var has no entry.
+struct Tally<'t> {
+    tracked: &'t HashSet<VarId>,
+    open: Vec<Counts>,
+    exprs: HashMap<*const IrExpr, Counts>,
+    stmts: HashMap<*const IrStmt, Counts>,
+}
+
+impl Tally<'_> {
+    fn note(&mut self, v: VarId) {
+        if self.tracked.contains(&v) {
+            *self.open.last_mut().expect("a node is open").entry(v).or_default() += 1;
+        }
+    }
+
+    /// Close the innermost node: its counts join its parent's.
+    fn close(&mut self) -> Counts {
+        let c = self.open.pop().expect("a node is open");
+        if let Some(parent) = self.open.last_mut() {
+            for (v, n) in &c {
+                *parent.entry(*v).or_default() += n;
+            }
+        }
+        c
+    }
+}
+
+impl IrVisitor for Tally<'_> {
     fn visit_expr(&mut self, e: &IrExpr) {
+        self.open.push(Counts::new());
         if let IrExprKind::Var { id } = &e.kind {
             self.note(*id);
         }
         walk_expr(self, e);
+        let c = self.close();
+        if !c.is_empty() {
+            self.exprs.insert(e as *const IrExpr, c);
+        }
     }
     fn visit_stmt(&mut self, s: &IrStmt) {
-        match &s.kind {
-            IrStmtKind::Assign { var, .. }
-            | IrStmtKind::IndexAssign { target: var, .. }
-            | IrStmtKind::MapInsert { target: var, .. }
-            | IrStmtKind::FieldAssign { target: var, .. }
-            | IrStmtKind::ListSwap { target: var, .. }
-            | IrStmtKind::ListReverse { target: var, .. }
-            | IrStmtKind::ListRotateLeft { target: var, .. }
-            | IrStmtKind::RcInc { var }
-            | IrStmtKind::RcDec { var } => self.note(*var),
-            IrStmtKind::ListCopySlice { dst, src, .. } => {
-                self.note(*dst);
-                self.note(*src);
-            }
-            _ => {}
-        }
+        self.open.push(Counts::new());
+        written_by(s, |v| self.note(v));
         walk_stmt(self, s);
+        let c = self.close();
+        if !c.is_empty() {
+            self.stmts.insert(s as *const IrStmt, c);
+        }
     }
 }
 
-fn counts_expr(e: &IrExpr, tracked: &HashSet<VarId>) -> Counts {
-    let mut m = Mentions { tracked, counts: Counts::new() };
-    m.visit_expr(e);
-    m.counts
+/// The tallied counts of the frame body's nodes.
+struct Counted {
+    exprs: HashMap<*const IrExpr, Counts>,
+    stmts: HashMap<*const IrStmt, Counts>,
+    empty: Counts,
 }
 
-fn counts_stmts(stmts: &[IrStmt], tracked: &HashSet<VarId>) -> Counts {
-    let mut m = Mentions { tracked, counts: Counts::new() };
-    stmts.iter().for_each(|s| m.visit_stmt(s));
-    m.counts
+impl Counted {
+    fn of(body: &IrExpr, tracked: &HashSet<VarId>) -> Counted {
+        let mut t = Tally { tracked, open: Vec::new(), exprs: HashMap::new(), stmts: HashMap::new() };
+        t.visit_expr(body);
+        Counted { exprs: t.exprs, stmts: t.stmts, empty: Counts::new() }
+    }
+    fn expr(&self, e: &IrExpr) -> &Counts {
+        self.exprs.get(&(e as *const IrExpr)).unwrap_or(&self.empty)
+    }
+    fn stmt(&self, s: &IrStmt) -> &Counts {
+        self.stmts.get(&(s as *const IrStmt)).unwrap_or(&self.empty)
+    }
 }
 
 fn keys(c: &Counts) -> HashSet<VarId> {
@@ -205,6 +248,7 @@ enum Ctx {
 
 struct Liveness<'t, F: FnMut(&IrExpr, Mutability)> {
     tracked: &'t HashSet<VarId>,
+    counted: &'t Counted,
     /// The frame's C-319 cells: a bind into one shares (its cell holds the
     /// occupant), so it is never a move.
     cells: &'t HashSet<VarId>,
@@ -225,7 +269,7 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
         let mut lives = Vec::with_capacity(stmts.len());
         for s in stmts.iter().rev() {
             lives.push(live.clone());
-            live.extend(keys(&counts_stmts(std::slice::from_ref(s), self.tracked)));
+            live.extend(keys(self.counted.stmt(s)));
         }
         for (s, live) in stmts.iter().zip(lives.into_iter().rev()) {
             self.stmt(s, live);
@@ -241,7 +285,7 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
         {
             (self.found)(value, *mutability);
         }
-        let all = counts_stmts(std::slice::from_ref(s), self.tracked);
+        let all = self.counted.stmt(s).clone();
         self.ctx.push(Ctx::Siblings { live, all });
         walk_stmt(self, s);
         self.ctx.pop();
@@ -253,17 +297,18 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
         let mut decl = Declared { tracked: self.tracked, out: HashSet::new() };
         decl.visit_expr(body);
         let mut live = outer.clone();
-        live.extend(keys(&counts_expr(whole, self.tracked)));
+        live.extend(keys(self.counted.expr(whole)));
         live.retain(|v| !decl.out.contains(v));
         live
     }
 
     fn expr(&mut self, e: &IrExpr, live: HashSet<VarId>) {
-        let union = |a: &HashSet<VarId>, b: Counts| a.iter().copied().chain(b.into_keys()).collect::<HashSet<_>>();
+        let counted = self.counted;
+        let union = |a: &HashSet<VarId>, b: &Counts| a.iter().copied().chain(b.keys().copied()).collect::<HashSet<_>>();
         match &e.kind {
             IrExprKind::Block { stmts, expr } => {
                 let after = match expr {
-                    Some(t) => union(&live, counts_expr(t, self.tracked)),
+                    Some(t) => union(&live, counted.expr(t)),
                     None => live.clone(),
                 };
                 self.stmts(stmts, &after);
@@ -272,8 +317,8 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
                 }
             }
             IrExprKind::If { cond, then, else_ } => {
-                let mut c = union(&live, counts_expr(then, self.tracked));
-                c.extend(keys(&counts_expr(else_, self.tracked)));
+                let mut c = union(&live, counted.expr(then));
+                c.extend(keys(counted.expr(else_)));
                 self.given(c, cond);
                 self.given(live.clone(), then);
                 self.given(live, else_);
@@ -281,9 +326,9 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
             IrExprKind::Match { subject, arms } => {
                 let mut rest = live.clone();
                 for a in arms {
-                    rest.extend(keys(&counts_expr(&a.body, self.tracked)));
+                    rest.extend(keys(counted.expr(&a.body)));
                     if let Some(g) = &a.guard {
-                        rest.extend(keys(&counts_expr(g, self.tracked)));
+                        rest.extend(keys(counted.expr(g)));
                     }
                 }
                 self.given(rest.clone(), subject);
@@ -296,7 +341,7 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
             }
             IrExprKind::ForIn { iterable, body, .. } | IrExprKind::While { cond: iterable, body } => {
                 let next = self.repeated(&live, e, e);
-                self.given(union(&live, counts_expr(e, self.tracked)), iterable);
+                self.given(union(&live, counted.expr(e)), iterable);
                 self.stmts(body, &next);
             }
             IrExprKind::Lambda { params, body, .. } => {
@@ -307,7 +352,7 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
                 self.given(next, body);
             }
             _ => {
-                let all = counts_expr(e, self.tracked);
+                let all = counted.expr(e).clone();
                 self.ctx.push(Ctx::Siblings { live, all });
                 walk_expr(self, e);
                 self.ctx.pop();
@@ -318,7 +363,8 @@ impl<F: FnMut(&IrExpr, Mutability)> Liveness<'_, F> {
 
 impl<F: FnMut(&IrExpr, Mutability)> IrVisitor for Liveness<'_, F> {
     fn visit_expr(&mut self, e: &IrExpr) {
-        let here = counts_expr(e, self.tracked);
+        let counted = self.counted;
+        let here = counted.expr(e);
         if here.is_empty() {
             return;
         }
@@ -346,7 +392,8 @@ pub(crate) fn dying_rebinds(body: &IrExpr, mut found: impl FnMut(&IrExpr, Mutabi
         return;
     }
     let cells = crate::cells::cell_vars_of(body);
-    let mut l = Liveness { tracked: &tracked, cells: &cells, ctx: Vec::new(), found: &mut found };
+    let counted = Counted::of(body, &tracked);
+    let mut l = Liveness { tracked: &tracked, counted: &counted, cells: &cells, ctx: Vec::new(), found: &mut found };
     l.visit_expr(body);
 }
 

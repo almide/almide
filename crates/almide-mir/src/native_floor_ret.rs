@@ -26,6 +26,7 @@ fn render_ret(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
         | FloorRet::ResValue
         | FloorRet::OptStr
         | FloorRet::ResListValue
+        | FloorRet::ResListInt
         | FloorRet::ResStrValuePairs
         | FloorRet::ResListStr
         | FloorRet::ResBytes
@@ -101,6 +102,10 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             let l = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::value_index())));
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(l, NTy::Str))))
         }
+        FloorRet::ResListInt => (
+            format!("({call}).map_err(AlmideString::from)"),
+            Some(NTy::Rec(crate::render_native_rec::result_type_of(NTy::Vec, NTy::Str))),
+        ),
         FloorRet::ResBytes => {
             let b = NTy::Rec(crate::render_native_rec::bytes_index());
             (format!("({call}).map_err(AlmideString::from)"), Some(NTy::Rec(crate::render_native_rec::result_type_of(b, NTy::Str))))

@@ -261,18 +261,38 @@ impl Emitter<'_> {
                 // The magic sequence is SIGNED — a UInt64 lane keeps the
                 // runtime path (C-179), as does a narrow signed operand
                 // (its own MIN/-1 trap, C-002).
+                // A literal immutable Int global is the same divisor once
+                // main has stored it and zero before (global_constants.rs).
+                let global_divisor = match &right.kind {
+                    IrExprKind::Var { id } if matches!(left.ty, Ty::Int) && matches!(right.ty, Ty::Int)
+                        && !self.locals.contains_key(id) => self.global_constants.get(&(self.var_space, *id)).copied(),
+                    _ => None,
+                };
+                let literal = match &right.kind {
+                    IrExprKind::LitInt { value } => Some(*value),
+                    _ => global_divisor,
+                };
                 if !unsigned
                     && narrow_width(&left.ty).is_none()
                     && narrow_width(&right.ty).is_none()
-                    && let IrExprKind::LitInt { value: c } = &right.kind
+                    && let Some(c) = literal
                 {
-                    let c = *c;
                     if !matches!(c, 0 | -1 | i64::MIN) {
                         // #4611: a dividend the range facts prove >= 0
                         // (int_range.rs) divides by 2^k as one unsigned
                         // shift, and its remainder is a mask.
                         let nonneg_pow2 = c > 1 && (c as u64).is_power_of_two() && self.int_nonneg(left);
                         self.lower(left, Some(INT))?;
+                        if global_divisor.is_some() {
+                            // The export can run before main: the global is
+                            // then still zero and the division aborts as it
+                            // always did, after the dividend was evaluated.
+                            self.lower(right, Some(INT))?;
+                            let div0 = self.pool.intern("Error: division by zero");
+                            let mut i = self.f.instructions();
+                            i.i64_eqz().if_(BlockType::Empty);
+                            i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
+                        }
                         if nonneg_pow2 {
                             let mut i = self.f.instructions();
                             if matches!(op, DivInt) {
@@ -299,20 +319,6 @@ impl Emitter<'_> {
                 let r = self.hold_i64()?;
                 let l = self.hold_i64()?;
                 self.f.instructions().local_set(r).local_set(l);
-                let hinted = match &right.kind {
-                    IrExprKind::Var { id } if matches!(left.ty, Ty::Int) && matches!(right.ty, Ty::Int)
-                        && !self.locals.contains_key(id) => self.global_constants.get(&(self.var_space, *id)).copied(),
-                    _ => None,
-                };
-                if let Some(c) = hinted {
-                    // The public export can run before main: the global
-                    // is then still zero. Evaluate both operands once and
-                    // retain the ordinary abort on the nonmatching arm.
-                    self.f.instructions().local_get(r).i64_const(c).i64_eq().if_(BlockType::Result(ValType::I64));
-                    self.f.instructions().local_get(l);
-                    self.emit_const_div(c, matches!(op, DivInt))?;
-                    self.f.instructions().else_();
-                }
                 let mut i = self.f.instructions();
                 i.local_get(r).i64_eqz().if_(BlockType::Empty);
                 i.i32_const(div0 as i32).call(F_EPRINTLN_BLOCK).unreachable().end();
@@ -343,7 +349,6 @@ impl Emitter<'_> {
                         _ => i.i64_rem_s(),
                     };
                 }
-                if hinted.is_some() { i.end(); }
                 self.release_i64();
                 self.release_i64();
                 Ok(INT)

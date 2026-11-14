@@ -90,6 +90,14 @@ pub(crate) fn heap_slot(slot: u32) -> Option<crate::render_native::NTy> {
     HEAP_SLOTS.with(|h| h.borrow().get(&slot).copied())
 }
 
+/// The heap slot at address `addr` holds a scalar Option (`Option<i64>`):
+/// its value is the Option itself, read and written without a block.
+pub(crate) fn scalar_option_slot_at(addr: i64) -> bool {
+    let base = i64::from(crate::mg_slot_addr(0));
+    addr >= base && (addr - base) % 8 == 0
+        && u32::try_from((addr - base) / 8).ok().and_then(heap_slot) == Some(crate::render_native::NTy::Opt)
+}
+
 /// The heap slot at address `addr`, and its kind; noted as used.
 pub(crate) fn heap_slot_at(addr: i64) -> Option<(u32, crate::render_native::NTy)> {
     let base = i64::from(crate::mg_slot_addr(0));

@@ -196,6 +196,10 @@ fn render_native_fn_sig(
         .iter()
         .map(|p| {
             let t = tys.get(&p.value).copied().unwrap_or(NTy::I64);
+            // An IN-OUT param (`crate::native_inout`) is the caller's buffer, lent.
+            if func.inout_params.contains(&p.value) {
+                return format!("{}: &mut {}", var(p.value), crate::render_native_rec::owned_ty(t));
+            }
             // A MOVE param (#4006 class P) takes the caller's value itself.
             let owned = func.owned_params.contains(&p.value);
             let spelled = match t {
@@ -657,6 +661,12 @@ fn render_native_drop_op(
         | Op::DropResultValueInt { v }
         | Op::DropResultListValueInt { v } => match tys.get(v) {
             Some(NTy::Rec(_)) => line!("// drop(value-holding): scope-end"),
+            // A value of a generated type read in place (a cell slot, a record
+            // field): the release ends the borrow and the owner frees, as the
+            // `DropListStr` and `DropVariant` arms already do for the same read.
+            Some(NTy::RecRef(_)) if crate::render_native_keyed::in_place(*v) => {
+                line!("// drop(value-holding): read in place, the borrow ends")
+            }
             other => return Err(wall(format!("native: {} of a {other:?} value", op_name(op)))),
         },
         Op::Drop { v } if EARLY_DROPPED.with(|e| e.borrow().contains(v)) => {

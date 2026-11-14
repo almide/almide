@@ -10,7 +10,7 @@ description = "Checks that the bounds and init witnesses' events are the instruc
 # none of the compiler — the emitter is the untrusted producer of the anchors
 # it reads, and it decodes the shipped bytes itself.
 [dependencies]
-wasmparser = "0.262"
+wasmparser = "0.263"
 
 [dev-dependencies]
 wat = "1"

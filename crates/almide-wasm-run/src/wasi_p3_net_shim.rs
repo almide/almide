@@ -401,13 +401,13 @@ fn net_same_ip(i: &mut Sink<'_>, a: &NetAbi, x: u32, y: u32) {
     let po = a.ia_payload;
     i.local_get(x).i32_load8_u(net_m8(0)).local_get(y).i32_load8_u(net_m8(0)).i32_eq();
     // Four bytes for either case, then twelve more for IPv6.
-    i.local_get(x).i32_load(MemArg { offset: po, align: 0, memory_index: 0 });
-    i.local_get(y).i32_load(MemArg { offset: po, align: 0, memory_index: 0 }).i32_eq().i32_and();
+    i.local_get(x).i32_load(MemArg { offset: po, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+    i.local_get(y).i32_load(MemArg { offset: po, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }).i32_eq().i32_and();
     i.local_get(x).i32_load8_u(net_m8(0)).i32_const(a.ia_case[0]).i32_eq();
     i.i32_const(1);
     for off in [4u64, 8, 12] {
-        i.local_get(x).i32_load(MemArg { offset: po + off, align: 0, memory_index: 0 });
-        i.local_get(y).i32_load(MemArg { offset: po + off, align: 0, memory_index: 0 }).i32_eq().i32_and();
+        i.local_get(x).i32_load(MemArg { offset: po + off, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
+        i.local_get(y).i32_load(MemArg { offset: po + off, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }).i32_eq().i32_and();
     }
     i.i32_or().i32_and();
 }

@@ -9,8 +9,8 @@ fn foreign(effect: bool) -> MirFunction {
             args: vec![], abi: vec![], result: None, result_abi: None,
         }],
         declared_caps: vec![], heap_slot_masks: Default::default(),
-        owned_params: Default::default(), call_moves: Default::default(),
-        aggregate_blocks: Default::default(),
+        owned_params: Default::default(), call_moves: Default::default(), inout_params: Default::default(),
+        aggregate_blocks: Default::default(), slot_origins: Default::default(),
     }
 }
 

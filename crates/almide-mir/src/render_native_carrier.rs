@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// The Result block's tag word: right after the payload handle in slot 0.
-const RESULT_TAG_OFFSET: i64 = BLOCK_HEADER as i64 + 4;
+pub(crate) const RESULT_TAG_OFFSET: i64 = BLOCK_HEADER as i64 + 4;
 
 /// A Result of two scalar payloads: the materializers build its Ok as
 /// `Init::ResOkScalar` (length word 0) and its Err as a one-slot block
@@ -263,7 +263,7 @@ pub(super) fn render_carrier_op(
             }
             None
         }
-        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {
+        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } | Op::Return { .. } => {
             cx.track_arms(op);
             None
         }
@@ -344,14 +344,28 @@ impl CarrierCx<'_> {
                 let (res, side) = self.st.res_tags.get(cond).copied()
                     .map(|(r, s)| (Some(r), s)).unwrap_or((None, true));
                 self.st.arms.push((res, side));
+                self.st.arms_left.push(None);
             }
             Op::Else { .. } => {
                 if let Some(a) = self.st.arms.last_mut() {
                     a.1 = !a.1;
                 }
             }
+            // The arm that returns early leaves the rest to the other side.
+            Op::Return { .. } => {
+                if let (Some(a), Some(l)) = (self.st.arms.last(), self.st.arms_left.last_mut()) {
+                    *l = Some(a.1);
+                }
+            }
             _ => {
-                self.st.arms.pop();
+                let (arm, left) = (self.st.arms.pop(), self.st.arms_left.pop().flatten());
+                // A top-level tag test one side of which returned: the code
+                // after it runs on the other side only, as inside that arm.
+                if let (Some((Some(res), _)), Some(side), true) = (arm, left, self.st.arms.len() == self.st.arms_kept) {
+                    self.st.arms.push((Some(res), !side));
+                    self.st.arms_left.push(None);
+                    self.st.arms_kept += 1;
+                }
             }
         }
     }
@@ -491,6 +505,20 @@ impl CarrierCx<'_> {
                 (p, format!("match {b} {{ Some(v) => v.clone(), None => {absent} }}"))
             } else if self.st.moves_last.contains(&d) && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_))) {
                 (p, format!("match {b} {{ Some(v) => v, None => {absent} }}"))
+            } else if self.st.moves.contains(&d)
+                && matches!(self.tys.get(&ad.base), Some(NTy::Rec(_)))
+                && has_default(p)
+                && !crate::render_native_addr::payload_lent(ad.base)
+                && !crate::render_native_move::drill_no_moves()
+            {
+                // The last read of the payload before the carrier is rebound
+                // or read at its tag again (a loop's `o = n.next` walk): the
+                // payload leaves and its `Default` stays, as a record's field
+                // does, so the carrier still reads `Some`. The copy was the
+                // whole rest of a chain on every step.
+                (p, format!("match &mut {b} {{ Some(v) => std::mem::take(v), None => {absent} }}"))
+            } else if self.borrowed_option_read(d, &b, p, guarded_some) {
+                return Some(Ok(true));
             } else {
                 (p, format!("match &{b} {{ Some(v) => v.clone(), None => {absent} }}"))
             }
@@ -533,6 +561,29 @@ impl CarrierCx<'_> {
         }
         self.tys.insert(d, t);
         self.emit(&format!("let mut {dv}: {ty} = match {b} {{ Some(v) => {val}, None => {absent} }};"));
+        true
+    }
+
+    /// The payload read of an Option inside its Some guard whose every use
+    /// only borrows (render_native_borrow_read::borrow_reads): a reference
+    /// into the carrier, as the Result's in-arm read
+    /// ([`Self::borrowed_result_read`]) renders, where the owned read copied
+    /// the whole payload (a `width(o: Bytes?)` match arm copied the buffer on
+    /// every call). `false` when the read needs an owned value or the payload
+    /// kind has no reference form.
+    fn borrowed_option_read(&mut self, d: ValueId, b: &str, p: NTy, guarded_some: bool) -> bool {
+        if !guarded_some || !self.st.borrow_reads.contains(&d) {
+            return false;
+        }
+        let (t, ty, val) = match p {
+            NTy::Rec(j) => (NTy::RecRef(j), format!("&{}", struct_name(j)), "v"),
+            NTy::Str => (NTy::StrRef, "&str".to_string(), "&v[..]"),
+            NTy::Vec => (NTy::VecRef, "&[i64]".to_string(), "&v[..]"),
+            NTy::VecStr => (NTy::VecStrRef, "&[AlmideString]".to_string(), "&v[..]"),
+            _ => return false,
+        };
+        self.tys.insert(d, t);
+        self.emit(&format!("let mut {}: {ty} = match &{b} {{ Some(v) => {val}, None => unreachable!() }};", var(d)));
         true
     }
 

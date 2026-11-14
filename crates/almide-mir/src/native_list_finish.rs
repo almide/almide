@@ -103,14 +103,50 @@ impl Facts {
         let handle = self.plus(address, i64::from(crate::lower::layout::BLOCK_LEN_OFFSET))?;
         self.handles
             .get(&handle)
-            .filter(|base| !self.mutable.contains(&handle) && !self.mutable.contains(base))
+            .filter(|_| !self.mutable.contains(&handle))
             .copied()
+    }
+
+    /// A builder slot rebound only AFTER its commitment (`list.push` onto
+    /// the filtered prefix) is still the fresh block at the commitment, as
+    /// long as no address taken from the old block is read once it moved.
+    fn rebound_after(&self, ops: &[Op], store: usize, base: ValueId) -> bool {
+        let rebinds = |op: &Op| matches!(op, Op::SetLocal { local, .. } if *local == base);
+        let Some(first) = ops.iter().position(rebinds) else { return true };
+        if first <= store {
+            return false;
+        }
+        let old: BTreeSet<ValueId> = ops[..first]
+            .iter()
+            .filter_map(crate::mir_ops::defined_value)
+            .filter(|v| *v != base && self.block_of(*v, 4) == Some(base))
+            .collect();
+        ops[first..].iter().all(|op| {
+            let mut reads = Vec::new();
+            crate::mir_ops::op_reads(op, &mut reads);
+            reads.iter().all(|v| !old.contains(v))
+        })
+    }
+
+    /// The block an address is derived from: its handle, moved by sums.
+    fn block_of(&self, address: ValueId, fuel: u8) -> Option<ValueId> {
+        if self.mutable.contains(&address) || fuel == 0 {
+            return None;
+        }
+        if let Some(base) = self.handles.get(&address) {
+            return Some(*base);
+        }
+        let &(_, a, b) = self.sums.get(&address)?;
+        self.block_of(a, fuel - 1).or_else(|| self.block_of(b, fuel - 1))
     }
 
     fn valid(&self, ops: &[Op], store: usize, base: ValueId, count: ValueId) -> bool {
         let Some(&(alloc, len)) = self.allocated.get(&base) else {
             return false;
         };
+        if !self.rebound_after(ops, store, base) {
+            return false;
+        }
         // Only address construction may separate the loop exit and commitment.
         let Some(end) = (alloc + 1..store).rev().find(|&i| {
             !matches!(
@@ -128,33 +164,15 @@ impl Facts {
         if !matches!(ops[end], Op::LoopEnd) {
             return false;
         }
-        let Some(start) = (alloc + 1..end)
-            .rev()
-            .find(|&i| matches!(ops[i], Op::LoopStart))
-        else {
+        let Some(start) = Self::matching_loop_start(ops, alloc, end) else {
             return false;
         };
-        // No nested loop: both counters advance at most once per iteration.
-        if ops[start + 1..end]
-            .iter()
-            .any(|op| matches!(op, Op::LoopStart | Op::LoopEnd))
-        {
+        // A rebound builder: no loop may start between the block's birth and
+        // the filter loop (an enclosing one would carry the rebound slot back).
+        if self.mutable.contains(&base) && ops[alloc + 1..start].iter().any(|op| matches!(op, Op::LoopStart | Op::LoopEnd)) {
             return false;
         }
-        let mut depth = 0;
-        let mut exit = None;
-        for (i, op) in ops.iter().enumerate().take(end).skip(start + 1) {
-            match op {
-                Op::IfThen { .. } => depth += 1,
-                Op::EndIf { .. } => depth -= 1,
-                Op::LoopBreakUnless { cond } if depth == 0 && exit.is_none() => {
-                    exit = Some((i, *cond))
-                }
-                Op::LoopBreakUnless { .. } | Op::Return { .. } => return false,
-                _ => {}
-            }
-        }
-        let Some((test, cond)) = exit else {
+        let Some((test, cond)) = Self::outer_exit(ops, start, end) else {
             return false;
         };
         if ops[start + 1..test]
@@ -176,6 +194,7 @@ impl Facts {
         }
         if !self.counter(ops, index, start, test, end, true)
             || !self.counter(ops, count, start, test, end, false)
+            || Self::nested_rebinds(&ops[start + 1..end], &[index, count, base])
         {
             return false;
         }
@@ -210,6 +229,57 @@ impl Facts {
             })
             .count()
             == 1
+    }
+
+    /// The `LoopStart` that the `LoopEnd` at `end` closes (an inner loop's pair is
+    /// skipped), strictly after `alloc`.
+    fn matching_loop_start(ops: &[Op], alloc: usize, end: usize) -> Option<usize> {
+        let mut inner = 0usize;
+        for i in (alloc + 1..end).rev() {
+            match ops[i] {
+                Op::LoopEnd => inner += 1,
+                Op::LoopStart if inner == 0 => return Some(i),
+                Op::LoopStart => inner -= 1,
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The filter loop's own exit: its first `LoopBreakUnless` outside any `if`
+    /// and outside any loop nested in it. A nested loop's breaks leave only that
+    /// loop; a second outer break, or a `return` anywhere, refuses.
+    fn outer_exit(ops: &[Op], start: usize, end: usize) -> Option<(usize, ValueId)> {
+        let (mut depth, mut loops) = (0i32, 0i32);
+        let mut exit = None;
+        for (i, op) in ops.iter().enumerate().take(end).skip(start + 1) {
+            match op {
+                Op::IfThen { .. } => depth += 1,
+                Op::EndIf { .. } => depth -= 1,
+                Op::LoopStart => loops += 1,
+                Op::LoopEnd => loops -= 1,
+                Op::LoopBreakUnless { .. } if loops > 0 => {}
+                Op::LoopBreakUnless { cond } if depth == 0 && exit.is_none() => exit = Some((i, *cond)),
+                Op::LoopBreakUnless { .. } | Op::Return { .. } => return None,
+                _ => {}
+            }
+        }
+        exit
+    }
+
+    /// Does a loop nested in the filter body rebind one of `values`? Its body runs
+    /// any number of times per outer iteration, so a counter (or the builder)
+    /// rebound there would no longer advance at most once per iteration.
+    fn nested_rebinds(body: &[Op], values: &[ValueId]) -> bool {
+        let mut loops = 0i32;
+        body.iter().any(|op| {
+            match op {
+                Op::LoopStart => loops += 1,
+                Op::LoopEnd => loops -= 1,
+                _ => {}
+            }
+            loops > 0 && matches!(op, Op::SetLocal { local, .. } if values.contains(local))
+        })
     }
 
     fn counter(

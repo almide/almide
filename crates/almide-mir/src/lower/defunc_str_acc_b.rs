@@ -114,7 +114,7 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: None });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot;
-        self.materialized_aggregates = ma_snapshot;
+        self.materialized_aggregates.restore_to(ma_snapshot);
         let none_ok = some_ok.and_then(|_| self.append_body_to_str_acc(none_body, acc));
         self.unit_arm_depth -= 1;
         self.ops.push(Op::EndIf { val: None });
@@ -522,7 +522,7 @@ impl LowerCtx {
         self.ops.push(Op::Else { val: None });
         self.param_values = pv_snapshot;
         self.live_heap_handles = lhh_snapshot;
-        self.materialized_aggregates = ma_snapshot;
+        self.materialized_aggregates.restore_to(ma_snapshot);
         let else_ok =
             then_ok.and_then(|_| self.emit_filter_map_arm(else_body, rh, cursor, result_elem, eight));
         self.unit_arm_depth -= 1;

@@ -536,6 +536,19 @@ impl Emitter<'_> {
         }
     }
 
+    /// #4648: an early exit's release of a local no bind on this path has
+    /// reached (exit_plan.rs `unbound`). The block it may hold was bound on an
+    /// earlier pass and is already accounted at that pass's end, so this is
+    /// the rebind's dec-old moved to the exit: logged as one (an `o` the
+    /// anchor check ties to the release call, nothing on this path's line).
+    pub(crate) fn witness_release_unbound(&mut self, unbound: &std::collections::BTreeSet<u32>) {
+        if let Some(w) = self.witness.as_mut() {
+            for &idx in unbound {
+                w.release_unbound(idx);
+            }
+        }
+    }
+
     /// The epilogue hook (func.rs): one `d` per `$dec_flat` emitted.
     pub(crate) fn witness_dec(&mut self, idx: u32) {
         if let Some(w) = self.witness.as_mut()

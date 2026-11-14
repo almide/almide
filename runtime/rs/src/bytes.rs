@@ -135,6 +135,20 @@ pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
     v.resize(n, 0);
     v
 }
+// The refilling twin of `almide_rt_bytes_zeros` (render-only, #4661): leaves
+// in `b` what `almide_rt_bytes_zeros(len)` returns, in the buffer `b` already
+// holds when that is large enough. `bytes.clear(buf)` reaches the certified
+// render as `buf = bytes.zeros(0)`; built afresh, a line buffer cleared per
+// line was freed and regrown per line. Not an Almide-visible function.
+pub fn almide_rt_bytes_zeros_into(b: &mut Vec<u8>, len: i64) {
+    let n = len.max(0) as usize;
+    if n > b.capacity() {
+        *b = almide_rt_bytes_zeros(len);
+    } else {
+        b.clear();
+        b.resize(n, 0);
+    }
+}
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 // The functional push (`bytes.__append`): a fresh copy of `b` with `val`'s low 8 bits appended.
 pub fn almide_rt_bytes_append_fresh(b: &Vec<u8>, val: i64) -> Vec<u8> { let mut r = Vec::with_capacity(b.len() + 1); r.extend_from_slice(b); r.push(val as u8); r }

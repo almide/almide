@@ -1643,10 +1643,9 @@ fn main() {{
         let mut b = {ty}::C0(0.0_f64.to_bits() as i64);
         for _ in 0..100_000 {{ a = {ty}::C1(Box::new(a)); b = {ty}::C1(Box::new(b)); }}
         assert_eq!(almd_equal(&a, &b), 1);
-        // Drain iteratively: this measures equality, separately from recursive Drop.
-        for mut node in [a, b] {{
-            loop {{ match node {{ {ty}::C1(next) => node = *next, _ => break }} }}
-        }}
+        // The type's own Drop releases its chain in a loop (#4676), so the
+        // 100,000 levels are released on this 128 KiB stack too.
+        drop((a, b));
     }}).unwrap().join().unwrap();
 }}
 "#));
@@ -1741,4 +1740,355 @@ fn owned_regions_preserve_views_bounds_permissions_and_detached_lifetimes() {
         }
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
+}
+
+const REGION_PROGRAM_MAIN: &str = r#"
+effect fn main() -> Unit = {
+ let r = ffi.alloc(3)!
+ ffi.write(r, 0, bytes.from_list([4, 5, 6]))!
+ println("${bytes.to_list(ffi.to_bytes(r)!)}")
+ println("${imax(ffi.len(r), 2)}")
+}
+"#;
+
+/// A Region reaches a host only as a by-value parameter of an
+/// `@extern(rust)` fn, lent as its block's `(ptr, len)` for the call. Any
+/// other way a live boundary could carry its address is refused: a C binding
+/// (no loan adapter), a written-back parameter, a declared record holding
+/// one, a callback's parameter, a returned Region, or a type parameter
+/// instantiated with a value holding one.
+#[test]
+fn a_live_host_boundary_that_can_carry_a_region_address_is_refused() {
+    let host_max = "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n";
+    for (name, decls, call) in [
+        ("c binding", "@extern(c, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n", "take(r)"),
+        ("written back", "@extern(rust, \"host\", \"take\")\nfn take(mut r: Region) -> Int = _\n\
+            fn lend(r: Region) -> Int = {\n var w = r\n take(w)\n}\n", "lend(r)"),
+        ("declared", "type Holder = { inner: Region, n: Int }\n@extern(rust, \"host\", \"take\")\nfn take(h: Holder) -> Int = _\n",
+            "take({ inner: r, n: 1 })"),
+        ("callback", "@extern(rust, \"host\", \"take\")\nfn take(k: (Int) -> Region) -> Int = _\n", "take((n) => r)"),
+        ("returned", "@extern(rust, \"host\", \"take\")\nfn take(n: Int) -> List[Region] = _\n", "list.len(take(1))"),
+        ("generic", "@extern(rust, \"host\", \"take\")\nfn take[T](x: T) -> Int = _\n", "take([r])"),
+    ] {
+        let source = format!("import ffi\n{host_max}{decls}{}",
+            REGION_PROGRAM_MAIN.replace(" println(\"${imax", &format!(" println(\"${{{call}}}\")\n println(\"${{imax")));
+        let refused = almide_mir::pipeline::try_render_rust_source_certified(&source).err()
+            .unwrap_or_else(|| panic!("{name}: rendered a live address-carrying boundary"));
+        assert!(format!("{refused:?}").contains("closed Almide-owned address domain"), "{name}: {refused:?}");
+    }
+}
+
+/// A host binding over plain data does not open the domain: native renders
+/// the program and agrees with v0.
+#[test]
+fn a_host_binding_over_plain_data_keeps_the_domain_closed() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-region-bound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = format!("import ffi\n{}{}{}",
+            "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n",
+            "",
+            REGION_PROGRAM_MAIN);
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(&source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        let rs = dir.join("region_bound.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, rust).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("region_bound");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "region_bound", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "[4, 5, 6]\n3\n");
+        let input = dir.join("region_bound.almd");
+        std::fs::write(&input, &source).unwrap();
+        let oracle = dir.join("region_bound-v0");
+        let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+            .args(["build", "--no-verified"]).arg(&input).arg("-o").arg(&oracle)
+            .env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let v0 = Command::new(oracle).output().unwrap();
+        assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
+
+/// A Region lent to an `@extern(rust)` host is its shared block: the host
+/// writes through `(ptr + off, len)` of a slice, and every copy of the parent
+/// sees the write, including a copy kept in a list after the parent's
+/// variable is rebound (the copy owns the block, so the address stays live).
+#[test]
+fn a_region_lent_to_a_rust_host_shares_its_block_with_every_copy() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-region-lent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = r#"import ffi
+@extern(rust, "host", "fill")
+fn fill(r: Region, start: Int) -> Int = _
+
+effect fn main() -> Unit = {
+  var parent = ffi.alloc(4)!
+  let aliases = [parent]
+  let view = ffi.slice(parent, 1, 2)!
+  parent = ffi.alloc(1)!
+  println("${fill(view, 7)}")
+  println("${bytes.to_list(ffi.to_bytes(list.get(aliases, 0) ?? parent)!)}")
+  println("${bytes.to_list(ffi.to_bytes(view)!)}")
+  println("${bytes.to_list(ffi.to_bytes(parent)!)}")
+  println("${fill(ffi.region(bytes.new()), 1)}")
+}
+"#;
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        assert!(rust.contains("almide_rt_ffi_block_ptr("), "the Region was not lent from its block");
+        let host = "\nmod host {\n    pub fn fill(p: *mut u8, n: usize, start: i64) -> i64 {\n        \
+            if !p.is_null() { for i in 0..n { unsafe { *p.add(i) = (start as u8).wrapping_add(i as u8) } } }\n        \
+            n as i64\n    }\n}\n";
+        let rs = dir.join("region_lent.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, format!("{rust}{host}")).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("region_lent");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "region_lent", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "2\n[0, 7, 8, 0]\n[7, 8]\n[0]\n0\n",
+            "{}", String::from_utf8_lossy(&native.stderr));
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
+
+/// Two shapes of the ceangal2 package that only the native v1 render takes,
+/// checked end to end against v0: a record stored into a mutable module-level
+/// list by index (the font table), and a recursive walk that appends a
+/// `(record, Int)` tuple to a module-level list from a branch inside a `for`
+/// over a record's child list (the paint pass).
+#[test]
+fn module_level_record_lists_and_a_recursive_branch_append_agree_with_v0() {
+    std::thread::Builder::new().stack_size(512 << 20).spawn(|| {
+        let dir = std::env::temp_dir().join(format!("almide-native-module-records-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = r#"type Face = { data: Bytes, ok: Bool }
+type Style = { absolute: Bool, overlay: Bool }
+type Node = { n: Int, name: String, style: Style, children: List[Node] }
+
+var faces: List[Face] = list.repeat({ data: bytes.new(), ok: false }, 3)
+var overlays: List[(Node, Int)] = []
+
+fn load_face(slot: Int, n: Int) -> Unit = {
+  faces[slot] = { data: bytes.zeros(n), ok: n > 0 }
+}
+
+fn subtree_len(v: Node) -> Int = 1 + list.sum(list.map(v.children, (c) => subtree_len(c)))
+
+fn paint(v: Node, idx: Int) -> Int = {
+  var next = idx + v.n
+  for c in v.children {
+    if not c.style.absolute then next = paint(c, next) else ()
+  }
+  for c in v.children {
+    if c.style.overlay then {
+      list.push(overlays, (c, next))
+      next = next + subtree_len(c)
+    } else if c.style.absolute then next = paint(c, next)
+    else ()
+  }
+  next
+}
+
+fn plain() -> Style = { absolute: false, overlay: false }
+
+effect fn main() -> Unit = {
+  let before = faces
+  load_face(1, 2)
+  load_face(2, 0)
+  for slot in 0..<3 {
+    if not faces[slot].ok then { faces[slot] = { data: bytes.zeros(slot + 4), ok: true } } else ()
+  }
+  println("${list.map(faces, (f) => bytes.len(f.data))} ${list.map(before, (f) => bytes.len(f.data))}")
+  let leaf: Node = { n: 1, name: "leaf", style: plain(), children: [] }
+  let abs: Node = { n: 10, name: "abs", style: { absolute: true, overlay: false }, children: [] }
+  let ov: Node = { n: 100, name: "ov", style: { absolute: false, overlay: true }, children: [leaf] }
+  let root: Node = { n: 0, name: "root", style: plain(), children: [leaf, abs, ov, leaf] }
+  println("${paint(root, 0)} ${list.map(overlays, (p) => "${p.0.name}@${p.1}")}")
+}
+"#;
+        let (rust, certs) = almide_mir::pipeline::try_render_rust_source_certified(source)
+            .unwrap_or_else(|e| panic!("native refused: {e:?}"));
+        for (property, function, witness) in &certs {
+            let property = almide_verify::Property::from_name(property).expect("known certificate property");
+            assert!(almide_verify::check(property, witness.as_bytes()), "rejected {property:?} for {function}");
+        }
+        let rs = dir.join("module_records.rs");
+        let crates = almide_codegen::runtime_crate_deps(&rust);
+        std::fs::write(&rs, rust).unwrap();
+        let binary = if crates.is_empty() {
+            let bin = dir.join("module_records");
+            let compile = Command::new("rustc").args(["--edition=2021", "-C", "opt-level=1"])
+                .arg(&rs).arg("-o").arg(&bin).output().unwrap();
+            assert!(compile.status.success(), "{}", String::from_utf8_lossy(&compile.stderr));
+            bin
+        } else {
+            build_with_runtime_crates(&dir, "module_records", &rs, &crates)
+        };
+        let native = Command::new(&binary).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&native.stdout), "[4, 2, 6] [0, 0, 0]\n115 [\"ov@113\"]\n",
+            "{}", String::from_utf8_lossy(&native.stderr));
+        let input = dir.join("module_records.almd");
+        std::fs::write(&input, source).unwrap();
+        let oracle = dir.join("module_records-v0");
+        let built = Command::new(env!("CARGO_BIN_EXE_almide"))
+            .args(["build", "--no-verified"]).arg(&input).arg("-o").arg(&oracle)
+            .env("ALMIDE_NO_VERIFIED_OK", "1").output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let v0 = Command::new(oracle).output().unwrap();
+        assert_eq!((&native.stdout, native.status.code()), (&v0.stdout, v0.status.code()), "v0");
+        std::fs::remove_dir_all(dir).unwrap();
+    }).unwrap().join().unwrap();
+}
+
+/// #4715: a `!` inside an arm block of a bound `if` / `match` in a loop body. The
+/// loop flag rewrite lifts it to a bind of the branch's Result; before, the bound
+/// return rule took it, and its exit left the loop's own state undropped, so the
+/// ownership certificate was rejected. Ok and err paths, on every route.
+#[test]
+fn bound_branch_bang_in_loop_preserves_all_routes() {
+    let dir = std::env::temp_dir().join(format!("almide-native-loop-bound-bang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+fn load(name: String) -> Result[List[Int], String] = match name {
+  "a" => ok([1, 2, 3]),
+  "bb" => ok([4]),
+  _ => err("no face ${name}"),
+}
+effect fn by_if(names: List[String]) -> Int = {
+  var sum = 0
+  for name in names {
+    let f = if string.len(name) > 5 then [1] else {
+        let loaded = load(name)!
+        loaded
+      }
+    println("if ${name}")
+    sum = sum + list.len(f)
+  }
+  sum
+}
+effect fn by_match(names: List[String]) -> Int = {
+  var sum = 0
+  for name in names {
+    let f = match list.get(names, 5) {
+      some(p) => [string.len(p)],
+      none => {
+        let loaded = load(name)!
+        loaded
+      },
+    }
+    println("match ${name}")
+    sum = sum + list.len(f)
+  }
+  sum
+}
+effect fn by_chain(names: List[String]) -> String = {
+  var out = ""
+  for name in names {
+    let f = if name == "x" then [] else if string.len(name) > 1 then {
+        let first = load(name)!
+        let second = load("a")!
+        first + second
+      } else load(name)!
+    out = out + "${list.len(f)};"
+  }
+  out
+}
+effect fn main() -> Unit = {
+  println("${by_if(["a", "longname", "a"])!}")
+  println("${by_match(["a", "bb"])!}")
+  println("${by_chain(["x", "bb", "a"])!}")
+  match by_if(["a", "zz", "a"]) {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+  match by_match(["bb", "q", "a"]) {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+  match by_chain(["a", "cc", "a"]) {
+    ok(s) => println("ok ${s}"),
+    err(e) => println("err ${e}"),
+  }
+}
+"#;
+    check_routes(&dir, "loop_bound_branch_bang", source,
+        "if a\nif longname\nif a\n7\nmatch a\nmatch bb\n4\n0;4;3;\nif a\nerr no face zz\nmatch bb\nerr no face q\nerr no face cc\n",
+        "", 0);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The indic shape: a `!` nested in a call argument inside the match arm block a
+/// loop-body bind takes. The hoist binds it in the arm, the loop flag rewrite
+/// places it behind the arm's continuation, and a Bytes payload crosses it.
+#[test]
+fn nested_bang_in_bound_arm_in_loop_preserves_all_routes() {
+    let dir = std::env::temp_dir().join(format!("almide-native-nested-bound-bang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+type Face = { name: String, data: Bytes }
+
+fn parse(name: String, b: Bytes) -> Face = { name: name, data: b }
+
+fn load(name: String) -> Result[Bytes, String] = match name {
+  "a" => ok(bytes.from_list([1, 2, 3])),
+  "b" => ok(bytes.from_list([1, 2, 3, 4, 5])),
+  _ => err("no face ${name}"),
+}
+
+effect fn total(text: String) -> Int = {
+  var faces: List[(String, Face)] = []
+  var sum = 0
+  for line in string.split(text, "\n") {
+    let cols = string.split(line, "\t")
+    if list.len(cols) == 2 then {
+      let name = cols[0]
+      let f = match list.find(faces, (p) => p.0 == name) {
+        some(p) => p.1,
+        none => {
+          let loaded = parse(name, load(name)!)
+          list.push(faces, (name, loaded))
+          loaded
+        },
+      }
+      sum = sum + bytes.len(f.data) * (int.parse(cols[1]) ?? 0)
+    } else ()
+  }
+  sum + list.len(faces) * 1000
+}
+
+effect fn main() -> Unit = {
+  println("${total("a\t1\nb\t2\na\t3\nbad\nb\t4")!}")
+  match total("a\t1\nc\t2\nb\t3") {
+    ok(n) => println("ok ${n}"),
+    err(e) => println("err ${e}"),
+  }
+}
+"#;
+    check_routes(&dir, "nested_bang_in_bound_arm", source, "2042\nerr no face c\n", "", 0);
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -37,9 +37,11 @@ impl LowerCtx {
             {
                 self.lower_variant_subject_match_arm(subject, arms, result_ty)
             }
-            IrExprKind::If { cond, then, else_ } => {
-                self.lower_nested_heap_result_if_arm(cond, then, else_, result_ty)
-            }
+            // A nested `if` arm already ran through `lower_heap_result_arm_literal` (always tried
+            // first, the same `lower_heap_result_if_inner`): its decline is final. Retrying it
+            // here doubled the work at every nesting level — a 34-arm string match (an if
+            // chain) never finished. The arm stays here so it cannot reach the `_` catch-all.
+            IrExprKind::If { .. } => None,
             IrExprKind::List { elements }
                 if Self::is_heap_elem_list_literal_result(result_ty) =>
             {
@@ -61,6 +63,11 @@ impl LowerCtx {
             }
             IrExprKind::Match { subject, arms } => {
                 self.lower_desugarable_match_arm(subject, arms, result_ty)
+            }
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if is_heap_ty(&arm.ty) && matches!(callee.kind, IrExprKind::Member { .. }) =>
+            {
+                self.lower_closure_field_call_arm(arm, callee, args, result_ty)
             }
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
                 if is_heap_ty(&arm.ty) =>
@@ -101,8 +108,30 @@ impl LowerCtx {
             {
                 self.lower_fresh_container_projection_arm(arm, object, result_ty)
             }
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if is_heap_ty(&arm.ty) && arm.ty == *result_ty =>
+            {
+                self.speculate(|this| this.lower_bound_value_arm(arm))
+            }
             _ => None,
         }
+    }
+
+    /// Any other heap projection arm that IS the result value (`ok(ds) => (list.first(ds)
+    /// ?? d).decl`) — its container is neither a borrowed slot nor a fresh call: bind it
+    /// to a synthetic `let` and move that local out — the block arm `{ let t = <arm>; t }`
+    /// the source could have spelled, which the bind lowering already carries for every
+    /// value it can name. Only projections: a non-projection arm (`c ?? "-"` over a lent
+    /// element) keeps the route it had, whose layout the native render already types.
+    /// The tail is a `Var`, which this arm never claims, so it cannot recurse.
+    fn lower_bound_value_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
+        let tmp = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: arm.ty.clone(), value: arm.clone() },
+            span: arm.span,
+        };
+        let var = IrExpr { kind: IrExprKind::Var { id: tmp }, ty: arm.ty.clone(), span: arm.span, def_id: None };
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(var)), &arm.ty)
     }
 
     /// A heap projection off a FRESH container (`ok(ds) => check_all(k, ds).error`): the
@@ -171,28 +200,6 @@ impl LowerCtx {
         Some(obj)
     }
 
-    /// Extracted from [`Self::lower_heap_result_arm_ctrl`] (codopsy r2, #852): the
-    /// nested heap-result `If` arm body, verbatim.
-    ///
-    /// A NESTED heap-result `if` arm: the branch desugar stacks one
-    /// hoisted `if`-bind per level, so a two-`if` element chain
-    /// arrives as `if c { … tail: if c' {…} else {…} } else …` (the
-    /// ceangal todo_item). Recurse through the same if-lowering —
-    /// level-by-level release parity is exactly the invariant
-    /// `lower_heap_result_if_inner` maintains — and move the merged
-    /// result out (`Consume`, the same `im` balance the Call arm
-    /// carries).
-    fn lower_nested_heap_result_if_arm(
-        &mut self,
-        cond: &IrExpr,
-        then: &IrExpr,
-        else_: &IrExpr,
-        result_ty: &Ty,
-    ) -> Option<ValueId> {
-        let dst = self.try_lower_heap_result_if(cond, then, else_, result_ty)?;
-        self.ops.push(crate::Op::Consume { v: dst });
-        Some(dst)
-    }
 
     /// Extracted from [`Self::lower_heap_result_arm_ctrl`] (codopsy r2, #852): the
     /// `List`-literal arm's guard — the result type is a `List` of exactly one HEAP
@@ -251,6 +258,36 @@ impl LowerCtx {
     /// `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
     /// `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
     /// not double-freed. Same per-arm balance the scalar block arm proves.
+    /// A call of a record's closure field (`if r then vw.value() else …`): the same
+    /// arm as its `let f = vw.value` then `f()` spelling, which binds the closure
+    /// as a tracked value and takes the known-closure call arm. The field is read
+    /// once, before the call, as in the source order.
+    fn lower_closure_field_call_arm(
+        &mut self,
+        arm: &IrExpr,
+        callee: &IrExpr,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let f = self.fresh_synth_var();
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: f, mutability: almide_ir::Mutability::Let,
+                ty: callee.ty.clone(), value: callee.clone(),
+            },
+            span: callee.span,
+        };
+        let read = IrExpr { kind: IrExprKind::Var { id: f }, ty: callee.ty.clone(), span: callee.span, def_id: None };
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(read) },
+                args: args.to_vec(), type_args: Vec::new(),
+            },
+            ..arm.clone()
+        };
+        self.lower_block_stmts_then_tail_arm(&[bind], &Some(Box::new(call)), result_ty)
+    }
+
     fn lower_block_stmts_then_tail_arm(
         &mut self,
         stmts: &[IrStmt],
@@ -453,6 +490,15 @@ impl LowerCtx {
         if let Some(dst) = self.try_lower_list_match_value(subject, arms, result_ty) {
             self.drop_arm_locals(arm_mark);
             return Some(dst);
+        }
+        // The per-constructor TUPLE sub-match the variant regroup builds over a ctor's
+        // borrowed payload fields (`EWith(s, arms) => match (s, arms) { … }`): the
+        // ordered refinement chain, merged the same way (no extra Consume).
+        if let IrExprKind::Tuple { elements } = &subject.kind {
+            if let Some(dst) = self.try_lower_tuple_refinement_rows(elements, arms, result_ty) {
+                self.drop_arm_locals(arm_mark);
+                return Some(dst);
+            }
         }
         if let Some(if_expr) = self.desugar_match_to_if(subject, arms, result_ty) {
             if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {

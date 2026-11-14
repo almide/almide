@@ -57,8 +57,11 @@ flags = "-S http=y"
 # in one batch) added `canonical_names` to `embed_component_metadata`; both
 # call sites pass false, which keeps 0.259's encoding. 0.262 (#3877, with the
 # other open dependabot updates) renamed `Payload::CodeSectionStart { range }` to
-# `unchecked_range`, read in dwarf.rs and its line test.
-family = "0.262"
+# `unchecked_range`, read in dwarf.rs and its line test. 0.263 (#4734, with the
+# other open dependabot updates) replaced `MemArg.memory_index` with
+# `target: MemArgTarget::Memory(_)` plus an `ordering` field; every site passes
+# memory 0 and no ordering, so the encoding is unchanged.
+family = "0.263"
 
 [sources]
 # Dated upstream evidence for the rows above.
@@ -74,4 +77,5 @@ evidence = [
   "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
   "wasm-tools 0.261.0 release 2026-10-02 (crates.io publish time of wasmparser 0.261.0); `wit_component::embed_component_metadata` gained a `canonical_names: bool` argument, the only API change this tree touches",
   "wasm-tools 0.262.0 release 2026-10-13 (crates.io publish time of wasmparser 0.262.0); `Payload::CodeSectionStart { range }` became `unchecked_range`, the only API change this tree touches",
+  "wasm-tools 0.263.0 release 2026-10-30 (crates.io publish time of wasmparser 0.263.0); `MemArg.memory_index` became `target: MemArgTarget` plus `ordering`, the only API change this tree touches (its Debug spelling moves the section-dump goldens)",
 ]

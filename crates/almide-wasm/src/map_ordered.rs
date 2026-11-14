@@ -1,6 +1,6 @@
 //! The flood fallback of the keyed-lookup index (#4104): the wasm twin of
 //! native's ordered `AlmideKeyLookup`. The hash index (map_index.rs) hashes
-//! with fixed functions (Fibonacci for Int, FNV-1a for String), so anyone
+//! with fixed functions (Fibonacci for Int, word-wise multiplicative for String), so anyone
 //! who knows them can pick keys that all land on one probe chain and make
 //! every insert walk it: building a map of n such keys costs n²/2 probes.
 //!

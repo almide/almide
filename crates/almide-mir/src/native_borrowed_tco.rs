@@ -10,7 +10,7 @@ use crate::render_native::{NTy, call_arg, var};
 /// A value must flow through every enclosing join to the actual return.
 /// Merely being the last expression of an inner arm is not tail position.
 pub(crate) fn sites(f: &MirFunction) -> BTreeSet<usize> {
-    if !f.owned_params.is_empty() || !f.call_moves.is_empty() || f.ret.is_none()
+    if !f.owned_params.is_empty() || !f.inout_params.is_empty() || !f.call_moves.is_empty() || f.ret.is_none()
         || f.ops.iter().any(|op| !matches!(op,
             Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Borrow { .. } | Op::ListGetScalar { .. }
             | Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. }
@@ -50,8 +50,12 @@ pub(crate) fn tail_calls(f: &MirFunction) -> BTreeSet<usize> {
     if !stack.is_empty() { return BTreeSet::new(); }
     f.ops.iter().enumerate().filter_map(|(i, op)| {
         let Op::CallFn { name, dst: Some(value), args, .. } = op else { return None; };
+        // An in-out param passed on at its own position is the caller's place,
+        // lent again: nothing of it is released after the call.
+        let released = |k: usize, a: &CallArg| matches!(a, CallArg::Handle(v)
+            if !(f.inout_params.contains(v) && f.params.get(k).is_some_and(|p| p.value == *v)));
         if name != &f.name || args.len() != f.params.len()
-            || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) { return None; }
+            || !args.iter().enumerate().any(|(k, a)| released(k, a)) { return None; }
         let (mut at, mut value) = (i + 1, *value);
         loop {
             match f.ops.get(at) {
@@ -223,7 +227,11 @@ mod tests {
 /// refers to the original input, never to the fallback Default temporary.
 /// Equality between two tag reads carries the selected tag to both inputs.
 pub(crate) fn guarded_reads(f: &MirFunction, records: &BTreeMap<ValueId, u16>) -> BTreeMap<ValueId, u32> {
-    if sites(f).is_empty() { return BTreeMap::new(); }
+    if sites(f).is_empty() {
+        let slots = crate::native_borrowed_slots::of(f);
+        if slots.is_empty() { return BTreeMap::new(); }
+        return slot_guarded_reads(f, &slots, records);
+    }
     let mut facts = TagFacts {
         addresses: f.params.iter().map(|p| (p.value, (p.value, 0i64))).collect(),
         ..TagFacts::default()
@@ -232,6 +240,64 @@ pub(crate) fn guarded_reads(f: &MirFunction, records: &BTreeMap<ValueId, u16>) -
         facts.step(op, records);
     }
     facts.reads
+}
+
+/// Tag facts for a frame whose borrowed slots are re-pointed at their own
+/// payloads (`native_borrowed_slots`). Only reads through those slots, and
+/// through payloads read off them, count: those blocks are the caller's and
+/// nothing in the frame writes them. A rebind ends what was known of the
+/// slot's tag for the rest of its arm, and past the join of any structure
+/// one of whose arms rebinds it; a sibling arm starts from the state before.
+pub(crate) fn slot_guarded_reads(f: &MirFunction, slots: &BTreeSet<ValueId>, records: &BTreeMap<ValueId, u16>) -> BTreeMap<ValueId, u32> {
+    let mut facts = TagFacts {
+        addresses: f.params.iter().map(|p| (p.value, (p.value, 0i64))).collect(),
+        ..TagFacts::default()
+    };
+    let mut fixed = slots.clone();
+    // Per open `if` or loop: the slots' tag reads at entry, and the slots rebound inside.
+    let mut scopes: Vec<(BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>)> = Vec::new();
+    let entry = |tags: &BTreeMap<ValueId, ValueId>| -> BTreeMap<ValueId, ValueId> {
+        tags.iter().filter(|(b, _)| slots.contains(b)).map(|(b, t)| (*b, *t)).collect()
+    };
+    for op in &f.ops {
+        match op {
+            Op::SetLocal { local, .. } if slots.contains(local) => {
+                facts.tags.remove(local);
+                if let Some((_, rebound)) = scopes.last_mut() { rebound.insert(*local); }
+            }
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } if args.len() == 1 => {
+                let base = facts.addresses.get(&args[0]).map(|(b, _)| *b);
+                if base.is_some_and(|b| fixed.contains(&b)) { fixed.insert(*d); }
+            }
+            Op::IfThen { .. } | Op::LoopStart => scopes.push((entry(&facts.tags), BTreeSet::new())),
+            Op::Else { .. } => {
+                if let Some((at_entry, _)) = scopes.last() {
+                    for s in slots {
+                        match at_entry.get(s) {
+                            Some(t) => { facts.tags.insert(*s, *t); }
+                            None => { facts.tags.remove(s); }
+                        }
+                    }
+                }
+            }
+            Op::EndIf { .. } | Op::LoopEnd => {
+                if let Some((at_entry, rebound)) = scopes.pop() {
+                    for s in slots {
+                        match at_entry.get(s) {
+                            Some(t) if !rebound.contains(s) => { facts.tags.insert(*s, *t); }
+                            _ => { facts.tags.remove(s); }
+                        }
+                    }
+                    if let Some((_, outer)) = scopes.last_mut() { outer.extend(rebound); }
+                }
+            }
+            _ => {}
+        }
+        facts.step(op, records);
+    }
+    let mut reads = facts.reads;
+    reads.retain(|d, _| fixed.contains(d));
+    reads
 }
 
 /// An equality test's two operands.

@@ -49,7 +49,7 @@ impl Emitter<'_> {
         self.lower_arg(x, Some(e), ArgMode::Retain)?;
         self.f.instructions().local_set(xh);
         let stride = e.slot_size() as i32;
-        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         let oh = self.hold_i32()?;
         {
             let mut i = self.f.instructions();

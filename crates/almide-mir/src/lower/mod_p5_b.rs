@@ -186,6 +186,7 @@ pub(crate) fn try_tco_rewrite(
     // type, so give every tail `err` base the function's return type.
     let retyped = crate::lower::owned_tco_slots().then(|| {
         let mut b = work_body.clone();
+        expose_guard_tails(&mut b, &body.ty);
         retype_tail_err_bases(&mut b, &body.ty);
         expose_short_circuit_tails(&mut b);
         b
@@ -250,17 +251,25 @@ pub(crate) fn try_tco_rewrite(
     if (0..n)
         .any(|i| carried[i] && is_heap_ty(&params2[i].ty) && !append_slots.contains(&params2[i].var))
     {
+        tco_trace!("bail: a heap carry outside an append slot");
         return None;
     }
     if !crate::lower::owned_tco_slots() && !simultaneous_update_safe(&calls, params2, &carried) {
+        tco_trace!("bail: simultaneous update");
         return None;
     }
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
     let ret_ty = body.ty.clone();
 
-    let use_result_acc = tco_result_acc_mode(work_ref, &base_exprs, &ret_ty)?;
+    let Some(use_result_acc) = tco_result_acc_mode(work_ref, &base_exprs, &ret_ty) else {
+        tco_trace!("bail: result accumulator mode");
+        return None;
+    };
     let result_slot: Option<(VarId, IrExpr)> = if use_result_acc {
-        let empty = tco_slot_empty(&ret_ty, decls, TCO_SLOT_EMPTY_DEPTH)?;
+        let Some(empty) = tco_slot_empty(&ret_ty, decls, TCO_SLOT_EMPTY_DEPTH) else {
+            tco_trace!("bail: no empty value for the result slot");
+            return None;
+        };
         let rv = VarId(slot_next);
         slot_next += 1;
         Some((rv, empty))
@@ -361,22 +370,23 @@ fn collect_tco_shape<'a>(
     fn_name: &str,
     params: &[almide_ir::IrParam],
 ) -> Option<(Vec<&'a [IrExpr]>, Vec<&'a IrExpr>)> {
+    // A base that itself recurses (`s + f(n - v, xs)` beside a tail `f(n,
+    // list.drop(xs, 1))`, #3550) stays a real call — no leg loops a non-tail
+    // call — while the tail calls round it become the loop. Only where the
+    // native render would otherwise refuse the function: its owned slots are
+    // on and a tail call hands a heap parameter on. Everywhere else such a
+    // function keeps its real-recursion lowering. The same holds for a self
+    // call in a `match` subject whose arm makes the tail call.
+    let mixed_ok = crate::lower::owned_tco_slots() && params.iter().any(|p| is_heap_ty(&p.ty));
     let mut calls: Vec<&[IrExpr]> = Vec::new();
     let mut bases: Vec<&IrExpr> = Vec::new();
-    tco_collect(body, fn_name, &mut calls, &mut bases)?;
+    tco_collect(body, fn_name, mixed_ok, &mut calls, &mut bases)?;
     if calls.is_empty() || bases.is_empty() {
         return None;
     }
     if calls.iter().any(|c| c.len() != params.len()) {
         return None;
     }
-    // A base that itself recurses (`s + f(n - v, xs)` beside a tail `f(n,
-    // list.drop(xs, 1))`, #3550) stays a real call — no leg loops a non-tail
-    // call — while the tail calls round it become the loop. Only where the
-    // native render would otherwise refuse the function: its owned slots are
-    // on and a tail call hands a heap parameter on. Everywhere else such a
-    // function keeps its real-recursion lowering.
-    let mixed_ok = crate::lower::owned_tco_slots() && params.iter().any(|p| is_heap_ty(&p.ty));
     if !mixed_ok && bases.iter().any(|b| tco_contains_self(b, fn_name)) {
         return None;
     }

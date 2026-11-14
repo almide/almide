@@ -102,9 +102,9 @@ fn main() -> Unit = {
 
 const RECORD_RESULT_STDOUT: &str = "2 done 2 t [1, 2] 1.5 true\n5 xxxxx\n4 [\"4\", \"3\", \"2\", \"1\"]\n-4 neg []\n4 zero [3, 2, 1, 0]\n";
 
-/// A heap tail call the loop conversion still declines: the base reads a
-/// binding of the loop body and the result (a map) has no empty value
-/// for the in-loop result slot.
+/// The base reads a binding of the loop body, so the loop delivers its
+/// result through an in-loop slot: a map result starts that slot as an
+/// empty map, and the shape loops.
 const MAP_RESULT: &str = r#"fn pick(n: Int, xs: List[Int]) -> Map[String, Int] = {
   let k = list.len(xs)
   if n == 0 then ["k": k] else pick(n - 1, [n, k])
@@ -112,6 +112,18 @@ const MAP_RESULT: &str = r#"fn pick(n: Int, xs: List[Int]) -> Map[String, Int] =
 
 fn main() -> Unit = {
   println(int.to_string(map.get(pick(5, []), "k") ?? -1))
+}
+"#;
+
+/// A heap tail call the loop conversion still declines: the same shape
+/// with a set result, which has no empty value for the in-loop slot.
+const SET_RESULT: &str = r#"fn pick(n: Int, xs: List[Int]) -> Set[Int] = {
+  let k = list.len(xs)
+  if n == 0 then set.from_list([k]) else pick(n - 1, [n, k])
+}
+
+fn main() -> Unit = {
+  println(int.to_string(set.len(pick(5, []))))
 }
 "#;
 
@@ -179,6 +191,14 @@ fn a_record_result_whose_base_reads_a_loop_binding_loops_from_a_fieldwise_empty_
 
 #[test]
 fn a_heap_tail_call_the_loop_declines_is_still_refused() {
-    let err = almide_mir::pipeline::try_render_rust_source(MAP_RESULT).expect_err("no loop conversion for this shape");
+    let err = almide_mir::pipeline::try_render_rust_source(SET_RESULT).expect_err("no loop conversion for this shape");
     assert!(format!("{err:?}").contains("passes a heap value to its own tail call"), "{err:?}");
+}
+
+#[test]
+fn a_map_result_slot_starts_empty_and_the_tail_call_loops() {
+    let out = almide_mir::pipeline::try_render_rust_source(MAP_RESULT).unwrap_or_else(|e| panic!("the map result walls: {e}"));
+    let (mangled, body) = rendered_fn(&out, "pick");
+    assert!(body.contains("loop") || body.contains("while"), "pick is a loop:\n{body}");
+    assert!(!body.contains(&format!("{mangled}(")), "pick no longer calls itself:\n{body}");
 }

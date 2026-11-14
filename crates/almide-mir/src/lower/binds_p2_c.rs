@@ -67,10 +67,16 @@ impl LowerCtx {
                         if self.value_of.get(id).is_some_and(|v| self.closure_values.contains(v))));
             // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
             // hval handle-level twins + `$__drop_map_mclo`) are representable
-            // closure CONTAINERS — excluded from the wall.
+            // closure CONTAINERS — excluded from the wall. So is a list of
+            // tuples whose closures are DIRECT slots (`List[(String, (String)
+            // -> Bool)]`): the value position lowers the same call with no
+            // data-arg guard and builds, invokes and frees each slot's closure
+            // faithfully, so the bind position takes the same route.
             let is_representable_closure_list = matches!(&a.ty,
                 Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
-                    if e.len() == 1 && matches!(e[0], Ty::Fn { .. }))
+                    if e.len() == 1 && (matches!(e[0], Ty::Fn { .. })
+                        || matches!(&e[0], Ty::Tuple(slots) if slots.iter().all(|s|
+                            matches!(s, Ty::Fn { .. }) || !crate::lower::ty_contains_fn(s)))))
                 || crate::lower::is_map_fn_ty(&a.ty);
             !is_closure_arg && !is_representable_closure_list && crate::lower::ty_contains_fn(&a.ty)
         });
@@ -603,7 +609,15 @@ impl LowerCtx {
             // A List-valued merge binds as a REAL populated block —
             // register it so later element reads take the executing path.
             self.materialized_lists.insert(obj);
-        } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+        } else {
+            self.seed_aggregate_merge(obj, ty);
+        }
+    }
+
+    /// A RECORD/TUPLE-valued merge's read shape, heap-slot mask and recursive
+    /// drop route (no-op for any other type).
+    pub(crate) fn seed_aggregate_merge(&mut self, obj: ValueId, ty: &Ty) {
+        if let Some((_, tys)) = self.aggregate_field_tys(ty) {
             // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
             // block: every arm materializes + Consumes its value (a
             // some/ok-arm payload is the variant's real payload block, a

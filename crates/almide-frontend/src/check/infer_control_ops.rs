@@ -314,6 +314,34 @@ impl Checker {
         }
     }
 
+    /// #4654: a branch whose value leaf is `err(..)`, typed `Result[T, E]`,
+    /// leaves the fn through its error channel, so `E` must be the channel's
+    /// type. Deferred like the match-arm payload check.
+    fn constrain_err_leaf_payload(&mut self, branch: &ast::Expr, ty: &Ty) {
+        fn leaf(e: &ast::Expr) -> &ast::Expr {
+            match &e.kind {
+                ExprKind::Block { expr: Some(tail), .. } => leaf(tail),
+                _ => e,
+            }
+        }
+        let leaf = leaf(branch);
+        // Inside a lambda the branch returns into the lambda's own channel
+        // (ADR-0021), which is not the fn's.
+        if self.env.lambda_depth > 0 || !matches!(leaf.kind, ExprKind::Err { .. }) {
+            return;
+        }
+        let Ty::Applied(TypeConstructorId::Result, args) = resolve_ty(ty, &self.uf) else { return };
+        let (Some(ok), Some(payload)) = (args.first(), args.get(1)) else { return };
+        let Some(chan) = self.bang_channel_err_ty() else { return };
+        self.constraints.push(super::types::Constraint {
+            expected: Ty::result(ok.clone(), chan),
+            actual: Ty::result(ok.clone(), payload.clone()),
+            context: "if branch".into(),
+            span: leaf.span.or(self.current_span),
+            fix_hint: None,
+        });
+    }
+
     /// The `err(..)` arm carries `String`, and a callback in this fn erased a
     /// typed error into its `String` channel with a `!` — the value-consumed
     /// form of #2601 (`let r = xs |> list.map((x) => ... f(x)! ...)` then
@@ -582,6 +610,13 @@ impl Checker {
                         if resolve_ty(&self.type_map.get(&branch.id).cloned().unwrap_or(Ty::Unknown), &self.uf).is_result() {
                             self.queue_implicit_prop_leaves(branch, "of this if branch's value", false);
                         }
+                    }
+                    // #4654: an `err(..)` branch returns from the fn through its
+                    // lifted channel, so its payload is that channel's type —
+                    // the strip below would otherwise drop it unchecked (the
+                    // match-arm rule, `check_err_arm_payloads`).
+                    for (branch, ty) in [(&**then, &then_ty), (&**else_, &else_ty)] {
+                        self.constrain_err_leaf_payload(branch, ty);
                     }
                     (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
                 } else {

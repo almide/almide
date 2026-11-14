@@ -748,7 +748,8 @@ mod ordered_tests {
         assert_eq!(
             t,
             [
-                "ffi.__address", "ffi.__export_view", "ffi.__lend", "ffi.__load", "ffi.__store",
+                "ffi.__address", "ffi.__block", "ffi.__block_load", "ffi.__block_store",
+                "ffi.__export_view", "ffi.__lend", "ffi.__load", "ffi.__store",
                 "ffi.alloc", "ffi.is_writable", "ffi.len", "ffi.read", "ffi.region", "ffi.slice", "ffi.to_bytes", "ffi.write",
             ]
         );

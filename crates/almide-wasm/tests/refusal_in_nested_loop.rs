@@ -6,19 +6,23 @@
 //! the enclosing match arm then closed its label (`shift_loop_labels(-1)`)
 //! against the body's fresh context and hit `loop label depth underflow`.
 //!
-//! The refused shape here is a `guard … else err(<List[String]>)` in an
-//! `effect fn`, whose error channel is `String` on the wasm leg. If that shape
-//! starts lowering (or the checker starts rejecting it), swap in any other
-//! statement the structural leg refuses: the assertion is that the refusal
-//! arrives as an error.
+//! The refused shape here is a `continue` inside a VALUE-position block (the
+//! structural leg's `expr:Continue` decline, as in decline_site.rs). The
+//! issue's own shape, a `guard … else err(<List[String]>)` in an `effect fn`,
+//! is now a check-time E001 (#4654). If this shape starts lowering, swap in
+//! any other statement the structural leg refuses: the assertion is that the
+//! refusal arrives as an error.
 
 const SRC: &str = "effect fn work(c: Bool, n: Int) -> Int = {
   var q = 0
   match c {
     true => {
       for i in 0..<2 {
-        guard n > 0 else err([\"a\", \"b\"])
-        q = q + i
+        let k = {
+          if n == 0 then continue
+          1
+        }
+        q = q + i + k
       }
     },
     false => (),

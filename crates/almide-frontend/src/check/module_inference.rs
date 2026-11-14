@@ -332,6 +332,15 @@ impl Checker {
         }
         // ret_ty is non-Result (e.g. String): body can be T or Result[T, E] (auto-unwrapped)
         if let Ty::Applied(crate::types::TypeConstructorId::Result, ref args) = body_resolved {
+            // #4654: a Result tail leaf leaves through the lifted channel, so
+            // its error slot is that channel's (`String`) too — `if c then n
+            // else err([..])` passed check, then failed rustc.
+            if args.len() == 2
+                && let Some(e) = self.bang_channel_err_ty()
+            {
+                self.constrain(Ty::result(ret_ty.clone(), e), body_ty, format!("fn '{}'", name));
+                return;
+            }
             if args.len() >= 1 {
                 self.constrain(ret_ty.clone(), args[0].clone(), format!("fn '{}'", name));
                 return;

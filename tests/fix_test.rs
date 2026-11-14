@@ -904,4 +904,15 @@ fn fix_deletes_the_lines_of_adjacent_unused_imports() {
     let after = std::fs::read_to_string(&path).unwrap();
     assert!(fix.status.success(), "fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
     assert_eq!(after, "import json\n\nfn main() -> Unit = println(json.stringify(value.int(1)))\n", "the kept import's blank line went");
+
+    // Every import unused: the blank line that separated the block from the
+    // code would start the file, which `almide fmt` never writes.
+    let none_used = "import json\nimport regex\n\nfn main() -> Unit = println(\"hi\")\n";
+    std::fs::write(&path, none_used).unwrap();
+    let fix = Command::new(almide()).args(["fix", "main.almd"]).current_dir(td.path()).output().unwrap();
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(fix.status.success(), "fix failed:\n{}\n{after}", String::from_utf8_lossy(&fix.stderr));
+    assert_eq!(after, "fn main() -> Unit = println(\"hi\")\n");
+    let fmt = Command::new(almide()).args(["fmt", "--check", "main.almd"]).current_dir(td.path()).output().unwrap();
+    assert!(fmt.status.success(), "fmt --check fails after fix:\n{}{}\n{after}", String::from_utf8_lossy(&fmt.stdout), String::from_utf8_lossy(&fmt.stderr));
 }

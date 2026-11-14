@@ -14,6 +14,14 @@
 // cut by a declared native_hof runtime call. Those calls keep the existing
 // trusted-runtime boundary and must pass its per-site checks and witness.
 
+/// The module a registry source is checked as: the one module every entry
+/// names, if any (`self_host_source_to_ir`, and the declared signature table
+/// in registry_sig.rs, which must name and type its fns the same way).
+pub(crate) fn self_host_owner<'a>(entries: &[(&str, &'a str)]) -> Option<&'a str> {
+    let mut modules = entries.iter().filter_map(|(_, call)| call.split_once('.').map(|(m, _)| m));
+    modules.next().filter(|first| modules.all(|m| m == *first))
+}
+
 /// One linked registry source: its IR (signatures, Result shapes) and layouts.
 struct LinkedSelfHost {
     ir: almide_ir::IrProgram,
@@ -24,13 +32,14 @@ struct LinkedSelfHost {
 
 /// Lower ONE registry source the way the interp oracle does: checked as its
 /// owning module (the one module every entry names, if any) and lowered in
-/// stdlib mode, so its internal prims are admitted.
-fn self_host_source_to_ir(
+/// stdlib mode, so its internal prims are admitted. The registry signature
+/// table (registry_sig.rs) reads the same lowering, so both see one name per
+/// impl (#4685).
+pub(crate) fn self_host_source_to_ir(
     source: &str,
     entries: &[(&str, &'static str)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    let mut modules = entries.iter().filter_map(|(_, call)| call.split_once('.').map(|(m, _)| m));
-    let owner = modules.next().filter(|first| modules.all(|m| m == *first));
+    let owner = self_host_owner(entries);
     let mut prog = parse_or_wall(source)?;
     let canon = canonicalize::canonicalize_program_in(&prog, std::iter::empty(), owner);
     let mut checker = Checker::from_env(canon.env);

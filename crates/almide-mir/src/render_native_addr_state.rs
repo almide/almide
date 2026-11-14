@@ -46,6 +46,10 @@ pub(crate) struct AddrState {
     /// The open `if`s: the Result whose tag each one tests, and whether the
     /// render is in its then-arm (tag 1 = Err).
     arms: Vec<(Option<ValueId>, bool)>,
+    /// Per open `if`, the side whose arm left by an early return, if one did.
+    arms_left: Vec<Option<bool>>,
+    /// The frames at the bottom of `arms` kept after their `if` closed.
+    arms_kept: usize,
     /// Result payload reads hoisted above their tag test → the side their uses select.
     hoisted: BTreeMap<ValueId, bool>,
     /// Result/Option payload reads below a tag test whose taken arm left the function →
@@ -61,6 +65,10 @@ pub(crate) struct AddrState {
     arith: BTreeSet<ValueId>,
     /// Payload reads that render as a borrow into their block.
     borrow_reads: BTreeSet<ValueId>,
+    /// The borrow reads whose place moves under them
+    /// (`render_native_borrow_read::moved_index_reads`): never noted as a
+    /// place a copy may read again.
+    moved_index_reads: BTreeSet<ValueId>,
     /// Heap slot reads of an owned record that move the value out
     /// (`render_native_slots::movable_loads`): nothing reads the slot again.
     moves: BTreeSet<ValueId>,
@@ -113,7 +121,26 @@ impl AddrState {
         let (handle_of, consts, base_of) = block_bases(func);
         // The untyped blocks, typed from their stores and the declarations
         // that consume them, in one fixpoint (render_native_slots.rs).
-        let (moves, moves_last, moves_first, moves_partial) = slots::movable_loads(func, &base_of);
+        let (mut moves, moves_last, mut moves_first, moves_partial) = slots::movable_loads(func, &base_of);
+        // A field of an in-out record moves out only where the record is
+        // rebuilt into the caller's place before anything reads it again
+        // (crate::native_inout::field_moves_out): the caller reads it after.
+        for (i, op) in func.ops.iter().enumerate() {
+            let crate::Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
+            if !(moves.contains(d) || moves_first.contains(d)) {
+                continue;
+            }
+            let Some(&(base, Some(off))) = args.first().and_then(|a| base_of.get(a)) else { continue };
+            if !func.inout_params.contains(&base) {
+                continue;
+            }
+            let k = (off - i64::from(crate::lower::layout::BLOCK_HEADER)) / i64::from(crate::lower::layout::SLOT_SIZE);
+            let place = format!("{}.f{k}", crate::render_native::var(base));
+            if !crate::native_inout::field_moves_out(func, i, base, &place) {
+                moves.remove(d);
+                moves_first.remove(d);
+            }
+        }
         let str_lists = slots::type_blocks(func, sigs, &mut alloc_rec, &slots::Facts { handle_of: &handle_of, base_of: &base_of, consts: &consts });
         // Tag exclusions need the declared enum of borrowed parameters too.
         // The allocation table below deliberately drops non-allocation values.
@@ -210,6 +237,8 @@ impl AddrState {
             res_tags: BTreeMap::new(),
             pending: BTreeMap::new(),
             arms: Vec::new(),
+            arms_left: Vec::new(),
+            arms_kept: 0,
             hoisted: carrier::hoisted_sides(func),
             exit_proven: carrier::exit_proven_sides(func),
             map_lens: BTreeMap::new(),
@@ -217,6 +246,7 @@ impl AddrState {
             scaled_src: BTreeMap::new(),
             arith: BTreeSet::new(),
             borrow_reads: crate::render_native_borrow_read::borrow_reads(func),
+            moved_index_reads: crate::render_native_borrow_read::moved_index_reads(func),
             moves,
             moves_last,
             moves_first,

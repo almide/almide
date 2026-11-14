@@ -273,11 +273,11 @@ fn trap_on_err(i: &mut wasm_encoder::InstructionSink<'_>, res: u32) {
 }
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 fn dword(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 3, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 3, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// The adapter: `(params…) -> (i32 ptr, i32 len)`, or `(params…) -> i32 ptr`

@@ -210,7 +210,7 @@ impl crate::emitter::Emitter<'_> {
                     i.local_get(hc).local_get(hs).i64_store(MemArg {
                         offset: 0,
                         align: 2,
-                        memory_index: 0,
+                        target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
                     });
                     i.local_get(hs).i64_const(1).i64_add().local_set(hs);
                     i.local_get(hc).i32_const(STEP).i32_add().local_set(hc);

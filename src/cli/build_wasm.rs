@@ -94,6 +94,7 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     let proc_op = refuse_unpackageable(file, &host_ops, req.component, js_host);
     let shape = WasmPackage::decide(&host_ops, req.component);
     let bytes = shape.package(file, &emitted, &host_ops);
+    super::phase_lap("package");
     if certify {
         // A component is not the core module the certificate describes
         // (`almide verify` refuses it the same way): its sinks are dropped.
@@ -107,10 +108,12 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
         }
     }
 
+    super::phase_lap("certify");
     if let Err(e) = std::fs::write(output, &bytes) {
         err(&format!("Failed to write {}: {}", output, e));
         std::process::exit(1);
     }
+    super::phase_lap("write");
     // The artifact needs a host that grants the subprocess capability: say
     // so at build time, since a stock runtime will refuse it at load.
     if shape.p3_default && almide_wasm::host_ops::names_socket_op(&host_ops) {

@@ -1286,7 +1286,7 @@ mod tests {
     fn an_out_of_bounds_access_names_the_memory_trap() {
         let oob = [
             Instruction::I32Const(-1),
-            Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }),
+            Instruction::I32Load(MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }),
             Instruction::Drop,
         ];
         let r = run_wasm(&module(&oob)).expect("engine runs the module");

@@ -464,6 +464,7 @@ pub fn try_render_rust_checked_tests_certified(
 
 fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram, LowerError>, test_harness: bool) -> Result<NativeRenderParts, LowerError> {
     let _foreign_originals = crate::native_foreign::OriginalScope::enter();
+    let _inout = crate::native_inout::ProgramScope::enter();
     let _error_displays = crate::native_display::ErrorDisplayScope::enter();
     crate::charge_probe::reset_budget_used();
     crate::lambda_sigs::clear();
@@ -495,6 +496,10 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     crate::native_mutation_places::expand(&mut ir);
     crate::native_map_upsert::expand(&mut ir);
     crate::native_group_count::expand(&mut ir);
+    crate::native_reduce_fusion::expand(&mut ir);
+    crate::native_range_loops::expand(&mut ir);
+    native_bundled::snapshot_range_bounds(&mut ir);
+    crate::native_invariant_eq::expand(&mut ir);
     almide_codegen::pass_region_window_native::native_region_windows(&mut ir);
     let windows = crate::native_region_window::window_fns(&ir);
     let mut ir = crate::fan_native::lift_fan_arms(ir)?;
@@ -531,15 +536,23 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     let _callback_types = crate::native_callbacks::HostTypes::enter(&ir);
     prepare_native_top_lets(&mut ir);
     let _fusion = crate::native_fusion::Scope::enter(&ir);
+    let _decode_slots = crate::native_decode_hint::Scope::enter(&ir);
     let mut functions = lower_native_functions(&ir, &record_layouts, &variant_layouts)?;
     let own: std::collections::BTreeSet<String> = functions.iter().map(|f| f.name.clone()).collect();
     // #4006: the registry bodies the program calls, linked as certified MIR.
     let (linked, runtime, host_results) = link_native_self_host(&mut functions, &ir)?;
     let linked_names: std::collections::BTreeSet<String> =
         functions.iter().filter(|f| !own.contains(&f.name)).map(|f| f.name.clone()).collect();
+    // The lowered lambdas' tuple and list types re-derive the record table,
+    // which may move indices: settle it before the heap-slot kinds record one
+    // (a slot read as `Rec(i)` of the old table named another type at render).
+    crate::render_native_rec::extend_with(&crate::lambda_sigs::declared_types());
     crate::native_slot_rewrite::set_heap_slots(native_heap_slots(&functions, &record_layouts, &variant_layouts));
     // No function is known to leave the heap slots alone until this program's are read.
     crate::native_slot_takes::set_quiet(&[]);
+    // A call of a function that only returns its parameter, whose result is
+    // only lent, is a copy of the argument (an erased newtype's accessor).
+    crate::native_identity_calls::inline(&mut functions);
     rewrite_native_linked_mir(&ir, &linked, &mut functions, &host_results, test_harness)?;
     let mut sigs = native_sigs_with_linked(&ir, &functions, &linked, &record_layouts, &variant_layouts)?;
     insert_native_probe_charges(&ir, &mut functions, &mut sigs);
@@ -548,6 +561,8 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
+    // A loop slot that only re-points at its own payloads borrows the param.
+    crate::native_borrowed_slots::rewrite(&mut functions, &sigs);
     // #4006 class P: a heap param its body takes over becomes a move param,
     // and every call hands the argument over at the call.
     let before_modes = functions.clone();
@@ -567,6 +582,8 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     );
     let _entry = crate::native_entry::EntryGuard::set(ir.functions.iter().any(|f| f.name.as_str() == "main" && f.is_effect));
     let initial_records = crate::render_native_rec::snapshot();
+    // The render lends by the lowered fns' own in-out params.
+    crate::native_inout::register_lowered(&program.functions);
     let mut rust = render_native_with_runtime_hofs(&mut program, &sigs, &linked_names, &runtime)?;
     // Runtime adapters can make linked indirect callers unreachable. Such
     // callers must not keep pinning the surviving callbacks to borrowing:

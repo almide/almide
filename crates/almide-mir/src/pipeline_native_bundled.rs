@@ -232,6 +232,13 @@ fn refresh_declared_reprs(ir: &mut IrProgram, checker: &Checker) {
 /// Call sites and signatures change together before MIR ownership lowering.
 pub(super) fn prepare_mutable_values(ir: &mut IrProgram) {
     crate::native_foreign::prepare_mutable(ir);
+    // The in-out fns (`crate::native_inout`) keep their signatures; the
+    // move-mode rewrite takes the rest.
+    // The `mut`-place operand hoist reads `mutated_params`, which the
+    // selection clears: run it first (it is idempotent; the rewrite runs it
+    // again).
+    almide_ir::call_writes::hoist_operands_before_mut_places(ir);
+    crate::native_inout::select(ir);
     almide_ir::mut_param::lower_mut_params_move_mode(ir);
     crate::native_propagation::expand(ir);
     own_written_params(ir);
@@ -254,8 +261,14 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         }
 
         fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
                 self.3.insert(*name);
+                // A var lent to an in-out param is written through it.
+                for (k, a) in args.iter().enumerate() {
+                    if crate::native_inout::is_inout_position(name.as_str(), k) {
+                        if let Some(v) = almide_ir::mut_args::place_root(a) { self.0.insert(v); }
+                    }
+                }
             }
             if let IrExprKind::Lambda { params, body, .. } = &e.kind {
                 let bound = params.iter().map(|(v, _)| *v).collect();
@@ -273,7 +286,10 @@ pub(super) fn own_written_params(ir: &mut IrProgram) {
         let mut writes = Writes(HashSet::new(), HashSet::new(), HashSet::new(), HashSet::new());
         writes.visit_expr(&f.body);
         let mut bindings = Vec::new();
-        for p in &mut f.params {
+        let inout = crate::native_inout::positions(f.name.as_str()).unwrap_or_default();
+        for (k, p) in f.params.iter_mut().enumerate() {
+            // An in-out param is the body's own slot (`crate::native_inout`).
+            if inout.contains(&k) { continue; }
             // The self-tail-call rewrite already creates owned carry slots.
             // Renaming its reassigned parameter first hides that recurrence.
             let assigned_local = writes.1.contains(&p.var) && !writes.3.contains(&f.name);
@@ -337,6 +353,7 @@ pub(super) fn snapshot_mut_reads(ir: &mut IrProgram) {
     for t in &mut ir.top_lets { visitor.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| visitor.visit_expr_mut(e));
     snapshot_loop_iterables(ir);
+    snapshot_range_bounds(ir);
     snapshot_call_operands(ir);
 }
 
@@ -430,7 +447,7 @@ impl IrVisitor for References {
 /// All user functions remain roots, even unused ones. Only unreached library
 /// definitions/templates are pruned. Every retained body takes the same native
 /// signature, MIR ownership and artifact checks as a user function.
-pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
+pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::intern::Sym>) -> Result<IrProgram, LowerError> {
     if ir.modules.is_empty() { return Ok(ir); }
     let bodies: HashMap<String, HashSet<String>> = ir.modules.iter().map(|m| {
         // These primary bodies were loaded and checked for this native leg.
@@ -440,13 +457,16 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         // A package module's native extern is the same declared import the
         // entry module's is: it links under its module name and lowers to
         // the checked foreign call (`native_foreign`).
-        let user = !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str());
+        // A package module named like a library module is still the
+        // program's own (#4640): its bodies are the ones its calls resolved
+        // to, never the runtime's entry of the same spelling.
+        let user = user_modules.contains(&m.name) || !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str());
         let names = m.functions.iter()
             .filter(|f| super::is_pure_almide_fn(f) || (user && crate::native_foreign::selected(f).is_some()))
             .map(|f| f.name.to_string())
             .filter(|f| {
                 let call = format!("{}.{}", m.name, almide_ir::mono_base_or_self(f));
-                !super::served_natively(&call)
+                user || !super::served_natively(&call)
             })
             .collect();
         (m.name.to_string(), names)
@@ -478,6 +498,23 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
     ir = almide_codegen::pass_unify_var_tables::UnifyVarTablesPass.run(ir, Target::Rust).program;
     almide_frontend::ir_link::ir_link_flatten(&mut ir);
     global_aliases::resolve(&mut ir);
+    let type_aliases = bare_type_aliases(&ir);
+    almide_codegen::pass_ir_link_flatten::rename_declared_type_references(&mut ir, &type_aliases);
+    almide_codegen::pass_ir_link_flatten::canonicalize_structural_twins(&mut ir);
+    let mut names = HashSet::new();
+    for f in &ir.functions {
+        if !names.insert(f.name) {
+            return Err(LowerError::at(f.body.span, format!("native: linked function name collision: {}", f.name)));
+        }
+    }
+    retain_reached(&mut ir, roots);
+    Ok(ir)
+}
+
+/// [`flatten`]'s bare type names: a linked record or variant declared under a
+/// module-qualified name keeps the bare name its references still spell,
+/// where that name is unambiguous and no root declaration owns it.
+fn bare_type_aliases(ir: &IrProgram) -> std::collections::HashMap<String, almide_lang::intern::Sym> {
     // Lowering already resolves unambiguous imported record references via
     // this registry. Carry the same identity into lambda signatures and
     // nested container types before deriving native representations.
@@ -506,14 +543,13 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
             type_aliases.insert(bare.to_string(), almide_lang::intern::sym(name));
         }
     }
-    almide_codegen::pass_ir_link_flatten::rename_declared_type_references(&mut ir, &type_aliases);
-    almide_codegen::pass_ir_link_flatten::canonicalize_structural_twins(&mut ir);
-    let mut names = HashSet::new();
-    for f in &ir.functions {
-        if !names.insert(f.name) {
-            return Err(LowerError::at(f.body.span, format!("native: linked function name collision: {}", f.name)));
-        }
-    }
+    type_aliases
+}
+
+/// [`flatten`]'s reachability: keep the functions the roots (the entry
+/// module's own, test entries, host callbacks, C exports, top-level values and
+/// defaults) reach through calls.
+fn retain_reached(ir: &mut IrProgram, roots: HashSet<String>) {
     let mut refs = References(roots);
     refs.0.extend(ir.functions.iter().filter(|f| crate::native_test_harness::is_entry(f.name.as_str()))
         .map(|f| f.name.to_string()));
@@ -537,7 +573,6 @@ pub(super) fn flatten(mut ir: IrProgram) -> Result<IrProgram, LowerError> {
         if !changed { break; }
     }
     ir.functions.retain(|f| refs.0.contains(f.name.as_str()));
-    Ok(ir)
 }
 
 #[cfg(test)]

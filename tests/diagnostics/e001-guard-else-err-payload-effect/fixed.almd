@@ -1,0 +1,21 @@
+// A `guard` else in an effect fn that does not return `Result` leaves
+// through the fn's String error channel (#4654): its `err(..)` payload must
+// be a String. A list payload passed check, then failed rustc and panicked
+// the wasm emitter.
+effect fn work(c: Bool, n: Int) -> Int = {
+  var q = 0
+  match c {
+    true => {
+      for i in 0..<2 {
+        guard n > 0 else err("a, b")
+        q = q + i
+      }
+    },
+    false => (),
+  }
+  q
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(work(true, 3)!))
+}

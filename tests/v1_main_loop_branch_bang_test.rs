@@ -143,7 +143,8 @@ effect fn main() -> Unit = {
 const RESULT_FN_STDOUT: &str = "a 0 2\na 1 3\na 2 5\na 3 6\nok(6)\na 0 2\na 1 3\na 2 5\na 3 6\na 4 8\na 5 9\na 6 11\na 7 12\nerr(\"big 8\")\nok(\"2.<0>;.;2.;[bad 3]<6>;2.;\")\nerr(\"int 6\")\nerr(\"int 6\")\nok([\"x1\", \"x2\", \"2\", \"x3\", \"2\", \"x4\"])\nerr(\"big 9\")\n";
 
 /// A `!` in an arm of a VALUE `if` bound by `let` in the loop: the flag form
-/// has no value to give the binding on the exit path. Still refused.
+/// moves the rest of the iteration into the arms (#4715), so the exit path
+/// needs no value for the binding.
 const LET_IF_BANG: &str = r#"effect fn mi(n: Int) -> Result[Int, String] = if n > 3 then err("big ${n}") else ok(n)
 
 effect fn run(k: Int) -> Result[Int, String] = {
@@ -210,7 +211,14 @@ fn a_bang_under_a_branch_statement_of_a_result_fn_loop_delivers_the_err_after_th
 }
 
 #[test]
-fn a_bang_in_a_let_bound_value_if_of_a_result_fn_loop_is_still_refused() {
-    let err = render(LET_IF_BANG).expect_err("the error-flag form does not place this `!`");
-    assert!(err.contains("if-value arms disagree on type"), "{err}");
+fn a_bang_in_a_let_bound_value_if_of_a_result_fn_loop_delivers_the_err_after_the_loop() {
+    render(LET_IF_BANG).unwrap_or_else(|e| panic!("the let-bound value-if `!` walls: {e}"));
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("let_if_bang.almd");
+    std::fs::write(&file, LET_IF_BANG).expect("source");
+    for extra in [&[][..], &["--target", "wasm"][..]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).args(extra).output().expect("almide run");
+        assert!(out.status.success(), "{extra:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "ok 2\nerr big 4\n", "{extra:?}");
+    }
 }

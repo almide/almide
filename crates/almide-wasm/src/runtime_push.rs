@@ -24,7 +24,7 @@ pub(crate) fn emit_list_push(s: Scalar) -> (Function, HelperSig) {
     let fresh = sig.object(None);
     let (lo, vo) = (list as usize, v as usize);
     let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(if stride == 4 { 4 } else { 3 }, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(list).i32_load(len_memarg()).local_set(la);
@@ -125,8 +125,8 @@ pub(crate) fn emit_bytes_push() -> (Function, HelperSig) {
     let mut sig = HelperSig::new(&[Mode::C, Mode::B]);
     let fresh = sig.object(None);
     let payload = almide_layout::PAYLOAD as i32;
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
+    let byte = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(b).i32_load(len_memarg()).local_set(la);

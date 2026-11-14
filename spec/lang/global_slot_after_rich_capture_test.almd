@@ -1,0 +1,23 @@
+// A closure capturing a record with list fields adds a capture slot type
+// after the lowering; the Bytes global read later must keep its own kind.
+type Outline = { xs: List[Float], ends: List[Int] }
+
+var data = bytes.zeros(8)
+
+fn span(o: Outline, n: Int) -> Float = {
+  let px = (i: Int) => o.xs[i % n] * 2.0
+  px(0) + px(3)
+}
+
+fn grow() -> Int = {
+  if bytes.len(data) < 16 then {
+    data = bytes.zeros(bytes.len(data) * 2)
+  } else ()
+  bytes.len(data)
+}
+
+test "a captured record and a Bytes global read together" {
+  assert_eq(span({ xs: [1.0, 2.0, 3.0], ends: [2] }, 3), 4.0)
+  assert_eq(grow(), 16)
+  assert_eq(grow(), 16)
+}

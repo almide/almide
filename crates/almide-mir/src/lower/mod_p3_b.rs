@@ -160,6 +160,16 @@ impl LowerCtx {
                  a modeled (non-executable) frame"
             )));
         }
+        // A heap element takes the same functional rebind a local list does
+        // (`g = list.set(g, i, v)` after the C-067 guard), under the same rule:
+        // a String or Value element on every leg, any heap element on native
+        // owned slots. The guard reads the slot fresh and the global Assign path
+        // owns the swap.
+        let rebinds = matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty)
+            || (crate::lower::owned_tco_slots() && is_heap_ty(&value.ty));
+        if rebinds && crate::lower::is_heap_ty(&gty) {
+            return self.lower_heap_elem_index_rebind(target, index, value);
+        }
         if is_heap_ty(&value.ty)
             || !crate::lower::is_heap_ty(&gty)
             || crate::lower::is_heap_elem_list_ty(&gty)
@@ -263,7 +273,8 @@ impl LowerCtx {
     ) -> Result<(), LowerError> {
         // A shared-cell list (native owned slots) is read out of its cell for the
         // guard, as every other reference to it is; the rebind below writes the cell.
-        let guarded = if crate::lower::owned_tco_slots() && self.cell_of.contains_key(&target) {
+        let global = !self.value_of.contains_key(&target) && crate::lower::mutable_global_info(target).is_some();
+        let guarded = if global || (crate::lower::owned_tco_slots() && self.cell_of.contains_key(&target)) {
             self.value_or_global(target)
         } else {
             self.value_for(target)
@@ -332,6 +343,10 @@ impl LowerCtx {
                         return self.lower_mutable_global_field_assign(target, global, field, value);
                     }
                 }
+                // A native shared-cell record: take, write in place, store back.
+                if self.try_lower_cell_field_assign(target, field, value)? {
+                    return Ok(());
+                }
                 // A HEAP-typed field write takes the functional REBIND `r.f = v` ≡
                 // `r = { ...r, f: v }` — the same value-semantics treatment `m[k] = v`
                 // gets: the spread construct reads the old record (a borrow), and the
@@ -353,7 +368,10 @@ impl LowerCtx {
                 // release it twice (rc_dec trap). The spread construct `Dup`s every heap
                 // slot it carries over, so each record owns its children. The in-place
                 // store stays for all-scalar records, where the raw copy IS the value.
-                let rebind_ty = self.var_decl_tys.get(&target).cloned().filter(|rec_ty| {
+                // An IN-OUT record param (`crate::native_inout`) is the caller's own
+                // place, lent: a scalar field is stored into it in place.
+                let in_place = crate::native_inout::is_lowering_inout_var(target) && !is_heap_ty(&value.ty);
+                let rebind_ty = self.var_decl_tys.get(&target).cloned().filter(|_| !in_place).filter(|rec_ty| {
                     self.aggregate_field_tys(rec_ty).is_some_and(|(_, tys)| {
                         is_heap_ty(&value.ty) || tys.iter().any(is_heap_ty)
                             || self.cell_of.contains_key(&target)

@@ -31,7 +31,18 @@ fn note_carrier_recs(func: &MirFunction, sigs: &crate::render_native::NativeSigs
             .collect(),
     );
     for (v, i) in declared {
-        alloc_rec.entry(v).or_insert(i);
+        // A lifted effect fn's arm is recorded at the body's type, the Result's
+        // Ok payload, while the value its join returns is the Result itself:
+        // the declared carrier is the value's type, the payload key is not.
+        let ok_payload = |j: u16| crate::render_native_rec::result_payloads(i).is_some_and(|(o, _)| o == NTy::Rec(j));
+        match alloc_rec.get(&v).copied() {
+            Some(j) if ok_payload(j) => {
+                alloc_rec.insert(v, i);
+            }
+            _ => {
+                alloc_rec.entry(v).or_insert(i);
+            }
+        }
     }
     // An empty container (`map.clear(m)`, `xs = []`) takes the type the
     // lowering recorded for it, or the one its floor call declares.

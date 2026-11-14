@@ -130,7 +130,7 @@ fn emit_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, hash: u32, 
     }
     i.local_get(mask).i32_const(ORDERED).i32_eq().if_(BlockType::Result(ValType::I32));
     i.local_get(flags).local_get(ord).i32_add().i32_const(1).i32_sub();
-    i.i32_load8_u(MemArg { offset: 0, align: 0, memory_index: 0 });
+    i.i32_load8_u(MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
     i.else_();
     emit_live_hashed(i, key, hash, ix, (p, koff), (ord, h, s));
     i.end();
@@ -141,7 +141,7 @@ fn emit_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, hash: u32, 
 /// its nodes name, so they must all be asked before the compaction moves
 /// any: byte `j` of the fresh `flags` is 1 for a live entry `j`.
 fn emit_mark_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, ord_find: u32, (v, block, esz, koff): (u32, u32, u32, u32), (p, end, flags): (u32, u32, u32)) {
-    let at = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let at = MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     i.local_get(block).i32_load(len_memarg()).local_get(esz).i32_div_u().i32_const(1).i32_add().call(F_ALLOC).local_set(flags);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);

@@ -380,6 +380,8 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         let rendered = narrow_abi_wrapper(func, sigs, rendered)?;
         let rendered = crate::render_native_keyed::specialize(func, rendered)?;
         fn_rets.insert(func.name.clone(), ret_nty);
+        // Ahead of the finished text: the rewrites above read its signature first.
+        bodies.push_str(crate::render_native_inline::attr(func, sigs));
         bodies.push_str(&rendered);
         bodies.push('\n');
         texts.insert(func.name.clone(), rendered);
@@ -546,7 +548,7 @@ fn seed_param_ntys(
             None => repr_nty(&p.repr, true)?,
         };
         // A MOVE param (#4006 class P) arrives as the caller's own value.
-        let nty = if func.owned_params.contains(&p.value) { owned_nty(nty) } else { nty };
+        let nty = if func.owned_params.contains(&p.value) || func.inout_params.contains(&p.value) { owned_nty(nty) } else { nty };
         tys.insert(p.value, nty);
     }
     Ok(tys)
@@ -599,6 +601,7 @@ pub(crate) fn owned_nty(t: NTy) -> NTy {
 }
 
 include!("render_native_loop.rs");
+include!("render_native_loop_helpers.rs");
 include!("render_native_tail.rs");
 include!("render_native_b.rs");
 include!("render_native_b_tail.rs");

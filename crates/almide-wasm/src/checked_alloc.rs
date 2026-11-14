@@ -119,7 +119,7 @@ pub(crate) fn emit_poison(i: &mut InstructionSink<'_>, block: u32, total: u32) {
 /// is poison, `total` re-derived from the header's `cap` exactly as `$free`
 /// derived it. `p` and `end` are two scratch i32 locals.
 pub(crate) fn emit_poison_check(i: &mut InstructionSink<'_>, head: u32, p: u32, end: u32) {
-    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     // end = head + ((cap + PAYLOAD + 3) & !3)
     i.local_get(head)
         .local_get(head)
@@ -143,7 +143,7 @@ pub(crate) fn emit_poison_check(i: &mut InstructionSink<'_>, head: u32, p: u32, 
 }
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// `$alloc`, on entry: size the block [`CANARY`] bytes past the request

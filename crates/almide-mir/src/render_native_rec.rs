@@ -24,6 +24,10 @@ pub(crate) struct RecDecl {
     pub name: String,
     /// Source types prove Rust structural equality preserves language equality.
     pub eq_safe: bool,
+    /// A struct or enum whose fields all compare by their source types
+    /// although Rust structural equality does not (a Float rides an i64 bit
+    /// lane): how each case's fields compare, rendered as its own `impl PartialEq`.
+    pub eq_fields: Option<Vec<Vec<FieldEq>>>,
     /// Source tuple fields establish the same lexicographic order as Rust.
     pub ord_safe: bool,
     pub fields: Vec<NTy>,
@@ -189,7 +193,7 @@ pub(crate) const VALUE_KEY: &str = "Ty::Value";
 /// The generated `Value` type: v0's own runtime enum (`AlmideValue`), so a
 /// declared-floor body takes it as is. Appended on first use, like `Bytes`.
 pub(crate) fn value_index() -> u16 {
-    intern(&|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), ..RecDecl::default() })
+    intern(&|d| d.name == VALUE_KEY, RecDecl { name: VALUE_KEY.into(), alias: Some("AlmideValue"), eq_safe: true, ..RecDecl::default() })
 }
 
 /// `t` is the generated `Value` type.
@@ -353,6 +357,26 @@ pub(crate) fn field_count(i: u16) -> usize {
     RECS.with(|r| r.borrow().get(i as usize).map_or(0, |d| d.fields.len()))
 }
 
+/// No value of kind `t` holds a closure or a shared cell anywhere inside it.
+pub(crate) fn holds_no_closure(t: NTy) -> bool {
+    fn go(t: NTy, seen: &mut std::collections::BTreeSet<u16>) -> bool {
+        let (NTy::Rec(i) | NTy::RecRef(i)) = t else { return true };
+        if !seen.insert(i) {
+            return true;
+        }
+        let Some(d) = RECS.with(|r| r.borrow().get(i as usize).cloned()) else { return false };
+        if d.closure_of.is_some() || d.cell_of.is_some() {
+            return false;
+        }
+        let mut parts: Vec<NTy> = d.fields.clone();
+        parts.extend(d.cases.iter().flatten().flat_map(|(_, p)| p.iter().copied()));
+        parts.extend(d.list_of.into_iter().chain(d.option_of).chain(d.set_of));
+        parts.extend(d.result_of.into_iter().chain(d.map_of).flat_map(|(a, b)| [a, b]));
+        parts.into_iter().all(|p| go(p, seen))
+    }
+    go(t, &mut std::collections::BTreeSet::new())
+}
+
 /// The element kind of a generated list type (`None` for a struct or enum).
 pub(crate) fn list_elem(i: u16) -> Option<NTy> {
     RECS.with(|r| r.borrow().get(i as usize).and_then(|d| d.list_of))
@@ -439,7 +463,14 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
     // A region twin is `Copy` (its boxed fields are arena handles), so a
     // rewound window block owns nothing to drop.
     let derive = if is_region(i) { "Clone, Copy" } else if native_order_safe(i) { "Clone, PartialEq, Eq, PartialOrd, Ord" } else if d.eq_safe { "Clone, PartialEq" } else { "Clone" };
-    let mut out = format!("/// variant `{}`\n#[derive({derive})]\nenum {n} {{\n", d.name);
+    // A chain of the type's own boxed last fields is copied in a loop.
+    let own: Vec<crate::render_native_spine_clone::Case> = cases.iter()
+        .map(|(t, fs)| crate::render_native_spine_clone::Case { tag: *t, own_box: fs.iter().map(|f| *f == NTy::Rec(i) && enum_field_boxed(i, *f)).collect() })
+        .collect();
+    let spine = if is_region(i) { None } else { crate::render_native_spine_clone::clone_impl(&n, &own) };
+    let derive = if spine.is_some() { derive.strip_prefix("Clone").unwrap_or(derive).trim_start_matches(", ") } else { derive };
+    let attr = if derive.is_empty() { String::new() } else { format!("#[derive({derive})]\n") };
+    let mut out = format!("/// variant `{}`\n{attr}enum {n} {{\n", d.name);
     for (t, fs) in cases {
         if fs.is_empty() {
             out.push_str(&format!("    C{t},\n"));
@@ -448,6 +479,8 @@ fn enum_def(i: u16, d: &RecDecl, cases: &[(u32, Vec<NTy>)]) -> String {
         }
     }
     out.push_str("}\n");
+    out.push_str(spine.as_deref().unwrap_or(""));
+    out.push_str(&source_eq_impl(i, d));
     // Default is a case with no generated-type field, so a recursive enum's
     // default terminates (derive_records keeps only enums that have one).
     let leaf = d.default_tag.unwrap_or(cases[0].0);
@@ -629,6 +662,7 @@ pub(crate) fn runtime_default_impls() -> String {
 }
 
 include!("render_native_defs.rs");
+include!("render_native_deep_drop.rs");
 
 /// The table key of a tuple type (its spelled form).
 pub(crate) fn tuple_key(t: &almide_lang::types::Ty) -> String {

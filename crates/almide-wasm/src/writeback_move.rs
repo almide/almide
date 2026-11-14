@@ -313,7 +313,7 @@ impl Emitter<'_> {
         if slots.is_empty() {
             return;
         }
-        let rc = wasm_encoder::MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = wasm_encoder::MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         let mut i = self.f.instructions();
         i.local_get(idx).global_get(crate::G_LINE_END).i32_ge_u();
         i.local_get(idx).i32_load(rc).i32_const(1).i32_eq();

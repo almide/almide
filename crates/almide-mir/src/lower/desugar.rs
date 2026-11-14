@@ -771,4 +771,4 @@ pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
     })
 }
 
-include!("desugar_guard_tail.rs");
+include!("desugar_tail_guards.rs");
