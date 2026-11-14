@@ -1,0 +1,77 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4624): the
+// station-aggregation shape held in memory. String floor calls on a borrowed
+// String parameter (`split_once`, `strip_prefix`) bound as slices of it, an
+// upsert whose closure builds a record from a captured Int, and the
+// sort/map/join render of the result. The certified native render serves the
+// parameter's slices without copying them; no perf program reached that path.
+let IM = 139968
+
+let IA = 3877
+
+let IC = 29573
+
+let STATIONS = ["Abha", "Accra", "Mexico City", "Oslo", "Paris", "Tokyo"]
+
+type Stats = { min: Int, max: Int, sum: Int, count: Int }
+
+fn fmt_tenths(t: Int) -> String =
+  if t < 0 then "-" + fmt_tenths(0 - t)
+  else "${t / 10}.${t % 10}"
+
+fn parse_int(s: String) -> Int = match int.parse(s) {
+  ok(v) => v,
+  err(_) => 0,
+}
+
+fn parse_tenths(s: String) -> Int = match string.strip_prefix(s, "-") {
+  some(rest) => 0 - parse_tenths(rest),
+  none => match string.split_once(s, ".") {
+    some((whole, frac)) => parse_int(whole) * 10 + parse_int(frac),
+    none => parse_int(s) * 10,
+  },
+}
+
+fn mean_tenths(sum: Int, count: Int) -> Int =
+  if sum < 0 then 0 - ((0 - sum) / count) else sum / count
+
+fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] = match string.split_once(line, ";") {
+  some((station, temp)) => {
+    let t = parse_tenths(temp)
+    map.upsert(
+      acc,
+      station,
+      Stats { min: t, max: t, sum: t, count: 1 },
+      (s) => Stats {
+        min: if t < s.min then t else s.min,
+        max: if t > s.max then t else s.max,
+        sum: s.sum + t,
+        count: s.count + 1,
+      },
+    )
+  },
+  none => acc,
+}
+
+fn lines(n: Int) -> List[String] = {
+  let n_stations = list.len(STATIONS)
+  var seed = 42
+  var out: List[String] = []
+  for _ in 0..<n {
+    seed = (seed * IA + IC) % IM
+    let station = STATIONS[seed % n_stations]
+    seed = (seed * IA + IC) % IM
+    let t = (seed % 1999) - 999
+    list.push(out, "${station};${fmt_tenths(t)}")
+  }
+  out
+}
+
+fn render(stats: Map[String, Stats]) -> String = {
+  let body = map.to_list(stats) |> list.sort_by(((name, _)) => name) |> list.map(((name, s)) => "${name}=${fmt_tenths(s.min)}/${fmt_tenths(mean_tenths(s.sum, s.count))}/${fmt_tenths(s.max)}") |> list.join(", ")
+  "{" + body + "}"
+}
+
+fn main() -> Unit = {
+  let stats = lines(60000) |> list.fold(map.new(), (acc, line) => step(acc, line))
+  println(render(stats))
+}
