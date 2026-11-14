@@ -69,7 +69,7 @@ const HEADS_BYTES: u32 = 4 * FREELIST_CLASSES;
 const SAVED_HEADS: u32 = almide_layout::PAYLOAD + 4;
 
 fn abs(offset: u32) -> MemArg {
-    MemArg { offset: offset as u64, align: 2, memory_index: 0 }
+    MemArg { offset: offset as u64, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 fn class_slot(k: u32) -> i32 {

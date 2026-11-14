@@ -30,7 +30,7 @@ pub(crate) const LARGE_HEAD: u32 = 12;
 const SPLIT: i32 = 65536;
 
 fn word(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// `while (cond) { pp = p; p = q; q = [q+12] }` — the walk both

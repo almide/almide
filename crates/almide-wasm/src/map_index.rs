@@ -128,7 +128,7 @@ impl IdxKey {
 }
 
 pub(crate) fn w(offset: u32) -> MemArg {
-    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+    MemArg { offset: u64::from(offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// Side-table pair `i` sits at `table + PAIRS + i*8`; index slot `h` at
@@ -302,7 +302,7 @@ pub(crate) fn emit_hash_str() -> Function {
     // params: 0=s; locals: 1=len (bytes left), 2=p (eight bytes BEFORE the
     // next unread payload byte), 3=h
     let (s, len, p, h) = (0u32, 1u32, 2u32, 3u32);
-    let at = |offset: u32| MemArg { offset: u64::from(offset), align: 0, memory_index: 0 };
+    let at = |offset: u32| MemArg { offset: u64::from(offset), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
     i.local_get(s).i32_load(len_memarg()).local_tee(len).i64_extend_i32_u().local_set(h);

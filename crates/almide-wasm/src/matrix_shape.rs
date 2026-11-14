@@ -26,7 +26,7 @@ use crate::*;
 
 /// A 4-byte element at a Bytes payload offset (unaligned-safe).
 fn raw_f32() -> MemArg {
-    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {
