@@ -770,15 +770,11 @@ fn solve_modes<'t>(
         }
         for (f, before) in next.iter_mut().zip(functions) {
             // The join releases sunk into the arms first, so an arm's call takes
-            // the slot over; the plain body if the mirror refuses that.
-            // The sunk body passed the mirror already: it is not judged twice.
+            // the slot over (judged once); the plain body if the mirror refuses.
             let sunk = move_at_sites(&sink_join_releases(f, &owned), &owned);
-            if no_new_violations(before, &sunk) && !newly_poisoned(before, &sunk) {
-                *f = sunk;
-                continue;
-            }
-            let moved = move_at_sites(f, &owned);
-            if !no_new_violations(before, &moved) {
+            let accepted = no_new_violations(before, &sunk) && !newly_poisoned(before, &sunk);
+            let moved = if accepted { sunk } else { move_at_sites(f, &owned) };
+            if !accepted && !no_new_violations(before, &moved) {
                 return None;
             }
             *f = moved;
