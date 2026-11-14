@@ -7,27 +7,13 @@
 // length, so this decodes UTF-8: every byte that is NOT a continuation byte
 // (10xxxxxx, i.e. `byte / 64 == 2`) starts a new codepoint. Reads only — `s` is
 // borrowed, no allocation.
-// Count codepoint-start bytes in [addr, end), eight bytes at a time while
-// eight remain (#4612): per byte, bit 7 of `w & !(w << 1)` is set exactly on
-// a continuation byte (bit 7 set, bit 6 clear; the bit shifted in from the
-// byte below lands on bit 0, outside the mask). Shifted down to one bit per
-// byte, a multiply by 0x0101…01 sums the eight bits into the top byte.
-fn __strlen_count(addr: Int, end: Int, n: Int) -> Int = {
-  var p = addr
-  var k = n
-  while p + 8 <= end {
-    let w = prim.load64(p)
-    let c = prim.band(prim.band(w, prim.bxor(prim.bshl(w, 1), -1)), -9187201950435737472)
-    k = k + 8 - prim.bshr_u(prim.bshr_u(c, 7) * 72340172838076673, 56)
-    p = p + 8
-  }
-  while p < end {
-    let b = prim.load8(p)
-    // continuation byte (128..191) → not a start
-    k = k + (if b >= 128 and b < 192 then 0 else 1)
-    p = p + 1
-  }
-  k
+// Count codepoint-start bytes in [addr, end).
+fn __strlen_count(addr: Int, end: Int, n: Int) -> Int = if addr >= end then n
+else {
+  let b = prim.load8(addr)
+  let step = if b / 64 == 2 then 0 else 1
+  // continuation byte (128..191) → not a start
+  __strlen_count(addr + 1, end, n + step)
 }
 
 fn string_len(s: String) -> Int = {
