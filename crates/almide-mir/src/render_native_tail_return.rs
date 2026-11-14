@@ -63,27 +63,53 @@ fn regions(func: &MirFunction) -> Vec<(usize, Option<usize>, usize)> {
 
 fn tail_yields(func: &MirFunction) -> BTreeMap<usize, Vec<ValueId>> {
     let regions = regions(func);
-    // The joins a region's value passes through to the function's result.
-    fn ladder(func: &MirFunction, regions: &[(usize, Option<usize>, usize)], at: usize) -> Option<Vec<ValueId>> {
-        let (start, _, end) = regions[at];
-        let Op::IfThen { dst: Some(join), .. } = func.ops[start] else { return None };
-        let next = (end + 1..func.ops.len()).find(|&k| !crate::render_native_move::bookkeeping(&func.ops[k]));
-        let Some(next) = next else { return (func.ret == Some(join)).then(|| vec![join]) };
-        let (Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) }) = func.ops[next] else { return None };
-        if v != join {
-            return None;
+    // The first region (in `regions` order) whose `Else` or `EndIf` sits at
+    // an op index.
+    let mut closing: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (at, (_, els, end)) in regions.iter().enumerate() {
+        closing.entry(*end).or_insert(at);
+        if let Some(e) = els {
+            closing.entry(*e).or_insert(at);
         }
-        let outer = regions.iter().position(|(_, els, e)| *els == Some(next) || *e == next)?;
-        let mut joins = vec![join];
-        joins.extend(ladder(func, regions, outer)?);
-        Some(joins)
     }
+    // The joins a region's value passes through to the function's result,
+    // memoised per region: a nested chain asks each outer region once.
+    fn ladder(
+        func: &MirFunction,
+        regions: &[(usize, Option<usize>, usize)],
+        closing: &std::collections::HashMap<usize, usize>,
+        memo: &mut Vec<Option<Option<std::rc::Rc<Vec<ValueId>>>>>,
+        at: usize,
+    ) -> Option<std::rc::Rc<Vec<ValueId>>> {
+        if let Some(known) = &memo[at] {
+            return known.clone();
+        }
+        let found = (|| {
+            let (start, _, end) = regions[at];
+            let Op::IfThen { dst: Some(join), .. } = func.ops[start] else { return None };
+            let next = (end + 1..func.ops.len()).find(|&k| !crate::render_native_move::bookkeeping(&func.ops[k]));
+            let Some(next) = next else { return (func.ret == Some(join)).then(|| std::rc::Rc::new(vec![join])) };
+            let (Op::Else { val: Some(v) } | Op::EndIf { val: Some(v) }) = func.ops[next] else { return None };
+            if v != join {
+                return None;
+            }
+            let outer = *closing.get(&next)?;
+            let rest = ladder(func, regions, closing, memo, outer)?;
+            let mut joins = Vec::with_capacity(rest.len() + 1);
+            joins.push(join);
+            joins.extend(rest.iter().copied());
+            Some(std::rc::Rc::new(joins))
+        })();
+        memo[at] = Some(found.clone());
+        found
+    }
+    let mut memo = vec![None; regions.len()];
     let mut out = BTreeMap::new();
     for (at, (_, els, end)) in regions.iter().enumerate() {
-        let Some(joins) = ladder(func, &regions, at) else { continue };
+        let Some(joins) = ladder(func, &regions, &closing, &mut memo, at) else { continue };
         for k in els.iter().chain([end]) {
             if matches!(func.ops[*k], Op::Else { val: Some(_) } | Op::EndIf { val: Some(_) }) {
-                out.insert(*k, joins.clone());
+                out.insert(*k, joins.to_vec());
             }
         }
     }
@@ -124,19 +150,46 @@ pub(crate) fn finish(func: &MirFunction, sigs: &NativeSigs, is_main: bool, tys: 
         .flatten()
         .filter(|t| matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Res | NTy::ResStr | NTy::Rec(_)))
         .filter(|_| !matches!(sigs.get(func.name.as_str()), Some((_, Some(NativeSigKind::Never)))));
-    for (i, joins) in tails {
-        let mark = marker(i);
-        let Some(at) = out.find(&mark) else { continue };
-        let line_at = out[..at].rfind('\n').map_or(0, |n| n + 1);
-        let same_kind = plain.is_some_and(|t| joins.iter().all(|j| tys.get(j) == Some(&t)));
-        let stmt = out[line_at..at].to_string();
-        let head = format!("{} = ", var(joins[0]));
-        let returned = match (same_kind, stmt.trim_start().strip_prefix(&head)) {
-            (true, Some(value)) => format!("{}return {value}", &stmt[..stmt.len() - stmt.trim_start().len()]),
-            _ => stmt,
-        };
-        out.replace_range(line_at..at + mark.len(), &returned);
+    if tails.is_empty() {
+        return;
     }
+    // One pass over the text: each marker is found once, its line rewritten
+    // or left, and the rest copied as it stands.
+    const OPEN: &str = " //__TAIL_";
+    let mut rebuilt = String::with_capacity(out.len());
+    let mut copied = 0;
+    let mut from = 0;
+    while let Some(k) = out[from..].find(OPEN) {
+        let at = from + k;
+        let digits = &out[at + OPEN.len()..];
+        let len = digits.bytes().take_while(u8::is_ascii_digit).count();
+        let joins = digits[len..].starts_with("__")
+            .then(|| digits[..len].parse::<usize>().ok())
+            .flatten()
+            .and_then(|i| tails.get(&i));
+        let Some(joins) = joins else {
+            from = at + OPEN.len();
+            continue;
+        };
+        let end = at + OPEN.len() + len + 2;
+        let line_at = out[..at].rfind('\n').map_or(0, |n| n + 1).max(copied);
+        rebuilt.push_str(&out[copied..line_at]);
+        let stmt = &out[line_at..at];
+        let same_kind = plain.is_some_and(|t| joins.iter().all(|j| tys.get(j) == Some(&t)));
+        let head = format!("{} = ", var(joins[0]));
+        match (same_kind, stmt.trim_start().strip_prefix(&head)) {
+            (true, Some(value)) => {
+                rebuilt.push_str(&stmt[..stmt.len() - stmt.trim_start().len()]);
+                rebuilt.push_str("return ");
+                rebuilt.push_str(value);
+            }
+            _ => rebuilt.push_str(stmt),
+        }
+        copied = end;
+        from = end;
+    }
+    rebuilt.push_str(&out[copied..]);
+    *out = rebuilt;
 }
 
 #[cfg(test)]

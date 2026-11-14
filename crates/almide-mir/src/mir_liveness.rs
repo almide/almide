@@ -346,15 +346,16 @@ fn force_moves() -> bool {
 pub(crate) fn reinit_reads(func: &MirFunction, at: usize) -> BTreeSet<ValueId> {
     let mut reads = Vec::new();
     crate::mir_ops::op_reads(&func.ops[at], &mut reads);
-    let rebound: BTreeSet<ValueId> = func
-        .params
-        .iter()
-        .map(|p| p.value)
-        .chain(func.ops.iter().filter_map(|op| match op {
-            Op::SetLocal { local, .. } => Some(*local),
-            _ => None,
-        }))
-        .collect();
+    let rebound = per_function(func, "rebound", || -> BTreeSet<ValueId> {
+        func.params
+            .iter()
+            .map(|p| p.value)
+            .chain(func.ops.iter().filter_map(|op| match op {
+                Op::SetLocal { local, .. } => Some(*local),
+                _ => None,
+            }))
+            .collect()
+    });
     let candidates: BTreeSet<ValueId> = reads.into_iter().filter(|v| rebound.contains(v) && func.ret != Some(*v)).collect();
     if candidates.is_empty() {
         return candidates;
