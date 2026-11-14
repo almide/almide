@@ -123,11 +123,38 @@ fn loop_stmts_raise(stmts: &mut [IrStmt]) {
                 loop_spine_raise(expr, false);
                 None
             }
+            // A BOUND branch (`let found = match a { …, _ => { guard g else
+            // err(e); v } }`): its arms' guards leave the fn as well, so they take
+            // the same spelling. The arms keep their values; only the guard
+            // statements on their spine change.
+            IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+                bound_spine_raise(value);
+                None
+            }
             _ => None,
         };
         if let Some(expr) = raised {
             s.kind = IrStmtKind::Expr { expr };
         }
+    }
+}
+
+/// The guard statements on a bound value's arm spine (through blocks and the
+/// arms of `if` / `match`, never into a lambda) take the raise spelling.
+fn bound_spine_raise(e: &mut IrExpr) {
+    match &mut e.kind {
+        IrExprKind::Block { stmts, expr } => {
+            loop_stmts_raise(stmts);
+            if let Some(t) = expr.as_deref_mut() {
+                bound_spine_raise(t);
+            }
+        }
+        IrExprKind::If { then, else_, .. } => {
+            bound_spine_raise(then);
+            bound_spine_raise(else_);
+        }
+        IrExprKind::Match { arms, .. } => arms.iter_mut().for_each(|a| bound_spine_raise(&mut a.body)),
+        _ => {}
     }
 }
 
