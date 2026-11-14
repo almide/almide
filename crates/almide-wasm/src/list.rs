@@ -554,10 +554,7 @@ impl Emitter<'_> {
             }
             _ => None,
         };
-        let take = match taken {
-            Some(_) => Some(self.list_take_open(bh)?),
-            None => None,
-        };
+        let take = taken.map(|_| self.list_take_open(bh)).transpose()?;
         // result = alloc(count * stride_u), same element count as source
         let rh = self.hold_i32()?;
         self.f

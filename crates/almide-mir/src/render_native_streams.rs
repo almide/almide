@@ -104,6 +104,26 @@ fn producer_call(rhs: &str) -> Option<(&str, Vec<&str>)> {
     args.iter().all(simple).then_some((symbol, args))
 }
 
+/// One loop to rewrite: the lines it touches, by index into the function.
+struct Plan {
+    /// The source list's declaration, the loop head, its closing line, and
+    /// the `drop` of the list right after it (none: it lives to scope end).
+    d: usize,
+    h: usize,
+    e: usize,
+    dl: Option<usize>,
+    src: String,
+    elem: String,
+    item: StreamItem,
+    /// `TWIN(ARGS)`.
+    call: String,
+    /// The list's length reads; those that only size the collected list,
+    /// with that list's declaration; the arguments' early releases.
+    lens: Vec<usize>,
+    sized: Vec<(usize, usize)>,
+    released: Vec<usize>,
+}
+
 fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     let (src, elem, e) = loop_head(lines, h)?;
     // The list dies at the loop: released right after it, or at scope end
@@ -113,12 +133,23 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     let (_, _, rhs) = let_parts(&lines[d])?;
     let (symbol, args) = producer_call(rhs)?;
     let (twin, item) = crate::native_floor::stream_twin(symbol)?;
-    // The list is named only by its declaration, its length reads before the
-    // loop, the loop head and its drop.
+    let lens = length_reads(lines, (d, h, dl), &src)?;
+    if !reads_element_as_yielded(&lines[h + 1..e], &elem, item) {
+        return None;
+    }
+    let released = early_releases(lines, d, dl.unwrap_or(e + 1), &args)?;
+    let sized = lens.iter().filter_map(|&k| sizing_only(lines, k)).collect();
+    let call = format!("{twin}({})", args.join(", "));
+    Some(render(lines, &Plan { d, h, e, dl, src, elem, item, call, lens, sized, released }))
+}
+
+/// The list is named only by its declaration `d`, its length reads before
+/// the loop head `h` (returned), the head and its drop `dl`.
+fn length_reads(lines: &[String], (d, h, dl): (usize, usize, Option<usize>), src: &str) -> Option<Vec<usize>> {
     let len_read = format!("{src}.len() as i64");
     let mut lens = Vec::new();
     for (k, l) in lines.iter().enumerate() {
-        if k == d || k == h || Some(k) == dl || is_note(l) || !mentions(l, &src) {
+        if k == d || k == h || Some(k) == dl || is_note(l) || !mentions(l, src) {
             continue;
         }
         match let_parts(l) {
@@ -126,23 +157,27 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
             _ => return None,
         }
     }
-    // The element is read only as the stream yields it.
-    let body = &lines[h + 1..e];
+    Some(lens)
+}
+
+/// The loop `body` reads the element only as the stream yields it.
+fn reads_element_as_yielded(body: &[String], elem: &str, item: StreamItem) -> bool {
     let star = format!("(*{elem})");
     let read = match item {
         StreamItem::Str => format!("&{star}[..]"),
-        StreamItem::Int => star.clone(),
+        StreamItem::Int => star,
     };
-    if body.iter().any(|l| mentions(&l.replace(&read, ""), &elem)) {
-        return None;
-    }
-    // Each argument is named by nothing from the list's declaration to its
-    // drop but its own early release, which moves after the loop.
+    !body.iter().any(|l| mentions(&l.replace(&read, ""), elem))
+}
+
+/// Each argument is a value this function owns outright: a local declared
+/// with an owned type. A borrow (`&…`, a cell guard's reference) may name a
+/// block something else writes while the loop runs, which the built list
+/// never saw; an owned local named by nothing during the loop cannot change.
+/// Between the declaration `d` and `end`, each is named only by its own early
+/// release (returned: it moves after the loop).
+fn early_releases(lines: &[String], d: usize, end: usize, args: &[&str]) -> Option<Vec<usize>> {
     let vars: Vec<&str> = args.iter().map(|a| a.strip_prefix('&').unwrap_or(a)).filter(|a| is_var(a)).collect();
-    // Each argument is a value this function owns outright: a local declared
-    // with an owned type. A borrow (`&…`, a cell guard's reference) may name a
-    // block something else writes while the loop runs, which the built list
-    // never saw; an owned local named by nothing during the loop cannot change.
     let owned = |v: &str| {
         (0..d).rev().find_map(|k| let_parts(&lines[k]).filter(|(n, _, _)| *n == v))
             .is_some_and(|(_, ty, _)| !ty.starts_with('&') && !ty.contains("Ref") && !ty.contains("Cell"))
@@ -151,10 +186,7 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
         return None;
     }
     let mut released = Vec::new();
-    for (k, l) in lines.iter().enumerate().take(dl.unwrap_or(e + 1)).skip(d + 1) {
-        if is_note(l) {
-            continue;
-        }
+    for (k, l) in lines.iter().enumerate().take(end).skip(d + 1).filter(|(_, l)| !is_note(l)) {
         for v in &vars {
             if l.trim() == format!("drop({v});") {
                 released.push(k);
@@ -163,45 +195,45 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
             }
         }
     }
-    let call = format!("{twin}({})", args.join(", "));
-    // A length read only to size the collected list is not counted: the list
-    // grows as the stream fills it (counting would walk the stream twice).
-    let mut sized: Vec<(usize, usize)> = Vec::new();
-    for &k in &lens {
-        let (v, _, _) = let_parts(&lines[k])?;
-        let reserve = format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({v}.max(0) as usize).is_err() {{");
-        let uses: Vec<usize> = (0..lines.len()).filter(|&j| j != k && !is_note(&lines[j]) && mentions(&lines[j], v)).collect();
-        if let [j] = uses[..] {
-            if let_parts(&lines[j]).is_some_and(|(_, ty, rhs)| ty.starts_with("Vec<") && rhs.starts_with(&reserve) && !mentions(&rhs.replacen(&reserve, "", 1), v)) {
-                sized.push((k, j));
-            }
-        }
-    }
+    Some(released)
+}
+
+/// The length read at `lines[k]` when its one use sizes a collected list
+/// (that list's declaration): the list then grows as the stream fills it,
+/// rather than walking the stream twice to count it.
+fn sizing_only(lines: &[String], k: usize) -> Option<(usize, usize)> {
+    let (v, _, _) = let_parts(&lines[k])?;
+    let reserve = format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({v}.max(0) as usize).is_err() {{");
+    let uses: Vec<usize> = (0..lines.len()).filter(|&j| j != k && !is_note(&lines[j]) && mentions(&lines[j], v)).collect();
+    let [j] = uses[..] else { return None };
+    let (_, ty, rhs) = let_parts(&lines[j])?;
+    (ty.starts_with("Vec<") && rhs.starts_with(&reserve) && !mentions(&rhs.replacen(&reserve, "", 1), v)).then_some((k, j))
+}
+
+fn render(lines: &[String], p: &Plan) -> Vec<String> {
+    let pad = |l: &String| " ".repeat(indent_of(l));
+    let releases = || p.released.iter().map(|&r| lines[r].clone());
     let mut out = Vec::with_capacity(lines.len());
     for (k, l) in lines.iter().enumerate() {
-        if k == d || released.contains(&k) || sized.iter().any(|&(n, _)| n == k) {
+        if k == p.d || p.released.contains(&k) || p.sized.iter().any(|&(n, _)| n == k) {
             continue;
         }
-        if sized.iter().any(|&(_, j)| j == k) {
-            let (v, ty, _) = let_parts(l)?;
-            out.push(format!("{}let mut {v}: {ty} = Vec::new();", " ".repeat(indent_of(l))));
-        } else if lens.contains(&k) {
-            let (v, _, _) = let_parts(l)?;
-            out.push(format!("{}let mut {v}: i64 = {call}.count() as i64;", " ".repeat(indent_of(l))));
-        } else if k == h {
-            out.push(l.replace(&format!("{src}.iter().enumerate()"), &format!("{call}.enumerate()")));
-        } else if k > h && k < e && item == StreamItem::Int {
-            out.push(l.replace(&star, &elem));
-        } else if Some(k) == dl {
-            out.extend(released.iter().map(|&r| lines[r].clone()));
-        } else {
-            out.push(l.clone());
-            if k == e && dl.is_none() {
-                out.extend(released.iter().map(|&r| lines[r].clone()));
+        let decl = let_parts(l);
+        match decl {
+            Some((v, ty, _)) if p.sized.iter().any(|&(_, j)| j == k) => out.push(format!("{}let mut {v}: {ty} = Vec::new();", pad(l))),
+            Some((v, _, _)) if p.lens.contains(&k) => out.push(format!("{}let mut {v}: i64 = {}.count() as i64;", pad(l), p.call)),
+            _ if k == p.h => out.push(l.replace(&format!("{}.iter().enumerate()", p.src), &format!("{}.enumerate()", p.call))),
+            _ if k > p.h && k < p.e && p.item == StreamItem::Int => out.push(l.replace(&format!("(*{})", p.elem), &p.elem)),
+            _ if Some(k) == p.dl => out.extend(releases()),
+            _ => {
+                out.push(l.clone());
+                if k == p.e && p.dl.is_none() {
+                    out.extend(releases());
+                }
             }
         }
     }
-    Some(out)
+    out
 }
 
 #[cfg(test)]
