@@ -1,0 +1,73 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4624): a loop that
+// destructures the record-pair payload of a fallible call (`let (a, b) =
+// pair(p)!`) and threads the parts through further fallible reads into a map.
+// The certified native render borrows the pair out of its Result above the
+// tag test; no perf program reached that read.
+type Obj =
+  | OName(String)
+  | ONum(Int)
+  | OList(List[Obj])
+
+fn kind(o: Obj) -> String = match o {
+  OName(_) => "name",
+  ONum(_) => "num",
+  OList(_) => "list",
+}
+
+fn pair(o: Obj) -> (Obj, Obj)! = match o {
+  OList(xs) => match xs {
+    [a, b] => ok((a, b)),
+    _ => err("expected a pair"),
+  },
+  _ => err("expected a pair, found " + kind(o)),
+}
+
+fn as_name(o: Obj) -> String! = match o {
+  OName(n) => ok(n),
+  _ => err("expected a name, found " + kind(o)),
+}
+
+fn as_num(o: Obj) -> Int! = match o {
+  ONum(k) => ok(k),
+  _ => err("expected a number, found " + kind(o)),
+}
+
+fn as_list(o: Obj) -> List[Obj]! = match o {
+  OList(xs) => ok(xs),
+  _ => err("expected a list, found " + kind(o)),
+}
+
+fn table(o: Obj) -> (Map[String, Int], Map[Int, String])! = {
+  let (s1, s2) = pair(o)!
+  let names = as_list(s1)!
+  let nums = as_list(s2)!
+  var m: Map[String, Int] = [:]
+  for p in names {
+    let (a, b) = pair(p)!
+    m = map.set(m, as_name(a)!, as_num(b)!)
+  }
+  var r: Map[Int, String] = [:]
+  for p in nums {
+    let (a, b) = pair(p)!
+    r = map.set(r, as_num(a)!, as_name(b)!)
+  }
+  ok((m, r))
+}
+
+fn input(n: Int) -> Obj = OList([
+  OList(list.range(0, n) |> list.map((i) => OList([OName("k${i % 50}"), ONum(i)]))),
+  OList(list.range(0, n) |> list.map((i) => OList([ONum(i % 70), OName("v${i}")]))),
+])
+
+fn main() -> Unit = {
+  let o = input(400)
+  let total = list.range(0, 100) |> list.fold(0, (acc, _) => acc + (match table(o) {
+    ok((m, r)) => map.len(m) + map.len(r),
+    err(_) => 0,
+  }))
+  let bad = match table(OList([OList([ONum(1)]), OList([])])) {
+    ok(_) => "ok",
+    err(e) => e,
+  }
+  println("${total} ${bad}")
+}
