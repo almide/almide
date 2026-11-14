@@ -25,6 +25,57 @@ pub(crate) fn slice_twin(symbol: &str) -> Option<(String, bool, Vec<bool>, Vec<&
     paired.then(|| Some((twin.clone(), pair, from, closure(&twin, rt).ok()?)))?
 }
 
+/// The viewing twin of the string body `symbol`: the runtime fn
+/// `<symbol>_ref`, paired from the signatures. Both take the same `&str`
+/// params; the body returns `AlmideString` and the twin a `&str` borrowed
+/// from its lifetime-carrying params. Returns the twin, which params its
+/// result borrows from, and its items. `None` when the runtime carries no
+/// such fn.
+pub(crate) fn view_twin(symbol: &str) -> Option<(String, Vec<bool>, Vec<&'static str>)> {
+    let rt = runtime_index();
+    let plain = |t: &String| squash(&without_lifetimes(t));
+    let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
+    let twin = format!("{symbol}_ref");
+    let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
+    if plain(&body_ret) != "AlmideString" || plain(&twin_ret) != "&str" {
+        return None;
+    }
+    let strs = |ps: &[String]| ps.iter().all(|p| plain(p) == "&str");
+    let from: Vec<bool> = twin_params.iter().map(|p| p.contains('\'')).collect();
+    let paired = body_params.len() == twin_params.len() && strs(&body_params) && strs(&twin_params) && from.contains(&true);
+    paired.then(|| Some((twin.clone(), from, closure(&twin, rt).ok()?)))?
+}
+
+/// What a streaming twin yields in place of the list's element reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StreamItem {
+    /// `&str` for a `Vec<AlmideString>` element: read only as `&(*e)[..]`.
+    Str,
+    /// `i64` for a `Vec<i64>` element: the value itself, not a reference.
+    Int,
+}
+
+/// The streaming twin of the list-building runtime body `symbol`: the runtime
+/// fn `<symbol>_iter`, paired from the signatures — the body's own params,
+/// returning `impl Iterator` of the items the body collects (`&str` for a
+/// `Vec<AlmideString>`, `i64` for a `Vec<i64>`). The body is the twin
+/// collected, so the stream is the list's elements in order. Returns the twin
+/// and its item. `None` when the runtime carries no such fn.
+pub(crate) fn stream_twin(symbol: &str) -> Option<(String, StreamItem)> {
+    let rt = runtime_index();
+    let plain = |t: &String| squash(&without_lifetimes(t));
+    let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
+    let twin = format!("{symbol}_iter");
+    let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
+    let item = match (plain(&body_ret).as_str(), plain(&twin_ret).as_str()) {
+        ("Vec<AlmideString>", "implIterator<Item=&str>+") => StreamItem::Str,
+        ("Vec<i64>", "implIterator<Item=i64>+") => StreamItem::Int,
+        _ => return None,
+    };
+    let same = body_params.len() == twin_params.len() && body_params.iter().zip(&twin_params).all(|(a, b)| plain(a) == plain(b));
+    same.then_some((twin, item))
+}
+
 /// A paired twin: its name and its items.
 type Twin = Option<(String, Vec<&'static str>)>;
 

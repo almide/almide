@@ -92,7 +92,10 @@ impl Fuse<'_> {
         let (func, args) = self.reducer_call(e)?;
         let chain = args.first()?;
         let (source, steps) = peel(chain);
-        if steps.is_empty() || !scalar(&e.ty) || !scalar(list_elem(&source.ty)?) { return None; }
+        // A reduction straight over a producer whose list the native render
+        // can stream (`streamed`) fuses too: as the fold it becomes a loop
+        // over the producer's stream, and the list is never built.
+        if (steps.is_empty() && (func == "fold" || !streamed(source))) || !scalar(&e.ty) || !scalar(list_elem(&source.ty)?) { return None; }
         let reduce_stage = match (func, args) {
             ("fold", [_, init, f]) => {
                 let IrExprKind::Lambda { body, .. } = &f.kind else { return None; };
@@ -108,8 +111,14 @@ impl Fuse<'_> {
             .collect();
         if !stages_mergeable(&stages) { return None; }
         let reduce = self.reduction(func, args, &e.ty)?;
-        let first = steps.first()?.param;
-        let elem_ty = self.vars.get(first).ty.clone();
+        let (first, elem_ty) = match steps.first() {
+            Some(s) => (s.param, self.vars.get(s.param).ty.clone()),
+            None => {
+                let ty = list_elem(&source.ty)?.clone();
+                let p = reduce.elem.unwrap_or_else(|| self.vars.alloc_fresh("fused_elem", ty.clone(), Mutability::Let, None));
+                (p, ty)
+            }
+        };
         let acc_ty = e.ty.clone();
         let (ahead, source) = self.counted_source(source)?;
         let body = fused_body(&steps, &reduce, self.vars, var(first, elem_ty.clone()));
@@ -214,6 +223,15 @@ fn peel(chain: &IrExpr) -> (&IrExpr, Vec<Step>) {
     }
     steps.reverse();
     (at, steps)
+}
+
+/// `e` calls a stdlib fn whose declared runtime body has a streaming twin
+/// (`crate::native_floor::stream_twin`): a loop over its list walks the
+/// stream instead (`render_native_streams`).
+fn streamed(e: &IrExpr) -> bool {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &e.kind else { return false; };
+    crate::native_floor::declared(&format!("{module}.{func}"))
+        .is_some_and(|f| crate::native_floor::stream_twin(&f.symbol).is_some())
 }
 
 /// The name and arguments of `e` when it is a call into the `list` module.

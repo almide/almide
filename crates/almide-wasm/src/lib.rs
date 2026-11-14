@@ -107,6 +107,7 @@ mod rem_test;
 /// #4278 B1: a runtime helper's declared RC signature and its body's log.
 pub(crate) mod helper_sig;
 mod runtime_push;
+mod list_take;
 /// #4278 B1: an arm's own RC, logged where it is emitted.
 mod arm_rc;
 mod fan_par;
