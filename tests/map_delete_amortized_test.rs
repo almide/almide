@@ -20,8 +20,10 @@
 //! compiler's output; the two legs must match it byte for byte.
 //!
 //! The scaling cell times only the delete loop (the program reads the
-//! monotonic clock around it) at n and 4n entries: a linear delete takes about
-//! 4× per op, a constant one about 1×; the bound 2.5 sits between them.
+//! monotonic clock around it) at n and 4n entries, divided by the growth of a
+//! constant-time lookup on the same map in the same run (#4644): a linear
+//! delete takes about 4× per op, a constant one about 1×; the bound 2.5 sits
+//! between them. The linear control pins that the measure still sees ~4.
 //!
 //! Every subprocess runs under a wall-clock cap, so a regression to the linear
 //! delete fails instead of hanging the suite. The scaling cell is release-only
@@ -32,6 +34,10 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+#[path = "support/scaling_ratio.rs"]
+mod scaling_ratio;
+use scaling_ratio::scaling;
 
 const SEMANTICS: &str = r#"type Holder = { snap: Map[String, Int], tag: Int }
 
@@ -205,25 +211,40 @@ set.from_list(["s0", "s3", "s6", "s9", "s12", "s15", "s18", "s21", "s24", "s27"]
 /// append a new one" — the delete has to cross the whole map's order.
 const SCALING: &str = r#"import env
 
-effect fn churn(n: Int, d: Int) -> Unit = {
+effect fn churn(n: Int, d: Int, linear: Bool) -> Unit = {
   var m: Map[Int, Int] = map.new()
   for i in 0..<n {
     m = map.set(m, i, i)
   }
-  let t0 = datetime.monotonic_ns()!
+  // #4644: the constant-time reference, timed on the same map in the same
+  // process — as many lookups as the loop below makes rounds.
+  let r0 = datetime.monotonic_ns()!
+  var hits = 0
   for i in 0..<d {
-    m = map.remove(m, i)
-    m = map.set(m, n + i, i)
+    if map.get(m, i % n) != none then hits = hits + 1 else ()
+  }
+  let r1 = datetime.monotonic_ns()!
+  let t0 = datetime.monotonic_ns()!
+  if linear then {
+    for i in 0..<d {
+      m = map.to_list(m) |> list.filter(((k, _)) => k != i) |> map.from_list
+      m = map.set(m, n + i, i)
+    }
+  } else {
+    for i in 0..<d {
+      m = map.remove(m, i)
+      m = map.set(m, n + i, i)
+    }
   }
   let t1 = datetime.monotonic_ns()!
-  println("${map.len(m)} ${map.get(m, n + d - 1)} ${t1 - t0}")
+  println("${map.len(m)} ${map.get(m, n + d - 1)} ${t1 - t0} ${r1 - r0} ${hits}")
 }
 
 effect fn main() -> Unit = {
   let args = env.args()
   let n = int.parse(list.get(args, 0) ?? "0") ?? 0
   let d = int.parse(list.get(args, 1) ?? "0") ?? 0
-  churn(n, d)!
+  churn(n, d, list.get(args, 2) == some("linear"))!
 }
 "#;
 
@@ -290,21 +311,24 @@ fn deletes_keep_every_observable_on_both_legs() {
     }
 }
 
-/// Nanoseconds per delete round at map size `n`: the best of three runs of
-/// the program's own clock around the loop.
-fn ns_per_round(file: &Path, wasm: bool, n: u64, d: u64) -> f64 {
+/// Nanoseconds per delete round and per reference lookup at map size `n`,
+/// one run of the program's own clock around each loop; `linear` swaps in the
+/// negative control's whole-map rebuild for the delete.
+fn ns_per_round(file: &Path, wasm: bool, n: u64, d: u64, linear: bool) -> (f64, f64) {
     let (n_s, d_s) = (n.to_string(), d.to_string());
-    (0..3)
-        .map(|_| {
-            let (code, out, err) = run_capped(file, wasm, &[&n_s, &d_s]);
-            assert_eq!(code, 0, "wasm={wasm} n={n}: exit {code}\n{err}");
-            let fields: Vec<&str> = out.split_whitespace().collect();
-            assert_eq!(fields.len(), 3, "wasm={wasm} n={n}: unexpected output {out:?}");
-            assert_eq!(fields[0], n_s, "wasm={wasm} n={n}: the map lost or gained entries");
-            assert_eq!(fields[1], format!("some({})", d - 1), "wasm={wasm} n={n}: the last append is missing");
-            fields[2].parse::<f64>().expect("elapsed ns") / d as f64
-        })
-        .fold(f64::INFINITY, f64::min)
+    let mut args = vec![n_s.as_str(), d_s.as_str()];
+    if linear {
+        args.push("linear");
+    }
+    let (code, out, err) = run_capped(file, wasm, &args);
+    assert_eq!(code, 0, "wasm={wasm} n={n}: exit {code}\n{err}");
+    let fields: Vec<&str> = out.split_whitespace().collect();
+    assert_eq!(fields.len(), 5, "wasm={wasm} n={n}: unexpected output {out:?}");
+    assert_eq!(fields[0], n_s, "wasm={wasm} n={n}: the map lost or gained entries");
+    assert_eq!(fields[1], format!("some({})", d - 1), "wasm={wasm} n={n}: the last append is missing");
+    assert_eq!(fields[4], d_s, "wasm={wasm} n={n}: a reference lookup missed");
+    let per_round = |f: &str| f.parse::<f64>().expect("elapsed ns") / d as f64;
+    (per_round(fields[2]), per_round(fields[3]))
 }
 
 #[test]
@@ -314,13 +338,25 @@ fn four_times_the_map_is_not_four_times_the_delete() {
     let file = write(&dir, "map_delete_scaling.almd", SCALING);
     let (n, d) = (25_000u64, 100_000u64);
     for wasm in [false, true] {
-        let small = ns_per_round(&file, wasm, n, d);
-        let large = ns_per_round(&file, wasm, 4 * n, d);
-        let ratio = large / small.max(1.0);
-        assert!(
-            ratio < 2.5,
-            "wasm={wasm}: a delete round took {large:.0} ns at {} entries against {small:.0} ns at {n} — ratio {ratio:.1}, linear in the map's size again",
-            4 * n
-        );
+        let s = scaling(|k| ns_per_round(&file, wasm, k, d, false), n);
+        eprintln!("wasm={wasm} delete: {}", s.describe(n));
+        assert!(s.normalized() < 2.5, "wasm={wasm}: a delete round took {} — linear in the map's size again", s.describe(n));
+    }
+}
+
+/// #4644 negative control: the same measurement over a delete that IS linear
+/// (the whole map rebuilt without the key) must read at or above the bound on
+/// both legs, so the normalized ratio cannot hide a linear delete. Smaller
+/// sizes keep the quadratic loop short; a linear op's ratio is ~4 at any n.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "times the delete loop: runs in CI's release-only root step")]
+fn a_linear_delete_still_reads_as_linear() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = write(&dir, "map_delete_scaling.almd", SCALING);
+    let (n, d) = (2_000u64, 1_000u64);
+    for wasm in [false, true] {
+        let s = scaling(|k| ns_per_round(&file, wasm, k, d, true), n);
+        eprintln!("wasm={wasm} linear control: {}", s.describe(n));
+        assert!(s.normalized() >= 2.5, "wasm={wasm}: the linear control read {}, under the bound the gate uses", s.describe(n));
     }
 }
