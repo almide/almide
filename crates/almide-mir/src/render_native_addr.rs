@@ -489,7 +489,7 @@ fn unnamed_on_paths_after(func: &MirFunction, at: usize, c: ValueId) -> bool {
         return false;
     };
     let mut names: BTreeSet<ValueId> =
-        crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == c).map(|(a, _)| a).collect();
+        crate::render_native_borrow_read::roots_shared(func).iter().filter(|(_, r)| **r == c).map(|(a, _)| *a).collect();
     names.insert(c);
     let (mut seen, mut work) = (BTreeSet::new(), succ[at].clone());
     while let Some(j) = work.pop() {

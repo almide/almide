@@ -187,6 +187,12 @@ pub(crate) fn ref_dup(v: ValueId) -> bool {
     REF_DUPS.with(|m| m.borrow().contains(&v))
 }
 
+/// [`roots`], built once per function while it renders and shared by the
+/// ops that read it (rebuilding it per op was quadratic in the function).
+pub(crate) fn roots_shared(func: &MirFunction) -> std::rc::Rc<BTreeMap<ValueId, ValueId>> {
+    crate::mir_liveness::per_function(func, "roots", || roots(func))
+}
+
 /// Every address value's root block (`prim.handle(r)` plus offsets).
 pub(crate) fn roots(func: &MirFunction) -> BTreeMap<ValueId, ValueId> {
     let mut root: BTreeMap<ValueId, ValueId> = BTreeMap::new();

@@ -109,7 +109,7 @@ pub(crate) fn last_use(
                 derived.insert(d);
             }
         }
-        let dead = loop_of(func)[at].is_none()
+        let dead = crate::mir_liveness::per_function(func, "loops", || loop_of(func))[at].is_none()
             && !func.ops.iter().any(|op| matches!(op, Op::SetLocal { local, .. } if *local == src))
             && func.ret != Some(src)
             && func.ops[at + 1..].iter().all(|op| {
@@ -175,7 +175,7 @@ pub(crate) fn dying_after(
     if func.ret == Some(src) {
         return false;
     }
-    let loops = loop_of(func);
+    let loops = crate::mir_liveness::per_function(func, "loops", || loop_of(func));
     let defs: Vec<usize> = func
         .ops
         .iter()
@@ -296,7 +296,7 @@ fn addresses_into(func: &MirFunction, src: ValueId) -> std::collections::BTreeSe
     if CARRIER_SCAN.with(|m| m.get()) {
         return std::collections::BTreeSet::new();
     }
-    crate::render_native_borrow_read::roots(func).into_iter().filter(|(_, r)| *r == src).map(|(a, _)| a).collect()
+    crate::render_native_borrow_read::roots_shared(func).iter().filter(|(_, r)| **r == src).map(|(a, _)| *a).collect()
 }
 
 thread_local! {
@@ -695,7 +695,7 @@ pub(crate) fn bound_once_this_round(func: &MirFunction, at: usize, base: ValueId
     if drill_no_moves() || REBOUND.with(|m| m.borrow().contains(&base)) {
         return None;
     }
-    let loops = loop_of(func);
+    let loops = crate::mir_liveness::per_function(func, "loops", || loop_of(func));
     let mut defs = (0..func.ops.len()).filter(|d| crate::mir_ops::defined_value(&func.ops[*d]) == Some(base));
     match (defs.next(), defs.next()) {
         (Some(d), None) if d < at && loops[d] == loops[at] => Some(d),

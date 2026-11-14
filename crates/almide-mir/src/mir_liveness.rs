@@ -16,7 +16,15 @@ use std::collections::BTreeSet;
 
 /// The control successors of each op of `func`; `None` when the markers do
 /// not nest.
-pub(crate) fn successors(func: &MirFunction) -> Option<Vec<Vec<usize>>> {
+pub(crate) fn successors(func: &MirFunction) -> Option<Succ> {
+    let cached = FLOW.with(|f| f.borrow().as_ref().filter(|c| c.key == flow_key(func)).map(|c| c.succ.clone()));
+    cached.unwrap_or_else(|| compute_successors(func).map(std::rc::Rc::new))
+}
+
+/// The successor graph, shared: a [`FlowScope`] hands every reader the one it built.
+pub(crate) type Succ = std::rc::Rc<Vec<Vec<usize>>>;
+
+fn compute_successors(func: &MirFunction) -> Option<Vec<Vec<usize>>> {
     let n = func.ops.len();
     let mut succ: Vec<Vec<usize>> = (0..n).map(|i| if i + 1 < n { vec![i + 1] } else { Vec::new() }).collect();
     // (IfThen index, Else index) and LoopStart indices, open.
@@ -121,8 +129,9 @@ pub(crate) fn live_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
 /// any other function is answered directly.
 struct FlowCache {
     key: (usize, usize),
-    succ: Option<Vec<Vec<usize>>>,
+    succ: Option<Succ>,
     live: std::collections::HashMap<(ValueId, bool), Vec<bool>>,
+    facts: std::collections::HashMap<&'static str, std::rc::Rc<dyn std::any::Any>>,
 }
 
 thread_local! {
@@ -138,7 +147,8 @@ pub(crate) struct FlowScope(Option<FlowCache>);
 
 impl FlowScope {
     pub(crate) fn enter(func: &MirFunction) -> FlowScope {
-        let cache = FlowCache { key: flow_key(func), succ: successors(func), live: Default::default() };
+        let succ = compute_successors(func).map(std::rc::Rc::new);
+        let cache = FlowCache { key: flow_key(func), succ, live: Default::default(), facts: Default::default() };
         FlowScope(FLOW.with(|f| f.borrow_mut().replace(cache)))
     }
 }
@@ -148,6 +158,25 @@ impl Drop for FlowScope {
         let outer = self.0.take();
         FLOW.with(|f| *f.borrow_mut() = outer);
     }
+}
+
+/// A fact derived from `func` alone (its address roots, its loop map), built
+/// once per [`FlowScope`] and shared by every op that reads it; outside a scope
+/// it is built per call, as before.
+pub(crate) fn per_function<T: 'static>(func: &MirFunction, name: &'static str, make: impl FnOnce() -> T) -> std::rc::Rc<T> {
+    let scoped = |f: &Option<FlowCache>| f.as_ref().is_some_and(|c| c.key == flow_key(func));
+    let hit = FLOW.with(|f| f.borrow().as_ref().filter(|c| c.key == flow_key(func)).and_then(|c| c.facts.get(name).cloned()));
+    if let Some(Ok(fact)) = hit.map(|any| any.downcast::<T>()) {
+        return fact;
+    }
+    let made = std::rc::Rc::new(make());
+    FLOW.with(|f| {
+        let mut f = f.borrow_mut();
+        if scoped(&f) {
+            f.as_mut().expect("scoped").facts.insert(name, made.clone());
+        }
+    });
+    made
 }
 
 fn cached_after(func: &MirFunction, at: usize, src: ValueId, def_ends: bool) -> Option<bool> {
