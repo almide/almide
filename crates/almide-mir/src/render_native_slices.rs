@@ -100,8 +100,10 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
             continue;
         };
         if let Some((twin, from, items)) = crate::native_floor::view_twin(symbol) {
-            if read_while_sources_live(func, i, *o, args, &from, &fixed) {
+            if let Some(releases) = read_while_sources_live(func, i, *o, args, &from, &fixed) {
                 steps.insert(i, Step::View { twin, items });
+                // A slice owns nothing: its release renders to nothing.
+                steps.extend(releases.into_iter().map(|j| (j, Step::Nothing)));
             }
             continue;
         }
@@ -127,24 +129,43 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
 /// render to nothing here) — nothing is released, written,
 /// rebound or moved while the slice is read, so whatever the argument
 /// borrows from is still alive at each read.
-fn read_while_sources_live(func: &MirFunction, at: usize, o: ValueId, args: &[CallArg], from: &[bool], fixed: &dyn Fn(&ValueId) -> bool) -> bool {
+/// The release ops of `o`, by index, when it may.
+fn read_while_sources_live(func: &MirFunction, at: usize, o: ValueId, args: &[CallArg], from: &[bool], fixed: &dyn Fn(&ValueId) -> bool) -> Option<Vec<usize>> {
     let sources_fixed = args.len() == from.len()
         && args.iter().zip(from).all(|(a, borrowed_from)| matches!(a, CallArg::Handle(v) if !*borrowed_from || fixed(v)));
     if !sources_fixed || !fixed(&o) || func.ret == Some(o) {
-        return false;
+        return None;
     }
     let root = crate::render_native_borrow_read::roots(func);
-    let Some(last) = crate::render_native_borrow_read::last_borrowing_use(func, at, o, &root) else { return false };
+    let last = crate::render_native_borrow_read::last_borrowing_use(func, at, o, &root).filter(|&l| l > at)?;
+    let mut releases = Vec::new();
     let mut vs = Vec::new();
-    func.ops[at + 1..=last].iter().all(|op| {
+    for (j, op) in func.ops.iter().enumerate().take(last + 1).skip(at + 1) {
         vs.clear();
         crate::mir_ops::op_values(op, &mut vs);
-        if vs.contains(&o) {
-            return matches!(op, Op::CallFn { .. }) || (vs.len() == 1 && crate::native_move_params::is_release(op, o));
+        let ok = if vs.contains(&o) {
+            if vs.len() == 1 && crate::native_move_params::is_release(op, o) {
+                releases.push(j);
+                true
+            } else {
+                matches!(op, Op::CallFn { .. })
+            }
+        } else {
+            // The ownership marks render to nothing on this target.
+            matches!(op, Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
+        };
+        if !ok {
+            return None;
         }
-        // The ownership marks render to nothing on this target.
-        matches!(op, Op::ConstInt { .. } | Op::IntBinOp { .. } | Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. })
-    }) && last > at
+    }
+    // Nothing names `o` after its last borrowing use (a later release would
+    // be one this render does not see).
+    let later = func.ops[last + 1..].iter().any(|op| {
+        vs.clear();
+        crate::mir_ops::op_values(op, &mut vs);
+        vs.contains(&o)
+    });
+    (!later).then_some(releases)
 }
 
 /// The step of every op that names the Option `o` (bound at `ops[at]`), its
