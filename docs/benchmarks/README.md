@@ -145,6 +145,6 @@ The stamped totals behind the [project status](../status.md), and the mutation s
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
-<!-- mutation-score:generated:start (as of 2026-09-22) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
-**Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](../../scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
+<!-- mutation-score:generated:start (as of 2026-11-15) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
+**Mutation score** — 42/42 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](../../scripts/check-mutation-gate.sh)), stamped 2026-11-15 from mutation-sweep run [43603614076](https://github.com/almide/almide/actions/runs/43603614076) at `08544f101`.
 <!-- mutation-score:generated:end -->
