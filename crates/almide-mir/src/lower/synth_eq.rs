@@ -38,6 +38,18 @@ impl LowerCtx {
         variant_layout_recursive(&self.variant_layouts, tyname)
     }
 
+    /// Take over the eq helpers a lifted lambda's sub-context synthesized. They are
+    /// named after the LAMBDA (the sub-context's `fn_name`), so only that context holds
+    /// them; the parent's function list carries them out beside its lifted lambdas.
+    /// Dropping them left the lambda calling a helper no module defines.
+    pub(crate) fn absorb_synth_eq_fns(&mut self, fns: Vec<MirFunction>) {
+        for f in fns {
+            if !self.synth_eq_fns.iter().any(|g| g.name == f.name) {
+                self.synth_eq_fns.push(f);
+            }
+        }
+    }
+
     fn eq_helper_name(&self, tyname: &str) -> String {
         format!("__eq_{}__{}", sanitize_ty_ident(tyname), sanitize_ty_ident(&self.fn_name))
     }

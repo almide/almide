@@ -62,7 +62,7 @@ const RET: u64 = 32;
 
 /// 8-byte MemArg.
 fn mem64(offset: u64) -> MemArg {
-    MemArg { offset, align: 3, memory_index: 0 }
+    MemArg { offset, align: 3, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {

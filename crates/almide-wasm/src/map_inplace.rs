@@ -81,7 +81,7 @@ impl Emitter<'_> {
     pub(crate) fn emit_release_slot_at(&mut self, ty: SliceTy) {
         if self.elem_is_handle(ty) {
             let dec = self.dec_fn_of(ty);
-            self.f.instructions().i32_load(MemArg { offset: 0, align: 2, memory_index: 0 }).call(dec);
+            self.f.instructions().i32_load(MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }).call(dec);
         } else {
             self.f.instructions().drop();
         }
@@ -285,7 +285,7 @@ impl Emitter<'_> {
     ) -> Result<(), EmitError> {
         let lay = crate::collections::entry_layout(k, v);
         let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
-        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
         {
             let mut i = self.f.instructions();
             // the judge: a heap block whose only holder is this credit

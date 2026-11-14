@@ -51,7 +51,7 @@ fn byte_at() -> wasm_encoder::MemArg {
 
 /// The byte `d` past the addressed one.
 fn byte_at_plus(d: u32) -> wasm_encoder::MemArg {
-    wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD + d), align: 0, memory_index: 0 }
+    wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD + d), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 impl Emitter<'_> {

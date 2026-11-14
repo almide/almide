@@ -309,6 +309,16 @@ pub(super) fn toolchain_identity() -> &'static str {
     })
 }
 
+/// Warm [`toolchain_identity`]'s `rustc -vV` (#4683): a process spawn of
+/// about 10 ms that every native build waits on when it computes its cache
+/// key. Run on a side thread while the frontend works, it leaves the answer in
+/// the same per-process memo the key reads later, so the key itself is
+/// unchanged. It never exits or reports: a missing or too-old rustc is still
+/// refused by `crate::find_rustc` on the build thread, in its usual place.
+pub(super) fn prefetch_toolchain_identity() {
+    let _ = super::rustc_floor::version_output(&super::rustc_floor::locate_rustc());
+}
+
 /// The environment's `(name, value)` pairs whose name `keep` selects, for a
 /// cache key. `std::env::vars` panics on the first variable that is not
 /// UTF-8 — any such variable anywhere in the environment made `almide run`

@@ -9,7 +9,7 @@
 //! structural leg's module next to those binaries, under the same rules:
 //!
 //! - **Where**: `<shared run dir>/target/wasm/almide-<key>` with its SHA-256
-//!   in `almide-<key>.sha256` (#4180: a hit is an entry whose bytes still hash
+//!   in `almide-<key>.blake3` (#4180: a hit is an entry whose bytes still hash
 //!   to the digest recorded when it was written, never a name that exists).
 //!   `almide clean` empties the dir with everything else in it.
 //! - **Eviction**: the age sweep (`evict_stale_artifacts`) and the size bound

@@ -33,7 +33,7 @@ fn byte() -> MemArg {
     MemArg {
         offset: u64::from(almide_layout::PAYLOAD),
         align: 0,
-        memory_index: 0,
+        target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
     }
 }
 
@@ -41,7 +41,7 @@ fn word() -> MemArg {
     MemArg {
         offset: u64::from(almide_layout::PAYLOAD),
         align: 2,
-        memory_index: 0,
+        target: wasm_encoder::MemArgTarget::Memory(0), ordering: None,
     }
 }
 

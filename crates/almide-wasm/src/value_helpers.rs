@@ -9,7 +9,7 @@ use crate::value::{value_tags, VT_ARRAY, VT_FLOAT, VT_INT, VT_OBJECT, VT_STR};
 use crate::*;
 
 pub(crate) fn raw8() -> MemArg {
-    MemArg { offset: 0, align: 0, memory_index: 0 }
+    MemArg { offset: 0, align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
 
 /// `$value_eq(a, b) -> i32` — deep structural Value equality over THIS
@@ -294,7 +294,7 @@ pub(crate) fn emit_string_split_byte_helper() -> Function {
     let (sb, sep) = (0u32, 1u32);
     let (slen, p, cnt, dst, slot, start, piece) = (2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32);
     let pay = almide_layout::PAYLOAD as i32;
-    let at = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    let at = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
     let mut f = Function::new([(7, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(sb).i32_load(len_memarg()).local_set(slen);

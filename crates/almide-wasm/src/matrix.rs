@@ -130,7 +130,7 @@ impl Emitter<'_> {
                 i.block(BlockType::Empty).loop_(BlockType::Empty);
                 i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
                 i.local_get(cur).f64_const(1.0.into()).f64_store(
-                    wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 },
+                    wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None },
                 );
                 i.local_get(cur).i32_const(8).i32_add().local_set(cur);
                 i.br(0);
@@ -594,5 +594,5 @@ impl Emitter<'_> {
 
 /// Raw absolute-address f64 access (block bases are 4-aligned, hint 2).
 fn raw8() -> wasm_encoder::MemArg {
-    wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }
+    wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }

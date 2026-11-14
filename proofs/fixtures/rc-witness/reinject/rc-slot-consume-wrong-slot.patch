@@ -6,10 +6,10 @@ index 26a721dda..721ca6b54 100644
              em.emit_release_slot_at(ty);
              Ok(())
          })?;
--        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
+-        let at = MemArg { offset: u64::from(off), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
 +        // RE-INJECTED (#4278 B1 drill): the NULL lands one slot past the
 +        // released one; the slot's `r` event stays.
-+        let at = MemArg { offset: u64::from(off) + 4, align: 2, memory_index: 0 };
++        let at = MemArg { offset: u64::from(off) + 4, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None };
          self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
          Ok(())
      }

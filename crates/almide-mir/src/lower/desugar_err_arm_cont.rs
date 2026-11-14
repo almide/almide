@@ -20,7 +20,7 @@
 // nested statements or lambdas, whose `err(..)` arm leaves a different scope.
 
 /// Restructure the fn-tail err-arm binds of `body`, a fn declared `ret`.
-pub fn desugar_err_arm_continuations(body: &IrExpr, ret: &Ty) -> Option<IrExpr> {
+pub(crate) fn desugar_err_arm_continuations(body: &IrExpr, ret: &Ty) -> Option<IrExpr> {
     if !crate::lower::owned_tco_slots() || !ret.is_result() {
         return None;
     }
