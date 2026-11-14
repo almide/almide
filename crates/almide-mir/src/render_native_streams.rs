@@ -28,8 +28,9 @@
 //! `e`). The list must be named by nothing but its declaration, its length
 //! reads before the loop, the loop head and the `drop` right after the loop
 //! (or none: the list then lives to scope end, named by no later line), and
-//! each argument by nothing between the list's declaration and the loop's
-//! end but its own early release. Anything else stays as rendered.
+//! each argument — a local this function owns, never a borrow — by nothing
+//! between the list's declaration and the loop's end but its own early
+//! release. Anything else stays as rendered.
 
 use crate::native_floor::StreamItem;
 use crate::render_native_loops::{indent_of, is_note, is_var, let_parts, mentions};
@@ -138,6 +139,17 @@ fn stream_at(lines: &[String], h: usize) -> Option<Vec<String>> {
     // Each argument is named by nothing from the list's declaration to its
     // drop but its own early release, which moves after the loop.
     let vars: Vec<&str> = args.iter().map(|a| a.strip_prefix('&').unwrap_or(a)).filter(|a| is_var(a)).collect();
+    // Each argument is a value this function owns outright: a local declared
+    // with an owned type. A borrow (`&…`, a cell guard's reference) may name a
+    // block something else writes while the loop runs, which the built list
+    // never saw; an owned local named by nothing during the loop cannot change.
+    let owned = |v: &str| {
+        (0..d).rev().find_map(|k| let_parts(&lines[k]).filter(|(n, _, _)| *n == v))
+            .is_some_and(|(_, ty, _)| !ty.starts_with('&') && !ty.contains("Ref") && !ty.contains("Cell"))
+    };
+    if !vars.iter().all(|v| owned(v)) {
+        return None;
+    }
     let mut released = Vec::new();
     for (k, l) in lines.iter().enumerate().take(dl.unwrap_or(e + 1)).skip(d + 1) {
         if is_note(l) {
@@ -200,7 +212,8 @@ mod tests {
         streamed_sources(src.lines().map(str::to_string).collect()).join("\n")
     }
 
-    const SPLIT_MAP: &str = r#"    let mut v23: Vec<AlmideString> = crate::almide_str_block::almide_str_list(almide_rt_string_split(&v21, ","));
+    const SPLIT_MAP: &str = r#"    let mut v21: AlmideString = AlmideString::new();
+    let mut v23: Vec<AlmideString> = crate::almide_str_block::almide_str_list(almide_rt_string_split(&v21, ","));
     drop(v21);
     // v26: v23 + 4 bytes
     let mut v27: i64 = v23.len() as i64;
@@ -240,6 +253,20 @@ mod tests {
     }
 
     #[test]
+    fn a_producer_over_a_borrow_is_kept() {
+        // The block behind a borrow may be written while the loop runs
+        // (a shared cell): the list was read before any such write.
+        let src = r#"    let mut v12: &AlmdRec2 = v11;
+    let mut v17: Vec<i64> = almide_rt_bytes_to_list(v12);
+    for (v20, __e_v20) in v17.iter().enumerate() {
+        let v20: i64 = v20 as i64;
+        let mut v25: i64 = (*__e_v20);
+    }
+    drop(v17);"#;
+        assert_eq!(run(src), src);
+    }
+
+    #[test]
     fn a_producer_without_a_stream_twin_is_kept() {
         let src = SPLIT_MAP.replace("almide_rt_string_split(", "almide_rt_string_lines(");
         assert_eq!(run(&src), src);
@@ -247,7 +274,8 @@ mod tests {
 
     #[test]
     fn an_int_stream_yields_the_value() {
-        let src = r#"    let mut v65: Vec<i64> = almide_rt_bytes_to_list(&v64);
+        let src = r#"    let mut v64: AlmdRec5 = almide_rt_bytes_from_string(v58);
+    let mut v65: Vec<i64> = almide_rt_bytes_to_list(&v64);
     let mut v70: i64 = 0i64;
     for (v53, __e_v53) in v65.iter().enumerate() {
         let v53: i64 = v53 as i64;
