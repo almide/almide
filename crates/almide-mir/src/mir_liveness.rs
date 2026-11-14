@@ -109,9 +109,70 @@ fn referring(func: &MirFunction, src: ValueId) -> BTreeSet<ValueId> {
 /// Whether `src` (or anything referring to its storage) may be read on some
 /// path after `ops[at]`. `true` whenever the control flow is not modelled.
 pub(crate) fn live_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
-    let Some(succ) = successors(func) else { return true };
-    let live_in = live_in(func, &succ, src, false);
-    succ[at].iter().any(|&s| live_in[s])
+    cached_after(func, at, src, false).unwrap_or_else(|| live_after_sites(func, src)(at))
+}
+
+/// The flow facts of ONE function while it is being rendered: its successor
+/// graph and, per value asked about, its liveness. The renderer asks
+/// [`live_after`] / [`bound_read_after`] at op after op of the same function;
+/// rebuilding both per question made rendering quadratic in the function's
+/// length. The cache is keyed by the function's op storage and only lives for
+/// a [`FlowScope`], during which the function is not mutated; a question about
+/// any other function is answered directly.
+struct FlowCache {
+    key: (usize, usize),
+    succ: Option<Vec<Vec<usize>>>,
+    live: std::collections::HashMap<(ValueId, bool), Vec<bool>>,
+}
+
+thread_local! {
+    static FLOW: std::cell::RefCell<Option<FlowCache>> = const { std::cell::RefCell::new(None) };
+}
+
+fn flow_key(func: &MirFunction) -> (usize, usize) {
+    (func.ops.as_ptr() as usize, func.ops.len())
+}
+
+/// Holds the [`FlowCache`] of one function for as long as it lives.
+pub(crate) struct FlowScope(Option<FlowCache>);
+
+impl FlowScope {
+    pub(crate) fn enter(func: &MirFunction) -> FlowScope {
+        let cache = FlowCache { key: flow_key(func), succ: successors(func), live: Default::default() };
+        FlowScope(FLOW.with(|f| f.borrow_mut().replace(cache)))
+    }
+}
+
+impl Drop for FlowScope {
+    fn drop(&mut self) {
+        let outer = self.0.take();
+        FLOW.with(|f| *f.borrow_mut() = outer);
+    }
+}
+
+fn cached_after(func: &MirFunction, at: usize, src: ValueId, def_ends: bool) -> Option<bool> {
+    FLOW.with(|f| {
+        let mut f = f.borrow_mut();
+        let cache = f.as_mut().filter(|c| c.key == flow_key(func))?;
+        let Some(succ) = cache.succ.as_ref() else { return Some(true) };
+        let live = cache.live.entry((src, def_ends)).or_insert_with(|| live_in(func, succ, src, def_ends));
+        Some(succ[at].iter().any(|&s| live[s]))
+    })
+}
+
+/// [`live_after`] for any number of sites of one value: the successor graph
+/// and the liveness of `src` are built once, not once per site. A caller that
+/// asks at every use of a value would otherwise rebuild both per use, which is
+/// quadratic in the function's length (a 28-arm command match took seconds).
+pub(crate) fn live_after_sites(func: &MirFunction, src: ValueId) -> impl Fn(usize) -> bool {
+    let flow = successors(func).map(|succ| {
+        let live = live_in(func, &succ, src, false);
+        (succ, live)
+    });
+    move |at| match &flow {
+        None => true,
+        Some((succ, live)) => succ[at].iter().any(|&s| live[s]),
+    }
 }
 
 /// Whether the binding `src` made by the op that defines it is read on some
@@ -122,6 +183,9 @@ pub(crate) fn live_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
 /// follows the back edge to the next round's read of it and so reports the
 /// binding of this round as still lent.
 pub(crate) fn bound_read_after(func: &MirFunction, at: usize, src: ValueId) -> bool {
+    if let Some(answer) = cached_after(func, at, src, true) {
+        return answer;
+    }
     let Some(succ) = successors(func) else { return true };
     let live_in = live_in(func, &succ, src, true);
     succ[at].iter().any(|&s| live_in[s])
@@ -327,7 +391,11 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
 /// copy on each path is its last use.
 pub(crate) fn last_use_on_every_path(func: &MirFunction, p: ValueId, at: &[usize]) -> bool {
     let Some(succ) = successors(func) else { return false };
-    if func.ops.is_empty() || at.iter().any(|&i| live_after(func, i, p)) {
+    if func.ops.is_empty() {
+        return false;
+    }
+    let live = live_in(func, &succ, p, false);
+    if at.iter().any(|&i| succ[i].iter().any(|&s| live[s])) {
         return false;
     }
     // No exit is reachable from the entry without passing one of `at`.
