@@ -639,12 +639,6 @@ fn prepare_checked_ir(
     Ok(ir)
 }
 
-/// Single-file convenience (no cross-module siblings) — the bundled-runtime / drop-source
-/// re-lowering paths, which never carry `import self.*`.
-pub(crate) fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
-    source_to_ir_with(source, &[])
-}
-
 /// `verbose` gates the honest per-function "outside the lowering subset" diagnostics to stderr.
 ///
 /// Returns `Ok(wat)` when the WHOLE program lowers (every function in-subset, `main` present, no

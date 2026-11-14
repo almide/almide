@@ -24,8 +24,10 @@ struct LinkedSelfHost {
 
 /// Lower ONE registry source the way the interp oracle does: checked as its
 /// owning module (the one module every entry names, if any) and lowered in
-/// stdlib mode, so its internal prims are admitted.
-fn self_host_source_to_ir(
+/// stdlib mode, so its internal prims are admitted. The registry signature
+/// table (registry_sig.rs) reads the same lowering, so both see one name per
+/// impl (#4685).
+pub(crate) fn self_host_source_to_ir(
     source: &str,
     entries: &[(&str, &'static str)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
