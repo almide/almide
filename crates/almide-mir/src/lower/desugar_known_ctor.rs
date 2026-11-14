@@ -99,18 +99,20 @@ fn reduce_known_ctor_match(subject: &IrExpr, arms: &[IrMatchArm], ty: &Ty) -> Op
         return None;
     }
     let ctor = known_ctor(subject)?;
-    // Only an inert payload (a variable, a literal, a tuple of them): the rewrite
-    // then never moves an allocation or an effect out of the subject position.
+    // An inert payload (a variable, a literal, a tuple of them) may be substituted or
+    // dropped. Any other payload (`err(("unknown " + cmd, stack))`, the raise a `mut`
+    // param's write-back pairs with the buffer) is evaluated exactly once, first: the
+    // selected arm binds it with a `let`, the same order the match ran it in. Dropping
+    // it unevaluated (a `_` payload) would skip its effects, so that arm declines.
     let (KnownCtor::Ok(payload) | KnownCtor::Err(payload)) = ctor;
-    if !known_ctor_payload_inert(payload) {
-        return None;
-    }
+    let inert = known_ctor_payload_inert(payload);
     for arm in arms {
         match known_ctor_arm(&ctor, &arm.pattern)? {
             Err(()) => continue,
             Ok(_) if arm.guard.is_some() => return None,
             // A `_` payload: the inert payload has nothing to evaluate.
-            Ok(None) => return Some(arm.body.clone()),
+            Ok(None) if inert => return Some(arm.body.clone()),
+            Ok(None) => return None,
             Ok(Some(var)) if known_ctor_payload_substitutable(payload, &arm.body, var) => {
                 let body = almide_ir::substitute::substitute_var_in_expr(&arm.body, var, payload);
                 return Some(drop_inert_expr_stmts(body));
