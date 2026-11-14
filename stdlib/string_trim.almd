@@ -73,13 +73,17 @@ else {
 // Copy `len` bytes from `src` to `dst`, eight at a time while eight remain.
 // Front to back, so `dst <= src` may overlap: every word is read before the
 // write that could reach it.
-fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = if len >= 8 then {
-  prim.store64(dst, prim.load64(src))
-  __trim_copy(src + 8, dst + 8, len - 8)
-} else if len <= 0 then dst
-else {
-  prim.store8(dst, prim.load8(src))
-  __trim_copy(src + 1, dst + 1, len - 1)
+fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = {
+  var i = 0
+  while i + 8 <= len {
+    prim.store64(dst + i, prim.load64(src + i))
+    i = i + 8
+  }
+  while i < len {
+    prim.store8(dst + i, prim.load8(src + i))
+    i = i + 1
+  }
+  dst + len
 }
 
 // The bytes `from`..`from + nbytes` of `s` (block `h`, `blen` bytes) as the
