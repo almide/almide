@@ -373,6 +373,28 @@ verdict = "TAG_DISPATCHED"
 why = "Discriminant@12 read (always meaningful), then every field read at 12+8*(i+1) sits inside IfThen(tag==case); nested recursion inherits the guard."
 
 [[arm]]
+file = "tuple_refinement_rows.rs"
+fn = "refine_ctor_cond"
+loads = 1
+verdict = "TAG_DISPATCHED"
+why = "The one load is the discriminant@12 itself (always meaningful); every field read (refine_field) sits inside refine_under(IfThen(tag==case)), and nested recursion inherits the guard."
+
+[[arm]]
+file = "tuple_refinement_rows.rs"
+fn = "refine_field"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "refine_ctor_cond (inside refine_under(IfThen(tag==case))), refine_ctor_binds (inside the row's IfThen whose condition holds this ctor's tag test — an unguarded row has no ctor pattern)"
+why = "Payload slot 1+i of a block whose tag the caller has already tested equal to the case owning slot i; the scalar load is only a literal-test operand."
+
+[[arm]]
+file = "tuple_refinement_rows.rs"
+fn = "refine_list_elem"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "ElemAddr-based bounds-checked List[heap] element borrow (the try_lower_heap_list_elem_borrow read), and only under the row's length test (refine_under(IfThen(len==n)) or the row's IfThen)."
+
+[[arm]]
 file = "control_p2_d.rs"
 fn = "variant_dispatch_handle_and_tag"
 loads = 2
@@ -384,7 +406,7 @@ file = "control_p2_d.rs"
 fn = "bind_variant_arm"
 loads = 1
 verdict = "CALLER_DISPATCHED"
-caller = "emit_variant_unit_chain (IfThen control_p2_d.rs:563), emit_variant_arm_chain (IfThen :630)"
+caller = "emit_variant_unit_chain (IfThen control_p2_d.rs:563), emit_variant_arm_chain (IfThen :630), refine_ctor_binds (tuple_refinement_rows.rs — only inside the row's IfThen whose condition holds this ctor's tag test)"
 why = "Field reads guarded by each dispatcher's tag-equality IfThen; the terminal arm runs unguarded only after exhaustive tag elimination (or a Wildcard that reads nothing)."
 
 [[arm]]
