@@ -544,10 +544,10 @@ impl Emitter<'_> {
         let Some(u) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-map-ret:{}", ty_name(&body.ty)));
         };
-        // Judged before the source is lowered: an owned temporary is one the
-        // arm releases after the loop.
-        let consumed = self.rc_owned_result(xs);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        // An owned temporary — its lowering marked it so — is one the arm
+        // released after the loop (parked by `hof_loop_open`'s borrow).
+        let consumed = self.rc_owned_result(xs);
         let taken = match &cb.kind {
             IrExprKind::Lambda { params: ps, .. } if consumed && self.rc_droppable(elem) => {
                 ps.first().and_then(|(p, _)| crate::list_take::sole_call_arg_read(body, *p))
