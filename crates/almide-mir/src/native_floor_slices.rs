@@ -142,3 +142,84 @@ pub(crate) fn refill_twin(symbol: &str) -> Twin {
     cache.lock().unwrap_or_else(|e| e.into_inner()).insert(symbol.to_string(), made.clone());
     made
 }
+
+/// The lent-string twin of the runtime body `symbol` (#4741), derived from
+/// the body's own text as its static twin is: `<symbol>_str_lent`, the body
+/// with the one `AlmideString` its callback (`Fn(..)`) is handed read as
+/// `&str`, and its one copy `AlmideString::from(<p>)` of a `<p>: &str` it
+/// holds handing `<p>` itself. The twin lends the string it hands the
+/// callback (a line of `fs.fold_lines`, borrowed from the read buffer) where
+/// the body copies it. It reaches exactly what the body reaches: the items
+/// are the body's own (closed under the fan header for a thread-crossing
+/// body). Returns the twin, its text and the body's items. `None` when the
+/// body has no such shape.
+pub(crate) fn str_lent_twin(symbol: &str) -> Option<(String, &'static str, Vec<&'static str>)> {
+    type Lent = Option<(String, &'static str, Vec<&'static str>)>;
+    static CACHE: OnceLock<Mutex<HashMap<String, Lent>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(symbol) {
+        return hit.clone();
+    }
+    let made = (|| {
+        const COPY: &str = "AlmideString::from(";
+        let rt = runtime_index();
+        let text = signature_text(rt, symbol)?;
+        let head = format!("fn {symbol}");
+        let at = text.find(&head)?;
+        let open = at + text[at..].find('{')?;
+        let (sig, count) = callback_strs_lent(&text[at + head.len()..open]);
+        let body = &text[open..];
+        if count != 1 || body.matches(COPY).count() != 1 {
+            return None;
+        }
+        let from = body.find(COPY)? + COPY.len();
+        let p = &body[from..from + body[from..].find(')')?];
+        let ident = !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !ident || !squash(body).contains(&format!("{p}:&str")) {
+            return None;
+        }
+        let twin = format!("{symbol}_str_lent");
+        let lent = format!("{}fn {twin}{sig}{}", &text[..at], body.replacen(&format!("{COPY}{p})"), p, 1));
+        let items = if almide_codegen::generated::runtime_fn_modes::crosses_threads(symbol) {
+            runtime_body_with_fan(symbol).ok()?.2
+        } else {
+            closure(symbol, rt).ok()?
+        };
+        Some((twin, &*Box::leak(lent.into_boxed_str()), items))
+    })();
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(symbol.to_string(), made.clone());
+    made
+}
+
+/// `sig` with every whole `AlmideString` inside a `Fn(..)` param list read
+/// as `&str`, and how many were.
+pub(crate) fn callback_strs_lent(sig: &str) -> (String, usize) {
+    const WORD: &str = "AlmideString";
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let (mut out, mut count, mut rest) = (String::new(), 0, sig);
+    while let Some(at) = rest.find("Fn(") {
+        // Squashed, `dyn Fn(` and `impl Fn(` read `dynFn(` and `implFn(`.
+        let before = &rest[..at];
+        let whole = !before.chars().next_back().is_some_and(ident) || before.ends_with("dyn") || before.ends_with("impl");
+        out.push_str(&rest[..at + 3]);
+        rest = &rest[at + 3..];
+        if !whole { continue; }
+        let mut depth = 1i32;
+        let close = rest.char_indices().find_map(|(k, c)| {
+            match c { '(' => depth += 1, ')' => depth -= 1, _ => {} }
+            (depth == 0).then_some(k)
+        }).unwrap_or(rest.len());
+        let mut args = &rest[..close];
+        while let Some(w) = args.find(WORD) {
+            let alone = !args[..w].chars().next_back().is_some_and(ident) && !args[w + WORD.len()..].chars().next().is_some_and(ident);
+            out.push_str(&args[..w]);
+            out.push_str(if alone { "&str" } else { WORD });
+            count += usize::from(alone);
+            args = &args[w + WORD.len()..];
+        }
+        out.push_str(args);
+        rest = &rest[close..];
+    }
+    out.push_str(rest);
+    (out, count)
+}

@@ -417,7 +417,7 @@ const LANE_F64: &str = "trait AlmdLaneF64 { fn lane_f64(self) -> f64; }\nimpl Al
 /// `lent[i]`: the runtime hands that param a reference (the payload of a
 /// lent `Option` receiver, [`lent_var`]); the lambda borrows it as it is, or
 /// takes the one copy it asks for.
-fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent): (&[NativeSigKind], &[bool], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
+fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent, strs): (&[NativeSigKind], &[bool], &[bool], &[bool]), bits: &[Lane], (ret, ret_lane): (NativeSigKind, Lane)) -> Option<String> {
     if ps.iter().chain([&ret]).any(|k| matches!(k, NativeSigKind::Narrow { .. })) {
         return None;
     }
@@ -426,9 +426,9 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent): (&[NativeSigKind]
         Lane::Bool => "bool".to_string(),
         Lane::Same => rec::owned_ty(clo::owned_nty(k)),
     };
-    let is_lent = |i: usize| lent.get(i).copied().unwrap_or(false);
+    let (is_lent, lent_str) = (|i: usize| lent.get(i).copied().unwrap_or(false), |i: usize| strs.get(i).copied().unwrap_or(false));
     let params: Vec<String> = ps.iter().zip(bits).enumerate()
-        .map(|(i, (k, b))| format!("__p{i}: {}{}", if is_lent(i) { "&" } else { "" }, spell(*k, *b))).collect();
+        .map(|(i, (k, b))| if lent_str(i) { format!("__p{i}: &str") } else { format!("__p{i}: {}{}", if is_lent(i) { "&" } else { "" }, spell(*k, *b)) }).collect();
     let args: String = ps
         .iter()
         .zip(bits)
@@ -437,7 +437,7 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent): (&[NativeSigKind]
             (_, Lane::F64) => format!(", __p{i}.to_bits() as i64"),
             (_, Lane::Bool) => format!(", __p{i} as i64"),
             _ if is_lent(i) && moved.get(i).copied().unwrap_or(false) => format!(", (*__p{i}).clone()"),
-            _ if is_lent(i) => format!(", __p{i}"),
+            _ if is_lent(i) || lent_str(i) => format!(", __p{i}"),
             (NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_), _)
                 if !moved.get(i).copied().unwrap_or(false) => format!(", &__p{i}"),
             _ => format!(", __p{i}"),
@@ -593,7 +593,7 @@ fn plan(
     let mut env = plan_env(hof, &got, declared_return)?;
     let (lent, elem) = lent_receivers(call.args, hof, &env);
     let lent_t = lent.map(|l| l.2).or(elem.as_ref().map(|e| e.0));
-    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent_t, elem_lent: elem.is_some(), key: key_only_var(hof) };
+    let cx = FnArgCx { user_fns, sigs, tys, origins: &origins, at: at.1, bounds: &hof.bounds, lent: lent_t, elem_lent: elem.is_some(), key: key_only_var(hof), str_lent: lent.is_none() && elem.is_none() && str_lent_route(hof).is_some() };
     let (mut rendered, mut side) = (Vec::new(), FnArgOut::default());
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {

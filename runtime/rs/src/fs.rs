@@ -101,6 +101,23 @@ pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<AlmideString>, AlmideSt
 // (e.g. invalid UTF-8) surfaces AFTER the callbacks for earlier lines have
 // already run — inherent to streaming.
 pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, AlmideString) -> A>) -> Result<A, AlmideString> {
+    // MEASURED (#1232, 2026-08-14): copying each line (`AlmideString::from`)
+    // beats `std::mem::take` on the read buffer, which the ledger proposed as a
+    // free memcpy saving. `take` steals the String's CAPACITY, so `read_line`
+    // regrows the buffer from zero every line (several doublings for an
+    // ~80-byte line) where the copy allocates one right-sized block and leaves
+    // the buffer's capacity intact to reuse. 2M lines / 162 MB, best-of-15,
+    // interleaved: 137 ms copy vs 143-146 ms take — the "saving" is a 4-6%
+    // REGRESSION. Do not re-apply without re-measuring.
+    //
+    // The line's one copy below is the only thing the native render's
+    // lent-string twin drops (#4741): a step that only reads its line is
+    // handed the read buffer itself.
+    fold_lines_impl(path, init, &|acc, line: &str| f(acc, AlmideString::from(line)))
+}
+// The walk both `fs.fold_lines` forms share: each line, its `\n` / `\r\n`
+// stripped, lent to `f` from the one reused read buffer.
+fn fold_lines_impl<A, F: Fn(A, &str) -> A + ?Sized>(path: &str, init: A, f: &F) -> Result<A, AlmideString> {
     let __almide_r: Result<A, String> = (|| {
         use std::io::BufRead;
         // The `open` and the per-line `read_line` are INNER steps of one call, so
@@ -120,14 +137,7 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
                     buf.pop();
                 }
             }
-            // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-            // the ledger proposed as a free memcpy saving. `take` steals the String's
-            // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-            // doublings for an ~80-byte line) where `clone` allocates one right-sized
-            // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-            // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-            // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-            acc = f(acc, AlmideString::from(buf.as_str()));
+            acc = f(acc, buf.as_str());
         }
     })();
     __almide_r.map_err(Into::into)
@@ -138,7 +148,7 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
 // exactly once: start>0 seeks to start-1 and discards through the first \n
 // (if byte start-1 IS \n the discard consumes just it), then lines fold while
 // their start offset is < end — the final line may read past end to finish.
-fn fold_lines_range_impl<A, F: Fn(A, AlmideString) -> A + ?Sized>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
+fn fold_lines_range_impl<A, F: Fn(A, &str) -> A + ?Sized>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
     use std::io::{BufRead, Seek};
     let mut file = std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
     // #3652: a directory opens but fails its first read, and the empty range
@@ -174,20 +184,13 @@ fn fold_lines_range_impl<A, F: Fn(A, AlmideString) -> A + ?Sized>(path: &str, st
                 buf.pop();
             }
         }
-        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-        // the ledger proposed as a free memcpy saving. `take` steals the String's
-        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-        // doublings for an ~80-byte line) where `clone` allocates one right-sized
-        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        acc = f(acc, AlmideString::from(buf.as_str()));
+        acc = f(acc, buf.as_str());
     }
     Ok(acc)
 }
 // Raw `F: Fn` last arg (NOT `Rc<dyn Fn>`): build.rs derives the
 // takes_raw_fn_last_arg set from this signature, so callbacks render unboxed.
-pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, AlmideString) -> A>(path: &str, start: i64, end: i64, init: A, f: F) -> Result<A, AlmideString> { let __almide_r: Result<A, String> = (|| { fold_lines_range_impl(path, start, end, init, &f) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, AlmideString) -> A>(path: &str, start: i64, end: i64, init: A, f: F) -> Result<A, AlmideString> { let __almide_r: Result<A, String> = (|| { fold_lines_range_impl(path, start, end, init, &|acc, line: &str| f(acc, AlmideString::from(line))) })(); __almide_r.map_err(Into::into) }
 // Chunk-parallel fold: the threads live HERE, inside the runtime — the fan
 // machinery's purity gate keeps effectful bodies sequential, so file
 // parallelism is the fs module's own intrinsic instead. Workers each fold
@@ -198,6 +201,13 @@ pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, AlmideString) -> A>(path: &str,
 // only for an accumulator and callback with no `Rc` inside: RustLowering
 // routes every other call to the `_seq` twin below (#3649).
 pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
+    // The line's one copy: a step that only reads it is handed the worker's
+    // read buffer by the native render's lent-string twin (#4741).
+    fold_lines_chunked_impl(path, workers, init, move |acc, line: &str| f(acc, AlmideString::from(line)))
+}
+// The chunk-parallel walk: each worker lends `f` its lines from one reused
+// read buffer.
+fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
     init.almide_share();
     let __almide_r: Result<Vec<A>, String> = (|| {
         let ranges = fold_lines_chunk_ranges(path, workers)?;
@@ -251,7 +261,7 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -
 pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, AlmideString) -> A>) -> Result<Vec<A>, AlmideString> {
     let __almide_r: Result<Vec<A>, String> = (|| {
         let ranges = fold_lines_chunk_ranges(path, workers)?;
-        ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &*f)).collect()
+        ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &|acc, line: &str| f(acc, AlmideString::from(line)))).collect()
     })();
     __almide_r.map_err(Into::into)
 }

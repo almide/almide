@@ -9,6 +9,9 @@ struct FnArgOut {
     share: Vec<String>,
     /// The callback takes the lent receiver's payload by reference.
     lent: bool,
+    /// The callback takes each string it is handed by reference: the call
+    /// names the lent-string twin ([`str_lent_route`]).
+    str_lent: bool,
 }
 
 /// What rendering the function-typed argument needs to see.
@@ -29,6 +32,9 @@ struct FnArgCx<'a> {
     /// The type param a callback returns that the runtime only orders
     /// ([`key_only_var`]): a tuple record there goes as a Rust tuple.
     key: Option<&'a str>,
+    /// The call may name the lent-string twin ([`str_lent_route`]): a
+    /// callback that only reads each string it is handed takes it lent.
+    str_lent: bool,
 }
 
 /// The adapter for the function-typed argument `a` (kind `t`) of declared
@@ -46,6 +52,7 @@ fn fn_arg(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DTy), (a, t): 
             side.reads.extend(extra.reads);
             side.share.extend(extra.share);
             side.lent |= extra.lent;
+            side.str_lent |= extra.str_lent;
             return Some(code);
         }
     }
@@ -105,6 +112,13 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     // The params that take a lent receiver's payload: by reference.
     let lent: Vec<bool> = dps.iter().map(|d| (!tuples || cx.elem_lent) && cx.lent.is_some_and(|t| matches!(d, DTy::Var(v) if v == t))).collect();
     side.lent = lent.contains(&true);
+    // #4741: every String param the lambda only reads, when the call may lend
+    // them all; one it takes over keeps every string owned.
+    let strs: Vec<bool> = dps.iter().zip(&ps).enumerate()
+        .map(|(i, (d, k))| cx.str_lent && !tuples && *d == DTy::Str && *k == NativeSigKind::Str && !moved.get(i).copied().unwrap_or(false))
+        .collect();
+    let strs = if dps.iter().zip(&strs).all(|(d, s)| *d != DTy::Str || *s) { strs } else { vec![false; strs.len()] };
+    side.str_lent = strs.contains(&true);
     let closure = if tuples {
         // A lent element the converting adapter cannot take by reference
         // keeps the copying route.
@@ -114,7 +128,7 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
             None if lent_one => { side.lent = false; tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), (ret, false))? }
             None => return None,
         }
-    } else { adapter(lambda, &name, (&ps, &moved, &lent), &bits, (ret?, ret_lane))? };
+    } else { adapter(lambda, &name, (&ps, &moved, &lent, &strs), &bits, (ret?, ret_lane))? };
     let keyed = cx.key.is_some_and(|b| matches!(dret, DTy::Var(v) if v == b));
     let closure = match ret.map(clo::owned_nty) {
         Some(NTy::Rec(i)) if keyed => tuple_key(&closure, i).unwrap_or(closure),

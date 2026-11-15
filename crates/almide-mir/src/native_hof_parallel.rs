@@ -293,9 +293,11 @@ effect fn main() -> Unit = {{
   println(int.to_string(list.len(parts)))
 }}
 "#)).expect("the chunked fold renders");
-        let threaded = |rust: &str| rust.contains("almide_rt_fs_fold_lines_chunked(") && !rust.contains("almide_rt_fs_fold_lines_chunked_seq");
+        let threaded = |rust: &str| (rust.contains("almide_rt_fs_fold_lines_chunked(") || rust.contains("almide_rt_fs_fold_lines_chunked_str_lent("))
+            && !rust.contains("almide_rt_fs_fold_lines_chunked_seq");
         let sum = render("fn step(acc: Int, line: String) -> Int = acc + string.len(line)", "0", "Int");
         assert!(threaded(&sum), "an Int step that only reads its line is threaded");
+        assert!(sum.contains("almide_rt_fs_fold_lines_chunked_str_lent("), "a step that only reads its line takes it lent, not copied per line");
         let stats = render(r#"fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] = match string.split_once(line, ";") {
   some((k, v)) => {
     let t = string.len(v)
@@ -305,8 +307,25 @@ effect fn main() -> Unit = {{
 }"#, "map.new()", "Map[String, Stats]");
         assert!(threaded(&stats), "the aggregation step (split_once + upsert with its own lambda) is threaded");
         assert!(stats.contains("almide_rt_map_upsert_str_static("), "the found key is borrowed, not copied per line");
+        assert!(stats.contains("almide_rt_fs_fold_lines_chunked_str_lent("), "the aggregation step reads its line lent");
         let printing = render("fn step(acc: Int, line: String) -> Int = { println(line); acc + 1 }", "0", "Int");
         assert!(printing.contains("almide_rt_fs_fold_lines_chunked_seq"), "a printing step keeps the chunk order of its output");
+    }
+
+    /// #4741: every line fold that copies the line it hands its step derives
+    /// a lent-string twin from its own text.
+    #[test]
+    fn line_folds_pair_their_lent_string_twins() {
+        for symbol in ["almide_rt_fs_fold_lines", "almide_rt_fs_fold_lines_chunked", "almide_rt_fs_fold_lines_chunked_seq", "almide_rt_fs_fold_lines_range"] {
+            let (twin, text, items) = crate::native_floor::str_lent_twin(symbol).unwrap_or_else(|| panic!("{symbol} derives a lent-string twin"));
+            assert_eq!(twin, format!("{symbol}_str_lent"));
+            assert!(text.contains(&format!("fn {twin}")) && text.contains("Fn(A, &str)") && !text.contains("AlmideString::from("), "{symbol}: {text}");
+            assert!(items.iter().any(|i| i.contains(&format!("fn {symbol}"))), "{symbol}: the twin reaches the body's own items");
+        }
+        // A body that copies no string it hands its callback has no twin.
+        assert!(crate::native_floor::str_lent_twin("almide_rt_list_map").is_none());
+        let (sig, n) = crate::native_floor::callback_strs_lent("<A>(f:std::rc::Rc<dynFn(A,AlmideString)->A>)->Result<A,AlmideString>");
+        assert_eq!((sig.as_str(), n), ("<A>(f:std::rc::Rc<dynFn(A,&str)->A>)->Result<A,AlmideString>", 1));
     }
 
     #[test]
