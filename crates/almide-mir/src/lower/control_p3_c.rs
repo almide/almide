@@ -54,6 +54,19 @@ impl LowerCtx {
         Self::list_elem_eq_call_name(&es[0])
     }
 
+    /// A runtime-backed value (`HttpRequest`) on the native render: its owner module's
+    /// declared equality (`stdlib_info::runtime_backed_eq_surface`, #4749), the runtime
+    /// struct's own `PartialEq`. The wasm legs erase such a value to its self-hosted
+    /// carrier before this point, so the surface is asked for on the native render only.
+    fn runtime_eq_call_name(ty: &Ty) -> Option<String> {
+        let Ty::Named(n, args) = ty else { return None };
+        if !crate::lower::owned_tco_slots() || !args.is_empty() {
+            return None;
+        }
+        crate::native_runtime_types::RuntimeType::of(n.as_str())?;
+        almide_lang::stdlib_info::runtime_backed_eq_surface(n.as_str())
+    }
+
     /// The `List[T]` ELEMENT classification half of [`Self::module_eq_call_name`] — split out
     /// (rather than left nested) so neither function's guard-clause chain re-exceeds the
     /// depth this extraction exists to fix. Verbatim extraction, no behavior change.
@@ -217,14 +230,15 @@ impl LowerCtx {
             self.ops.push(Op::IntBinOp { dst, op: IntOp::Eq, a: lv, b: rv });
             return Some(Some(dst));
         }
-        if let Some(name) = Self::module_eq_call_name(ty) {
+        let name = Self::module_eq_call_name(ty).map(str::to_string).or_else(|| Self::runtime_eq_call_name(ty));
+        if let Some(name) = name {
             let Ok(result) = repr_of(&Ty::Bool) else {
                 return Some(None);
             };
             let dst = self.fresh_value();
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
-                name: name.to_string(),
+                name,
                 args: vec![self.eq_handle_arg(lv), self.eq_handle_arg(rv)],
                 result: Some(result),
             });

@@ -10528,6 +10528,22 @@ fn __http_call_repr(c: HttpCall) -> String = _
 @borrow_ref(resp)
 fn __http_response_repr(resp: HttpResponse) -> String = _
 
+
+
+
+
+@intrinsic("almide_http_req_eq")
+@borrow_ref(a, b)
+fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
+
+@intrinsic("almide_http_call_eq")
+@borrow_ref(a, b)
+fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
+
+@intrinsic("almide_http_resp_eq")
+@borrow_ref(a, b)
+fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _
+
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,

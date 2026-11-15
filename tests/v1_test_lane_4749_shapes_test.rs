@@ -18,6 +18,10 @@
 //!   Result of that Result, and the caller read the Ok payload slot as a
 //!   nested Result.
 //!
+//! A fifth (the batch-1115d http test, #4754): `==` over a runtime-backed
+//! value such as `HttpRequest` walled the assertion, having no comparison on
+//! the certified render; it now calls the type's declared equality.
+//!
 //! Each test file passes on the native test lane and on wasm, and the main
 //! program prints the same lines on both, its native build the certified
 //! render's own.
@@ -204,5 +208,39 @@ fn the_shapes_print_the_same_lines_on_native_and_wasm() {
         let (ok, stdout, stderr) = almide(dir.path(), &args);
         assert!(ok, "main on {target:?}:\n{stderr}");
         assert_eq!(stdout, MAIN_OUT, "main on {target:?}:\n{stderr}");
+    }
+}
+
+/// `==` over a runtime-backed value (`HttpRequest`, `HttpResponse`) on the
+/// native test lane: the certified render compares it through its module's
+/// declared equality (`stdlib_info::runtime_backed_eq_surface`), the runtime
+/// struct's own `PartialEq`, instead of walling the assertion's `if`. Only the
+/// runtime-backed types reach this route — a user record compares field by
+/// field — so the fixture needs `http`.
+const RUNTIME_EQ: &str = r#"import http
+
+fn same(a: HttpRequest, b: HttpRequest) -> Bool = a == b
+fn differ(a: HttpResponse, b: HttpResponse) -> Bool = a != b
+
+test "runtime-backed values compare by value" {
+  let req = http.new_request("POST", "/", "ab", [("X-A", "1")])
+  let a = http.set_body(req, "x")
+  assert_eq(a, http.set_body(req, "x"))
+  assert(a != http.set_body(req, "y"))
+  assert(same(a, http.set_body(req, "x")))
+  assert(not same(a, req))
+  assert(differ(http.response(200, "a"), http.response(200, "b")))
+  assert(not differ(http.response(200, "a"), http.response(200, "a")))
+}
+"#;
+
+#[test]
+fn a_runtime_backed_value_compares_on_the_native_test_lane_and_on_wasm() {
+    let dir = tempfile::tempdir().expect("scratch");
+    std::fs::write(dir.path().join("runtime_eq_test.almd"), RUNTIME_EQ).unwrap();
+    for target in ["native", "wasm"] {
+        let (ok, stdout, stderr) = almide(dir.path(), &["test", "--target", target, "runtime_eq_test.almd"]);
+        assert!(ok, "runtime_eq_test on {target}:\n{stdout}\n{stderr}");
+        assert!(!stderr.contains("native v1 test render"), "runtime_eq_test on {target}:\n{stderr}");
     }
 }

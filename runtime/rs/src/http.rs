@@ -267,6 +267,12 @@ impl AlmideRepr for AlmideHttpRequest {
 pub fn almide_http_req_repr(req: &AlmideHttpRequest) -> AlmideString { req.almide_repr().into_almide() }
 pub fn almide_http_resp_repr(resp: &AlmideHttpResponse) -> AlmideString { resp.almide_repr().into_almide() }
 
+// `http.__http_request_eq` / `__http_response_eq` / `__http_call_eq` (#4749):
+// the declared equalities are the structs' own `PartialEq`, the `==` the other
+// render emits; the certified native render calls them for a `==` over one.
+pub fn almide_http_req_eq(a: &AlmideHttpRequest, b: &AlmideHttpRequest) -> bool { a == b }
+pub fn almide_http_resp_eq(a: &AlmideHttpResponse, b: &AlmideHttpResponse) -> bool { a == b }
+
 pub fn almide_http_req_method(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.method.clone() })(); __almide_v.into_almide() }
 pub fn almide_http_req_path(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.path.clone() })(); __almide_v.into_almide() }
 pub fn almide_http_req_body(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.body.clone() })(); __almide_v.into_almide() }
@@ -376,6 +382,7 @@ impl AlmideRepr for AlmideHttpCall {
 
 // `http.__http_call_repr` (#4204): a call in flight shows only its type name.
 pub fn almide_http_call_repr(c: &AlmideHttpCall) -> AlmideString { c.almide_repr().into_almide() }
+pub fn almide_http_call_eq(a: &AlmideHttpCall, b: &AlmideHttpCall) -> bool { a == b }
 
 impl PartialEq for AlmideHttpCall {
     fn eq(&self, other: &Self) -> bool {
