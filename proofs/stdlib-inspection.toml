@@ -8953,7 +8953,7 @@ name = "bytes.append_bytes"
 sig = "(b: Bytes, src: Bytes) -> Unit"
 class = "pure"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f16_be"
