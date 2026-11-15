@@ -109,6 +109,14 @@ impl LowerCtx {
             {
                 self.heap_field_container_tracked(object)
             }
+            // The borrow's ANF-temp arm: a fresh owned container (`tok(ts, k).text`,
+            // #4749) is bound to a tracked temp and borrowed from like a local. Admitted
+            // only where that arm runs (native owned slots), where the list builder runs
+            // under `speculate` — a container the temp bind declines rolls the whole
+            // literal back instead of leaking partial ops.
+            IrExprKind::Call { .. } | IrExprKind::UnwrapOr { .. } | IrExprKind::If { .. }
+            | IrExprKind::Match { .. } | IrExprKind::Block { .. }
+                if is_heap_ty(&container.ty) && crate::lower::owned_tco_slots() => true,
             _ => false,
         }
     }
