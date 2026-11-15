@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "918"
+# uninspected_ceiling = "917"
 
 [[fn]]
 name = "args.option"
@@ -10014,8 +10014,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "bytes.group_by"
 sig = "(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:7077976eeeabafca"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 e47b5a1de0ad97b8ccbe4aebbfd28389a861575f (the generator with the 237 catalogued fns, per-element HOF callbacks, the #4758 denylist and the group_by String instantiation / sized bytes.pop recipe, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 152 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=String] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 4.130e7/8.249e7/1.649e8/3.297e8/6.594e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.010/0.000/0.015/0.025/0.056s wasm k=4..8 2.189e7/4.377e7/8.751e7/1.750e8/3.500e8 fit n (rms 0.0%) moved 1.048e6/2.096e6/4.193e6/8.386e6/1.677e7B fit n (rms 0.0%) wall 0.005/0.005/0.005/0.015/0.030s (order n ok)"
+alloc = "PASS: [vars=String] call live=0"
+diamond = "PASS: [vars=String] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "bytes.intersperse"
