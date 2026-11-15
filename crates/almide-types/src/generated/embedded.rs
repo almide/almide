@@ -10874,14 +10874,10 @@ fn __hc_walk_len(b: Bytes) -> Int = {
 
 
 
-fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string(
-  "${__hc_cell(method)}${__hc_walk_len(body)}\n",
-) + body + bytes.from_string(
-  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
-    "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
-    (acc, cell) => acc + cell,
-  ),
-)
+fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string("${__hc_cell(method)}${__hc_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
+  "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+  (acc, cell) => acc + cell,
+))
 
 effect fn __http_call_open(url: String, frame: Bytes) -> Result[HttpCall, String] = _
 
@@ -10991,11 +10987,7 @@ fn __http_walk_len(b: Bytes) -> Int = {
   lead + list.count(xs, (x) => x < 128 or x >= 192)
 }
 
-fn __http_byte_frame(method: String, body: Bytes, flat: List[String]) -> Bytes = bytes.from_string(
-  "${__http_cell(method)}${__http_walk_len(body)}\n",
-) + body + bytes.from_string(
-  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __http_cell(c)) |> list.join(""),
-)
+fn __http_byte_frame(method: String, body: Bytes, flat: List[String]) -> Bytes = bytes.from_string("${__http_cell(method)}${__http_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __http_cell(c)) |> list.join(""))
 
 
 fn __http_take_cell(f: String) -> (String, String) = {
@@ -11052,6 +11044,7 @@ pub const SRC_HTTP_REQUEST: &str = r#"
 
 
 import hex
+
 fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
@@ -11142,11 +11135,16 @@ fn http_req_set_header(req: List[String], key: String, value: String) -> List[St
   value,
 )
 
-fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(__hq_no_raw(req), 2, body)
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(
+  __hq_no_raw(req),
+  2,
+  body,
+)
 
 
-fn __hq_raw(req: List[String]) -> String? = if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
-else none
+fn __hq_raw(req: List[String]) -> String? =
+  if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
+  else none
 
 fn __hq_no_raw(req: List[String]) -> List[String] = match __hq_raw(req) {
   some(_) => list.take(req, list.len(req) - 1),
