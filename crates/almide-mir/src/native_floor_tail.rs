@@ -276,10 +276,17 @@ fn runtime_type_arg(by_ref: bool, code: &str, got: &NTy, dying_here: bool) -> St
     match (by_ref, got) {
         (true, NTy::RecRef(_)) => code.to_string(),
         (true, _) => format!("&{code}"),
-        (false, NTy::Rec(_)) if dying_here => crate::render_native_move::move_as_itself(code)
-            .unwrap_or_else(|| format!("({code}).clone()")),
+        (false, NTy::Rec(_)) if dying_here && moves_as_itself(code) => code.to_string(),
         (false, _) => format!("({code}).clone()"),
     }
+}
+
+/// Whether the binding `code` moves as itself ([`crate::render_native_move::take_expr`]'s
+/// move arm, never its `std::mem::take`, which needs a `Default`).
+fn moves_as_itself(code: &str) -> bool {
+    let id = code.strip_prefix('v').and_then(|n| n.parse::<u32>().ok()).map(crate::ValueId);
+    id.is_some_and(|v| !crate::native_inout::is_rendering_inout(v) && crate::render_native_move::moves_as_itself(v))
+        && !crate::render_native_move::drill_no_moves()
 }
 
 /// A readonly Bytes param's argument.
