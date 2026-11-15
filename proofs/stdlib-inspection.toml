@@ -11088,7 +11088,7 @@ name = "env.remove"
 sig = "effect (name: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "env.secret"
