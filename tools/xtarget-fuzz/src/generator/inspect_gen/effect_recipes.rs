@@ -102,6 +102,14 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "args.positional", size: "", args: &[("options", "[]")] },
     Recipe { func: "env.get", size: "", args: &[("name", "\"XF_GREETING\"")] },
     Recipe { func: "env.set", size: "value", args: &[("name", "\"XF_SET\""), ("value", "string.repeat(\"aé\", {n})")] },
+    // A SET variable whose name scales with n, so the lookup runs its
+    // success path (`some`): an unset name measured only the miss
+    // (coordinator ruling 2026-11-16). The probe sets it on its own leg.
+    Recipe {
+        func: "env.secret",
+        size: "name",
+        args: &[("name", "{ env.set(\"XF_S\" + string.repeat(\"A\", {n}), \"s3cr3t\")!\n  \"XF_S\" + string.repeat(\"A\", {n}) }")],
+    },
     // Past the native 64 KiB stdout buffer at every size, so every size
     // writes in one regime (as io.write's recipe did).
     Recipe { func: "io.print", size: "s", args: &[("s", "string.repeat(\"aé\", 4 * {n})")] },

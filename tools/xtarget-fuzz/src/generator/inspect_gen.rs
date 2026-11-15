@@ -323,8 +323,11 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The asserts' passing path, the one a stamp claims: a failing assert
     // aborts the probe. `contains` and `snapshot` scale with the strings
     // they compare (the needle at the end, two equal strings).
-    Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{n}"), ("b", "1")] },
-    Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "1"), ("b", "{n}")] },
+    // `{sized}` / `{small}` follow the instantiation: at Int n against 2, at
+    // String "aé"×n against "aé" (a longer string with the same prefix
+    // compares greater). Int literals made the [vars=String] probe E001.
+    Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{sized}"), ("b", "{small}")] },
+    Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "{small}"), ("b", "{sized}")] },
     Recipe { func: "testing.assert_approx", size: "a", args: &[("a", "float.from({n})"), ("b", "float.from({n})"), ("tolerance", "0.5")] },
     Recipe { func: "testing.assert_contains", size: "haystack", args: &[("haystack", "string.repeat(\"a\", {n}) + \"b\""), ("needle", "\"b\"")] },
     Recipe { func: "testing.assert_snapshot", size: "actual", args: &[("actual", "string.repeat(\"aé\", {n})"), ("expected", "string.repeat(\"aé\", {n})")] },
