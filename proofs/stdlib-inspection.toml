@@ -12377,7 +12377,7 @@ name = "env.secret"
 sig = "effect (name: String) -> Option[Secret[String]] ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "env.vars"
@@ -12445,7 +12445,7 @@ name = "http.path"
 sig = "(req: HttpRequest) -> String"
 class = "pure"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.send"
