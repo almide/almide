@@ -12473,7 +12473,7 @@ name = "http.set_status"
 sig = "(resp: HttpResponse, code: Int) -> HttpResponse"
 class = "pure"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.close"
