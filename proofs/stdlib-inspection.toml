@@ -15412,7 +15412,7 @@ name = "io.read_to_end"
 sig = "effect (h: H) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "io.stderr"
@@ -15549,7 +15549,7 @@ name = "net.udp_recv_from"
 sig = "effect (sock: UdpSocket, max: Int) -> UdpPacket ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "net.udp_send_to"
@@ -15583,21 +15583,21 @@ name = "process.poll"
 sig = "effect (c: ProcessChild) -> Option[Result[ProcessStatus, String]] ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.read_new_stderr"
 sig = "effect (c: ProcessChild) -> String ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.read_new_stdout"
 sig = "effect (c: ProcessChild) -> String ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.start"
@@ -15624,7 +15624,7 @@ name = "process.wait"
 sig = "effect (c: ProcessChild) -> ProcessStatus ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.count_matches"
@@ -15919,7 +15919,7 @@ name = "value.index"
 sig = "(p: Path, i: Int) -> Path"
 class = "pure"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "value.key"
