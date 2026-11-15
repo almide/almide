@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "623"
+# uninspected_ceiling = "622"
 
 [[fn]]
 name = "args.option"
@@ -12728,8 +12728,14 @@ order = "n; rebind (loop, tail, fold) n"
 name = "regex.escape"
 sig = "(s: String) -> String"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:cdc3dee7915d220a"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 168 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 4.414e7/8.828e7/1.766e8/3.531e8/7.062e8 fit n (rms 0.0%) moved 1.800e5/3.600e5/7.200e5/1.440e6/2.880e6B fit n (rms 0.0%) wall 0.010/0.010/0.015/0.030/0.051s wasm k=1..2 3.370e7/6.741e7/1.348e8/2.697e8/5.393e8 fit n (rms 0.0%) moved 3.218e5/6.441e5/1.288e6/2.577e6/5.153e6B fit n (rms 0.0%) wall 0.005/0.000/0.005/0.020/0.035s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 4.402e7/8.804e7/1.761e8/3.522e8/7.043e8 fit n (rms 0.0%) moved 1.800e5/3.600e5/7.200e5/1.440e6/2.880e6B fit n (rms 0.0%) wall 0.010/0.005/0.015/0.030/0.051s wasm k=1..2 3.313e7/6.626e7/1.325e8/2.650e8/5.301e8 fit n (rms 0.0%) moved 3.221e5/6.441e5/1.288e6/2.577e6/5.154e6B fit n (rms 0.0%) wall 0.005/0.010/0.010/0.020/0.035s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 4.406e7/8.812e7/1.762e8/3.525e8/7.050e8 fit n (rms 0.0%) moved 1.800e5/3.600e5/7.200e5/1.440e6/2.880e6B fit n (rms 0.0%) wall 0.010/0.010/0.015/0.030/0.056s wasm k=1..2 3.313e7/6.626e7/1.325e8/2.650e8/5.301e8 fit n (rms 0.0%) moved 3.223e5/6.438e5/1.289e6/2.576e6/5.153e6B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.020/0.030s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 4.403e7/8.804e7/1.761e8/3.522e8/7.043e8 fit n (rms 0.0%) moved 1.800e5/3.600e5/7.200e5/1.440e6/2.880e6B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.025/0.046s wasm k=1..2 3.314e7/6.626e7/1.325e8/2.650e8/5.301e8 fit n (rms 0.0%) moved 3.220e5/6.437e5/1.288e6/2.576e6/5.153e6B fit n (rms 0.1%) wall 0.005/0.005/0.010/0.020/0.035s (order n ok)"
+alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "regex.index_of"
