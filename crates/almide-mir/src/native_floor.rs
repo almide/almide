@@ -401,10 +401,11 @@ pub(crate) fn by_value_only_through_twin(call: &str, k: usize) -> bool {
 
 /// A declared param the runtime body itself takes by value: an owned
 /// container, or an element it stores (`set.insert(s, x)`'s `x`). A map's
-/// key is not: its set has a twin that borrows a `String` key.
+/// key is not: its set has a twin that borrows a `String` key. A runtime type
+/// the body takes by value (`http.set_status`'s response, #4771) is one too.
 fn plain_by_value(p: Option<&FloorParam>) -> bool {
     matches!(p, Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)
-        | FloorParam::Elem(false) | FloorParam::SetElem(false)))
+        | FloorParam::Elem(false) | FloorParam::SetElem(false) | FloorParam::Runtime(_, false)))
 }
 
 /// The declared return of the self-hosted body registered under `call`.
