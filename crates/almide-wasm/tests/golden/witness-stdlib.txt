@@ -546,6 +546,7 @@ __selfhost_.http_json
 __selfhost_.http_new_request
 __selfhost_.http_param
 __selfhost_.http_req_body
+__selfhost_.http_req_body_bytes
 __selfhost_.http_req_header
 __selfhost_.http_req_header_values
 __selfhost_.http_req_headers_flat
@@ -553,6 +554,7 @@ __selfhost_.http_req_method
 __selfhost_.http_req_path
 __selfhost_.http_req_repr
 __selfhost_.http_req_set_body
+__selfhost_.http_req_set_body_bytes
 __selfhost_.http_req_set_header
 __selfhost_.http_req_with_params
 __selfhost_.http_req_with_path
@@ -1225,9 +1227,7 @@ http.__dispatch
 http.__encodes_unreserved
 http.__flat
 http.__hex_pair
-http.__http_request_body_bytes
 http.__http_request_headers
-http.__http_request_set_body_bytes
 http.__http_response_body_headers
 http.__http_response_headers
 http.__http_response_owned_refusal
