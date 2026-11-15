@@ -336,3 +336,49 @@ mod tests {
         );
     }
 }
+
+/// Known open issue #4758: an ordering behind a generic wrapper with no
+/// declared bound. `deque.max[A]` (`= list.max(to_list(d))`) and the heap's
+/// natural order (`heap.__natural[A]`) pass `almide check` at an element type
+/// with no order (`Set`, `Secret`, a `Heap`, a `Result`), and the native build
+/// then fails with E0277 while wasm walls. That is #4758's finding, not
+/// the function a campaign is focused on, so until #4758 closes:
+/// - a `Heap[A]` holds only an ordered `A` ([`issue_4758_ord_elem`]): every
+///   heap carries the natural comparator, whatever op touches it;
+/// - each deque op that orders a type variable ([`ISSUE_4758_ORDERED_VARS`])
+///   takes only an ordered type there.
+///
+/// REMOVE this block (and its two call sites, `sig_type.rs`'s Heap arm and
+/// `catalogue.rs`'s bound) when #4758 closes.
+pub const ISSUE_4758_ORDERED_VARS: &[(&str, &str)] = &[
+    ("deque.max", "A"),
+    ("deque.min", "A"),
+    ("deque.sort", "A"),
+    ("deque.max_by", "K"),
+    ("deque.min_by", "K"),
+    ("deque.sort_by", "B"),
+    ("heap.new_by", "K"),
+];
+
+/// #4758: the scalars every leg orders, the ones an ordered variable takes.
+pub fn issue_4758_ordered_types() -> Vec<super::types::GenType> {
+    use super::types::GenType;
+    vec![GenType::Int, GenType::String, GenType::Bool, GenType::Float]
+}
+
+/// #4758: `g` has an order the checker would also demand of `list.max`
+/// (E030): a scalar, or a list / option / pair of non-Float scalars.
+pub fn issue_4758_ord_elem(g: &super::types::GenType) -> bool {
+    use super::types::GenType;
+    let scalar = |t: &GenType| match t {
+        GenType::Int | GenType::String | GenType::Bool => true,
+        GenType::Sized(n) => !n.starts_with("Float"),
+        _ => false,
+    };
+    match g {
+        GenType::Float => true,
+        GenType::List(e) | GenType::Option(e) => scalar(e),
+        GenType::Tuple2(a, b) => scalar(a) && scalar(b),
+        t => scalar(t),
+    }
+}

@@ -1071,6 +1071,17 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         }
         bounds.push((sym_str(g.name).to_string(), allowed));
     }
+    // #4758 (`denylist.rs`): the deque op's ordered variable takes an ordered type.
+    for (_, v) in super::denylist::ISSUE_4758_ORDERED_VARS
+        .iter()
+        .filter(|(f, v)| *f == format!("{module}.{func}") && used.iter().any(|u| u == v))
+    {
+        let ord = super::denylist::issue_4758_ordered_types();
+        match bounds.iter_mut().find(|(n, _)| n == v) {
+            Some((_, allowed)) => allowed.retain(|t| ord.contains(t)),
+            None => bounds.push((v.to_string(), ord)),
+        }
+    }
     let literal_params: Vec<(usize, &'static [&'static str])> = attrs
         .iter()
         .filter_map(|a| {

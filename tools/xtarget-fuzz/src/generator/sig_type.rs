@@ -264,7 +264,10 @@ impl SigType {
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
             SigType::Secret(e) => Some(GenType::Secret(Box::new(e.instantiate(subst)?))),
-            SigType::Coll(k, e) => Some(GenType::Coll(k, Box::new(e.instantiate(subst)?))),
+            // #4758 (`denylist.rs`): a Heap holds only an ordered element.
+            SigType::Coll(k, e) => Some(e.instantiate(subst)?)
+                .filter(|g| *k != "Heap" || super::denylist::issue_4758_ord_elem(g))
+                .map(|g| GenType::Coll(k, Box::new(g))),
             // The error slot is fixed to String regardless of the bound
             // variable, or is the nominal the signature names
             // (`Result[T, HttpResponse]`, GenType::ResultNom). Any other
