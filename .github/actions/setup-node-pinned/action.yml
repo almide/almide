@@ -9,7 +9,7 @@ description: >-
 
 inputs:
   node-version:
-    description: "The exact Node.js version (e.g. 20.20.2); its linux-x64 archive must be in .github/pinned-downloads.txt"
+    description: "The exact Node.js version (e.g. 24.22.3); its linux-x64 archive must be in .github/pinned-downloads.txt"
     required: true
 
 runs:
