@@ -194,6 +194,26 @@ Per take site, from the instruction sequences above:
 
 So against the doubled body this ADR saves the whole body copy (−859 B on the measured 21 rows, more on bigger bodies) at the same instruction count; against no fast path it adds ≈ 40 B per site and two instructions per element on a shared source, and saves an inc, an allocation, a copy and a free per element on a unique one. The witness costs no shipped bytes (it is bundle metadata). Exact numbers are step 0 of the plan.
 
+### D11. The kernel refuses `r` (#4753)
+
+Owner decision 9 found a hole, verified 2026-11-15. The extracted checker, `almide-verify` and the Rocq kernel all accepted `iamr`, `ar`, `amar`, `i(am)r`, `isr` and `iiamdr`. Each of these reuses in place a block that another holder still holds. No producer emits `r` on an ownership line, so the hole was unreachable; it is #4753.
+
+**Why the existing theorem did not catch it.** `check_reuse_sound` proves what it states: on an accepted line, every `Reuse` acts where *that line's* count is 1. The gap was in what "count" meant. Brick 1 modelled one stream per object, and `RuntimeModel.mrun_tracks_exec` binds a line to the block's rc cell starting from 0. Both make the line's count the block's count, which is the same as assuming the line is the block's only holder. That assumption stopped holding once lines became per-holder accounts:
+
+- a move-out (`m`) hands a credit to a container that the line no longer counts;
+- a borrowed parameter's line starts at 0 with the caller's credit uncounted;
+- a share-out (`s`) puts a credit on the result's line.
+
+The theorem stayed true, but its reading as "uniqueness" did not. Two places already worked around it without saying so: `share_handover_sound` required `no_reuse_ops`, and the helper-signature and native-call checkers require reuse-free lines (`CallModes.reuse_body_not_shift_safe`). `check_xc` did not.
+
+**The new rule.** `r` is refused on every ownership line: `exec` faults on `Reuse`. The kernel has no other way to make a uniqueness claim from a line count. Uniqueness comes only from this ADR's split:
+
+- the `u` Probe's guard: the frame holds a credit;
+- the shipped runtime test: `rc X = 1`;
+- `UniqueTake.probe_exclusive`, which shows that these two together leave no other holder.
+
+The rule "a `u` must precede an `r` on the same path" would need path state in `exec`. Refusing `r` needs none, and nothing emits `r`. The six rows above, and the former control `ir`, are must-reject Examples in the kernel and rows in `almide-verify`'s test.
+
 ### D10. Implementation order
 
 Each step lands green before the next; **[K]** touches the Coq kernel.
@@ -246,7 +266,7 @@ One decision per question, each with a recommendation. **Answered 2026-11-15: �
 6. **`UniqueTake.v` (the model, T1–T6) lands with the kernel letters, before the fast path returns; a `WasmRcDec.v`-style proof of the probe's instruction tree may follow.** Recommendation: ○. The model is what makes `u` mean exclusivity; the tree proof only shrinks R1's trust.
 7. **Certificate v8 bumps the bundle format version, so an older `almide-verify` refuses instead of skipping `u`.** Recommendation: ○.
 8. **The fast path returns after v0.70.0 (not in it), behind the gates of the implementation plan.** Recommendation: ○. The revert is the v0.70.0 answer.
-9. **Open a separate issue on the kernel's existing `Reuse` (`r`) rule:** it takes "frame count = 1" as uniqueness, and `check_xc "iamr"` accepts (alloc, alias, move the alias out, reuse) although the moved credit is a second holder. This ADR does not lean on it (it uses the runtime count). Recommendation: ○ — file it, and check whether any producer still emits `r` on an ownership line.
+9. **Open a separate issue on the kernel's existing `Reuse` (`r`) rule:** it takes "frame count = 1" as uniqueness, and `check_xc "iamr"` accepts (alloc, alias, move the alias out, reuse) although the moved credit is a second holder. This ADR does not lean on it (it uses the runtime count). Recommendation: ○ — file it, and check whether any producer still emits `r` on an ownership line. **Done: #4753; closed by D11.**
 
 ## References
 
