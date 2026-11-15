@@ -22,9 +22,15 @@
 use crate::{CallArg, IntOp, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The `LoadHandle` destinations of `func` that may render as a borrow.
+/// The `LoadHandle` destinations of `func` that may render as a borrow (built
+/// once per rendering function; five passes ask for it).
 pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
+    (*crate::mir_liveness::per_function(func, "borrow_reads", || borrow_reads_of(func))).clone()
+}
+
+fn borrow_reads_of(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
+    let readers = readers_of(func, &root);
     let mut out = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
@@ -32,7 +38,7 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
         if func.ret == Some(*d) {
             continue;
         }
-        let Some(last) = last_borrowing_use(func, i, *d, &root) else { continue };
+        let Some(last) = last_borrowing_use_at(func, i, *d, &root, &readers) else { continue };
         if block_untouched(func, i, through_enclosing_loops(func, i, last), base, &root) {
             out.insert(*d);
         }
@@ -96,6 +102,13 @@ fn index_values(defs: &BTreeMap<ValueId, &Op>, addr: ValueId, root: &BTreeMap<Va
 pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
     let reads = borrow_reads(func);
+    // Built once: the values an op rebinds or gives up, and the ops reading
+    // each value (or an address rooted at it), so no dup rescans the body.
+    let moved: BTreeSet<ValueId> = func.ops.iter().filter_map(|o| match o {
+        Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } => Some(*x),
+        _ => None,
+    }).collect();
+    let readers = readers_of(func, &root);
     let mut out = BTreeSet::new();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
@@ -103,11 +116,8 @@ pub(crate) fn ref_dups(func: &MirFunction) -> BTreeSet<ValueId> {
         let (last, dups) = borrow_span(func, i, *d);
         // Never rebound, returned, or handed over (a call-site move, a
         // uniqueness claim): the copy exists to be owned there.
-        let fixed = |v: &ValueId| {
-            func.ret != Some(*v)
-                && !func.ops.iter().any(|o| matches!(o, Op::SetLocal { local: x, .. } | Op::Consume { v: x } | Op::MakeUnique { v: x } if x == v))
-        };
-        let borrowing = |(j, v): &(usize, ValueId)| fixed(v) && last_borrowing_use(func, *j, *v, &root).is_some();
+        let fixed = |v: &ValueId| func.ret != Some(*v) && !moved.contains(v);
+        let borrowing = |(j, v): &(usize, ValueId)| fixed(v) && last_borrowing_use_at(func, *j, *v, &root, &readers).is_some();
         if dups.iter().all(borrowing) && block_untouched(func, i, last, base, &root) {
             out.extend(dups.iter().map(|(_, v)| *v));
         }
@@ -187,6 +197,12 @@ pub(crate) fn ref_dup(v: ValueId) -> bool {
     REF_DUPS.with(|m| m.borrow().contains(&v))
 }
 
+/// [`roots`], built once per function while it renders and shared by the
+/// ops that read it (rebuilding it per op was quadratic in the function).
+pub(crate) fn roots_shared(func: &MirFunction) -> std::rc::Rc<BTreeMap<ValueId, ValueId>> {
+    crate::mir_liveness::per_function(func, "roots", || roots(func))
+}
+
 /// Every address value's root block (`prim.handle(r)` plus offsets).
 pub(crate) fn roots(func: &MirFunction) -> BTreeMap<ValueId, ValueId> {
     let mut root: BTreeMap<ValueId, ValueId> = BTreeMap::new();
@@ -225,6 +241,42 @@ fn call_lends(name: &str, args: &[CallArg], d: ValueId) -> bool {
 
 /// The index of the last op after `at` that uses `d`, when every such use only
 /// borrows it; `None` when some use needs an owned value.
+/// For each value, the ops (in order) that read it or an address rooted at it.
+fn readers_of(func: &MirFunction, root: &BTreeMap<ValueId, ValueId>) -> BTreeMap<ValueId, Vec<usize>> {
+    let mut out: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
+    let mut reads = Vec::new();
+    for (j, op) in func.ops.iter().enumerate() {
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        for v in reads.iter().copied().chain(reads.iter().filter_map(|v| root.get(v).copied())) {
+            let at = out.entry(v).or_default();
+            if at.last() != Some(&j) {
+                at.push(j);
+            }
+        }
+    }
+    out
+}
+
+/// [`last_borrowing_use`] over the precomputed [`readers_of`]: the same ops
+/// are visited in the same order, the ones that name neither `d` nor an
+/// address rooted at it skipped without being read again.
+fn last_borrowing_use_at(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, readers: &BTreeMap<ValueId, Vec<usize>>) -> Option<usize> {
+    let mut last = at;
+    let mut reads = Vec::new();
+    for &j in readers.get(&d).map_or(&[][..], |v| v.as_slice()).iter().filter(|&&j| j > at) {
+        let op = &func.ops[j];
+        reads.clear();
+        crate::mir_ops::op_reads(op, &mut reads);
+        let names_root = reads.iter().any(|v| root.get(v) == Some(&d));
+        if !(crate::render_native_move::bookkeeping(op) || borrowing_op(func, (j, op), d, root, names_root)) {
+            return None;
+        }
+        last = j;
+    }
+    Some(last)
+}
+
 pub(crate) fn last_borrowing_use(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>) -> Option<usize> {
     let mut last = at;
     let mut reads = Vec::new();
@@ -377,6 +429,7 @@ mod mutation_tests {
 pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
     let reads = borrow_reads(func);
+    let readers = readers_of(func, &root);
     let rebound: BTreeSet<ValueId> = func
         .ops
         .iter()
@@ -400,7 +453,7 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
             (crate::native_floor::FloorParam::Value(_), a) => matches!(a, CallArg::Handle(v) if borrowed_param(*v)),
             _ => true,
         });
-        if sources_borrowed && only_borrowed_reads(func, i, *d, &root, &reads) {
+        if sources_borrowed && only_borrowed_reads(func, i, *d, &root, &reads, &readers) {
             out.insert(*d);
         }
     }
@@ -409,15 +462,13 @@ pub(crate) fn borrowed_results(func: &MirFunction) -> BTreeSet<ValueId> {
 
 /// Every use of the carrier `d` after `ops[at]` reads its words or borrows a
 /// payload ([`borrowed_results`]).
-fn only_borrowed_reads(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, reads: &BTreeSet<ValueId>) -> bool {
+fn only_borrowed_reads(func: &MirFunction, at: usize, d: ValueId, root: &BTreeMap<ValueId, ValueId>, reads: &BTreeSet<ValueId>, readers: &BTreeMap<ValueId, Vec<usize>>) -> bool {
     let mut vs = Vec::new();
-    for op in &func.ops[at + 1..] {
+    // Only the ops naming `d` or an address rooted at it ([`readers_of`]), in order.
+    for op in readers.get(&d).map_or(&[][..], |v| v.as_slice()).iter().filter(|&&j| j > at).map(|&j| &func.ops[j]) {
         vs.clear();
         crate::mir_ops::op_reads(op, &mut vs);
         let names_root = vs.iter().any(|v| root.get(v) == Some(&d));
-        if !vs.contains(&d) && !names_root {
-            continue;
-        }
         let ok = crate::render_native_move::bookkeeping(op)
             || match op {
                 Op::Prim { kind: PrimKind::Handle, args, .. } => args.as_slice() == [d],

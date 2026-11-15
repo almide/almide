@@ -1,0 +1,39 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4624): a generic
+// record and a generic variant instantiated at a record that holds a function
+// field, and a secret that holds one. No perf program reached the render of a
+// closure-bearing record inside a generic aggregate.
+import secret
+
+type Hook = { run: (Int) -> Int, name: String }
+
+type Boxed[A] = { item: A, count: Int }
+
+type Slot[A] =
+  | Full(A)
+  | Empty
+
+fn hook(k: Int) -> Hook = { run: (x) => x + k, name: "add" }
+
+fn boxed(k: Int) -> Int = {
+  let b: Boxed[Hook] = { item: hook(k), count: 1 }
+  let f = b.item.run
+  f(40) + b.count + string.len(b.item.name)
+}
+
+fn slotted(k: Int) -> Int = {
+  let s: Slot[Hook] = Full(hook(k))
+  match s {
+    Full(h) => h.run(1),
+    Empty => 0,
+  }
+}
+
+fn hidden(k: Int) -> Int = {
+  let s = secret.new(hook(k))
+  secret.reveal(s).run(1)
+}
+
+fn main() -> Unit = {
+  let total = list.range(0, 20000) |> list.fold(0, (acc, k) => acc + boxed(k) + slotted(k) + hidden(k))
+  println(int.to_string(total))
+}

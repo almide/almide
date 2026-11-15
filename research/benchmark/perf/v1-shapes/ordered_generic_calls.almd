@@ -1,0 +1,18 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4624): generic functions over the ordered protocol at several element types, from spec/stdlib/ordered_generic_test.almd,
+// each case run once from main. No perf program reached these render paths.
+// list.binary_search (R-list-15) and testing.assert_gt / assert_lt
+// (R-testing-02) over element types other than Int.
+import testing
+
+effect fn case_1() -> Unit ={
+  assert_eq(list.binary_search(["a", "c", "e"], "c"), some(1))
+  assert_eq(list.binary_search([1.5, 2.5], 3.0), none)
+  testing.assert_gt("b", "a")
+  testing.assert_lt(1.5, 2.5)
+}
+
+
+effect fn main() -> Unit = {
+  case_1()!
+  println("ok")
+}

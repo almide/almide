@@ -86,16 +86,16 @@ fn main() -> Unit = {
 }
 "#;
 
+/// Each call gets its own directory: two tests emit in parallel, and with one
+/// shared directory one test's cleanup removed the other's source mid-emit.
 fn emitted() -> String {
-    let dir = std::env::temp_dir().join(format!("almide-record-update-move-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let src = dir.join("prog.almd");
+    let dir = tempfile::Builder::new().prefix("almide-record-update-move-").tempdir().unwrap();
+    let src = dir.path().join("prog.almd");
     std::fs::write(&src, PROGRAM).unwrap();
     let output = Command::new(almide_bin())
         .args([src.to_str().unwrap(), "--target", "rust"])
         .output()
         .expect("failed to spawn almide");
-    std::fs::remove_dir_all(&dir).ok();
     assert!(output.status.success(), "--target rust emit failed:\n{}", String::from_utf8_lossy(&output.stderr));
     String::from_utf8_lossy(&output.stdout).to_string()
 }

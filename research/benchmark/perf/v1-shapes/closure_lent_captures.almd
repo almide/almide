@@ -1,0 +1,38 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf.sh, #4700): closures
+// that cannot outlive their frame, handed to program higher-order functions,
+// capturing a String, a List[Int], a List[String] and a record parameter.
+// The certified native render lends each parameter to the closure; it used to
+// copy it per closure built, which is what made a recursive fallible map run
+// slower than v0. `keep` copies the lent closure it is handed, which owns
+// every capture.
+type Env = { names: Map[String, Int], base: Int }
+
+fn each(xs: List[Int], f: (Int) -> String) -> List[String] = xs |> list.map((x) => f(x))
+
+fn sizes(xs: List[Int], f: (Int) -> Int) -> List[Int] = xs |> list.map((x) => f(x))
+
+fn tags(p: String, xs: List[Int]) -> List[String] = each(xs, (x) => "${p}${x}")
+
+fn shifted(base: List[Int], xs: List[Int]) -> List[Int] = sizes(xs, (x) => list.len(base) + x)
+
+fn named(names: List[String], xs: List[Int]) -> List[String] = each(xs, (x) => list.get(names, x % 3) ?? "?")
+
+fn scored(env: Env, xs: List[Int]) -> List[Int] = sizes(xs, (x) => env.base + (map.get(env.names, "a") ?? 0) + x)
+
+fn keep(f: (Int) -> String) -> List[(Int) -> String] = {
+  let first = f(0)
+  if first == "" then [] else [f]
+}
+
+fn kept(p: String) -> Int = list.len(keep((x) => "${p}${x}"))
+
+fn round(i: Int) -> Int = {
+  let xs = [i, i + 1, i + 2, i + 3]
+  let env = Env { names: ["a": 1, "b": 2], base: i }
+  list.len(tags("t", xs)) + list.sum(shifted(xs, xs)) + list.len(named(["a", "b", "c"], xs)) + list.sum(scored(env, xs)) + kept("k")
+}
+
+fn main() -> Unit = {
+  let total = list.range(0, 20000) |> list.fold(0, (acc, i) => acc + round(i))
+  println(int.to_string(total))
+}

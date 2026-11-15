@@ -18,7 +18,7 @@ fn host_callback_route(
     let quiet = hof.params.iter().zip(args).all(|((d, _), a)| {
         if !matches!(d, DTy::Fn(..)) { return true; }
         let (CallArg::Handle(v) | CallArg::Scalar(v)) = a else { return false };
-        origins.get(v).is_some_and(|(name, _)| callback_thread_quiet(name, functions, &mut BTreeSet::new()))
+        origins.get(v).is_some_and(|(name, _)| callback_thread_quiet(name, &[], functions, &mut BTreeSet::new()))
     });
     if quiet { return Some(hof); }
     static ROUTES: OnceLock<Mutex<HashMap<String, Option<&'static Hof>>>> = OnceLock::new();
@@ -38,15 +38,81 @@ fn host_callback_route(
     })
 }
 
-fn callback_thread_quiet(name: &str, functions: &BTreeMap<&str, &MirFunction>, seen: &mut BTreeSet<String>) -> bool {
-    if !seen.insert(name.to_string()) { return true; }
+/// Whether `name`, entered with its params `known` (param k holds a closure
+/// block whose lambda this walk follows from where it was built), reaches no
+/// capability. Closures are accounted where they are built (`FuncRef`, as
+/// `certificate::reachable_caps` does), so a closure call is quiet when its
+/// block is one built here or a `known` param (#4741: the self-hosted
+/// `map.upsert` a fold step calls, handed the step's own lambda). A block of
+/// any other origin (a capture, a loaded slot, an unknown param) could be a
+/// closure built outside the walk, so it keeps the call off the threads.
+fn callback_thread_quiet(name: &str, known: &[bool], functions: &BTreeMap<&str, &MirFunction>, seen: &mut BTreeSet<(String, Vec<bool>)>) -> bool {
+    if !seen.insert((name.to_string(), known.to_vec())) { return true; }
     let Some(f) = functions.get(name) else { return false };
-    if !crate::certificate::cap_witness(f).used.is_empty() { return false; }
+    let local = closure_origins(f);
+    let followed = |v: &ValueId| local.contains_key(v)
+        || f.params.iter().zip(known).any(|(p, k)| *k && p.value == *v);
+    let mut direct = (*f).clone();
+    direct.ops.retain(|op| !matches!(op, Op::CallIndirect { .. }));
+    if !crate::certificate::cap_witness(&direct).used.is_empty() { return false; }
     f.ops.iter().all(|op| match op {
-        Op::CallIndirect { .. } | Op::CallImport { .. } => false,
-        Op::CallFn { name, .. } | Op::FuncRef { name, .. } => callback_thread_quiet(name, functions, seen),
+        Op::CallIndirect { args, .. } => matches!(args.first(), Some(CallArg::Handle(b)) if followed(b)),
+        Op::CallImport { .. } => false,
+        Op::CallFn { name, args, .. } => {
+            let passed: Vec<bool> = args.iter().map(|a| matches!(a, CallArg::Handle(v) | CallArg::Scalar(v) if followed(v))).collect();
+            if functions.contains_key(name.as_str()) { callback_thread_quiet(name, &passed, functions, seen) }
+            else { absent_callee_quiet(name, &passed) }
+        }
+        Op::FuncRef { name, .. } => callback_thread_quiet(name, &[], functions, seen),
         _ => true,
     })
+}
+
+/// A callee the render serves without a MIR body: a dotted stdlib call on the
+/// declared floor, or a linked body pruned for its runtime route. It is quiet
+/// when it is no host op and every function-typed param its declaration has
+/// receives a closure the walk follows (its lambda is checked where built).
+fn absent_callee_quiet(name: &str, passed: &[bool]) -> bool {
+    let call = if name.contains('.') { name.to_string() } else if pruned(name) { match registry_call(name) { Some(c) => c, None => return false } } else { return false };
+    if crate::host_ops::host_op_for_call_name(&call).is_some() { return false; }
+    declared_fn_params(&call).is_some_and(|fns| fns.len() == passed.len()
+        && fns.iter().zip(passed).all(|(is_fn, followed)| !is_fn || *followed))
+}
+
+/// For each param of the stdlib declaration `call` serves (or `@specializes`),
+/// whether its type may hold a function; `None` when no single declaration
+/// is found.
+fn declared_fn_params(call: &str) -> Option<Vec<bool>> {
+    let target = crate::native_floor::specializes(call).unwrap_or_else(|| call.to_string());
+    let (module, func) = target.split_once('.')?;
+    let program = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached)?;
+    let mut decls = program.decls.iter().filter_map(|d| match d {
+        Decl::Fn { name, params, .. } if name.as_str() == func => Some(params),
+        _ => None,
+    });
+    let params = decls.next()?;
+    if decls.next().is_some() { return None; }
+    let declared: BTreeSet<String> = program.decls.iter().filter_map(|d| match d {
+        Decl::Type { name, .. } => Some(name.to_string()),
+        _ => None,
+    }).collect();
+    Some(params.iter().map(|p| may_hold_fn(&p.ty, &declared)).collect())
+}
+
+/// A function type anywhere in `t`; a type the module declares itself (an
+/// alias may name a function type) counts as one.
+fn may_hold_fn(t: &TypeExpr, declared: &BTreeSet<String>) -> bool {
+    let any = |ts: &[TypeExpr]| ts.iter().any(|t| may_hold_fn(t, declared));
+    match t {
+        TypeExpr::Fn { .. } => true,
+        TypeExpr::Simple { name } => declared.contains(name.as_str()),
+        TypeExpr::Generic { name, args } => declared.contains(name.as_str()) || any(args),
+        TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => fields.iter().any(|f| may_hold_fn(&f.ty, declared)),
+        TypeExpr::Tuple { elements } => any(elements),
+        TypeExpr::Union { members } => any(members),
+        TypeExpr::Variant { .. } => true,
+        TypeExpr::ConstLit { .. } => false,
+    }
 }
 
 fn parallel_hof() -> Option<&'static Hof> {
@@ -205,10 +271,61 @@ mod parallel_abi_tests {
             Op::CallFn { dst: None, name: "printing".into(), args: vec![], result: None },
         ], ..Default::default() };
         let functions = BTreeMap::from([("pure", &pure), ("printing", &printing), ("relay", &relay)]);
-        assert!(super::callback_thread_quiet("pure", &functions, &mut BTreeSet::new()));
+        assert!(super::callback_thread_quiet("pure", &[], &functions, &mut BTreeSet::new()));
         for name in ["printing", "relay", "unknown"] {
-            assert!(!super::callback_thread_quiet(name, &functions, &mut BTreeSet::new()));
+            assert!(!super::callback_thread_quiet(name, &[], &functions, &mut BTreeSet::new()));
         }
+    }
+
+    /// #4741: a chunked line fold whose step reaches no capability folds on
+    /// the threaded runtime body, as v0.69.0 did, through the stdlib floor
+    /// calls (`string.len`, `string.split_once`) and the self-hosted
+    /// `map.upsert` the step hands its own lambda. A step that prints, or that
+    /// calls a closure built outside the walk, keeps the Send-free twin.
+    #[test]
+    fn a_quiet_chunked_fold_step_runs_on_the_threaded_runtime() {
+        let render = |step: &str, init: &str, acc: &str| crate::pipeline::try_render_rust_source(&format!(r#"
+import fs
+type Stats = {{ min: Int, count: Int }}
+{step}
+effect fn main() -> Unit = {{
+  let parts: List[{acc}] = fs.fold_lines_chunked("in.txt", 12, {init}, step)!
+  println(int.to_string(list.len(parts)))
+}}
+"#)).expect("the chunked fold renders");
+        let threaded = |rust: &str| (rust.contains("almide_rt_fs_fold_lines_chunked(") || rust.contains("almide_rt_fs_fold_lines_chunked_str_lent("))
+            && !rust.contains("almide_rt_fs_fold_lines_chunked_seq");
+        let sum = render("fn step(acc: Int, line: String) -> Int = acc + string.len(line)", "0", "Int");
+        assert!(threaded(&sum), "an Int step that only reads its line is threaded");
+        assert!(sum.contains("almide_rt_fs_fold_lines_chunked_str_lent("), "a step that only reads its line takes it lent, not copied per line");
+        let stats = render(r#"fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] = match string.split_once(line, ";") {
+  some((k, v)) => {
+    let t = string.len(v)
+    map.upsert(acc, k, Stats { min: t, count: 1 }, (s) => Stats { min: if t < s.min then t else s.min, count: s.count + 1 })
+  },
+  none => acc,
+}"#, "map.new()", "Map[String, Stats]");
+        assert!(threaded(&stats), "the aggregation step (split_once + upsert with its own lambda) is threaded");
+        assert!(stats.contains("almide_rt_map_upsert_str_static("), "the found key is borrowed, not copied per line");
+        assert!(stats.contains("almide_rt_fs_fold_lines_chunked_str_lent("), "the aggregation step reads its line lent");
+        let printing = render("fn step(acc: Int, line: String) -> Int = { println(line); acc + 1 }", "0", "Int");
+        assert!(printing.contains("almide_rt_fs_fold_lines_chunked_seq"), "a printing step keeps the chunk order of its output");
+    }
+
+    /// #4741: every line fold that copies the line it hands its step derives
+    /// a lent-string twin from its own text.
+    #[test]
+    fn line_folds_pair_their_lent_string_twins() {
+        for symbol in ["almide_rt_fs_fold_lines", "almide_rt_fs_fold_lines_chunked", "almide_rt_fs_fold_lines_chunked_seq", "almide_rt_fs_fold_lines_range"] {
+            let (twin, text, items) = crate::native_floor::str_lent_twin(symbol).unwrap_or_else(|| panic!("{symbol} derives a lent-string twin"));
+            assert_eq!(twin, format!("{symbol}_str_lent"));
+            assert!(text.contains(&format!("fn {twin}")) && text.contains("Fn(A, &str)") && !text.contains("AlmideString::from("), "{symbol}: {text}");
+            assert!(items.iter().any(|i| i.contains(&format!("fn {symbol}"))), "{symbol}: the twin reaches the body's own items");
+        }
+        // A body that copies no string it hands its callback has no twin.
+        assert!(crate::native_floor::str_lent_twin("almide_rt_list_map").is_none());
+        let (sig, n) = crate::native_floor::callback_strs_lent("<A>(f:std::rc::Rc<dynFn(A,AlmideString)->A>)->Result<A,AlmideString>");
+        assert_eq!((sig.as_str(), n), ("<A>(f:std::rc::Rc<dynFn(A,&str)->A>)->Result<A,AlmideString>", 1));
     }
 
     #[test]

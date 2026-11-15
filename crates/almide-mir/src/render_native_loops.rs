@@ -47,6 +47,8 @@ pub(crate) fn iterator_loops(out: String) -> String {
             lines = new;
         }
     }
+    // A list built only to be walked here is walked as its producer's stream.
+    let lines = crate::render_native_streams::streamed_sources(lines);
     let mut s = lines.join("\n");
     if out.ends_with('\n') {
         s.push('\n');

@@ -25,6 +25,18 @@ fn has_body(name: &str) -> bool {
     BODIES.with(|d| d.borrow().contains(name))
 }
 
+/// Does the program define `name` (a call to it reaches a body here)?
+pub(crate) fn has_program_body(name: &str) -> bool {
+    has_body(name)
+}
+
+/// A copy of a param that only lends it: a borrow-only read's copy, or the
+/// co-own of a closure that cannot escape (native_capture_borrow), which
+/// borrows the param instead.
+fn lent_copy(func: &MirFunction, at: usize, root: &BTreeMap<ValueId, ValueId>) -> bool {
+    crate::render_native_borrow_read::lent_param_copy(func, at, root).is_some() || crate::native_capture_borrow::lent_to_closure(func, at)
+}
+
 fn native_result(name: &str, k: usize) -> bool {
     NATIVE_RESULTS.with(|d| d.borrow().contains(&(name.to_string(), k)))
 }
@@ -307,4 +319,40 @@ fn own_unnested(
 ) -> Option<MirFunction> {
     let flat = crate::native_tail_unnest::unnest(func).filter(|g| no_new_violations(func, g))?;
     own_params(&flat, takes, hands, owned)
+}
+
+/// One judged takeover: the body it started from, the takeovers made, and
+/// the verdict ([`judged`]).
+struct Judged {
+    before: MirFunction,
+    movable: Vec<(usize, usize)>,
+    consumed: Vec<(usize, usize)>,
+    verdict: (bool, bool),
+}
+
+thread_local! {
+    /// The takeovers judged in this [`rewrite`]: every solve round rebuilds
+    /// the same takeover of an unchanged body, judged once.
+    static JUDGED: std::cell::RefCell<Vec<Judged>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// (does the mirror accept `after`, and — when it does — does `after` newly
+/// poison the certificate `func`'s body had). `after` is `func` with the
+/// `movable` and `consumed` takeovers made, so the verdict is a function of
+/// those three: a solve round that rebuilds the same takeover of the same
+/// body reads the verdict judged before.
+fn judged(func: &MirFunction, after: &MirFunction, movable: &[(usize, usize)], consumed: &[(usize, usize)]) -> (bool, bool) {
+    let same = |j: &Judged| j.movable == movable && j.consumed == consumed && j.before == *func;
+    if let Some(verdict) = JUDGED.with(|j| j.borrow().iter().find(|j| same(j)).map(|j| j.verdict)) {
+        return verdict;
+    }
+    let verified = crate::verify_ownership(after).is_ok();
+    let verdict = (verified, verified && newly_poisoned(func, after));
+    JUDGED.with(|j| j.borrow_mut().push(Judged {
+        before: func.clone(),
+        movable: movable.to_vec(),
+        consumed: consumed.to_vec(),
+        verdict,
+    }));
+    verdict
 }
