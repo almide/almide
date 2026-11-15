@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "701"
+# uninspected_ceiling = "700"
 
 [[fn]]
 name = "args.option"
@@ -10610,8 +10610,14 @@ diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 name = "bytes.append_bytes"
 sig = "(b: Bytes, src: Bytes) -> Unit"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:66e8de65110a49ba"
+stamp = "almide 0.70.0 (dev, 54ea90c8f) at reinspect-1115 54ea90c8f25b7989bffebeda32ba68a481106583 = ddb96f5d3 + develop a4444be5b (measured on the merged tree; the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 ce0181b1eeaca42e95c606f4d0c489b9ec42adf9 (the generator with the 237 catalogued fns, per-element HOF callbacks, the #4758 denylist, the group_by String instantiation, the abort-as-trap stock rule and tuple-in-callback observation, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 160 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 2.155e7/4.206e7/8.305e7/1.650e8/3.288e8 fit n (rms 0.1%) moved 5.317e6/1.044e7/2.068e7/4.116e7/8.212e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.030s wasm k=256..512 2.139e7/4.187e7/8.283e7/1.648e8/3.286e8 fit n (rms 0.0%) moved 5.316e6/1.044e7/2.068e7/4.116e7/8.212e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.025/0.051s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
 name = "bytes.append_f16_be"
