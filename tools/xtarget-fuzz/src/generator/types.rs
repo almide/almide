@@ -220,7 +220,14 @@ impl GenType {
         let x = format!("o{depth}");
         let inner = |e: &GenType| -> Option<String> {
             let (pre, expr) = e.observe(&x, depth + 1)?;
-            pre.is_empty().then(|| format!("(({x}) => {expr})"))
+            if pre.is_empty() {
+                return Some(format!("(({x}) => {expr})"));
+            }
+            // A callback has no room for the `let` a tuple is destructured
+            // with: read its fields instead (value.as_object's
+            // `List[(String, Value)]` was "not printable" for want of this).
+            let expr = e.observe_fields(&x, depth + 1)?;
+            Some(format!("(({x}) => {expr})"))
         };
         // An observation that calls an effect closure (a handler) cannot sit
         // in a plain callback: an Option or Result is taken apart with a
@@ -303,6 +310,35 @@ impl GenType {
                 ))
             }
             _ => None,
+        }
+    }
+
+    /// [`observe`](Self::observe) as one expression, a tuple read through its
+    /// fields (`v.0`, `v.1`) rather than a `let` — for a callback body, which
+    /// has no room for the `let`. None where an element still needs one.
+    pub fn observe_fields(&self, v: &str, depth: usize) -> Option<String> {
+        let one = |e: &GenType, at: String| -> Option<String> {
+            match e.observe(&at, depth + 1)? {
+                (pre, expr) if pre.is_empty() => Some(expr),
+                _ => e.observe_fields(&at, depth + 1),
+            }
+        };
+        match self {
+            GenType::Tuple2(a, b) => Some(format!(
+                "({}, {})",
+                one(a, format!("{v}.0"))?,
+                one(b, format!("{v}.1"))?
+            )),
+            GenType::Tuple3(a, b, c) => Some(format!(
+                "({}, {}, {})",
+                one(a, format!("{v}.0"))?,
+                one(b, format!("{v}.1"))?,
+                one(c, format!("{v}.2"))?
+            )),
+            _ => match self.observe(v, depth)? {
+                (pre, expr) if pre.is_empty() => Some(expr),
+                _ => None,
+            },
         }
     }
 
@@ -454,6 +490,21 @@ pub fn render_print(name: &str, ty: &GenType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tuple_inside_a_callback_is_observed_through_its_fields() {
+        // value.as_object: Result[List[(String, Value)], String].
+        let t = GenType::Result(Box::new(GenType::List(Box::new(GenType::Tuple2(
+            Box::new(GenType::String),
+            Box::new(GenType::Value),
+        )))));
+        let (pre, expr) = t.observe("v", 0).expect("observable");
+        assert!(pre.is_empty(), "{pre}");
+        assert!(expr.contains(".0") && expr.contains("json.stringify(o1.1)"), "{expr}");
+        // A top-level tuple keeps its `let` form.
+        let top = GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::Value));
+        assert!(!top.observe("v", 0).expect("observable").0.is_empty());
+    }
 
     /// #3636: the observed image of a non-printable value is a call, and a
     /// call interpolated inside `${…}` whose type is a Result is E041
