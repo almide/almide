@@ -10234,7 +10234,7 @@ fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 /// Body text; a fetched body is decoded as lossy UTF-8.
 fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 
-/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+/// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
 /// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
@@ -10246,7 +10246,7 @@ fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self
 /// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
+/// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10326,7 +10326,11 @@ fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
-fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+
+
+@intrinsic("almide_http_req_body_bytes")
+@borrow_ref(m)
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = _
 
 @intrinsic("almide_http_req_set_header")
 @consume(m)
@@ -10336,10 +10340,9 @@ fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> Htt
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+@intrinsic("almide_http_req_set_body_bytes")
+@consume(m)
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = _
 
 
 fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
@@ -10402,13 +10405,15 @@ effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
 )
 
+
+
 @intrinsic("almide_http_request_response")
 @borrow_ref(flat)
-effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
+effect fn __request_response(method: String, url: String, body: Bytes, flat: List[String]) -> Result[HttpResponse, String] = _
 
 
 
@@ -10434,7 +10439,7 @@ type HttpLimits = { total_ms: Int, idle_ms: Int }
 effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
@@ -10442,7 +10447,7 @@ effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String
 
 @intrinsic("almide_rt_http___call_start")
 @borrow_ref(flat)
-effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+effect fn __call_start(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
@@ -10855,15 +10860,30 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
-  flat,
-  2 * (list.len(flat) / 2),
-) |> list.map((c) => __hc_cell(c)) |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
-  (acc, cell) => acc + cell,
+
+
+
+fn __hc_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
+
+
+
+fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string(
+  "${__hc_cell(method)}${__hc_walk_len(body)}\n",
+) + body + bytes.from_string(
+  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
+    "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+    (acc, cell) => acc + cell,
+  ),
 )
 
-effect fn __http_call_open(url: String, frame: String) -> Result[HttpCall, String] = _
+effect fn __http_call_open(url: String, frame: Bytes) -> Result[HttpCall, String] = _
 
 
 
@@ -10883,7 +10903,7 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 
-effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
   __hc_frame(method, body, flat, total_ms, idle_ms),
 )
@@ -10955,7 +10975,27 @@ effect fn __request_impl(method: String, url: String, body: String, flat: List[S
   __http_frame(method, body, flat),
 )
 
-effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+
+
+
+
+
+effect fn __http_framed_response(url: String, frame: Bytes) -> Result[String, String] = _
+
+fn __http_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
+
+fn __http_byte_frame(method: String, body: Bytes, flat: List[String]) -> Bytes = bytes.from_string(
+  "${__http_cell(method)}${__http_walk_len(body)}\n",
+) + body + bytes.from_string(
+  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __http_cell(c)) |> list.join(""),
+)
 
 
 fn __http_take_cell(f: String) -> (String, String) = {
@@ -10972,8 +11012,8 @@ else {
 }
 
 @implements("http.__request_response")
-effect fn __request_response_impl(method: String, url: String, body: String, flat: List[String]) -> Result[List[String], String] = {
-  let f = __http_framed_response(url, __http_frame(method, body, flat))!
+effect fn __request_response_impl(method: String, url: String, body: Bytes, flat: List[String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_byte_frame(method, body, flat))!
   let c1 = string.index_of(f, "\n") ?? 0
   let after_code = string.drop(f, c1 + 1)
   let c2 = string.index_of(after_code, "\n") ?? 0
@@ -10986,7 +11026,7 @@ effect fn __request_response_impl(method: String, url: String, body: String, fla
 effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
   "GET",
   url,
-  "",
+  bytes.from_string(""),
   [],
 )
 "#;
@@ -11004,6 +11044,14 @@ pub const SRC_HTTP_REQUEST: &str = r#"
 
 
 
+
+
+
+
+
+
+
+import hex
 fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
@@ -11094,7 +11142,35 @@ fn http_req_set_header(req: List[String], key: String, value: String) -> List[St
   value,
 )
 
-fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(__hq_no_raw(req), 2, body)
+
+
+fn __hq_raw(req: List[String]) -> String? = if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
+else none
+
+fn __hq_no_raw(req: List[String]) -> List[String] = match __hq_raw(req) {
+  some(_) => list.take(req, list.len(req) - 1),
+  none => req,
+}
+
+
+
+@implements("http.__http_request_body_bytes")
+fn http_req_body_bytes(req: List[String]) -> Bytes = {
+  let text = bytes.from_string(list.get(req, 2) ?? "")
+  match __hq_raw(req) {
+    some(raw) => hex.decode(string.drop(raw, 1)) ?? text,
+    none => text,
+  }
+}
+
+
+
+@implements("http.__http_request_set_body_bytes")
+fn http_req_set_body_bytes(req: List[String], body: Bytes) -> List[String] = match bytes.to_string(body) {
+  ok(text) => list.set(__hq_no_raw(req), 2, text),
+  err(_) => list.set(__hq_no_raw(req), 2, bytes.to_string_lossy(body)) + ["/" + hex.encode(body)],
+}
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)

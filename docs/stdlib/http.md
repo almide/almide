@@ -483,8 +483,9 @@ Hello!
 The body as `Bytes`. For a response the client fetched (`get_response`,
 `send`, the `*_response` family) these are the bytes the server sent, byte
 for byte, so a body that is not UTF-8 (an image, audio) survives; `http.body`
-is their lossy UTF-8 decoding. For a message built in code they are the UTF-8
-bytes of `http.body(m)`.
+is their lossy UTF-8 decoding. For a request given its body with
+`http.set_body_bytes` they are those bytes exactly. For any other message
+built in code they are the UTF-8 bytes of `http.body(m)`.
 
 ```almd run
 import http
@@ -543,10 +544,12 @@ final
 
 ### `http.set_body_bytes(m, body: Bytes) -> M`
 
-Replace the body with `Bytes`. A message body is held as text today, so the
-bytes are decoded as lossy UTF-8: a byte sequence that is not UTF-8 becomes
-U+FFFD and does not survive. Use it for text you hold as `Bytes`; it is not a
-lossless binary upload.
+Replace the body with `Bytes`. A request keeps the bytes exactly:
+`http.body_bytes` answers them and `http.send` / `http.start` send them byte
+for byte, so it is a lossless binary upload; `http.body` is their lossy UTF-8
+decoding. A built response still holds its body as text (#4311), so on a
+response the bytes are decoded as lossy UTF-8 and its `Content-Type` becomes
+`application/octet-stream`.
 
 ```almd run
 import http
@@ -1198,7 +1201,7 @@ http.headers(m: M) -> List[(String, String)]
 // @since 0.6.0 or earlier
 http.body(m: M) -> String
 
-// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 
@@ -1210,7 +1213,7 @@ http.set_header(m: M, name: String, value: String) -> M
 // @since unreleased
 http.set_body(m: M, body: String) -> M
 
-// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
+// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
 // @since unreleased
 http.set_body_bytes(m: M, body: Bytes) -> M
 

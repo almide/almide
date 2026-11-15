@@ -643,10 +643,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.header_values(m: M, name: String) -> List[String]` — Every value of header name, any case, in wire order; [] if absent.
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
-- `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+- `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
 - `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
 - `http.set_body(m: M, body: String) -> M` — m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
-- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
 - `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
 - `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.

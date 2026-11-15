@@ -40,7 +40,27 @@ effect fn __request_impl(method: String, url: String, body: String, flat: List[S
   __http_frame(method, body, flat),
 )
 
-effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+// The response leaf's frame is BYTES (#4744): the body cell carries the
+// request's exact bytes, which no String may hold. Its length counts what the
+// shim's cell walk counts (wasi_p3_http.rs `http_frame_cell`): one per byte
+// that is not a UTF-8 continuation, plus one when the cell opens on a
+// continuation — `string.len` of a valid cell, so every other cell is as before.
+effect fn __http_framed_response(url: String, frame: Bytes) -> Result[String, String] = _
+
+fn __http_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
+
+fn __http_byte_frame(method: String, body: Bytes, flat: List[String]) -> Bytes = bytes.from_string(
+  "${__http_cell(method)}${__http_walk_len(body)}\n",
+) + body + bytes.from_string(
+  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __http_cell(c)) |> list.join(""),
+)
 
 // The next decimal-length cell of `f`: (payload, rest).
 fn __http_take_cell(f: String) -> (String, String) = {
@@ -57,8 +77,8 @@ else {
 }
 
 @implements("http.__request_response")
-effect fn __request_response_impl(method: String, url: String, body: String, flat: List[String]) -> Result[List[String], String] = {
-  let f = __http_framed_response(url, __http_frame(method, body, flat))!
+effect fn __request_response_impl(method: String, url: String, body: Bytes, flat: List[String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_byte_frame(method, body, flat))!
   let c1 = string.index_of(f, "\n") ?? 0
   let after_code = string.drop(f, c1 + 1)
   let c2 = string.index_of(after_code, "\n") ?? 0
@@ -71,6 +91,6 @@ effect fn __request_response_impl(method: String, url: String, body: String, fla
 effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
   "GET",
   url,
-  "",
+  bytes.from_string(""),
   [],
 )

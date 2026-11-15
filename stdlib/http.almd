@@ -129,7 +129,7 @@ fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 /// Body text; a fetched body is decoded as lossy UTF-8.
 fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 
-/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+/// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
 /// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
@@ -141,7 +141,7 @@ fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self
 /// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
+/// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 // The response's HttpMessage requirements.
@@ -221,7 +221,11 @@ fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
-fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+// A request's body is its bytes (#4744): what set_body_bytes was given goes
+// out exactly as given, beside the lossy text `body` answers.
+@intrinsic("almide_http_req_body_bytes")
+@borrow_ref(m)
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = _
 
 @intrinsic("almide_http_req_set_header")
 @consume(m)
@@ -231,10 +235,9 @@ fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> Htt
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+@intrinsic("almide_http_req_set_body_bytes")
+@consume(m)
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = _
 
 // A header list crosses to the runtime flat: [k1, v1, k2, v2, …].
 fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
@@ -297,13 +300,15 @@ effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
 )
 
+// The body crosses as bytes, so a set_body_bytes upload leaves exactly as
+// given (#4744).
 @intrinsic("almide_http_request_response")
 @borrow_ref(flat)
-effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
+effect fn __request_response(method: String, url: String, body: Bytes, flat: List[String]) -> Result[HttpResponse, String] = _
 
 // ── Call handle and per-call limits (#2631) ──
 //
@@ -329,7 +334,7 @@ type HttpLimits = { total_ms: Int, idle_ms: Int }
 effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
@@ -337,7 +342,7 @@ effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String
 
 @intrinsic("almide_rt_http___call_start")
 @borrow_ref(flat)
-effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+effect fn __call_start(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
