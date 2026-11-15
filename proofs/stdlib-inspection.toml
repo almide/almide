@@ -82,17 +82,20 @@ name = "args.option"
 sig = "effect (name: String) -> Option[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "args.positional"
 sig = "effect (options: List[String]) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "base64.decode"
 sig = "(s: String) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 [[fn]]
@@ -100,6 +103,7 @@ name = "base64.decode_url"
 sig = "(s: String) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "base64.encode"
@@ -134,90 +138,105 @@ name = "bytes.append_f32_be"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f32_le"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f64_be"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f64_le"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i16_be"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i16_le"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i32_be"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i32_le"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i64_be"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i64_le"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_u16_be"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_u16_le"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_u32_be"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_u32_le"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_u8"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "bytes.clear"
 sig = "(b: Bytes) -> Unit"
@@ -235,12 +254,14 @@ name = "bytes.contains"
 sig = "(b: Bytes, needle: Bytes) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.copy_from"
 sig = "(b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "bytes.copy_within"
 sig = "(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit"
@@ -271,34 +292,40 @@ name = "bytes.fill"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.from_list"
 sig = "(xs: List[Int]) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.from_string"
 sig = "(s: String) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.get"
 sig = "(b: Bytes, i: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "bytes.index_of"
 sig = "(b: Bytes, needle: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.insert"
 sig = "(b: Bytes, i: Int, x: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.is_empty"
 sig = "(b: Bytes) -> Bool"
@@ -330,28 +357,33 @@ name = "bytes.len"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.new"
 sig = "() -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.push"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "bytes.remove_at"
 sig = "(b: Bytes, i: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.repeat"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.reverse"
 sig = "(b: Bytes) -> Bytes"
@@ -372,6 +404,7 @@ name = "bytes.set"
 sig = "(b: Bytes, i: Int, x: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "bytes.skip"
 sig = "(b: Bytes, pos: Int, n: Int) -> Int"
@@ -389,11 +422,13 @@ name = "bytes.slice"
 sig = "(b: Bytes, start: Int, end: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.split"
 sig = "(b: Bytes, sep: Bytes) -> List[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "bytes.starts_with"
@@ -412,18 +447,21 @@ name = "bytes.to_list"
 sig = "(b: Bytes) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.to_string"
 sig = "(b: Bytes) -> Result[String, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.to_string_lossy"
 sig = "(b: Bytes) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.xor"
 sig = "(a: Bytes, b: Bytes) -> Bytes"
@@ -599,6 +637,7 @@ name = "datetime.from_parts"
 sig = "(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "datetime.hour"
 sig = "(ts: Int) -> Int"
@@ -658,11 +697,13 @@ name = "datetime.now"
 sig = "effect () -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "datetime.parse_iso"
 sig = "(s: String) -> Result[Int, String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "datetime.second"
@@ -801,6 +842,7 @@ name = "env.args"
 sig = "effect () -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "env.cwd"
 sig = "effect () -> String ! String"
@@ -820,57 +862,67 @@ name = "env.get"
 sig = "effect (name: String) -> Option[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "env.os"
 sig = "() -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "env.set"
 sig = "effect (name: String, value: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "env.sleep_ms"
 sig = "effect (ms: Int) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.abs"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.ceil"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.clamp"
 sig = "(x: Float, lo: Float, hi: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.floor"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.is_infinite"
 sig = "(x: Float) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.is_nan"
 sig = "(x: Float) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.max"
 sig = "(a: Float, b: Float) -> Float"
@@ -903,6 +955,7 @@ name = "float.parse"
 sig = "(s: String) -> Result[Float, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 
@@ -911,11 +964,13 @@ name = "float.round"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.sign"
 sig = "(n: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.to_bits"
 sig = "(f: Float) -> Int"
@@ -935,11 +990,13 @@ name = "float.to_fixed"
 sig = "(x: Float, decimals: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float.to_string"
 sig = "(x: Float) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "float32.to_string"
 sig = "(x: Float32) -> String"
@@ -957,104 +1014,122 @@ name = "float64.to_string"
 sig = "(x: Float64) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "fs.copy"
 sig = "effect (src: String, dst: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.create_temp_dir"
 sig = "effect (prefix: String) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.create_temp_file"
 sig = "effect (prefix: String) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.exists"
 sig = "effect (path: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "fs.fold_lines"
 sig = "effect (path: String, init: A, f: (A, String) -> A) -> A ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.fold_lines_chunked"
 sig = "effect (path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.fold_lines_range"
 sig = "effect (path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.for_each_line"
 sig = "effect (path: String, f: (String) -> Unit) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "fs.glob"
 sig = "effect (pattern: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "fs.is_dir"
 sig = "effect (path: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.is_file"
 sig = "effect (path: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.is_symlink"
 sig = "effect (path: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "fs.list_dir"
 sig = "effect (path: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "fs.mkdir_p"
 sig = "effect (path: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.read_bytes"
 sig = "effect (path: String) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.read_bytes_if_exists"
 sig = "effect (path: String) -> Option[Bytes] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "fs.read_lines"
 sig = "effect (path: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 [[fn]]
@@ -1062,6 +1137,7 @@ name = "fs.read_lines_if_exists"
 sig = "effect (path: String) -> Option[List[String]] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 [[fn]]
@@ -1069,6 +1145,7 @@ name = "fs.read_text"
 sig = "effect (path: String) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 [[fn]]
@@ -1076,30 +1153,35 @@ name = "fs.read_text_if_exists"
 sig = "effect (path: String) -> Option[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "fs.remove"
 sig = "effect (path: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.remove_all"
 sig = "effect (path: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.rename"
 sig = "effect (src: String, dst: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.stat"
 sig = "effect (path: String) -> FileStat ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "fs.temp_dir"
@@ -1120,17 +1202,20 @@ name = "fs.walk"
 sig = "effect (dir: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "fs.write_bytes"
 sig = "effect (path: String, data: Bytes) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "hash.fnv1a32"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "hash.sha256"
 sig = "(b: Bytes) -> Bytes"
@@ -1150,6 +1235,7 @@ name = "hash.sha256_hex"
 sig = "(b: Bytes) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "hex.decode"
 sig = "(s: String) -> Result[Bytes, String]"
@@ -1256,6 +1342,7 @@ name = "http.body"
 sig = "(m: M) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "http.cancel"
 sig = "effect (c: HttpCall) -> Unit ! String"
@@ -1276,6 +1363,7 @@ name = "http.decode_json"
 sig = "(req: HttpRequest) -> Result[T, HttpResponse]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.get"
 sig = "effect (url: String) -> String ! String"
@@ -1306,12 +1394,14 @@ name = "http.header_values"
 sig = "(m: M, name: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "http.headers"
 sig = "(m: M) -> List[(String, String)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.json"
 sig = "(status: Int, body: String) -> HttpResponse"
@@ -1331,12 +1421,14 @@ name = "http.mount"
 sig = "(prefix: String, sub: HttpHandler) -> HttpRoute"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "http.new_request"
 sig = "(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.param"
 sig = "(req: HttpRequest, name: String) -> Option[String]"
@@ -1398,11 +1490,13 @@ name = "http.redirect"
 sig = "(url: String) -> HttpResponse"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.request"
 sig = "effect (method: String, url: String, body: String, headers: List[(String, String)]) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1422,17 +1516,20 @@ name = "http.route"
 sig = "(pattern: String, handler: HttpHandler) -> HttpRoute"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.router"
 sig = "(xs: List[HttpRoute]) -> Result[HttpHandler, String]"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "http.serve"
 sig = "effect (port: Int, handler: HttpHandler) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1440,11 +1537,13 @@ name = "http.set_header"
 sig = "(m: M, name: String, value: String) -> M"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "http.start"
 sig = "effect (req: HttpRequest, limits: HttpLimits) -> HttpCall ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1452,11 +1551,13 @@ name = "http.status"
 sig = "(resp: HttpResponse) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "http.wait"
 sig = "effect (c: HttpCall) -> HttpResponse ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1476,6 +1577,7 @@ name = "http.wrap"
 sig = "(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1483,99 +1585,116 @@ name = "int.abs"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.band"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bit_reverse"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.bit_width"
 sig = "(n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.bnot"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bor"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bshl"
 sig = "(a: Int, n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bshr"
 sig = "(a: Int, n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bxor"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.byte_swap"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.clamp"
 sig = "(x: Int, lo: Int, hi: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.count_leading_zeros"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.count_trailing_zeros"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.is_even"
 sig = "(x: Int) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.is_odd"
 sig = "(x: Int) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.log2_ceil"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.log2_floor"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.max"
 sig = "(a: Int, b: Int) -> Int"
@@ -1632,17 +1751,20 @@ name = "int.next_power_of_two"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.parse"
 sig = "(s: String) -> Result[Int, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "int.pop_count"
 sig = "(n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 
 [[fn]]
@@ -1650,152 +1772,180 @@ name = "int.prev_power_of_two"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.rotate_left"
 sig = "(a: Int, n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.rotate_right"
 sig = "(a: Int, n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.to_hex"
 sig = "(x: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.to_string"
 sig = "(x: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int.wrap_add"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.wrap_mul"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.max_value"
 sig = "() -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.min_value"
 sig = "() -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int16.to_string"
 sig = "(x: Int16) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int32.max_value"
 sig = "() -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.min_value"
 sig = "() -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int32.to_string"
 sig = "(x: Int32) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int64.max_value"
 sig = "() -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.min_value"
 sig = "() -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int64.to_string"
 sig = "(x: Int64) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int8.max_value"
 sig = "() -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.min_value"
 sig = "() -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "int8.to_string"
 sig = "(x: Int8) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "io.print"
 sig = "effect (s: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "io.read_all"
 sig = "effect () -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "io.read_line"
 sig = "effect () -> Option[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "io.write"
 sig = "effect (h: H, data: Bytes) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "json.parse"
 sig = "(text: String) -> Result[Value, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "json.stringify"
 sig = "(v: Value) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "json.stringify_pretty"
 sig = "(v: Value) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.all"
 sig = "(xs: List[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.any"
 sig = "(xs: List[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1803,11 +1953,13 @@ name = "list.binary_search"
 sig = "(xs: List[A], target: A) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "log; rebind (loop, tail, fold) log"
 [[fn]]
 name = "list.chunk"
 sig = "(xs: List[A], n: Int) -> List[List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.clear"
 sig = "(xs: List[A]) -> Unit"
@@ -1827,65 +1979,76 @@ name = "list.contains"
 sig = "(xs: List[A], x: A) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.count"
 sig = "(xs: List[A], f: (A) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.dedup"
 sig = "(xs: List[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.drop"
 sig = "(xs: List[A], n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.drop_end"
 sig = "(xs: List[A], n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.drop_while"
 sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.enumerate"
 sig = "(xs: List[A]) -> List[(Int, A)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.filter"
 sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.filter_map"
 sig = "(xs: List[A], f: (A) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.find"
 sig = "(xs: List[A], f: (A) -> Bool) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.find_index"
 sig = "(xs: List[A], f: (A) -> Bool) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.find_map"
 sig = "(xs: List[A], f: (A) -> Option[B]) -> Option[B]"
@@ -1905,12 +2068,14 @@ name = "list.first"
 sig = "(xs: List[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.flat_map"
 sig = "(xs: List[A], f: (A) -> List[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -1918,28 +2083,33 @@ name = "list.flatten"
 sig = "(xs: List[List[A]]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.fold"
 sig = "(xs: List[A], init: B, f: (B, A) -> B) -> B"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.get"
 sig = "(xs: List[A], i: Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.group_by"
 sig = "(xs: List[A], f: (A) -> B) -> Map[B, List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.index_of"
 sig = "(xs: List[A], x: A) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 
 [[fn]]
@@ -1947,11 +2117,13 @@ name = "list.insert"
 sig = "(xs: List[A], i: Int, x: A) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.intersperse"
 sig = "(xs: List[A], sep: A) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.is_empty"
 sig = "(xs: List[A]) -> Bool"
@@ -1972,35 +2144,41 @@ name = "list.iterate"
 sig = "(seed: A, f: (A) -> A, n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.join"
 sig = "(xs: List[T], sep: T) -> T"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.last"
 sig = "(xs: List[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.len"
 sig = "(xs: List[A]) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.length"
 sig = "(xs: List[A]) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.map"
 sig = "(xs: List[A], f: (A) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.max"
@@ -2032,6 +2210,7 @@ name = "list.partition"
 sig = "(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.pop"
 sig = "(xs: List[A]) -> Option[A]"
@@ -2052,6 +2231,7 @@ name = "list.product"
 sig = "(xs: List[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.push"
 sig = "(xs: List[A], x: A) -> Unit"
@@ -2071,11 +2251,13 @@ name = "list.range"
 sig = "(start: Int, end: Int) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.reduce"
 sig = "(xs: List[A], f: (A, A) -> A) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.remove_at"
 sig = "(xs: List[A], i: Int) -> List[A]"
@@ -2096,6 +2278,7 @@ name = "list.repeat"
 sig = "(x: A, n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.reverse"
 sig = "(xs: List[A]) -> List[A]"
@@ -2115,6 +2298,7 @@ name = "list.scan"
 sig = "(xs: List[A], init: B, f: (B, A) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -2122,11 +2306,13 @@ name = "list.set"
 sig = "(xs: List[A], i: Int, x: A) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.slice"
 sig = "(xs: List[A], start: Int, end: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.sort"
@@ -2158,55 +2344,65 @@ name = "list.split_at"
 sig = "(xs: List[A], n: Int) -> (List[A], List[A])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.sum"
 sig = "(xs: List[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.swap"
 sig = "(xs: List[A], i: Int, j: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.take"
 sig = "(xs: List[A], n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.take_end"
 sig = "(xs: List[A], n: Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.take_while"
 sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.unique"
 sig = "(xs: List[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "list.unique_by"
 sig = "(xs: List[A], f: (A) -> K) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "list.update"
 sig = "(xs: List[A], i: Int, f: (A) -> A) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "list.window"
 sig = "(xs: List[A], n: Int) -> List[List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.with_capacity"
 sig = "(cap: Int) -> List[A]"
@@ -2226,11 +2422,13 @@ name = "list.zip"
 sig = "(xs: List[A], ys: List[B]) -> List[(A, B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "list.zip_with"
 sig = "(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -2238,12 +2436,14 @@ name = "map.all"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "map.any"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "map.clear"
 sig = "(m: Map[K, V]) -> Unit"
@@ -2277,28 +2477,33 @@ name = "map.count"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "map.filter"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.find"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "map.fold"
 sig = "(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "map.from_list"
 sig = "(xs: List[(K, V)]) -> Map[K, V]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "map.get"
 sig = "(m: Map[K, V], key: K) -> Option[V]"
@@ -2396,6 +2601,7 @@ name = "map.remove"
 sig = "(m: Map[K, V], key: K) -> Map[K, V]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "map.set"
 sig = "(m: Map[K, V], key: K, value: V) -> Map[K, V]"
@@ -2465,6 +2671,7 @@ name = "math.choose"
 sig = "(n: Int, k: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "math.cos"
 sig = "(x: Float) -> Float"
@@ -2507,6 +2714,7 @@ name = "math.factorial"
 sig = "(n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "math.log"
@@ -2589,6 +2797,7 @@ name = "math.sqrt"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "math.tan"
 sig = "(x: Float) -> Float"
@@ -2647,6 +2856,7 @@ name = "matrix.concat_cols"
 sig = "(xs: List[Matrix]) -> Matrix"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "matrix.concat_cols_many"
 sig = "(matrices: List[Matrix]) -> Matrix"
@@ -2678,18 +2888,21 @@ name = "matrix.from_bytes_f16_le"
 sig = "(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "matrix.from_bytes_f32_le"
 sig = "(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "matrix.from_bytes_f64_le"
 sig = "(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 
 
@@ -2698,6 +2911,7 @@ name = "matrix.from_lists"
 sig = "(xs: List[List[Float]]) -> Matrix"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "matrix.gather_rows"
 sig = "(m: Matrix, indices: List[Int]) -> Matrix"
@@ -2716,6 +2930,7 @@ name = "matrix.get"
 sig = "(m: Matrix, row: Int, col: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "matrix.map"
@@ -2800,6 +3015,7 @@ name = "matrix.slice_rows"
 sig = "(m: Matrix, start: Int, end: Int) -> Matrix"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "matrix.split_cols_even"
 sig = "(m: Matrix, n: Int) -> List[Matrix]"
@@ -2882,51 +3098,60 @@ name = "net.tcp_accept"
 sig = "effect (listener: TcpListener) -> TcpStream ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.tcp_available"
 sig = "effect (stream: TcpStream) -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "net.tcp_connect"
 sig = "effect (host: String, port: Int) -> TcpStream ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.tcp_is_open"
 sig = "effect (stream: TcpStream) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.tcp_listen"
 sig = "effect (host: String, port: Int) -> TcpListener ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "net.tcp_read_timeout"
 sig = "effect (stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "net.tcp_set_timeout"
 sig = "effect (stream: TcpStream, timeout_ms: Int) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "option.collect"
 sig = "(xs: List[Option[A]]) -> Option[List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "option.collect_map"
 sig = "(xs: List[A], f: (A) -> Option[B]) -> Option[List[B]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "option.filter"
 sig = "(o: Option[A], f: (A) -> Bool) -> Option[A]"
@@ -3088,34 +3313,40 @@ name = "path.basename"
 sig = "(path: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "path.dirname"
 sig = "(path: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "path.extension"
 sig = "(path: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "path.is_absolute"
 sig = "(path: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "path.join"
 sig = "(base: String, child: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "path.normalize"
 sig = "(path: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -3123,29 +3354,34 @@ name = "path.stem"
 sig = "(path: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "process.exec"
 sig = "effect (cmd: String, args: List[String]) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.exit"
 sig = "effect (code: Int) -> Never ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.kill"
 sig = "effect (pid: Int, signal: Int) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "process.pid"
 sig = "effect () -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 
 [[fn]]
@@ -3153,17 +3389,20 @@ name = "process.run"
 sig = "effect (c: ProcessCommand) -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "random.choice"
 sig = "effect (xs: List[A]) -> Option[A] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "random.float"
 sig = "effect () -> Float ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "random.int"
 sig = "effect (min: Int, max: Int) -> Int ! String"
@@ -3185,53 +3424,62 @@ name = "random.shuffle"
 sig = "effect (xs: List[A]) -> List[A] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "regex.captures"
 sig = "(re: Regex, s: String) -> Option[List[Option[String]]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.find"
 sig = "(re: Regex, s: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.find_all"
 sig = "(re: Regex, s: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.full_match"
 sig = "(re: Regex, s: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.is_match"
 sig = "(re: Regex, s: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.replace"
 sig = "(re: Regex, s: String, rep: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.replace_first"
 sig = "(re: Regex, s: String, rep: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.split"
 sig = "(re: Regex, s: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
@@ -3239,6 +3487,7 @@ name = "result.filter"
 sig = "(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "result.flat_map"
 sig = "(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]"
@@ -3335,6 +3584,7 @@ name = "result.partition"
 sig = "(xs: List[Result[A, E]]) -> (List[A], List[E])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "result.to_err_option"
 sig = "(r: Result[A, E]) -> Option[E]"
@@ -3416,12 +3666,14 @@ name = "secret.new"
 sig = "(x: A) -> Secret[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "secret.reveal"
 sig = "(s: Secret[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "set.all"
@@ -3456,6 +3708,7 @@ name = "set.contains"
 sig = "(s: Set[A], x: A) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.difference"
 sig = "(a: Set[A], b: Set[A]) -> Set[A]"
@@ -3488,6 +3741,7 @@ name = "set.fold"
 sig = "(s: Set[A], init: B, f: (B, A) -> B) -> B"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.from_list"
 sig = "(xs: List[A]) -> Set[A]"
@@ -3508,6 +3762,7 @@ name = "set.insert"
 sig = "(s: Set[A], x: A) -> Set[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.intersection"
 sig = "(a: Set[A], b: Set[A]) -> Set[A]"
@@ -3540,6 +3795,7 @@ name = "set.is_empty"
 sig = "(s: Set[A]) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.is_subset"
 sig = "(a: Set[A], b: Set[A]) -> Bool"
@@ -3559,6 +3815,7 @@ name = "set.len"
 sig = "(s: Set[A]) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.map"
 sig = "(s: Set[A], f: (A) -> B) -> Set[B]"
@@ -3592,6 +3849,7 @@ name = "set.remove"
 sig = "(s: Set[A], x: A) -> Set[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "set.symmetric_difference"
 sig = "(a: Set[A], b: Set[A]) -> Set[A]"
@@ -3648,6 +3906,7 @@ name = "string.capitalize"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "string.clear"
@@ -3666,24 +3925,28 @@ name = "string.contains"
 sig = "(s: String, needle: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.count"
 sig = "(s: String, f: (String) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.drop"
 sig = "(s: String, n: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.drop_end"
 sig = "(s: String, n: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "string.ends_with"
 sig = "(s: String, suffix: String) -> Bool"
@@ -3713,6 +3976,7 @@ name = "string.from_codepoint"
 sig = "(n: Int) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "string.get"
 sig = "(s: String, i: Int) -> Option[String]"
@@ -3731,6 +3995,7 @@ name = "string.index_of"
 sig = "(s: String, needle: String) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "string.is_alpha"
@@ -3834,6 +4099,7 @@ name = "string.last_index_of"
 sig = "(s: String, needle: String) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "string.len"
@@ -3879,18 +4145,21 @@ name = "string.pad_end"
 sig = "(s: String, n: Int, fill: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.pad_start"
 sig = "(s: String, n: Int, fill: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.push"
 sig = "(s: String, x: String) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "string.repeat"
 sig = "(s: String, n: Int) -> String"
@@ -3909,6 +4178,7 @@ name = "string.replace"
 sig = "(s: String, from: String, to: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 
 [[fn]]
@@ -3916,6 +4186,7 @@ name = "string.replace_first"
 sig = "(s: String, from: String, to: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "string.reverse"
@@ -3948,6 +4219,7 @@ name = "string.split"
 sig = "(s: String, sep: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 
 [[fn]]
@@ -3955,6 +4227,7 @@ name = "string.split_once"
 sig = "(s: String, sep: String) -> Option[(String, String)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "string.starts_with"
@@ -3998,17 +4271,20 @@ name = "string.take"
 sig = "(s: String, n: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "string.take_end"
 sig = "(s: String, n: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "string.to_lower"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
 [[fn]]
@@ -4016,6 +4292,7 @@ name = "string.to_upper"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 [[fn]]
 name = "string.trim"
@@ -4060,6 +4337,7 @@ name = "testing.assert_aborts"
 sig = "(expected: String, f: () -> A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "testing.assert_approx"
 sig = "(a: Float, b: Float, tolerance: Float) -> Unit"
@@ -4093,30 +4371,35 @@ name = "testing.assert_err"
 sig = "(r: Result[A, B]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "testing.assert_gt"
 sig = "(a: A, b: A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "testing.assert_lt"
 sig = "(a: A, b: A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "testing.assert_none"
 sig = "(o: Option[A]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "testing.assert_ok"
 sig = "(r: Result[A, B]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "testing.assert_snapshot"
 sig = "(actual: String, expected: String) -> Unit"
@@ -4137,88 +4420,104 @@ name = "testing.assert_some"
 sig = "(o: Option[A]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.max_value"
 sig = "() -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.min_value"
 sig = "() -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint16.to_string"
 sig = "(x: UInt16) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint32.max_value"
 sig = "() -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.min_value"
 sig = "() -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint32.to_string"
 sig = "(x: UInt32) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint64.max_value"
 sig = "() -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.min_value"
 sig = "() -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint64.to_string"
 sig = "(x: UInt64) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint8.max_value"
 sig = "() -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.min_value"
 sig = "() -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "uint8.to_string"
 sig = "(x: UInt8) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "url.build_query"
 sig = "(xs: List[(String, String)]) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "url.decode_component"
 sig = "(s: String) -> Result[String, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "url.encode_component"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "url.parse"
 sig = "(s: String) -> Result[Url, String]"
@@ -4253,6 +4552,7 @@ name = "value.array"
 sig = "(xs: List[Value]) -> Value"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "value.as_array"
 sig = "(v: Value) -> Result[List[Value], String]"
@@ -4362,6 +4662,7 @@ name = "value.merge"
 sig = "(a: Value, b: Value) -> Value"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "implementation changed by the stdlib DoS batch (#4206, #4207, #4211, #4212): re-inspect on GCE"
 [[fn]]
 name = "value.null"
@@ -4382,6 +4683,7 @@ name = "value.object"
 sig = "(xs: List[(String, Value)]) -> Value"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "value.omit"
 sig = "(v: Value, keys: List[String]) -> Value"
@@ -4413,53 +4715,62 @@ name = "zlib.compress"
 sig = "effect (b: Bytes) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.compress_level"
 sig = "effect (b: Bytes, level: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "zlib.decompress"
 sig = "(b: Bytes) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.deflate"
 sig = "effect (b: Bytes) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.deflate_level"
 sig = "effect (b: Bytes, level: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.gunzip"
 sig = "(b: Bytes) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.gzip"
 sig = "effect (b: Bytes) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.inflate"
 sig = "(b: Bytes) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "net.tcp_local_port"
 sig = "effect (listener: TcpListener) -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "ffi.read"
@@ -4491,6 +4802,7 @@ name = "args.has_flag"
 sig = "effect (name: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4498,6 +4810,7 @@ name = "bool.compare"
 sig = "(a: Bool, b: Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4505,6 +4818,7 @@ name = "bool.parse"
 sig = "(s: String) -> Result[Bool, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4512,6 +4826,7 @@ name = "bool.to_string"
 sig = "(b: Bool) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4519,6 +4834,7 @@ name = "datetime.now_ms"
 sig = "effect () -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4526,6 +4842,7 @@ name = "hash.adler32"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4533,6 +4850,7 @@ name = "hash.crc32"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4540,6 +4858,7 @@ name = "hash.sha512"
 sig = "(b: Bytes) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4547,6 +4866,7 @@ name = "hash.sha512_hex"
 sig = "(b: Bytes) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4554,6 +4874,7 @@ name = "math.acos"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4561,6 +4882,7 @@ name = "math.acosh"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4568,6 +4890,7 @@ name = "math.asin"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4575,6 +4898,7 @@ name = "math.asinh"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4582,6 +4906,7 @@ name = "math.atan2"
 sig = "(y: Float, x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4589,6 +4914,7 @@ name = "math.atanh"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4596,6 +4922,7 @@ name = "math.cbrt"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4603,6 +4930,7 @@ name = "math.cosh"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4610,6 +4938,7 @@ name = "math.expm1"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4617,6 +4946,7 @@ name = "math.hypot"
 sig = "(a: Float, b: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4624,6 +4954,7 @@ name = "math.log1p"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4631,6 +4962,7 @@ name = "math.sinh"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4638,6 +4970,7 @@ name = "matrix.concat_rows"
 sig = "(xs: List[Matrix]) -> Matrix"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4645,6 +4978,7 @@ name = "matrix.zip_with"
 sig = "(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4652,6 +4986,7 @@ name = "path.components"
 sig = "(path: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4659,6 +4994,7 @@ name = "path.relative_to"
 sig = "(path: String, base: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4666,6 +5002,7 @@ name = "path.with_extension"
 sig = "(path: String, ext: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4673,6 +5010,7 @@ name = "random.next_choice"
 sig = "(rng: Rng, xs: List[A]) -> (Option[A], Rng)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4680,6 +5018,7 @@ name = "random.next_float"
 sig = "(rng: Rng) -> (Float, Rng)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4687,6 +5026,7 @@ name = "random.next_int"
 sig = "(rng: Rng, min: Int, max: Int) -> (Int, Rng)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4694,6 +5034,7 @@ name = "random.next_shuffle"
 sig = "(rng: Rng, xs: List[A]) -> (List[A], Rng)"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4701,6 +5042,7 @@ name = "random.bytes"
 sig = "effect (n: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign (R-random-02, #3938, C-394): awaits its ADR-0027 effect inspection run (on the deterministic host: the length is n and two calls differ)"
 
 [[fn]]
@@ -4708,6 +5050,7 @@ name = "random.seeded"
 sig = "(seed: Int) -> Rng"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4715,6 +5058,7 @@ name = "url.decode_form"
 sig = "(s: String) -> Result[String, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4722,6 +5066,7 @@ name = "url.encode_form"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4729,6 +5074,7 @@ name = "url.parse_query"
 sig = "(query: String) -> Result[List[(String, String)], String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4736,6 +5082,7 @@ name = "url.resolve"
 sig = "(base: Url, ref: String) -> Result[Url, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4743,6 +5090,7 @@ name = "string.byte_len"
 sig = "(s: String) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4750,6 +5098,7 @@ name = "string.chunk"
 sig = "(s: String, n: Int) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4757,6 +5106,7 @@ name = "string.compare"
 sig = "(a: String, b: String) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4764,6 +5114,7 @@ name = "string.dedup"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4771,6 +5122,7 @@ name = "string.drop_while"
 sig = "(s: String, f: (String) -> Bool) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4778,6 +5130,7 @@ name = "string.enumerate"
 sig = "(s: String) -> List[(Int, String)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4785,6 +5138,7 @@ name = "string.filter"
 sig = "(s: String, f: (String) -> Bool) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4792,6 +5146,7 @@ name = "string.filter_map"
 sig = "(s: String, f: (String) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4799,6 +5154,7 @@ name = "string.find_index"
 sig = "(s: String, f: (String) -> Bool) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4806,6 +5162,7 @@ name = "string.find_map"
 sig = "(s: String, f: (String) -> Option[B]) -> Option[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4813,6 +5170,7 @@ name = "string.fold"
 sig = "(s: String, init: B, f: (B, String) -> B) -> B"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4820,6 +5178,7 @@ name = "string.from_list"
 sig = "(xs: List[String]) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4827,6 +5186,7 @@ name = "string.from_utf16"
 sig = "(xs: List[Int]) -> Result[String, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4834,6 +5194,7 @@ name = "string.group_by"
 sig = "(s: String, f: (String) -> B) -> Map[B, List[String]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4841,6 +5202,7 @@ name = "string.insert"
 sig = "(s: String, i: Int, x: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4848,6 +5210,7 @@ name = "string.intersperse"
 sig = "(s: String, sep: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4855,6 +5218,7 @@ name = "string.max"
 sig = "(s: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4862,6 +5226,7 @@ name = "string.max_by"
 sig = "(s: String, f: (String) -> K) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4869,6 +5234,7 @@ name = "string.max_with"
 sig = "(s: String, cmp: (String, String) -> Int) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4876,6 +5242,7 @@ name = "string.min"
 sig = "(s: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4883,6 +5250,7 @@ name = "string.min_by"
 sig = "(s: String, f: (String) -> K) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4890,6 +5258,7 @@ name = "string.min_with"
 sig = "(s: String, cmp: (String, String) -> Int) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4897,6 +5266,7 @@ name = "string.new"
 sig = "() -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4904,6 +5274,7 @@ name = "string.partition"
 sig = "(s: String, f: (String) -> Bool) -> (List[String], List[String])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4911,6 +5282,7 @@ name = "string.reduce"
 sig = "(s: String, f: (String, String) -> String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4918,6 +5290,7 @@ name = "string.remove_at"
 sig = "(s: String, i: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4925,6 +5298,7 @@ name = "string.scan"
 sig = "(s: String, init: B, f: (B, String) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4932,6 +5306,7 @@ name = "string.sort"
 sig = "(s: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4939,6 +5314,7 @@ name = "string.sort_by"
 sig = "(s: String, f: (String) -> B) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4946,6 +5322,7 @@ name = "string.sort_with"
 sig = "(s: String, cmp: (String, String) -> Int) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4953,6 +5330,7 @@ name = "string.split_at"
 sig = "(s: String, n: Int) -> (String, String)"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4960,6 +5338,7 @@ name = "string.take_while"
 sig = "(s: String, f: (String) -> Bool) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4967,6 +5346,7 @@ name = "string.to_utf16"
 sig = "(s: String) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4974,6 +5354,7 @@ name = "string.unique"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4981,6 +5362,7 @@ name = "string.unique_by"
 sig = "(s: String, f: (String) -> K) -> String"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4988,6 +5370,7 @@ name = "string.window"
 sig = "(s: String, n: Int) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -4995,6 +5378,7 @@ name = "string.zip"
 sig = "(s: String, ys: List[B]) -> List[(String, B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -5002,6 +5386,7 @@ name = "string.zip_with"
 sig = "(s: String, ys: List[B], f: (String, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
@@ -5009,2274 +5394,2653 @@ name = "deque.all"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.any"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.chunk"
 sig = "(d: Deque[A], n: Int) -> List[Deque[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.clear"
 sig = "(d: Deque[A]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.contains"
 sig = "(d: Deque[A], x: A) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.count"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.dedup"
 sig = "(d: Deque[A]) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.drop"
 sig = "(d: Deque[A], n: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.drop_end"
 sig = "(d: Deque[A], n: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.drop_while"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.enumerate"
 sig = "(d: Deque[A]) -> List[(Int, A)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.filter"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.filter_map"
 sig = "(d: Deque[A], f: (A) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.find"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.find_index"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.find_map"
 sig = "(d: Deque[A], f: (A) -> Option[B]) -> Option[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.first"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.fold"
 sig = "(d: Deque[A], init: B, f: (B, A) -> B) -> B"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.from_list"
 sig = "(xs: List[A]) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.get"
 sig = "(d: Deque[A], i: Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.group_by"
 sig = "(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.insert"
 sig = "(d: Deque[A], i: Int, x: A) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.intersperse"
 sig = "(d: Deque[A], sep: A) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.is_empty"
 sig = "(d: Deque[A]) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.last"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.len"
 sig = "(d: Deque[A]) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.map"
 sig = "(d: Deque[A], f: (A) -> B) -> Deque[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.max"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.max_by"
 sig = "(d: Deque[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.max_with"
 sig = "(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.min"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.min_by"
 sig = "(d: Deque[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.min_with"
 sig = "(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.new"
 sig = "() -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.partition"
 sig = "(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.pop"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.pop_front"
 sig = "(d: Deque[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.push"
 sig = "(d: Deque[A], x: A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.push_front"
 sig = "(d: Deque[A], x: A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.reduce"
 sig = "(d: Deque[A], f: (A, A) -> A) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.remove_at"
 sig = "(d: Deque[A], i: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.reverse"
 sig = "(d: Deque[A]) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.scan"
 sig = "(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.set"
 sig = "(d: Deque[A], i: Int, x: A) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.slice"
 sig = "(d: Deque[A], start: Int, end: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.sort"
 sig = "(d: Deque[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "deque.sort_by"
 sig = "(d: Deque[A], f: (A) -> B) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "deque.sort_with"
 sig = "(d: Deque[A], cmp: (A, A) -> Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "deque.split_at"
 sig = "(d: Deque[A], n: Int) -> (Deque[A], Deque[A])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.take"
 sig = "(d: Deque[A], n: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.take_end"
 sig = "(d: Deque[A], n: Int) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.take_while"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.to_list"
 sig = "(d: Deque[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.unique"
 sig = "(d: Deque[A]) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "deque.unique_by"
 sig = "(d: Deque[A], f: (A) -> K) -> Deque[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "deque.window"
 sig = "(d: Deque[A], n: Int) -> List[Deque[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.zip"
 sig = "(d: Deque[A], ys: List[B]) -> List[(A, B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.zip_with"
 sig = "(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.all"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.any"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.clear"
 sig = "(h: Heap[A]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.contains"
 sig = "(h: Heap[A], x: A) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.count"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.filter"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Heap[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.from_list"
 sig = "(xs: List[A]) -> Heap[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "heap.is_empty"
 sig = "(h: Heap[A]) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.len"
 sig = "(h: Heap[A]) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.new"
 sig = "() -> Heap[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.new_by"
 sig = "(f: (A) -> K) -> Heap[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.new_with"
 sig = "(cmp: (A, A) -> Int) -> Heap[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.peek"
 sig = "(h: Heap[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "heap.pop"
 sig = "(h: Heap[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "log; rebind (loop, tail, fold) log"
 
 [[fn]]
 name = "heap.push"
 sig = "(h: Heap[A], x: A) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "log; rebind (loop, tail, fold) log"
 
 [[fn]]
 name = "heap.to_list"
 sig = "(h: Heap[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.binary_search_by"
 sig = "(xs: List[A], target: K, f: (A) -> K) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "log; rebind (loop, tail, fold) log"
 
 [[fn]]
 name = "list.binary_search_with"
 sig = "(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "log; rebind (loop, tail, fold) log"
 
 [[fn]]
 name = "list.from_list"
 sig = "(xs: List[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.max_by"
 sig = "(xs: List[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.max_with"
 sig = "(xs: List[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.min_by"
 sig = "(xs: List[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.min_with"
 sig = "(xs: List[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.new"
 sig = "() -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "list.range_step"
 sig = "(start: Int, end: Int, step: Int) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.sort_with"
 sig = "(xs: List[A], cmp: (A, A) -> Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "list.to_list"
 sig = "(xs: List[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "list.unzip"
 sig = "(xs: List[(A, B)]) -> (List[A], List[B])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.enumerate"
 sig = "(m: Map[K, V]) -> List[(Int, (K, V))]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.filter_map"
 sig = "(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.find_map"
 sig = "(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.group_by"
 sig = "(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.max_by"
 sig = "(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.max_with"
 sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.min_by"
 sig = "(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.min_with"
 sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.partition"
 sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.reduce"
 sig = "(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.scan"
 sig = "(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.sort_by"
 sig = "(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "map.sort_with"
 sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "map.zip"
 sig = "(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "map.zip_with"
 sig = "(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.clear"
 sig = "(s: Set[A]) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.count"
 sig = "(s: Set[A], f: (A) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.enumerate"
 sig = "(s: Set[A]) -> List[(Int, A)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.filter_map"
 sig = "(s: Set[A], f: (A) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.find"
 sig = "(s: Set[A], f: (A) -> Bool) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.find_map"
 sig = "(s: Set[A], f: (A) -> Option[B]) -> Option[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.group_by"
 sig = "(s: Set[A], f: (A) -> B) -> Map[B, List[A]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.max"
 sig = "(s: Set[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.max_by"
 sig = "(s: Set[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.max_with"
 sig = "(s: Set[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.min"
 sig = "(s: Set[A]) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.min_by"
 sig = "(s: Set[A], f: (A) -> K) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.min_with"
 sig = "(s: Set[A], cmp: (A, A) -> Int) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.partition"
 sig = "(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.reduce"
 sig = "(s: Set[A], f: (A, A) -> A) -> Option[A]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.scan"
 sig = "(s: Set[A], init: B, f: (B, A) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.sort"
 sig = "(s: Set[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "set.sort_by"
 sig = "(s: Set[A], f: (A) -> B) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "set.sort_with"
 sig = "(s: Set[A], cmp: (A, A) -> Int) -> List[A]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "set.zip"
 sig = "(s: Set[A], ys: List[B]) -> List[(A, B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.zip_with"
 sig = "(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "float32.abs"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.ceil"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.clamp"
 sig = "(x: Float32, lo: Float32, hi: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.compare"
 sig = "(a: Float32, b: Float32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.epsilon"
 sig = "() -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.floor"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.from_bits"
 sig = "(bits: Int) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.infinity"
 sig = "() -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.is_finite"
 sig = "(x: Float32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.is_infinite"
 sig = "(x: Float32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.is_nan"
 sig = "(x: Float32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.max"
 sig = "(a: Float32, b: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.max_value"
 sig = "() -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.min"
 sig = "(a: Float32, b: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.min_value"
 sig = "() -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.nan"
 sig = "() -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.round"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.signum"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.to_bits"
 sig = "(x: Float32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.trunc"
 sig = "(x: Float32) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.abs"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.ceil"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.clamp"
 sig = "(x: Float64, lo: Float64, hi: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.compare"
 sig = "(a: Float64, b: Float64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.epsilon"
 sig = "() -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.floor"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.from_bits"
 sig = "(bits: Int) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.infinity"
 sig = "() -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.is_finite"
 sig = "(x: Float64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.is_infinite"
 sig = "(x: Float64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.is_nan"
 sig = "(x: Float64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.max"
 sig = "(a: Float64, b: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.max_value"
 sig = "() -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.min"
 sig = "(a: Float64, b: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.min_value"
 sig = "() -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.nan"
 sig = "() -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.parse"
 sig = "(s: String) -> Result[Float64, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "float64.round"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.signum"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.to_bits"
 sig = "(x: Float64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.trunc"
 sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.abs"
 sig = "(x: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.band"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bit_length"
 sig = "(x: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bnot"
 sig = "(x: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bor"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bshl"
 sig = "(a: Int16, n: Int) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bshr"
 sig = "(a: Int16, n: Int) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.bxor"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.byte_swap"
 sig = "(x: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.clamp"
 sig = "(x: Int16, lo: Int16, hi: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.compare"
 sig = "(a: Int16, b: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.count_leading_zeros"
 sig = "(x: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.count_ones"
 sig = "(x: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.count_trailing_zeros"
 sig = "(x: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.floor_div"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.is_even"
 sig = "(x: Int16) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.is_odd"
 sig = "(x: Int16) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.max"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.min"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.modulo"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.parse"
 sig = "(s: String) -> Result[Int16, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int16.pow"
 sig = "(base: Int16, exp: Int) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.rotate_left"
 sig = "(a: Int16, n: Int) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.rotate_right"
 sig = "(a: Int16, n: Int) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.sign"
 sig = "(x: Int16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.wrap_add"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.wrap_mul"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.wrap_sub"
 sig = "(a: Int16, b: Int16) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.abs"
 sig = "(x: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.band"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bit_length"
 sig = "(x: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bnot"
 sig = "(x: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bor"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bshl"
 sig = "(a: Int32, n: Int) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bshr"
 sig = "(a: Int32, n: Int) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.bxor"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.byte_swap"
 sig = "(x: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.clamp"
 sig = "(x: Int32, lo: Int32, hi: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.compare"
 sig = "(a: Int32, b: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.count_leading_zeros"
 sig = "(x: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.count_ones"
 sig = "(x: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.count_trailing_zeros"
 sig = "(x: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.floor_div"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.is_even"
 sig = "(x: Int32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.is_odd"
 sig = "(x: Int32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.max"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.min"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.modulo"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.parse"
 sig = "(s: String) -> Result[Int32, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int32.pow"
 sig = "(base: Int32, exp: Int) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.rotate_left"
 sig = "(a: Int32, n: Int) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.rotate_right"
 sig = "(a: Int32, n: Int) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.sign"
 sig = "(x: Int32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.wrap_add"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.wrap_mul"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.wrap_sub"
 sig = "(a: Int32, b: Int32) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.abs"
 sig = "(x: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.band"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bit_length"
 sig = "(x: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bnot"
 sig = "(x: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bor"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bshl"
 sig = "(a: Int64, n: Int) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bshr"
 sig = "(a: Int64, n: Int) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.bxor"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.byte_swap"
 sig = "(x: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.clamp"
 sig = "(x: Int64, lo: Int64, hi: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.compare"
 sig = "(a: Int64, b: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.count_leading_zeros"
 sig = "(x: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.count_ones"
 sig = "(x: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.count_trailing_zeros"
 sig = "(x: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.floor_div"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.is_even"
 sig = "(x: Int64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.is_odd"
 sig = "(x: Int64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.max"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.min"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.modulo"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.parse"
 sig = "(s: String) -> Result[Int64, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int64.pow"
 sig = "(base: Int64, exp: Int) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.rotate_left"
 sig = "(a: Int64, n: Int) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.rotate_right"
 sig = "(a: Int64, n: Int) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.sign"
 sig = "(x: Int64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.wrap_add"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.wrap_mul"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.wrap_sub"
 sig = "(a: Int64, b: Int64) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.abs"
 sig = "(x: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.band"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bit_length"
 sig = "(x: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bnot"
 sig = "(x: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bor"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bshl"
 sig = "(a: Int8, n: Int) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bshr"
 sig = "(a: Int8, n: Int) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.bxor"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.byte_swap"
 sig = "(x: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.clamp"
 sig = "(x: Int8, lo: Int8, hi: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.compare"
 sig = "(a: Int8, b: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.count_leading_zeros"
 sig = "(x: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.count_ones"
 sig = "(x: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.count_trailing_zeros"
 sig = "(x: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.floor_div"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.is_even"
 sig = "(x: Int8) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.is_odd"
 sig = "(x: Int8) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.max"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.min"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.modulo"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.parse"
 sig = "(s: String) -> Result[Int8, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int8.pow"
 sig = "(base: Int8, exp: Int) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.rotate_left"
 sig = "(a: Int8, n: Int) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.rotate_right"
 sig = "(a: Int8, n: Int) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.sign"
 sig = "(x: Int8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.wrap_add"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.wrap_mul"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.wrap_sub"
 sig = "(a: Int8, b: Int8) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.band"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bit_length"
 sig = "(x: UInt16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bnot"
 sig = "(x: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bor"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bshl"
 sig = "(a: UInt16, n: Int) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bshr"
 sig = "(a: UInt16, n: Int) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.bxor"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.byte_swap"
 sig = "(x: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.clamp"
 sig = "(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.compare"
 sig = "(a: UInt16, b: UInt16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.count_leading_zeros"
 sig = "(x: UInt16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.count_ones"
 sig = "(x: UInt16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.count_trailing_zeros"
 sig = "(x: UInt16) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.floor_div"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.is_even"
 sig = "(x: UInt16) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.is_odd"
 sig = "(x: UInt16) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.max"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.min"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.modulo"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.parse"
 sig = "(s: String) -> Result[UInt16, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint16.pow"
 sig = "(base: UInt16, exp: Int) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.rotate_left"
 sig = "(a: UInt16, n: Int) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.rotate_right"
 sig = "(a: UInt16, n: Int) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.wrap_add"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.wrap_mul"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.wrap_sub"
 sig = "(a: UInt16, b: UInt16) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.band"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bit_length"
 sig = "(x: UInt32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bnot"
 sig = "(x: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bor"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bshl"
 sig = "(a: UInt32, n: Int) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bshr"
 sig = "(a: UInt32, n: Int) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.bxor"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.byte_swap"
 sig = "(x: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.clamp"
 sig = "(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.compare"
 sig = "(a: UInt32, b: UInt32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.count_leading_zeros"
 sig = "(x: UInt32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.count_ones"
 sig = "(x: UInt32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.count_trailing_zeros"
 sig = "(x: UInt32) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.floor_div"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.is_even"
 sig = "(x: UInt32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.is_odd"
 sig = "(x: UInt32) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.max"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.min"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.modulo"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.parse"
 sig = "(s: String) -> Result[UInt32, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint32.pow"
 sig = "(base: UInt32, exp: Int) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.rotate_left"
 sig = "(a: UInt32, n: Int) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.rotate_right"
 sig = "(a: UInt32, n: Int) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.wrap_add"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.wrap_mul"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.wrap_sub"
 sig = "(a: UInt32, b: UInt32) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.band"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bit_length"
 sig = "(x: UInt64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bnot"
 sig = "(x: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bor"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bshl"
 sig = "(a: UInt64, n: Int) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bshr"
 sig = "(a: UInt64, n: Int) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.bxor"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.byte_swap"
 sig = "(x: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.clamp"
 sig = "(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.compare"
 sig = "(a: UInt64, b: UInt64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.count_leading_zeros"
 sig = "(x: UInt64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.count_ones"
 sig = "(x: UInt64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.count_trailing_zeros"
 sig = "(x: UInt64) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.floor_div"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.is_even"
 sig = "(x: UInt64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.is_odd"
 sig = "(x: UInt64) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.max"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.min"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.modulo"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.parse"
 sig = "(s: String) -> Result[UInt64, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint64.pow"
 sig = "(base: UInt64, exp: Int) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.rotate_left"
 sig = "(a: UInt64, n: Int) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.rotate_right"
 sig = "(a: UInt64, n: Int) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.wrap_add"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.wrap_mul"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.wrap_sub"
 sig = "(a: UInt64, b: UInt64) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.band"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bit_length"
 sig = "(x: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bnot"
 sig = "(x: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bor"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bshl"
 sig = "(a: UInt8, n: Int) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bshr"
 sig = "(a: UInt8, n: Int) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.bxor"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.byte_swap"
 sig = "(x: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.clamp"
 sig = "(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.compare"
 sig = "(a: UInt8, b: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.count_leading_zeros"
 sig = "(x: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.count_ones"
 sig = "(x: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.count_trailing_zeros"
 sig = "(x: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.floor_div"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.is_even"
 sig = "(x: UInt8) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.is_odd"
 sig = "(x: UInt8) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.max"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.min"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.modulo"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.parse"
 sig = "(s: String) -> Result[UInt8, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint8.pow"
 sig = "(base: UInt8, exp: Int) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.rotate_left"
 sig = "(a: UInt8, n: Int) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.rotate_right"
 sig = "(a: UInt8, n: Int) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.wrap_add"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.wrap_mul"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.wrap_sub"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 
 [[fn]]
@@ -7284,719 +8048,839 @@ name = "zlib.decompress_max"
 sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.gunzip_max"
 sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "zlib.inflate_max"
 sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "fs.open_root"
 sig = "effect (dir: String) -> FsRoot ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.root_exists"
 sig = "effect (root: FsRoot, path: String) -> Bool ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.root_list_dir"
 sig = "effect (root: FsRoot, path: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "fs.root_read_bytes"
 sig = "effect (root: FsRoot, path: String) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.root_read_text"
 sig = "effect (root: FsRoot, path: String) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.root_remove"
 sig = "effect (root: FsRoot, path: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.root_write_text"
 sig = "effect (root: FsRoot, path: String, content: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.abs"
 sig = "(x: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.band"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.bit_length"
 sig = "(x: BigInt) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.bnot"
 sig = "(x: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.bor"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.bshl"
 sig = "(a: BigInt, n: Int) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.bshr"
 sig = "(a: BigInt, n: Int) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.bxor"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.clamp"
 sig = "(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.compare"
 sig = "(a: BigInt, b: BigInt) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.floor_div"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.is_even"
 sig = "(x: BigInt) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.is_odd"
 sig = "(x: BigInt) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.max"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.min"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bigint.modulo"
 sig = "(a: BigInt, b: BigInt) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.parse"
 sig = "(s: String) -> Result[BigInt, String]"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.parse_radix"
 sig = "(s: String, radix: Int) -> Result[BigInt, String]"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.pow"
 sig = "(base: BigInt, exp: Int) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.sign"
 sig = "(x: BigInt) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.to_string"
 sig = "(x: BigInt) -> String"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "bigint.to_string_radix"
 sig = "(x: BigInt, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "n2; rebind (loop, tail, fold) n2"
 
 [[fn]]
 name = "float.compare"
 sig = "(a: Float, b: Float) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.epsilon"
 sig = "() -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.from_bits"
 sig = "(bits: Int) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.infinity"
 sig = "() -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.is_finite"
 sig = "(x: Float) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.max_value"
 sig = "() -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.min_value"
 sig = "() -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.nan"
 sig = "() -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.pow"
 sig = "(base: Float, exp: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.signum"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.trunc"
 sig = "(x: Float) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.parse"
 sig = "(s: String) -> Result[Float32, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int.bit_length"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.bshr_logical"
 sig = "(a: Int, n: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.compare"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.count_ones"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.floor_div"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.modulo"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.parse_radix"
 sig = "(s: String, radix: Int) -> Result[Int, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int.pow"
 sig = "(base: Int, exp: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.sign"
 sig = "(x: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.to_string_radix"
 sig = "(x: Int, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.wrap"
 sig = "(x: Int, bits: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.wrap_sub"
 sig = "(a: Int, b: Int) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.parse_radix"
 sig = "(s: String, radix: Int) -> Result[Int16, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int16.to_string_radix"
 sig = "(x: Int16, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.parse_radix"
 sig = "(s: String, radix: Int) -> Result[Int32, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int32.to_string_radix"
 sig = "(x: Int32, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.parse_radix"
 sig = "(s: String, radix: Int) -> Result[Int64, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int64.to_string_radix"
 sig = "(x: Int64, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.parse_radix"
 sig = "(s: String, radix: Int) -> Result[Int8, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "int8.to_string_radix"
 sig = "(x: Int8, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.parse_radix"
 sig = "(s: String, radix: Int) -> Result[UInt16, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint16.to_string_radix"
 sig = "(x: UInt16, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.parse_radix"
 sig = "(s: String, radix: Int) -> Result[UInt32, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint32.to_string_radix"
 sig = "(x: UInt32, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.parse_radix"
 sig = "(s: String, radix: Int) -> Result[UInt64, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint64.to_string_radix"
 sig = "(x: UInt64, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.parse_radix"
 sig = "(s: String, radix: Int) -> Result[UInt8, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint8.to_string_radix"
 sig = "(x: UInt8, radix: Int) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.from"
 sig = "(x: S) -> BigInt"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bigint.from_checked"
 sig = "(x: S) -> Option[BigInt]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "deque.product"
 sig = "(d: Deque[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "deque.sum"
 sig = "(d: Deque[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "float.from"
 sig = "(x: S) -> Float"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float.from_checked"
 sig = "(x: S) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.from"
 sig = "(x: S) -> Float32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float32.from_checked"
 sig = "(x: S) -> Option[Float32]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.from"
 sig = "(x: S) -> Float64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "float64.from_checked"
 sig = "(x: S) -> Option[Float64]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.from"
 sig = "(x: S) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.from_checked"
 sig = "(x: S) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.from_saturating"
 sig = "(x: S) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int.from_wrapping"
 sig = "(x: S) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.from"
 sig = "(x: S) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.from_checked"
 sig = "(x: S) -> Option[Int16]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.from_saturating"
 sig = "(x: S) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int16.from_wrapping"
 sig = "(x: S) -> Int16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.from"
 sig = "(x: S) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.from_checked"
 sig = "(x: S) -> Option[Int32]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.from_saturating"
 sig = "(x: S) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int32.from_wrapping"
 sig = "(x: S) -> Int32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.from"
 sig = "(x: S) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.from_checked"
 sig = "(x: S) -> Option[Int64]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.from_saturating"
 sig = "(x: S) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int64.from_wrapping"
 sig = "(x: S) -> Int64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.from"
 sig = "(x: S) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.from_checked"
 sig = "(x: S) -> Option[Int8]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.from_saturating"
 sig = "(x: S) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "int8.from_wrapping"
 sig = "(x: S) -> Int8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "set.product"
 sig = "(s: Set[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "set.sum"
 sig = "(s: Set[A]) -> A"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uint16.from"
 sig = "(x: S) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.from_checked"
 sig = "(x: S) -> Option[UInt16]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.from_saturating"
 sig = "(x: S) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint16.from_wrapping"
 sig = "(x: S) -> UInt16"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.from"
 sig = "(x: S) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.from_checked"
 sig = "(x: S) -> Option[UInt32]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.from_saturating"
 sig = "(x: S) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint32.from_wrapping"
 sig = "(x: S) -> UInt32"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.from"
 sig = "(x: S) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.from_checked"
 sig = "(x: S) -> Option[UInt64]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.from_saturating"
 sig = "(x: S) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint64.from_wrapping"
 sig = "(x: S) -> UInt64"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.from"
 sig = "(x: S) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.from_checked"
 sig = "(x: S) -> Option[UInt8]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.from_saturating"
 sig = "(x: S) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uint8.from_wrapping"
 sig = "(x: S) -> UInt8"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 
 [[fn]]
@@ -8004,869 +8888,1014 @@ name = "path.join_within"
 sig = "(base: String, child: String) -> Result[String, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "bytes.all"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.any"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.append_bool"
 sig = "(b: Bytes, x: Bool) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_bytes"
 sig = "(b: Bytes, src: Bytes) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f16_be"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_f16_le"
 sig = "(b: Bytes, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.append_i8"
 sig = "(b: Bytes, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.chunk"
 sig = "(b: Bytes, n: Int) -> List[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.compare"
 sig = "(a: Bytes, b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.count"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.count_matches"
 sig = "(b: Bytes, needle: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.dedup"
 sig = "(b: Bytes) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.drop"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.drop_end"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.drop_while"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.enumerate"
 sig = "(b: Bytes) -> List[(Int, Int)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.filter"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.filter_map"
 sig = "(b: Bytes, f: (Int) -> Option[B]) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.find"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.find_index"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.find_map"
 sig = "(b: Bytes, f: (Int) -> Option[B]) -> Option[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.first"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.fold"
 sig = "(b: Bytes, init: B, f: (B, Int) -> B) -> B"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_bool"
 sig = "(b: Bytes, pos: Int) -> Option[Bool]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f16_be"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f16_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f16_le"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f16_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f32_be"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f32_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f32_le"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f32_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f64_be"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f64_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f64_le"
 sig = "(b: Bytes, pos: Int) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_f64_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i16_be"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i16_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i16_le"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i16_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i32_be"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i32_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i32_le"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i32_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i64_be"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i64_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i64_le"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i64_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_i8"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u16_be"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u16_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u16_le"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u16_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u32_be"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u32_be_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u32_le"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u32_le_array"
 sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.get_u8"
 sig = "(b: Bytes, pos: Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.group_by"
 sig = "(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.intersperse"
 sig = "(b: Bytes, sep: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.is_eof"
 sig = "(b: Bytes, pos: Int) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.last"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.last_index_of"
 sig = "(b: Bytes, needle: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.map"
 sig = "(b: Bytes, f: (Int) -> Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.max"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.max_by"
 sig = "(b: Bytes, f: (Int) -> K) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.max_with"
 sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.min"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.min_by"
 sig = "(b: Bytes, f: (Int) -> K) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.min_with"
 sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.next_bool"
 sig = "(b: Bytes, pos: Int) -> (Option[Bool], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_bytes"
 sig = "(b: Bytes, pos: Int, n: Int) -> (Option[Bytes], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f16_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f16_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f32_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f32_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f64_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_f64_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i16_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i16_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i32_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i32_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i64_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i64_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_i8"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_u16_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_u16_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_u32_be"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_u32_le"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.next_u8"
 sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.pad_end"
 sig = "(b: Bytes, n: Int, fill: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.pad_start"
 sig = "(b: Bytes, n: Int, fill: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.partition"
 sig = "(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.pop"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.product"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.put_bool"
 sig = "(b: Bytes, pos: Int, x: Bool) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f16_be"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f16_le"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f32_be"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f32_le"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f64_be"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_f64_le"
 sig = "(b: Bytes, pos: Int, x: Float) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i16_be"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i16_le"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i32_be"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i32_le"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i64_be"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i64_le"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_i8"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_u16_be"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_u16_le"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_u32_be"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_u32_le"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.put_u8"
 sig = "(b: Bytes, pos: Int, x: Int) -> Unit"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.reduce"
 sig = "(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.replace"
 sig = "(b: Bytes, from: Bytes, to: Bytes) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.replace_first"
 sig = "(b: Bytes, from: Bytes, to: Bytes) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.scan"
 sig = "(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.sort"
 sig = "(b: Bytes) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "bytes.sort_by"
 sig = "(b: Bytes, f: (Int) -> B) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "bytes.sort_with"
 sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "bytes.split_at"
 sig = "(b: Bytes, n: Int) -> (Bytes, Bytes)"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.strip_prefix"
 sig = "(b: Bytes, prefix: Bytes) -> Option[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.strip_suffix"
 sig = "(b: Bytes, suffix: Bytes) -> Option[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.sum"
 sig = "(b: Bytes) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.take"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.take_end"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "bytes.take_while"
 sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.unique"
 sig = "(b: Bytes) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "bytes.unique_by"
 sig = "(b: Bytes, f: (Int) -> K) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "bytes.window"
 sig = "(b: Bytes, n: Int) -> List[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.zeros"
 sig = "(n: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.zip"
 sig = "(b: Bytes, ys: List[B]) -> List[(Int, B)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.zip_with"
 sig = "(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "matrix.to_bytes_f16_le"
 sig = "(m: Matrix) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.captures_all"
 sig = "(re: Regex, s: String) -> List[List[Option[String]]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.compile"
 sig = "(pattern: String) -> Result[Regex, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.escape"
 sig = "(s: String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.index_of"
 sig = "(re: Regex, s: String) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.is_full_match"
 sig = "(re: Regex, s: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.new"
 sig = "(pattern: String) -> Regex"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.replace_first_with"
 sig = "(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "regex.replace_with"
 sig = "(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "bytes.is_equal_constant_time"
 sig = "(a: Bytes, b: Bytes) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 
@@ -8875,27 +9904,32 @@ name = "hash.hmac_sha256"
 sig = "(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "hash.hmac_sha512"
 sig = "(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 [[fn]]
 name = "hash.is_valid_hmac_sha256"
 sig = "(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "hash.is_valid_hmac_sha512"
 sig = "(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 [[fn]]
 name = "string.is_equal_constant_time"
 sig = "(a: String, b: String) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
@@ -8903,450 +9937,525 @@ name = "env.remove"
 sig = "effect (name: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "env.secret"
 sig = "effect (name: String) -> Option[Secret[String]] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "env.vars"
 sig = "effect () -> Map[String, String] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "fs.append_bytes"
 sig = "effect (path: String, data: Bytes) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.append_text"
 sig = "effect (path: String, content: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "fs.write_text"
 sig = "effect (path: String, content: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "http.body_bytes"
 sig = "(m: M) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.header"
 sig = "(m: M, name: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "http.method"
 sig = "(req: HttpRequest) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.path"
 sig = "(req: HttpRequest) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.send"
 sig = "effect (req: HttpRequest) -> HttpResponse ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.set_body"
 sig = "(m: M, body: String) -> M"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.set_body_bytes"
 sig = "(m: M, body: Bytes) -> M"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.set_status"
 sig = "(resp: HttpResponse, code: Int) -> HttpResponse"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.close"
 sig = "effect (h: H) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.eprint"
 sig = "effect (s: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "io.read"
 sig = "effect (h: H, max: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.read_exact"
 sig = "effect (h: H, n: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "io.read_to_end"
 sig = "effect (h: H) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.stderr"
 sig = "effect () -> Stderr ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.stdin"
 sig = "effect () -> Stdin ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "io.stdout"
 sig = "effect () -> Stdout ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "map.to_list"
 sig = "(m: Map[K, V]) -> List[(K, V)]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "net.ip_to_string"
 sig = "(ip: IpAddr) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.is_loopback"
 sig = "(ip: IpAddr) -> Bool"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.lookup_host"
 sig = "effect (host: String) -> List[IpAddr] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.parse_ip"
 sig = "(s: String) -> Result[IpAddr, String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.udp_bind"
 sig = "effect (host: String, port: Int) -> UdpSocket ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.udp_local_port"
 sig = "effect (sock: UdpSocket) -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.udp_recv_from"
 sig = "effect (sock: UdpSocket, max: Int) -> UdpPacket ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "net.udp_send_to"
 sig = "effect (sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.child_pid"
 sig = "effect (c: ProcessChild) -> Int ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.output"
 sig = "effect (c: ProcessCommand) -> ProcessStatus ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.poll"
 sig = "effect (c: ProcessChild) -> Option[Result[ProcessStatus, String]] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.read_new_stderr"
 sig = "effect (c: ProcessChild) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.read_new_stdout"
 sig = "effect (c: ProcessChild) -> String ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.start"
 sig = "effect (c: ProcessCommand) -> ProcessChild ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.stop"
 sig = "effect (c: ProcessChild, grace_ms: Int) -> ProcessStatus ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "process.wait"
 sig = "effect (c: ProcessChild) -> ProcessStatus ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "string.count_matches"
 sig = "(s: String, needle: String) -> Int"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "string.pop"
 sig = "(s: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "string.to_codepoint"
 sig = "(s: String) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "string.to_list"
 sig = "(s: String) -> List[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.accept"
 sig = "effect (listener: Fd) -> Fd ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "unix.connect"
 sig = "effect (path: String) -> Fd ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "unix.listen"
 sig = "effect (path: String) -> Fd ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "unix.select"
 sig = "effect (xs: List[Fd], timeout_ms: Int) -> List[Fd] ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.shm_create"
 sig = "effect (size: Int) -> Fd ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.shm_read"
 sig = "effect (fd: Fd, offset: Int, len: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.shm_resize"
 sig = "effect (fd: Fd, size: Int) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.shm_write"
 sig = "effect (fd: Fd, offset: Int, data: Bytes) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "unix.take_fds"
 sig = "effect (sock: Fd) -> List[Fd] ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "unix.write_fds"
 sig = "effect (sock: Fd, data: Bytes, fds: List[Fd]) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "uuid.compare"
 sig = "(a: Uuid, b: Uuid) -> Int"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.from_bytes"
 sig = "(b: Bytes) -> Result[Uuid, String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.parse"
 sig = "(s: String) -> Result[Uuid, String]"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.to_bytes"
 sig = "(u: Uuid) -> Bytes"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.to_string"
 sig = "(u: Uuid) -> String"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.v4"
 sig = "effect () -> Uuid ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "uuid.v7"
 sig = "effect () -> Uuid ! String"
 class = "effect"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "value.as_object"
 sig = "(v: Value) -> Result[List[(String, Value)], String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get"
 sig = "(v: Value, key: String) -> Option[Value]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_array"
 sig = "(v: Value, key: String) -> Option[List[Value]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_bool"
 sig = "(v: Value, key: String) -> Option[Bool]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_float"
 sig = "(v: Value, key: String) -> Option[Float]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_int"
 sig = "(v: Value, key: String) -> Option[Int]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_object"
 sig = "(v: Value, key: String) -> Option[List[(String, Value)]]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_path"
 sig = "(v: Value, p: Path) -> Option[Value]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.get_string"
 sig = "(v: Value, key: String) -> Option[String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.index"
 sig = "(p: Path, i: Int) -> Path"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "value.key"
 sig = "(p: Path, name: String) -> Path"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "value.remove_path"
 sig = "(v: Value, p: Path) -> Value"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.root"
 sig = "() -> Path"
 class = "pure"
 status = "uninspected"
+order = "1; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "value.set_path"
 sig = "(v: Value, p: Path, x: Value) -> Result[Value, String]"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "value.string"
 sig = "(s: String) -> Value"
 class = "pure"
 status = "uninspected"
+order = "n; rebind (loop, tail, fold) n"
 
 
 [[fn]]
