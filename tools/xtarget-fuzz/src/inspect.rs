@@ -1132,6 +1132,36 @@ fn judge_counted(
             walls.sort();
             ts.push(walls[walls.len() / 2]);
         }
+        // XF_SUBTRACT_FIXED=1 (coordinator ruling 2026-11-16): a call whose
+        // cost is one fixed setup (a child's spawn, a first buffer) plus its
+        // order is measured once more at size 0 — the same call, empty
+        // operand, the same k and median — and that constant is taken off
+        // every point before the unchanged fitter and tolerance judge the
+        // marginal. The line records the baseline.
+        if std::env::var("XF_SUBTRACT_FIXED").as_deref() == Ok("1") {
+            let (p, b) = marginal(0, k);
+            let mut runs = Vec::new();
+            for _ in 0..reps {
+                runs.push(
+                    counted_delta(ctx, &p, &b, leg)
+                        .map_err(|e| format!("{label} {} k={k} n=0 (fixed cost): {e}", leg_tag(leg)))?,
+                );
+            }
+            let median = |f: &dyn Fn(&Delta) -> f64| {
+                let mut v: Vec<f64> = runs.iter().map(f).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                v[v.len() / 2]
+            };
+            let (y0, b0) = (median(&|d| d.instructions), median(&|d| d.moved));
+            line.push_str(&format!(
+                " {} fixed(n=0) {:.3e} instr {:.3e}B subtracted;",
+                leg_tag(leg),
+                y0,
+                b0
+            ));
+            ys.iter_mut().for_each(|y| *y -= y0);
+            bs.iter_mut().for_each(|y| *y -= b0);
+        }
         let (class, rms) = fit_series(&sizes, &ys, k);
         let (bclass, brms) = fit_series(&sizes, &bs, k);
         worst = worst.max(class).max(bclass);
