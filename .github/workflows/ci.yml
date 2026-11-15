@@ -1640,7 +1640,7 @@ jobs:
 
       - uses: ./.github/actions/setup-node-pinned
         with:
-          node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
+          node-version: "22.23.5"  # exact (security row 16): a major alone resolves to the newest 22.x at run time
 
       - name: Cache wasm-pack tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1734,7 +1734,7 @@ jobs:
 
       - uses: ./.github/actions/setup-node-pinned
         with:
-          node-version: "20.20.2"  # exact (security row 16): a major alone resolves to the newest 20.x at run time
+          node-version: "22.23.5"  # exact (security row 16): a major alone resolves to the newest 22.x at run time
 
       - name: Cache wasm-pack tarball
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -2165,7 +2165,7 @@ jobs:
       - uses: ./.github/actions/setup-node-pinned
         if: env.PROSE_LANE != 'true'
         with:
-          node-version: "24.22.1"  # exact (security row 16); JSPI needs >= 24.20
+          node-version: "24.22.3"  # exact (security row 16); JSPI needs >= 24.20
       - name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)
         if: env.PROSE_LANE != 'true'
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version

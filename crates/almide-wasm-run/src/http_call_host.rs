@@ -89,34 +89,51 @@ fn cell(s: &str) -> String {
 /// The start frame: method, body, total_ms, idle_ms, then header key/value
 /// cells until the frame ends. Both limit cells `classic` is plain
 /// `request_stream`'s call (the core's classic mode, no limits named);
-/// `None` here.
-type StartFrame = (String, String, Option<(i64, i64)>, Vec<(String, String)>);
+/// `None` here. The body is BYTES (#4744): the guest frames the request's
+/// exact bytes, never a lossy decoding of them.
+type StartFrame = (String, Vec<u8>, Option<(i64, i64)>, Vec<(String, String)>);
 
-fn parse_start_frame(frame: &str) -> Result<StartFrame, String> {
-    fn take(rest: &str) -> Result<(String, &str), String> {
-        let nl = rest.find('\n').ok_or_else(|| "malformed http call frame (missing length)".to_string())?;
-        let n: usize = rest[..nl].parse().map_err(|_| "malformed http call frame (bad length)".to_string())?;
-        let tail = &rest[nl + 1..];
-        if tail.chars().count() < n {
+/// One `<count>\n<payload>` cell over the frame's bytes, walked as the p3
+/// shim walks it (`http_frame_cell`): each counted unit is one byte and the
+/// UTF-8 continuation bytes after it. On valid text that is `string.len`'s
+/// char count; on a raw body cell it is the count the guest wrote for it.
+fn take_cell(rest: &[u8]) -> Result<(&[u8], &[u8]), String> {
+    let nl = rest.iter().position(|&b| b == b'\n').ok_or_else(|| "malformed http call frame (missing length)".to_string())?;
+    let n: usize = std::str::from_utf8(&rest[..nl])
+        .ok()
+        .and_then(|d| d.parse().ok())
+        .ok_or_else(|| "malformed http call frame (bad length)".to_string())?;
+    let tail = &rest[nl + 1..];
+    let mut end = 0;
+    for _ in 0..n {
+        if end >= tail.len() {
             return Err("malformed http call frame (short cell)".to_string());
         }
-        let end = tail.char_indices().nth(n).map(|(i, _)| i).unwrap_or(tail.len());
-        Ok((tail[..end].to_string(), &tail[end..]))
+        end += 1;
+        while end < tail.len() && tail[end] & 0xC0 == 0x80 {
+            end += 1;
+        }
     }
+    Ok((&tail[..end], &tail[end..]))
+}
+
+fn parse_start_frame(frame: &[u8]) -> Result<StartFrame, String> {
+    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
     let int = |s: String| s.parse::<i64>().map_err(|_| "malformed http call frame (bad limit)".to_string());
-    let (method, rest) = take(frame)?;
-    let (body, rest) = take(rest)?;
-    let (total, rest) = take(rest)?;
-    let (idle, mut rest) = take(rest)?;
+    let (method, rest) = take_cell(frame)?;
+    let (body, rest) = take_cell(rest)?;
+    let (total, rest) = take_cell(rest)?;
+    let (idle, mut rest) = take_cell(rest)?;
     let mut headers = Vec::new();
     while !rest.is_empty() {
-        let (k, r1) = take(rest)?;
-        let (v, r2) = take(r1)?;
-        headers.push((k, v));
+        let (k, r1) = take_cell(rest)?;
+        let (v, r2) = take_cell(r1)?;
+        headers.push((text(k), text(v)));
         rest = r2;
     }
+    let (total, idle) = (text(total), text(idle));
     let limits = if total == "classic" && idle == "classic" { None } else { Some((int(total)?, int(idle)?)) };
-    Ok((method, body, limits, headers))
+    Ok((text(method), body.to_vec(), limits, headers))
 }
 
 /// Length-prefixed frames (u32 LE + bytes), the list-of-strings encoding.
@@ -131,8 +148,7 @@ fn frames(items: &[String]) -> Vec<u8> {
 
 /// Op 53: validate and start the call; its id, or the start error.
 pub(crate) fn open(calls: &Mutex<HttpCalls>, url: &str, frame: &[u8]) -> (i64, Vec<u8>) {
-    let frame = String::from_utf8_lossy(frame);
-    let (method, body, limits, headers) = match parse_start_frame(&frame) {
+    let (method, body, limits, headers) = match parse_start_frame(frame) {
         Ok(f) => f,
         Err(m) => return err_text(m),
     };

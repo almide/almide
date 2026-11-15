@@ -472,12 +472,14 @@ pub struct AlmideHttpRoute {
 /// caller's headers in map order, less a `Content-Length` (the client frames
 /// the body, `HTTP_FRAMING_HEADERS`). A caller's `Host` replaces ours, as in
 /// curl. ONE writer for every client shape, so the wire request cannot drift
-/// between them. The headers must have passed `http_check_request`.
+/// between them. The headers must have passed `http_check_request`. The body
+/// is BYTES and goes out exactly as given (#4744): a `set_body_bytes` upload
+/// that is not UTF-8 is not re-encoded on the way to the wire.
 pub fn http_request_bytes(
     method: &str,
     u: &AlmideHttpUrl,
     route: &AlmideHttpRoute,
-    body: &str,
+    body: &[u8],
     headers: &[(String, String)],
 ) -> Vec<u8> {
     let has = |name: &str| headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
@@ -502,8 +504,9 @@ pub fn http_request_bytes(
         req.push_str(&format!("{}: {}\r\n", k, v));
     }
     req.push_str("\r\n");
-    req.push_str(body);
-    req.into_bytes()
+    let mut wire = req.into_bytes();
+    wire.extend_from_slice(body);
+    wire
 }
 
 include!("http_proxy_core.rs");

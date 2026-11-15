@@ -335,7 +335,7 @@ fn http_call_run(
     sh: &AlmideHttpCallShared,
     method: &str,
     url: &str,
-    body: &str,
+    body: &[u8],
     headers: &[(String, String)],
 ) -> Result<(), String> {
     let u = http_prepare(method, url, headers)?;
@@ -480,7 +480,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
 pub fn http_call_spawn(
     method: &str,
     url: &str,
-    body: &str,
+    body: impl AsRef<[u8]>,
     headers: Vec<(String, String)>,
     total_ms: i64,
     idle_ms: i64,
@@ -491,7 +491,7 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
-    http_call_spawn_with(method, url, body, headers, (total_ms, idle_ms), false)
+    http_call_spawn_with(method, url, body.as_ref(), headers, (total_ms, idle_ms), false)
 }
 
 /// Start a CLASSIC call — plain `request_stream` on every leg: no wall
@@ -499,17 +499,18 @@ pub fn http_call_spawn(
 pub fn http_call_spawn_classic(
     method: &str,
     url: &str,
-    body: &str,
+    body: impl AsRef<[u8]>,
     headers: Vec<(String, String)>,
 ) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
     let idle_ms = client_read_timeout(120).map_or(0, |d| d.as_millis() as i64);
-    http_call_spawn_with(method, url, body, headers, (0, idle_ms), true)
+    http_call_spawn_with(method, url, body.as_ref(), headers, (0, idle_ms), true)
 }
 
+// The request body is bytes and is sent exactly as given (#4744).
 fn http_call_spawn_with(
     method: &str,
     url: &str,
-    body: &str,
+    body: &[u8],
     headers: Vec<(String, String)>,
     (total_ms, idle_ms): (i64, i64),
     classic: bool,
@@ -531,7 +532,7 @@ fn http_call_spawn_with(
         classic,
     });
     let worker = shared.clone();
-    let (method, url, body) = (method.to_string(), url.to_string(), body.to_string());
+    let (method, url, body) = (method.to_string(), url.to_string(), body.to_vec());
     std::thread::Builder::new()
         .name("almide-http-call".to_string())
         .spawn(move || {

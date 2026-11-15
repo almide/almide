@@ -337,7 +337,7 @@ impl LowerCtx {
         // globals (`let DERIVED = BASE + ["c"]`, #2274) folds to one literal
         // list at lowering time — pure substitution and concatenation, zero
         // calls injected — and materializes like the literal it folds to.
-        if let Some(folded) = self.fold_pure_literal_init(init, 0) {
+        if let Some(folded) = self.fold_pure_literal_init(init) {
             if matches!(folded.kind, IrExprKind::LitStr { .. }) {
                 return self.materialize_const_data_global(var, ty, &folded);
             }
@@ -418,12 +418,19 @@ impl LowerCtx {
 
     /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
     /// Fold literal list/String concatenation through immutable globals, with
-    /// no injected calls. Calls, mutable globals and excessive depth decline.
-    /// The folded expression retains the checked type and source span.
-    fn fold_pure_literal_init(&self, init: &IrExpr, depth: u32) -> Option<IrExpr> {
-        if depth > 8 {
-            return None;
-        }
+    /// no injected calls. Calls, mutable globals, a global cycle and a folded
+    /// value past the size budget decline. The folded expression retains the
+    /// checked type and source span.
+    ///
+    /// The fold is bounded by what it PRODUCES, not by how many globals it passes
+    /// through (#4749): a fixed depth bound refused `let D6 = D5 + D5` six steps down
+    /// a chain whose value is 320 bytes. Each global folds once per materialization
+    /// (memoized), so a doubling chain costs its output size, not 2^n walks.
+    fn fold_pure_literal_init(&self, init: &IrExpr) -> Option<IrExpr> {
+        self.fold_pure_literal_expr(init, &mut PureLiteralFold::default())
+    }
+
+    fn fold_pure_literal_expr(&self, init: &IrExpr, fold: &mut PureLiteralFold) -> Option<IrExpr> {
         match &init.kind {
             IrExprKind::LitStr { .. } => Some(init.clone()),
             IrExprKind::List { .. } if crate::lower::is_pure_literal_list(init) => Some(init.clone()),
@@ -431,40 +438,60 @@ impl LowerCtx {
             // literal list of what each one folds to.
             IrExprKind::List { elements } if crate::lower::owned_tco_slots() => {
                 let elements = elements.iter().map(|e| match &e.kind {
-                    IrExprKind::Var { .. } => self.fold_pure_literal_init(e, depth + 1),
+                    IrExprKind::Var { .. } => self.fold_pure_literal_expr(e, fold),
                     _ => Some(e.clone()),
                 }).collect::<Option<Vec<_>>>()?;
                 let folded = IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None };
                 crate::lower::is_pure_literal_list(&folded).then_some(folded)
             }
-            IrExprKind::Var { id } => {
-                if crate::lower::is_mutable_global(*id) {
-                    return None;
-                }
-                let src = self.global_inits.get(id)?.clone();
-                self.fold_pure_literal_init(&src, depth + 1)
-            }
+            IrExprKind::Var { id } => self.fold_pure_literal_global(*id, fold),
             IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } => {
-                let l = self.fold_pure_literal_init(left, depth + 1)?;
-                let r = self.fold_pure_literal_init(right, depth + 1)?;
+                let l = self.fold_pure_literal_expr(left, fold)?;
+                let r = self.fold_pure_literal_expr(right, fold)?;
                 let (IrExprKind::List { elements: le }, IrExprKind::List { elements: re }) = (&l.kind, &r.kind) else {
                     return None;
                 };
+                if le.len() + re.len() > PureLiteralFold::MAX_LIST_ELEMS {
+                    return None;
+                }
                 let mut elements = le.clone();
                 elements.extend(re.iter().cloned());
                 Some(IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None })
             }
             IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } => {
-                let l = self.fold_pure_literal_init(left, depth + 1)?;
-                let r = self.fold_pure_literal_init(right, depth + 1)?;
+                let l = self.fold_pure_literal_expr(left, fold)?;
+                let r = self.fold_pure_literal_expr(right, fold)?;
                 let (IrExprKind::LitStr { value: mut text }, IrExprKind::LitStr { value: suffix }) = (l.kind, r.kind) else {
                     return None;
                 };
+                if text.len() + suffix.len() > PureLiteralFold::MAX_STR_BYTES {
+                    return None;
+                }
                 text.push_str(&suffix);
                 Some(IrExpr { kind: IrExprKind::LitStr { value: text }, ty: init.ty.clone(), span: init.span, def_id: None })
             }
             _ => None,
         }
+    }
+
+    /// One immutable global's folded initializer, memoized for the rest of this
+    /// fold. A global met again while its own init is still folding is a cycle and
+    /// declines.
+    fn fold_pure_literal_global(&self, id: VarId, fold: &mut PureLiteralFold) -> Option<IrExpr> {
+        if crate::lower::is_mutable_global(id) {
+            return None;
+        }
+        if let Some(done) = fold.memo.get(&id) {
+            return done.clone();
+        }
+        if !fold.open.insert(id) {
+            return None;
+        }
+        let src = self.global_inits.get(&id).cloned();
+        let out = src.and_then(|src| self.fold_pure_literal_expr(&src, fold));
+        fold.open.remove(&id);
+        fold.memo.insert(id, out.clone());
+        out
     }
 
     fn materialize_literal_list_global(
@@ -698,6 +725,21 @@ impl LowerCtx {
         }
         None
     }
+}
+
+/// The state of one [`LowerCtx::fold_pure_literal_init`] walk: each global's
+/// folded value (or its decline), and the globals whose init is mid-fold.
+#[derive(Default)]
+struct PureLiteralFold {
+    memo: std::collections::HashMap<VarId, Option<IrExpr>>,
+    open: std::collections::HashSet<VarId>,
+}
+
+impl PureLiteralFold {
+    /// The largest String a fold produces; past it the global walls as before.
+    const MAX_STR_BYTES: usize = 1 << 20;
+    /// The largest list a fold produces.
+    const MAX_LIST_ELEMS: usize = 1 << 16;
 }
 
 include!("mod_p3_c_drops.rs");
