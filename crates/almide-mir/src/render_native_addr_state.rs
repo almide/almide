@@ -16,8 +16,9 @@ pub(crate) struct AddrState {
     const_lists: BTreeMap<ValueId, Vec<String>>,
     /// The literals those tables are filled from (`const_list_elems`).
     const_elems: BTreeSet<ValueId>,
-    /// Empty list literals (`[]`): stored into a slot of a list type, each
-    /// is that type's empty list.
+    /// Empty list literals (`[]`) and empty list allocations: each renders as
+    /// its type's empty list. A later read of one is that type's empty list
+    /// only while nothing rebinds it ([`AddrState::still_empty_list`]).
     empty_lists: BTreeSet<ValueId>,
     /// Values some `Store` writes into a slot. A string's handle joins the
     /// algebra only as one of these; any other string handle (the abort
@@ -272,5 +273,15 @@ impl AddrState {
     /// the snapshot's reference (render_native_heap_slot).
     pub(crate) fn slot_alias(&self, v: &ValueId) -> bool {
         self.slot_reads.aliases.get(v).is_some_and(|s| crate::native_slot_takes::snapshot_slot(*s))
+    }
+
+    /// `v` is a block allocated empty that still holds that empty list where
+    /// it is read: its allocation is an empty one and nothing rebinds it. A
+    /// `SetLocal` target holds whatever its last write left — a loop
+    /// accumulator `acc = []; for … { acc = acc + part }` is allocated empty
+    /// and read full after the loop (#4764) — so only its allocation is
+    /// known empty, the rule `known_none` applies to a mutable None.
+    pub(crate) fn still_empty_list(&self, v: &ValueId) -> bool {
+        self.empty_lists.contains(v) && !self.set_locals.contains(v)
     }
 }
