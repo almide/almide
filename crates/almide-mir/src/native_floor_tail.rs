@@ -65,31 +65,13 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     if elem == ListElem::StrValuePairs {
         return owned_pairs(code, got, false).map(|v| format!("&{v}"));
     }
-    let elem_of = |i: u16| crate::render_native_rec::list_elem(i);
-    match (elem, got) {
-        // A type parameter's list: a generated list too, borrowed whole.
-        (ListElem::Any, NTy::Rec(i)) if elem_of(i).is_some() => return Some(format!("&{code}")),
-        (ListElem::Any, NTy::RecRef(i)) if elem_of(i).is_some() => return Some(code.to_string()),
-        // The render's float list holds each cell's bits.
-        (ListElem::Float, NTy::Vec | NTy::VecRef) => {
-            return Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()"))
-        }
-        // And a bool list each cell's 0 / 1.
-        (ListElem::Bool, NTy::Vec | NTy::VecRef) => return Some(format!("&{code}.iter().map(|x| *x != 0).collect::<Vec<bool>>()")),
-        (ListElem::FloatRows, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i) == Some(NTy::Vec) => {
-            return Some(format!(
-                "&{code}.iter().map(|r| r.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()).collect::<Vec<Vec<f64>>>()"
-            ))
-        }
-        (ListElem::Matrix, NTy::Rec(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(format!("&{code}")),
-        (ListElem::Matrix, NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(code.to_string()),
-        // A Bytes list's runtime param is a slice of `B: Deref<Target = Vec<u8>>`
-        // (v0 hands it shared blocks): lend it a slice of the blocks' references,
-        // which meets that bound and every other a reference meets.
-        (ListElem::Bytes, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_bytes) => {
-            return Some(format!("&{code}.iter().collect::<Vec<&Vec<u8>>>()"))
-        }
-        (ListElem::Float | ListElem::Bool | ListElem::FloatRows | ListElem::Matrix | ListElem::Bytes, _) => return None,
+    if matches!(elem, ListElem::Float | ListElem::Bool | ListElem::FloatRows | ListElem::Matrix | ListElem::Bytes) {
+        return converted_list_arg(elem, code, got);
+    }
+    // A type parameter's list: a generated list too, borrowed whole.
+    match got {
+        NTy::Rec(i) if elem == ListElem::Any && crate::render_native_rec::list_elem(i).is_some() => return Some(format!("&{code}")),
+        NTy::RecRef(i) if elem == ListElem::Any && crate::render_native_rec::list_elem(i).is_some() => return Some(code.to_string()),
         _ => {}
     }
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);
@@ -104,6 +86,30 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
         }
         NTy::RecRef(i) if elem == ListElem::Value && crate::render_native_rec::list_elem(i).is_some_and(crate::render_native_rec::is_value) => {
             Some(code.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// The list params whose runtime element is not the render's cell: each is
+/// converted or re-borrowed into the runtime's shape, or refused.
+fn converted_list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
+    let elem_of = |i: u16| crate::render_native_rec::list_elem(i);
+    match (elem, got) {
+        // The render's float list holds each cell's bits.
+        (ListElem::Float, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()")),
+        // And a bool list each cell's 0 / 1.
+        (ListElem::Bool, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| *x != 0).collect::<Vec<bool>>()")),
+        (ListElem::FloatRows, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i) == Some(NTy::Vec) => Some(format!(
+            "&{code}.iter().map(|r| r.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()).collect::<Vec<Vec<f64>>>()"
+        )),
+        (ListElem::Matrix, NTy::Rec(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => Some(format!("&{code}")),
+        (ListElem::Matrix, NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => Some(code.to_string()),
+        // A Bytes list's runtime param is a slice of `B: Deref<Target = Vec<u8>>`
+        // (v0 hands it shared blocks): lend it a slice of the blocks' references,
+        // which meets that bound and every other a reference meets.
+        (ListElem::Bytes, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_bytes) => {
+            Some(format!("&{code}.iter().collect::<Vec<&Vec<u8>>>()"))
         }
         _ => None,
     }
