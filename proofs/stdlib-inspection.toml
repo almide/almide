@@ -75,21 +75,33 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "704"
+# uninspected_ceiling = "701"
 
 [[fn]]
 name = "args.option"
 sig = "effect (name: String) -> Option[String] ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:731545c3d06520e2"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 167 of them clean on every leg; unique findings 0"
+complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "args.positional"
 sig = "effect (options: List[String]) -> List[String] ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:7fb36834031370ad"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 137 of them clean on every leg; unique findings 0"
+complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
 name = "base64.decode"
 sig = "(s: String) -> Result[Bytes, String]"
@@ -5467,9 +5479,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "args.has_flag"
 sig = "effect (name: String) -> Bool ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:cc5d567ab815a3c0"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
-blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 166 of them clean on every leg; unique findings 0"
+complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "bool.compare"
