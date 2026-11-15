@@ -1062,7 +1062,21 @@ fn judge_counted(
         (Leg::Native, calibrate(Leg::Native)?),
         (Leg::Wasm, calibrate(Leg::Wasm)?),
     ];
-    let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
+    // XF_SIZE_STEPS (doublings, default 5) and XF_REPS (median of R runs per
+    // size, default 1) widen a series whose single run fits no class within
+    // the tolerance (coordinator ruling 2026-11-16, fs.glob / fs.walk). The
+    // defaults reproduce the stamped evidence exactly; the tolerance and the
+    // order comparison are unchanged, and the line records both settings.
+    let env_u = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v >= 1)
+            .unwrap_or(d)
+    };
+    let steps = env_u("XF_SIZE_STEPS", 5).max(5);
+    let reps = env_u("XF_REPS", 1);
+    let sizes: Vec<u64> = (0..steps).map(|i| n << i).collect();
     let k_both = ks[0].1.min(ks[1].1);
     for &m in &sizes {
         legs_agree(ctx, &programs(m, k_both).0)
@@ -1070,8 +1084,11 @@ fn judge_counted(
     }
     let mut line = format!(
         "{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}",
-        n << 4
+        n << (steps - 1)
     );
+    if steps != 5 || reps != 1 {
+        line.push_str(&format!(" sizes={steps} median-of={reps}"));
+    }
     let mut worst = 0usize;
     let mut unexplained = false;
     for (leg, k) in ks {
@@ -1082,11 +1099,23 @@ fn judge_counted(
             let (p, b) = marginal(m, k);
             // Which leg, k and size failed is the first thing a timeout's
             // diagnosis needs (value.as_array timed out with none of it).
-            let d = counted_delta(ctx, &p, &b, leg)
-                .map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
-            ys.push(d.instructions);
-            bs.push(d.moved);
-            ts.push(d.wall);
+            let mut runs = Vec::new();
+            for _ in 0..reps {
+                runs.push(
+                    counted_delta(ctx, &p, &b, leg)
+                        .map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?,
+                );
+            }
+            let median = |f: &dyn Fn(&Delta) -> f64| {
+                let mut v: Vec<f64> = runs.iter().map(f).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                v[v.len() / 2]
+            };
+            ys.push(median(&|d| d.instructions));
+            bs.push(median(&|d| d.moved));
+            let mut walls: Vec<_> = runs.iter().map(|d| d.wall).collect();
+            walls.sort();
+            ts.push(walls[walls.len() / 2]);
         }
         let (class, rms) = fit_series(&sizes, &ys, k);
         let (bclass, brms) = fit_series(&sizes, &bs, k);
