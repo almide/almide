@@ -217,14 +217,15 @@ impl LowerCtx {
             self.ops.push(Op::IntBinOp { dst, op: IntOp::Eq, a: lv, b: rv });
             return Some(Some(dst));
         }
-        if let Some(name) = Self::module_eq_call_name(ty) {
+        let name = Self::module_eq_call_name(ty).map(str::to_string).or_else(|| Self::runtime_eq_call_name(ty));
+        if let Some(name) = name {
             let Ok(result) = repr_of(&Ty::Bool) else {
                 return Some(None);
             };
             let dst = self.fresh_value();
             self.ops.push(Op::CallFn {
                 dst: Some(dst),
-                name: name.to_string(),
+                name,
                 args: vec![self.eq_handle_arg(lv), self.eq_handle_arg(rv)],
                 result: Some(result),
             });
@@ -788,4 +789,5 @@ impl LowerCtx {
 }
 
 include!("native_set_eq.rs");
+include!("runtime_backed_eq.rs");
 include!("native_tag_pair_gate.rs");

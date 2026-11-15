@@ -265,13 +265,19 @@ fn cl_outline_continuation(
     // frontend's convention for a named effect call under `!`; the Unwrap
     // above it carries the unwrapped T. A plain-T call ty made the unwrap
     // desugar read the subject as a non-Result ("empty deferred heap value").
+    // A fn that DECLARES its Result (`effect fn f() -> Result[Int, String]`)
+    // is its own carrier: the frontend types a call to it as that Result, not
+    // a Result of it, and the continuation's tail already builds it (#4749 —
+    // wrapping it again read the callee's Ok payload slot as a nested Result).
+    // Its value continuation binds the call's Result as is and returns it.
+    let declares_carrier = crate::lower::is_result_ty(ret_ty);
     let call = IrExpr {
         kind: IrExprKind::Call {
             target: CallTarget::Named { name: func_name },
             args,
             type_args: vec![],
         },
-        ty: Ty::result(ret_ty.clone(), Ty::String),
+        ty: if declares_carrier { ret_ty.clone() } else { Ty::result(ret_ty.clone(), Ty::String) },
         span,
         def_id: None,
     };
@@ -283,14 +289,18 @@ fn cl_outline_continuation(
     // the wasm stack (round 1's invalid module), a tail-position
     // `Unwrap(call)` walled inside a preceding err-check arm, and a
     // Unit-typed BIND walled as an empty deferred heap value.
-    let unwrapped = IrExpr {
-        kind: IrExprKind::Unwrap { expr: Box::new(call) },
-        ty: ret_ty.clone(),
-        span,
-        def_id: None,
+    let value = if declares_carrier {
+        call
+    } else {
+        IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(call) },
+            ty: ret_ty.clone(),
+            span,
+            def_id: None,
+        }
     };
     if matches!(ret_ty, Ty::Unit) {
-        stmts.push(IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: unwrapped }, span });
+        stmts.push(IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: value }, span });
         tail = None;
     } else {
         let ret_var = vt.alloc(sym("__cl_ret"), ret_ty.clone(), almide_ir::Mutability::Let, span);
@@ -299,7 +309,7 @@ fn cl_outline_continuation(
                 var: ret_var,
                 mutability: almide_ir::Mutability::Let,
                 ty: ret_ty.clone(),
-                value: unwrapped,
+                value,
             },
             span,
         });
