@@ -19,8 +19,8 @@ test "a monomorphic fn by name over a mapped list" {
 }
 
 test "a two-parameter generic fn by name" {
-  let unzipped = list.map([[(1, "a"), (2, "b")], []], list.unzip)
-  assert_eq(unzipped, [([1, 2], ["a", "b"]), ([], [])])
+  let keys = list.map([map.from_list([("a", 1)])], map.keys)
+  assert_eq(keys, [["a"]])
   let sizes = list.map([map.from_list([("a", 1)]), map.new()], map.len)
   assert_eq(sizes, [1, 0])
 }
