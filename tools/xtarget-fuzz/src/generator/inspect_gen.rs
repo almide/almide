@@ -368,6 +368,11 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "zlib.decompress", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.inflate", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.gunzip", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    // The capped decoders: the same encoded input, and a cap above the
+    // decoded length so the run takes the success path.
+    Recipe { func: "zlib.decompress_max", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
+    Recipe { func: "zlib.inflate_max", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
+    Recipe { func: "zlib.gunzip_max", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
     // `io.write` is generic over its handle (`H: Write`) now, outside the
     // generator's type universe, so it has no recipe until the generator
     // builds handles; its last recipe wrote 4n bytes so every size was past
