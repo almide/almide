@@ -838,6 +838,12 @@ pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<Alm
     };
     __almide_v
 }
+// The borrowed-key twin of `almide_rt_map_upsert` (#4741): the native v1
+// render pairs it by signature (`native_floor::str_key_twin`) and takes its
+// closure statically, as v0's StrMapKey takes `_str_fn`.
+pub fn almide_rt_map_upsert_str<V: Clone>(m: AlmideMap<AlmideString, V>, k: &str, init: V, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<AlmideString, V> {
+    almide_rt_map_upsert_str_fn(m, k, init, move |v| f(v))
+}
 pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &str, v: V) -> AlmideMap<AlmideString, V> {
     let __almide_v: AlmideMap<AlmideString, V> = {
         m.insert_borrowed(k, v, |k: &str| AlmideString::from(k));

@@ -50,6 +50,15 @@ fn static_twin(symbol: &str, text: &str) -> Option<(String, String)> {
     found.then_some((twin, out))
 }
 
+/// The borrowed-string-key twin of a static twin `<symbol>_static`: the
+/// static twin of `symbol`'s own `_str` twin (`native_floor::str_key_twin`),
+/// so a closure taken statically keeps its key borrowed too (#4741).
+pub(crate) fn static_str_key_twin(static_symbol: &str) -> Option<(String, Vec<&'static str>)> {
+    let symbol = static_symbol.strip_suffix("_static")?;
+    let (keyed, items) = crate::native_floor::str_key_twin(symbol)?;
+    static_runtime_closure(&keyed, items)
+}
+
 // A borrowed runtime wrapper may forward its callback to another runtime
 // function. Specialize that dependency too; otherwise an impl Fn reaches a
 // parameter that still demands an Rc<dyn Fn + 'static>. Keep original items
