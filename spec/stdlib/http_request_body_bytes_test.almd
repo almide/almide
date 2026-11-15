@@ -19,7 +19,11 @@ test "a body that opens on a continuation byte round-trips" {
 }
 
 test "the headers and params beside a bytes body are unchanged" {
-  let req = http.set_header(http.set_body_bytes(http.new_request("PUT", "/x?q=1", "", [("X-A", "1")]), all_bytes()), "X-B", "2")
+  let req = http.set_header(
+    http.set_body_bytes(http.new_request("PUT", "/x?q=1", "", [("X-A", "1")]), all_bytes()),
+    "X-B",
+    "2",
+  )
   assert_eq(http.header(req, "x-a"), some("1"))
   assert_eq(http.header(req, "X-B"), some("2"))
   assert_eq(http.headers(req), [("X-A", "1"), ("X-B", "2")])
