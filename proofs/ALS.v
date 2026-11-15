@@ -56,6 +56,10 @@ Proof.
       exfalso. destruct (Hinc Borrow (or_introl eq_refl)) as [H | H]; discriminate.
     + (* ShareOut — excluded by hypothesis *)
       exfalso. destruct (Hinc ShareOut (or_introl eq_refl)) as [H | H]; discriminate.
+    + (* Take — excluded by hypothesis *)
+      exfalso. destruct (Hinc Take (or_introl eq_refl)) as [H | H]; discriminate.
+    + (* Probe — excluded by hypothesis *)
+      exfalso. destruct (Hinc Probe (or_introl eq_refl)) as [H | H]; discriminate.
 Qed.
 
 (* THE CURRENT ARTIFACT REFINES THE SAFETY CORE. The eager-copy renderer emits an

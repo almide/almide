@@ -34,16 +34,14 @@ Open Scope Z_scope.
    v0's {Inc,Dec} is the DEGENERATE case (Alias≡Inc, MoveOut≡Dec at the balance
    fold), so this strictly generalizes brick 1 with ZERO new proof obligations —
    the soundness proofs reason about the run's Z result, not the constructors.
-     Reuse   = REUSE-eligible release (the PERCEUS mode): a release the compiler
-               proved acts on a UNIQUELY-owned object, so the freed block may be
-               reused IN PLACE. The uniqueness OBLIGATION is discharged by the
-               FOLD, not a separate subset section: a Reuse is valid iff rc = 1 at
-               that point (the checker's own count), so it derives uniqueness
-               WITHOUT trusting the compiler's analysis. (A subset section would
-               have had to trust a compiler-asserted "proven-unique" set — an
-               inference the checker cannot re-derive; the fold already knows rc,
-               so the guard is both simpler and strictly sound. A Reuse at rc > 1
-               = SHARED = unsound, and FAULTS — see `check_reuse_sound`.)
+     Reuse   = REFUSED (#4753). It once claimed a release on a UNIQUELY owned
+               block, valid iff this line's count was 1. But a line counts one
+               HOLDER's credits, not the block's: a credit moved out (`m`),
+               shared out (`s`) or held by a borrowed parameter's caller is
+               invisible to it, so `iamr` / `ar` / `isr` balanced and were
+               accepted while another holder still held the block. No producer
+               emits it; it now always FAULTS. Uniqueness is a RUNTIME fact:
+               the `u` Probe (ADR-0034) plus the shipped count test.
      Borrow  = +0 USE of a live reference (a read-only borrow / in-place unique
                use — `Op::Borrow`/`MakeUnique`). No refcount change, but a
                LIVENESS guard: a borrow of a DEAD object (rc = 0 — every owned
@@ -70,7 +68,22 @@ Inductive Op : Type :=
      agrees with it; `share_handover_sound` proves the two accounts on the one
      block (the argument's and the result's) never fault together and return
      the block to the count it had. *)
-  | ShareOut : Op.
+  | ShareOut : Op
+  (* Take = +1 on the RECEIVING holder's line (ADR-0034, format v8: the `k`
+     byte). A credit MOVED out of a container slot that was cleared in the
+     same step — not an allocation (`i`), not an `rc_inc` (`a`): no RC
+     instruction exists for it. It folds exactly like Inc; the distinct
+     constructor is the ground fact the RC byte check holds to the slot's
+     null store under a uniqueness test (almide-anchor-check rc/take.rs).
+     The slot's own account loses the credit: `take_handover_sound`. *)
+  | Take : Op
+  (* Probe = +0 on the CONTAINER's line (ADR-0034, the `u` byte): the
+     shipped code tested the container's runtime count for 1 here. The guard
+     is Borrow's: this holder must own a credit (count > 0). Static ownership
+     (this guard) and the dynamic count (the shipped test) together give
+     exclusivity — `UniqueTake.probe_exclusive`; neither alone does. After a
+     Probe the line may only probe again or end in one release (`drained`). *)
+  | Probe : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -87,12 +100,12 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   | Alias :: rest => exec rest (rc + 1)
   | Dec :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   | MoveOut :: rest => if rc <=? 0 then None else exec rest (rc - 1)
-  (* Reuse is REUSE-eligible: the compiler asserts the block is UNIQUELY owned
-     (rc = 1) so it may be repurposed IN PLACE. The checker does NOT trust that
-     assertion — it derives uniqueness from its OWN fold: a Reuse is valid iff
-     rc = 1 at this point (then it goes to 0). A Reuse at rc > 1 (a SHARED object)
-     would corrupt the aliasing owner — it FAULTS; rc <= 0 is the usual underflow. *)
-  | Reuse :: rest => if Z.eqb rc 1 then exec rest 0 else None
+  (* #4753: a line's count is ONE holder's account, never the block's count,
+     so "count = 1 here" is not uniqueness (`iamr`, `ar`, `isr` balanced and
+     were accepted while another holder still held the block). Uniqueness is
+     a RUNTIME fact (ADR-0034's Probe + the shipped test); no producer emits
+     `r`. So a Reuse on an ownership line always FAULTS. *)
+  | Reuse :: _ => None
   (* Borrow is a +0 USE: it needs a live reference (rc > 0) but releases nothing.
      A borrow at rc = 0 is a use-after-free — the object's owned references are
      all gone — and FAULTS, exactly like verify_ownership's live-check on
@@ -101,6 +114,8 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   (* ShareOut: the share +1 moves straight into the arm's result (the result's
      line holds it), so this line's count is unchanged. *)
   | ShareOut :: rest => exec rest rc
+  | Take :: rest => exec rest (rc + 1)
+  | Probe :: rest => if rc <=? 0 then None else exec rest rc
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -195,6 +210,8 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "r"%char) (Ascii.eqb a "R"%char) then Some Reuse
   else if orb (Ascii.eqb a "b"%char) (Ascii.eqb a "B"%char) then Some Borrow
   else if orb (Ascii.eqb a "s"%char) (Ascii.eqb a "S"%char) then Some ShareOut
+  else if orb (Ascii.eqb a "k"%char) (Ascii.eqb a "K"%char) then Some Take
+  else if orb (Ascii.eqb a "u"%char) (Ascii.eqb a "U"%char) then Some Probe
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -250,8 +267,9 @@ Proof. reflexivity. Qed.
 Example cert_move_out_underflow_rejects : check_cert "m"%string = false. (* move-out with nothing owned = use-after-move *)
 Proof. reflexivity. Qed.
 
-(* perceus mode: a reuse-release `r` on a UNIQUE object (rc = 1) — alloc, reuse. *)
-Example cert_reuse_balanced : check_cert "ir"%string = true.
+(* #4753: `r` is refused on every ownership line — a line's count of 1 is not
+   uniqueness (see `exec`). Even the alloc-then-reuse control rejects now. *)
+Example cert_reuse_refused : check_cert "ir"%string = false.
 Proof. reflexivity. Qed.
 
 (* ─── REUSE SOUNDNESS (the perceus uniqueness obligation, A1 "+reuse健全性") ───
@@ -271,6 +289,8 @@ Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
      borrow changes nothing. *)
   | Borrow :: rest => if rc <=? 0 then true else reuses_unique rest rc
   | ShareOut :: rest => reuses_unique rest rc
+  | Take :: rest => reuses_unique rest (rc + 1)
+  | Probe :: rest => if rc <=? 0 then true else reuses_unique rest rc
   end.
 
 (* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
@@ -286,9 +306,11 @@ Proof.
     + apply IH. exact H.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
-    + destruct (Z.eqb rc 1) eqn:E. { apply IH. exact H. } exfalso. apply H. reflexivity.
+    + exfalso. apply H. reflexivity.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + apply IH. exact H.
+    + apply IH. exact H.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
 Qed.
 
 (* REUSE SOUNDNESS: an accepted certificate has every Reuse acting on a UNIQUELY
@@ -487,9 +509,11 @@ Proof.
     + apply IH.
     + destruct (rc <=? 0). reflexivity. apply IH.
     + destruct (rc <=? 0). reflexivity. apply IH.
-    + destruct (Z.eqb rc 1). apply IH. reflexivity.
+    + reflexivity.
     + destruct (rc <=? 0). reflexivity. apply IH.
     + apply IH.
+    + apply IH.
+    + destruct (rc <=? 0). reflexivity. apply IH.
 Qed.
 
 (* exec over a cons = single-op step then the rest. *)
@@ -590,9 +614,11 @@ Proof.
     + apply IHHU; exact Hexec.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
-    + destruct (Z.eqb rc 1); [apply IHHU; exact Hexec | discriminate].
+    + discriminate.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + apply IHHU; exact Hexec.
+    + apply IHHU; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
@@ -707,9 +733,11 @@ Proof.
     + eapply IHHA; exact Hexec.
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
-    + destruct (Z.eqb rc 1); [eapply IHHA; exact Hexec | discriminate].
+    + discriminate.
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + eapply IHHA; exact Hexec.
+    + eapply IHHA; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
     destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
@@ -1470,10 +1498,225 @@ Proof.
     + exact (UL_branchabort_cont false (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
 Qed.
 
+(* ─── THE DRAIN RULE (ADR-0034 D2, format v8) ───
+   A holder that PROBED a container (`u`) gives it up: once the container's
+   slots may have been cleared by takes, the line reads it again only to
+   probe it or to release it. On the line: after the first `Probe`, every
+   later op is a `Probe`, or the line's one terminal release (`Dec` /
+   `MoveOut`), and nothing follows that release. v1 accepts the flat form
+   only — a probe inside a branch arm or a conditional loop, or a loop body
+   that mixes a probe with anything else, rejects (completeness can widen
+   later; a refusal is never unsound). *)
+Definition is_probe (o : Op) : bool :=
+  match o with Probe => true | _ => false end.
+
+Definition probe_free (ops : list Op) : bool := forallb (fun o => negb (is_probe o)) ops.
+
+Definition all_probes (ops : list Op) : bool := forallb is_probe ops.
+
+Definition is_release_op (o : Op) : bool :=
+  match o with Dec | MoveOut => true | _ => false end.
+
+Definition item_probe_free (c : CertItem) : bool :=
+  match c with
+  | COp o => negb (is_probe o)
+  | CLoop b => probe_free b
+  | CCondLoop t e | CBranch t e => andb (probe_free t) (probe_free e)
+  | CBranchRet _ t e | CBranchAbort _ t e => andb (probe_free t) (probe_free e)
+  | CPoison => true
+  end.
+
+(* after the first probe: probes (flat, or a loop of probes only), then at
+   most one release, then the end of the line. *)
+Fixpoint drained_post (cs : list CertItem) : bool :=
+  match cs with
+  | [] => true
+  | COp o :: rest =>
+      if is_probe o then drained_post rest
+      else andb (is_release_op o) (match rest with [] => true | _ => false end)
+  | CLoop b :: rest => andb (all_probes b) (drained_post rest)
+  | _ => false
+  end.
+
+Fixpoint drained (cs : list CertItem) : bool :=
+  match cs with
+  | [] => true
+  | COp o :: rest => if is_probe o then drained_post rest else drained rest
+  | CLoop b :: rest =>
+      if probe_free b then drained rest
+      else andb (all_probes b) (drained_post rest)
+  | c :: rest => andb (item_probe_free c) (drained rest)
+  end.
+
+(* The same rule over a CONCRETE run: before the first probe anything; after
+   it, probes and at most one final release. *)
+Fixpoint ops_post (ops : list Op) : bool :=
+  match ops with
+  | [] => true
+  | o :: rest =>
+      if is_probe o then ops_post rest
+      else andb (is_release_op o) (match rest with [] => true | _ => false end)
+  end.
+
+Fixpoint ops_drained (ops : list Op) : bool :=
+  match ops with
+  | [] => true
+  | o :: rest => if is_probe o then ops_post rest else ops_drained rest
+  end.
+
+Lemma ops_drained_probe_free_app :
+  forall a b, probe_free a = true -> ops_drained (a ++ b) = ops_drained b.
+Proof.
+  induction a as [| o a IH]; intros b H; [reflexivity |].
+  cbn [probe_free forallb] in H. apply andb_prop in H. destruct H as [Ho Ha].
+  destruct o; cbn in Ho |- *; try discriminate; apply IH; exact Ha.
+Qed.
+
+Lemma ops_drained_probe_free :
+  forall a, probe_free a = true -> ops_drained a = true.
+Proof.
+  intros a H. rewrite <- (app_nil_r a). rewrite ops_drained_probe_free_app; auto.
+Qed.
+
+Lemma ops_post_probes_app :
+  forall a b, all_probes a = true -> ops_post (a ++ b) = ops_post b.
+Proof.
+  induction a as [| o a IH]; intros b H; [reflexivity |].
+  cbn [all_probes forallb] in H. apply andb_prop in H. destruct H as [Ho Ha].
+  destruct o; cbn in Ho |- *; try discriminate; apply IH; exact Ha.
+Qed.
+
+Lemma ops_drained_probes_app :
+  forall a b, all_probes a = true -> ops_post b = true ->
+    ops_drained (a ++ b) = true \/ a = [] .
+Proof.
+  intros a b Ha Hb. destruct a as [| o a]; [right; reflexivity | left].
+  cbn [all_probes forallb] in Ha. apply andb_prop in Ha. destruct Ha as [Ho Ha].
+  destruct o; cbn in Ho |- *; try discriminate.
+  rewrite ops_post_probes_app; assumption.
+Qed.
+
+Lemma probe_free_concat_repeat :
+  forall b n, probe_free b = true -> probe_free (List.concat (List.repeat b n)) = true.
+Proof.
+  intros b n H. induction n as [| n IH]; [reflexivity |].
+  cbn [List.repeat List.concat]. unfold probe_free in *.
+  rewrite forallb_app, H, IH. reflexivity.
+Qed.
+
+Lemma all_probes_concat_repeat :
+  forall b n, all_probes b = true -> all_probes (List.concat (List.repeat b n)) = true.
+Proof.
+  intros b n H. induction n as [| n IH]; [reflexivity |].
+  cbn [List.repeat List.concat]. unfold all_probes in *.
+  rewrite forallb_app, H, IH. reflexivity.
+Qed.
+
+Lemma probe_free_cond_concat :
+  forall t e bs, probe_free t = true -> probe_free e = true ->
+    probe_free (cond_concat t e bs) = true.
+Proof.
+  intros t e bs Ht He. induction bs as [| b bs IH]; [reflexivity |].
+  destruct b; cbn [cond_concat]; unfold probe_free in *;
+    rewrite forallb_app; rewrite ?Ht, ?He, IH; reflexivity.
+Qed.
+
+Lemma probe_free_if :
+  forall (c : bool) t e, probe_free t = true -> probe_free e = true ->
+    probe_free (if c then t else e) = true.
+Proof. intros c t e Ht He. destruct c; assumption. Qed.
+
+(* The post-probe half: a line accepted by `drained_post` unrolls only to
+   runs `ops_post` accepts. *)
+Lemma drained_post_unroll :
+  forall cs fops, UnrollsL cs fops -> drained_post cs = true -> ops_post fops = true.
+Proof.
+  intros cs fops HU. induction HU; intros H; cbn [drained_post] in H.
+  - reflexivity.
+  - revert H; destruct (is_probe o) eqn:Ep; intro H.
+    + destruct o; cbn in Ep; try discriminate. cbn. apply IHHU. exact H.
+    + apply andb_prop in H. destruct H as [Hr Hn].
+      destruct a; [| discriminate].
+      match goal with Hu : UnrollsL [] _ |- _ => inversion Hu; subst end.
+      cbn. rewrite Ep, Hr. reflexivity.
+  - apply andb_prop in H. destruct H as [Hb Hr].
+    rewrite ops_post_probes_app; [apply IHHU; exact Hr |].
+    apply all_probes_concat_repeat. exact Hb.
+  - discriminate.
+  - discriminate.
+  - discriminate.
+  - discriminate.
+  - discriminate.
+Qed.
+
+Lemma drained_unroll :
+  forall cs fops, UnrollsL cs fops -> drained cs = true -> ops_drained fops = true.
+Proof.
+  intros cs fops HU. induction HU; intros H; cbn [drained item_probe_free] in H.
+  - reflexivity.
+  - revert H; destruct (is_probe o) eqn:Ep; intro H.
+    + destruct o; cbn in Ep; try discriminate. cbn.
+      eapply drained_post_unroll; eassumption.
+    + cbn. rewrite Ep. apply IHHU. exact H.
+  - revert H; destruct (probe_free body) eqn:Ef; intro H.
+    + rewrite ops_drained_probe_free_app; [apply IHHU; exact H |].
+      apply probe_free_concat_repeat. exact Ef.
+    + apply andb_prop in H. destruct H as [Hb Hr].
+      assert (Hpost : ops_post b = true) by (eapply drained_post_unroll; eassumption).
+      destruct (ops_drained_probes_app _ b (all_probes_concat_repeat body n Hb) Hpost)
+        as [Hd | He]; [exact Hd |].
+      rewrite He. cbn [app].
+      (* zero iterations: the rest of the line is in the post state; a post
+         run is also a drained run. *)
+      clear -Hpost. induction b as [| o b IH]; [reflexivity |].
+      cbn in Hpost |- *. destruct (is_probe o); [exact Hpost |].
+      apply andb_prop in Hpost. destruct Hpost as [Hr Hn].
+      destruct b; [| discriminate]. reflexivity.
+  - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
+    apply probe_free_cond_concat; assumption.
+  - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
+    apply probe_free_if; assumption.
+  - apply andb_prop in H. destruct H as [Hf _]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    apply ops_drained_probe_free. apply probe_free_if; assumption.
+  - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
+    apply probe_free_if; assumption.
+  - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
+    apply probe_free_if; assumption.
+Qed.
+
 (* The full exit-aware checker over raw certificate bytes (format v6), with
-   the owned-line resurrection rule (#3229). *)
+   the owned-line resurrection rule (#3229) and the drain rule (format v8,
+   ADR-0034). *)
 Definition check_xc (s : string) : bool :=
-  forallb (fun cs => check_line (guard_line cs)) (parse_xc s [] None None None).
+  forallb (fun cs => andb (check_line (guard_line cs)) (drained cs))
+          (parse_xc s [] None None None).
+
+(* Every line `check_xc` accepts passes the guarded balance check. *)
+Lemma check_xc_line :
+  forall s cs, check_xc s = true -> In cs (parse_xc s [] None None None) ->
+    check_line (guard_line cs) = true /\ drained cs = true.
+Proof.
+  intros s cs H Hin. unfold check_xc in H. rewrite forallb_forall in H.
+  apply andb_prop. exact (H cs Hin).
+Qed.
+
+(* THE DRAIN THEOREM: on an accepted certificate, every concrete run of every
+   line, once it has probed its container, only probes it again and ends in
+   at most one release — nothing reads a container whose slots a take may
+   have cleared. *)
+Theorem check_xc_drained_sound :
+  forall s, check_xc s = true ->
+    forall cs, In cs (parse_xc s [] None None None) ->
+      forall fops, UnrollsL cs fops -> ops_drained fops = true.
+Proof.
+  intros s H cs Hin fops HU.
+  destruct (check_xc_line s cs H Hin) as [_ Hd].
+  exact (drained_unroll cs fops HU Hd).
+Qed.
 
 (* SOUNDNESS over bytes (1-line corollary of check_line_unroll_sound, covering
    CBranchRet via UL_branchret_exit / UL_branchret_cont): an accepted exit-aware
@@ -1486,8 +1729,8 @@ Theorem check_xc_unroll_sound :
       forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0.
 Proof.
   intros s H cs Hin fops HU.
-  unfold check_xc in H. rewrite forallb_forall in H.
-  apply (check_line_unroll_sound cs (check_line_guard_weaken cs (H cs Hin)) fops HU).
+  destruct (check_xc_line s cs H Hin) as [Hl _].
+  apply (check_line_unroll_sound cs (check_line_guard_weaken cs Hl) fops HU).
 Qed.
 
 (* NO RESURRECTION (#3229): on an accepted certificate, every OWNED line (one
@@ -1504,8 +1747,7 @@ Theorem check_xc_no_resurrection :
         run (Inc :: guard_ops f) <> None /\ run (Inc :: guard_ops f) = Some 0.
 Proof.
   intros s H rest Hin f HU.
-  unfold check_xc in H. rewrite forallb_forall in H.
-  pose proof (H _ Hin) as Hline. cbn [guard_line] in Hline.
+  destruct (check_xc_line s _ H Hin) as [Hline _]. cbn [guard_line] in Hline.
   apply (check_line_unroll_sound _ Hline).
   apply UL_op. apply unrolls_guard. exact HU.
 Qed.
@@ -1520,8 +1762,8 @@ Theorem check_xc_abort_sound :
       forall fops, AbortsL cs fops -> run fops <> None.
 Proof.
   intros s H cs Hin fops HA.
-  unfold check_xc in H. rewrite forallb_forall in H.
-  apply (check_line_abort_sound cs (check_line_guard_weaken cs (H cs Hin)) fops HA).
+  destruct (check_xc_line s cs H Hin) as [Hl _].
+  apply (check_line_abort_sound cs (check_line_guard_weaken cs Hl) fops HA).
 Qed.
 
 (* backward-compat (flat + loop + cond-loop + branch certs verify exactly as
@@ -1653,6 +1895,10 @@ From Stdlib Require Import Lia.
 Definition expand_op (o : Op) : list Op :=
   match o with
   | ShareOut => [Alias; MoveOut]
+  (* a take is the receiving account's +1 (the slot's −1 is the other
+     account's: `take_handover_sound`); a probe is a liveness read. *)
+  | Take => [Inc]
+  | Probe => [Borrow]
   | _ => [o]
   end.
 
@@ -1672,10 +1918,12 @@ Proof.
   - apply IH. lia.
   - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
   - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
-  - destruct (Z.eqb rc 1); [apply IH; lia | reflexivity].
+  - reflexivity.
   - destruct (rc <=? 0); [reflexivity | apply IH; exact Hrc].
   - assert (E : (rc + 1 <=? 0) = false) by (apply Z.leb_gt; lia).
     rewrite E. replace (rc + 1 - 1) with rc by lia. apply IH. exact Hrc.
+  - apply IH. lia.
+  - destruct (rc <=? 0); [reflexivity | apply IH; exact Hrc].
 Qed.
 
 Theorem check_expand : forall ops, check (expand ops) = check ops.
@@ -1736,6 +1984,10 @@ Proof.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
     + apply IHHI; auto.
+    + replace (r1 + r2 + k + 1) with (r1 + 1 + r2 + k) by lia. apply IHHI; auto; lia.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      apply IHHI; auto.
   - destruct o; simpl in Eb, Nb |- *.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
@@ -1750,6 +2002,10 @@ Proof.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
     + apply IHHI; auto.
+    + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      apply IHHI; auto.
 Qed.
 
 Theorem share_handover_sound :
@@ -1796,6 +2052,101 @@ Example share_handover_example :
   exec [Borrow; Inc; ShareOut; Dec] 1 = Some 1.
 Proof. reflexivity. Qed.
 
+(* ─── THE TAKE (ADR-0034, format v8: the `k` and `u` bytes) ───────────────
+   A take-or-retain site: the container X is probed (`u` on X's line), and
+   per element EITHER the slot's credit moves to the receiving line (`k`, the
+   slot cleared, no RC instruction) OR the receiver takes an `rc_inc` of its
+   own (`a`). Both arms leave the receiver holding one credit, so the site is
+   an ordinary agreeing `CBranch` and the code after it is checked ONCE. *)
+
+(* THE HAND-OVER. Before the take the element's count is `base` (its other
+   holders) plus the slot's one credit. The slot's account gives that credit
+   up (`MoveOut`, the cleared slot) and the receiving line takes it (`Take`),
+   in some interleaving with the receiver's later events. Accepted (and
+   reuse-free), every interleaving never faults and returns the element to
+   `base`: the moved credit is released exactly once, by the receiver. *)
+Theorem take_handover_sound :
+  forall res w base,
+    check res = true -> no_reuse_ops res = true ->
+    Interleave [MoveOut] res w -> 0 <= base ->
+    exec w (1 + base) = Some base.
+Proof.
+  intros res w base Hr Nr HI Hb.
+  unfold check, run in Hr.
+  destruct (exec res 0) as [y |] eqn:Er; [| discriminate].
+  apply Z.eqb_eq in Hr. subst y.
+  pose proof (interleave_exec [MoveOut] res w HI 1 0 base 0 0) as H.
+  replace (1 + 0 + base) with (1 + base) in H by lia.
+  replace (0 + 0 + base) with base in H by lia.
+  apply H; try lia; auto.
+Qed.
+
+(* the strchurn site, per element: take-or-retain, then the body moves the
+   element into a consuming callee — and its borrowing-callee twin. *)
+Example cert_xc_take_site_accepts : check_xc "{k|a}m"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_take_site_whole_accepts : check_xc "{km|am}"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_take_site_borrowing_accepts : check_xc "{k|a}d"%string = true.
+Proof. reflexivity. Qed.
+(* the container: born, probed, released after the loop. *)
+Example cert_xc_probe_drain_accepts : check_xc "iud"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_probe_loop_accepts : check_xc "i(u)m"%string = true.
+Proof. reflexivity. Qed.
+(* NEGATIVE: a take arm that does not take — the arms disagree. *)
+Example cert_xc_take_missing_rejects : check_xc "{k|}m"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE: a taken credit released twice. *)
+Example cert_xc_take_double_release_rejects : check_xc "kdd"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE: a probe of a container this holder owns no credit on. *)
+Example cert_xc_probe_unowned_rejects : check_xc "u"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_probe_after_release_rejects : check_xc "idu"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE (the drain rule): after a probe, a read, a share, a share-out, a
+   second release, a new birth or a take on the container's line. *)
+Example cert_xc_drain_read_rejects : check_xc "iubd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_share_rejects : check_xc "iuadd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_shareout_rejects : check_xc "iusd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_two_releases_rejects : check_xc "iiudd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_birth_rejects : check_xc "iuidd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_in_branch_rejects : check_xc "i{u|}d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_drain_mixed_loop_rejects : check_xc "i(ub)d"%string = false.
+Proof. reflexivity. Qed.
+(* NEGATIVE: the leak — probed, never released. *)
+Example cert_xc_probe_leak_rejects : check_xc "iu"%string = false.
+Proof. reflexivity. Qed.
+
+(* #4753: `r` is refused on every ownership line. Each of these BALANCED and
+   was accepted, though another holder still held the block it reused: the
+   moved alias (`iamr`), the caller of a borrowed parameter (`ar`, `amar`),
+   a loop's moved shares (`i(am)r`), the arm result of a share-out (`isr`),
+   a second credit moved out (`iiamdr`). The control `ir` is refused too:
+   uniqueness is a runtime fact (the probe `u` and the shipped test), never
+   a line count. *)
+Example cert_xc_reuse_moved_alias_rejects : check_xc "iamr"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_borrowed_param_rejects : check_xc "ar"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_param_moved_rejects : check_xc "amar"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_loop_rejects : check_xc "i(am)r"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_share_out_rejects : check_xc "isr"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_second_credit_rejects : check_xc "iiamdr"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_reuse_control_rejects : check_xc "ir"%string = false.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
@@ -1817,3 +2168,5 @@ Print Assumptions check_cert_reuse_sound.
 Print Assumptions exec_expand.
 Print Assumptions share_out_sound.
 Print Assumptions share_handover_sound.
+Print Assumptions check_xc_drained_sound.
+Print Assumptions take_handover_sound.

@@ -55,10 +55,19 @@ Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   match o with
   | Inc | Alias => Some (rt_inc m base)
   | Dec | MoveOut => rt_dec m base
-  | Reuse => rt_reuse m base
+  (* #4753: refused on every ownership line (OwnershipChecker.exec), so the
+     machine faults with it; `rt_reuse` stays as the model of the in-place
+     write itself, never reached from a witness. *)
+  | Reuse => None
   | Borrow => rt_borrow m base
   (* a share-out: the +1 is the arm result's cell (its `i`), not this one. *)
   | ShareOut => Some m
+  (* ADR-0034 take: this ACCOUNT gains the credit the slot's account lost (the
+     physical cell is unchanged — UniqueTake.take_preserves); per account it
+     steps like Inc. *)
+  | Take => Some (rt_inc m base)
+  (* ADR-0034 probe: a liveness read, like Borrow. *)
+  | Probe => rt_borrow m base
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -105,18 +114,18 @@ Proof.
       * reflexivity.
       * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
         rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
-    + (* Reuse *) unfold rt_reuse. destruct (Z.eqb (read_rc m base) 1) eqn:E.
-      * (* rc = 1: cell → 0; abstract exec → exec rest 0 *)
-        pose proof (IH (upd m (base + RC_OFFSET) 0) base) as IH2.
-        rewrite (read_upd_same m base 0) in IH2. exact IH2.
-      * (* rc <> 1: both fault (shared reuse / underflow) *)
-        reflexivity.
+    + (* Reuse: refused — both fault (#4753) *) reflexivity.
     + (* Borrow *) unfold rt_borrow. destruct (read_rc m base <=? 0) eqn:E.
       * (* dead cell: both fault (use-after-free) *)
         reflexivity.
       * (* live: memory untouched, count unchanged *)
         apply IH.
     + (* ShareOut: this cell untouched, count unchanged *) apply IH.
+    + (* Take: the account steps like Inc *) pose proof (IH (rt_inc m base) base) as IH2.
+      rewrite read_rt_inc in IH2. exact IH2.
+    + (* Probe: Borrow's guard *) unfold rt_borrow. destruct (read_rc m base <=? 0) eqn:E.
+      * reflexivity.
+      * apply IH.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)
