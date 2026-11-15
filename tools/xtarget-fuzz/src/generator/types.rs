@@ -187,6 +187,9 @@ impl GenType {
         match self {
             GenType::Int | GenType::String | GenType::Bool => true,
             GenType::Sized(name) => !name.starts_with("Float"),
+            // A hashable record (`{ neg: Bool, limbs: List[Int] }`): the
+            // heap-backed Numeric conformer a set's sum and product take.
+            GenType::Nominal("BigInt") => true,
             _ => false,
         }
     }

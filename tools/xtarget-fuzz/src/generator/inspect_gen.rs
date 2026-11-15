@@ -1731,6 +1731,7 @@ fn elem(t: &GenType) -> String {
         GenType::Tuple2(a, b) => format!("({}, {})", elem(a), elem(b)),
         GenType::Tuple3(a, b, c) => format!("({}, {}, {})", elem(a), elem(b), elem(c)),
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
+        GenType::Nominal("BigInt") => "bigint.from(i)".into(),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
         GenType::Secret(e) => format!("secret.new({})", elem(e)),
         GenType::Coll(k, e) => format!("{}.from_list([{}])", coll_module(k), elem(e)),
