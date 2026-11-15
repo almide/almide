@@ -29,10 +29,10 @@ fn __natural[A](a: A, b: A) -> Int =
 
 // ── construction (R-heap-01) ──
 /// An empty heap; the least element comes out first.
-fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+fn new[A: Ord]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
 
 /// An empty heap ordered by key f(x); the least key comes out first.
-fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+fn new_by[A, K: Ord](f: (A) -> K) -> Heap[A] = {
   slots: [],
   next: 0,
   cmp: (a, b) => __natural(f(a), f(b)),
@@ -42,7 +42,7 @@ fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
 fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
-fn from_list[A](xs: List[A]) -> Heap[A] = {
+fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
   var h: Heap[A] = new()
   for x in xs {
     push(h, x)
