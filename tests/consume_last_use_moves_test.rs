@@ -20,6 +20,10 @@
 //!   afterwards (shared). `main` MUST still copy it — so a cell whose
 //!   positive passes for a reason other than a move (a scalar lowering that
 //!   never copies anything) is caught as vacuous.
+//!
+//! A rebind cell runs once more with the call inside a user fn
+//! `step(x, n)` (`x = step(x, n)`): the caller hands `x` over to `step`'s
+//! param, which reaches the `@consume` param at its last use.
 
 use std::collections::BTreeSet;
 use std::process::Command;
@@ -134,6 +138,37 @@ fn typed(build: &str) -> String {
 /// shared form copies fails, so the list cannot hide a regression.
 const LENDS: &[&str] = &["list.fold", "value.__eq"];
 
+/// The declared type of a rebind cell's `x`, for the `step` fn the
+/// hand-over variant passes it through.
+fn ty_of(build: &str) -> &str {
+    match build {
+        b if b.starts_with(':') => b[1..].split(" = ").next().unwrap_or("").trim(),
+        RESP => "HttpResponse",
+        REQ => "HttpRequest",
+        LIST => "List[Int]",
+        b if b.starts_with("map.from_list(") => "Map[Int, Int]",
+        b => panic!("no declared type for the build `{b}`"),
+    }
+}
+
+/// The hand-over variant of a rebind cell: the call sits in a user fn
+/// `step(x, n)` and the loop rebinds `x = step(x, n)`, so `x` reaches the
+/// `@consume` param through a param of `step` that the caller hands over at
+/// its last use. `None` for an effect call (its `!` needs an effect `step`).
+fn program_through(c: &Cell, shared: bool) -> Option<String> {
+    if !c.rebind || c.call.contains('!') {
+        return None;
+    }
+    let ty = ty_of(c.build);
+    let import = if c.import.is_empty() { String::new() } else { format!("import {}\n", c.import) };
+    let keep = if shared { format!("    let keep: {ty} = x\n") } else { String::new() };
+    let after = if shared { "    println(\"${keep}\")\n" } else { "" };
+    Some(format!(
+        "{import}fn step(x: {ty}, n: Int) -> {ty} = {call}\n\neffect fn main() -> Unit = {{\n  var n = 0\n  var x{build}\n  while n < 3 {{\n{keep}    x = step(x, n)\n{after}    n = n + 1\n  }}\n  println(\"${{x}}\")\n}}\n",
+        call = c.call, build = typed(c.build),
+    ))
+}
+
 /// The cell's program; `shared`: the consumed value is read again after the
 /// call (the negative control).
 fn program(c: &Cell, shared: bool) -> String {
@@ -185,6 +220,16 @@ fn main_body(rust: &str) -> &str {
     &rest[..rest.find("\n}\n").map_or(rest.len(), |e| e + 2)]
 }
 
+/// The rendered body of the user fn `step` (v1 spells it `almd_step`).
+fn step_body(rust: &str) -> &str {
+    let at = ["\nfn almd_step(", "\npub fn almd_step(", "\npub fn step(", "\nfn step("]
+        .iter()
+        .find_map(|h| rust.find(h))
+        .expect("the render has fn step");
+    let rest = &rust[at..];
+    &rest[..rest.find("\n}\n").map_or(rest.len(), |e| e + 2)]
+}
+
 /// The copy sites in `main`'s body: one line each.
 fn copies(body: &str) -> Vec<&str> {
     body.lines()
@@ -219,6 +264,26 @@ fn a_dying_consume_argument_moves_and_a_shared_one_is_copied() {
         }
         if !nc.is_empty() && lends {
             failures.push(format!("{} [{neg_route}]: listed in LENDS, but the shared control copies — take it out of LENDS:\n  {}", c.decl, nc.join("\n  ")));
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+#[test]
+fn a_dying_consume_argument_handed_through_a_param_moves() {
+    let mut failures = Vec::new();
+    for c in cells() {
+        let (Some(pos_src), Some(neg_src)) = (program_through(&c, false), program_through(&c, true)) else { continue };
+        let (pos, route) = shipped_rust(c.decl, &pos_src);
+        let (neg, neg_route) = shipped_rust(c.decl, &neg_src);
+        let pc: Vec<&str> = copies(main_body(&pos)).into_iter().chain(copies(step_body(&pos))).collect();
+        let nc: Vec<&str> = copies(main_body(&neg)).into_iter().chain(copies(step_body(&neg))).collect();
+        eprintln!("== {} through [{route}/{neg_route}] positive copies {:?}\n   negative copies {:?}", c.decl, pc, nc);
+        if !pc.is_empty() {
+            failures.push(format!("{} [{route}]: a value handed over through a param is copied:\n  {}\n{pos_src}", c.decl, pc.join("\n  ")));
+        }
+        if nc.is_empty() {
+            failures.push(format!("{} [{neg_route}]: the shared control copies nothing:\n{neg_src}", c.decl));
         }
     }
     assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
