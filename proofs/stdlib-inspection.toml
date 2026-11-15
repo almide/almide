@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "145"
+# uninspected_ceiling = "142"
 
 [[fn]]
 name = "args.option"
@@ -8043,8 +8043,14 @@ diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s
 name = "deque.take_while"
 sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:27a26d184d8452fb"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 142 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.996e7/9.988e7/1.997e8/3.994e8/7.988e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.061s wasm k=16..32 3.394e7/6.786e7/1.357e8/2.714e8/5.428e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.031/0.076s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.996e7/9.988e7/1.997e8/3.994e8/7.988e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.025/0.056s wasm k=16..32 3.394e7/6.786e7/1.357e8/2.714e8/5.428e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.071s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.996e7/9.988e7/1.997e8/3.994e8/7.988e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.061s wasm k=16..32 3.394e7/6.786e7/1.357e8/2.714e8/5.428e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.030/0.081s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.996e7/9.988e7/1.997e8/3.994e8/7.988e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.061s wasm k=16..32 3.394e7/6.786e7/1.357e8/2.714e8/5.428e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.031/0.061s (order n ok) || [vars=String] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 4.769e7/9.537e7/1.907e8/3.815e8/7.629e8 fit n (rms 0.0%) moved 0.000e0/1.000e0/0.000e0/0.000e0/1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.051s wasm k=4..8 2.777e7/5.553e7/1.110e8/2.221e8/4.442e8 fit n (rms 0.0%) moved 6.400e5/1.280e6/2.560e6/5.120e6/1.024e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.030s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 4.769e7/9.537e7/1.907e8/3.815e8/7.629e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.056s wasm k=4..8 2.777e7/5.553e7/1.110e8/2.221e8/4.442e8 fit n (rms 0.0%) moved 6.399e5/1.280e6/2.560e6/5.120e6/1.024e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.015/0.030s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 4.769e7/9.537e7/1.907e8/3.815e8/7.629e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.030/0.066s wasm k=4..8 2.777e7/5.553e7/1.110e8/2.221e8/4.442e8 fit n (rms 0.0%) moved 6.402e5/1.280e6/2.560e6/5.121e6/1.024e7B fit n (rms 0.0%) wall 0.000/0.005/0.000/0.020/0.030s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 4.769e7/9.537e7/1.907e8/3.815e8/7.629e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.035/0.066s wasm k=4..8 2.777e7/5.553e7/1.110e8/2.221e8/4.442e8 fit n (rms 0.0%) moved 6.402e5/1.280e6/2.560e6/5.120e6/1.024e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.036s (order n ok)"
+alloc = "PASS: [vars=Int] call live=0, loop live=0, tail live=0, fold live=0 || [vars=String] call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=String] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "deque.to_list"
@@ -12536,8 +12542,14 @@ order = "n2; rebind (loop, tail, fold) n2"
 name = "bigint.parse"
 sig = "(s: String) -> Result[BigInt, String]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:675669af6b1cabad"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 c7170f27e619b5318b48e0dd7371345c7b5ef0ad (the generator with the capped zlib decoder recipes, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "n2; rebind (loop, tail, fold) n2"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 167 of them clean on every leg; unique findings 0"
+complexity = "PASS (coordinator ruling 2026-11-16: the algorithm's own cost — decimal digits fold in by chunk, each step a mul_small and add_mag over the whole accumulator, so the declared n2; the counted series approaches it from below (native ratios 2.67/2.85/2.82/3.06, wasm 3.71..3.93) at 250..4000 digits (the 4300-digit limit caps n), and a direct timing at 1000/2000/4000 digits rises x2.8/x3.4 (native 0.036/0.101/0.341 s); not slower than v0.69.1 (native 0.114/0.347/1.187 s, wasm 1.92 s vs 1.87 s at 4000 digits, one run each); the harness line follows unchanged) FAIL: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=250..4000 native k=256..512 3.907e7/1.045e8/2.982e8/8.402e8/2.568e9 fit n2 (rms 90.4%) moved 1.157e6/2.309e6/4.613e6/9.221e6/1.844e7B fit n (rms 0.0%) wall 0.005/0.010/0.030/0.101/0.324s wasm k=64..128 3.180e7/1.179e8/4.521e8/1.751e9/6.873e9 fit n2 (rms 8.6%) moved 4.951e5/2.025e6/8.383e6/3.426e7/1.393e8B fit n2 (rms 7.4%) wall 0.005/0.015/0.046/0.188/0.695s (unexplained: a series fits no class within 3%)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "bigint.parse_radix"
@@ -12556,8 +12568,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "bigint.pow"
 sig = "(base: BigInt, exp: Int) -> BigInt"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:b7c9b4bebc505704"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5 (the generator with the 237 catalogued fns, per-element HOF callbacks and the #4758 denylist, built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-15; codopsy: no crate code changed by this inspection"
 order = "n2; rebind (loop, tail, fold) n2"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 144 of them clean on every leg; unique findings 0"
+complexity = "PASS (coordinator ruling 2026-11-16: the algorithm's own cost — squaring is schoolbook (mul_mag: one shifted add_mag per limb), so the declared n2; the counted series approaches it from below (native doubling ratios 2.63/2.89/2.92/2.95, wasm 3.66..3.95) at 17..267 limbs, and a direct timing of pow(x, 2) at 16000/32000/64000 bits rises x2.97/x3.65 (native 0.021/0.062/0.224 s); not slower than v0.69.1 (native 0.054/0.251/1.035 s, wasm 2.15 s vs 2.48 s at 64000 bits); the harness line follows unchanged) FAIL: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=500..8000 native k=256..512 4.235e7/1.115e8/3.224e8/9.401e8/2.776e9 fit n2 (rms 97.1%) moved 1.536e5/2.908e5/5.632e5/1.110e6/2.202e6B fit n (rms 0.1%) wall 0.005/0.010/0.030/0.091/0.288s wasm k=64..128 4.858e7/1.779e8/6.808e8/2.660e9/1.051e10 fit n2 (rms 5.2%) moved 8.849e5/3.713e6/1.545e7/6.315e7/2.565e8B fit n2 (rms 6.6%) wall 0.005/0.020/0.071/0.238/0.976s (unexplained: a series fits no class within 3%); rebind shapes not timed: the value grows geometrically per step (21 -> 325 after 4 steps)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "bigint.sign"
