@@ -12452,7 +12452,7 @@ name = "http.send"
 sig = "effect (req: HttpRequest) -> HttpResponse ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) 1"
 
 [[fn]]
 name = "http.set_body"
