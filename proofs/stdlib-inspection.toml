@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "124"
+# uninspected_ceiling = "120"
 
 [[fn]]
 name = "args.option"
@@ -13425,8 +13425,14 @@ order = "1; rebind (loop, tail, fold) 1"
 name = "uint16.from_checked"
 sig = "(x: S) -> Option[UInt16]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:f6e17f2d1b0896ee"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 8e7dce397049bc93378c7bef96bff918bab36de4 (as ed7d703, with the descriptor observer kept fallible; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 169 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] no size parameter — constant-size arguments only (the plain call is the parity campaign's) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 2.372e7/2.372e7/2.372e7/2.373e7/2.372e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=16384..32768 6.821e7/6.820e7/6.820e7/6.821e7/6.821e7 fit 1 (rms 0.0%) moved 7.868e5/7.864e5/7.861e5/7.864e5/7.861e5B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.005/0.005s (order 1 ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "uint16.from_saturating"
@@ -13509,23 +13515,40 @@ order = "1; rebind (loop, tail, fold) 1"
 name = "uint8.from_checked"
 sig = "(x: S) -> Option[UInt8]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:a00c521d46955c61"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 8e7dce397049bc93378c7bef96bff918bab36de4 (as ed7d703, with the descriptor observer kept fallible; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 169 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] no size parameter — constant-size arguments only (the plain call is the parity campaign's) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 2.372e7/2.372e7/2.372e7/2.372e7/2.372e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.005/0.005s wasm k=16384..32768 6.821e7/6.820e7/6.821e7/6.820e7/6.820e7 fit 1 (rms 0.0%) moved 7.864e5/7.858e5/7.868e5/7.864e5/7.862e5B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "uint8.from_saturating"
 sig = "(x: S) -> UInt8"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:9f25a12ae05a1cfc"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 8e7dce397049bc93378c7bef96bff918bab36de4 (as ed7d703, with the descriptor observer kept fallible; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 171 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] no size parameter — constant-size arguments only (the plain call is the parity campaign's) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 2.389e7/2.389e7/2.389e7/2.389e7/2.389e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.000/0.005/0.005s wasm k=16384..32768 6.861e7/6.861e7/6.861e7/6.861e7/6.860e7 fit 1 (rms 0.0%) moved 7.860e5/7.865e5/7.863e5/7.867e5/7.860e5B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "uint8.from_wrapping"
 sig = "(x: S) -> UInt8"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:bfa3fcb31dd63a6e"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 8e7dce397049bc93378c7bef96bff918bab36de4 (as ed7d703, with the descriptor observer kept fallible; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "1; rebind (loop, tail, fold) 1"
-
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 166 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] no size parameter — constant-size arguments only (the plain call is the parity campaign's) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4096..8192 2.479e7/2.478e7/2.478e7/2.478e7/2.479e7 fit 1 (rms 0.0%) moved 3.277e5/3.277e5/3.277e5/3.277e5/3.277e5B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.005/0.005s wasm k=4096..8192 5.658e7/5.658e7/5.657e7/5.657e7/5.658e7 fit 1 (rms 0.0%) moved 6.227e5/6.221e5/6.222e5/6.223e5/6.226e5B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "path.join_within"
