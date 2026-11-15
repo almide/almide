@@ -87,6 +87,9 @@ fn list_param_agrees(elem: ListElem, r: &str) -> bool {
         (ListElem::Bool, Some(i)) => i == "bool",
         (ListElem::FloatRows, Some(i)) => i == "Vec<f64>",
         (ListElem::Matrix, Some(i)) => i == "AlmideMatrix",
+        // The render lends `&[&Vec<u8>]` (native_floor_tail.rs `list_arg`),
+        // which only a type-parameter element accepts.
+        (ListElem::Bytes, Some(i)) => is_type_param(i),
         (ListElem::Any, Some(i)) => is_type_param(i),
         _ => false,
     }

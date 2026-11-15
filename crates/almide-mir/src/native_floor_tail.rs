@@ -83,7 +83,13 @@ fn list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
         }
         (ListElem::Matrix, NTy::Rec(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(format!("&{code}")),
         (ListElem::Matrix, NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => return Some(code.to_string()),
-        (ListElem::Float | ListElem::Bool | ListElem::FloatRows | ListElem::Matrix, _) => return None,
+        // A Bytes list's runtime param is a slice of `B: Deref<Target = Vec<u8>>`
+        // (v0 hands it shared blocks): lend it a slice of the blocks' references,
+        // which meets that bound and every other a reference meets.
+        (ListElem::Bytes, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_bytes) => {
+            return Some(format!("&{code}.iter().collect::<Vec<&Vec<u8>>>()"))
+        }
+        (ListElem::Float | ListElem::Bool | ListElem::FloatRows | ListElem::Matrix | ListElem::Bytes, _) => return None,
         _ => {}
     }
     let int_list = matches!(elem, ListElem::Int | ListElem::Any);

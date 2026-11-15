@@ -215,6 +215,7 @@ pub(crate) fn generated_list_of(p: FloorParam) -> Option<u16> {
     let elem = match p {
         FloorParam::List(ListElem::Value) | FloorParam::ListOwned(ListElem::Value) => NTy::Rec(rec::value_index()),
         FloorParam::List(ListElem::Matrix) | FloorParam::ListOwned(ListElem::Matrix) => NTy::Rec(rec::matrix_index()),
+        FloorParam::List(ListElem::Bytes) | FloorParam::ListOwned(ListElem::Bytes) => NTy::Rec(rec::bytes_index()),
         FloorParam::List(ListElem::StrValuePairs) | FloorParam::ListOwned(ListElem::StrValuePairs) => NTy::Rec(rec::slots_type_of(&[NTy::Str, NTy::Rec(rec::value_index())])),
         _ => return None,
     };

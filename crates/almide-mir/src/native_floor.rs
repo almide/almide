@@ -102,6 +102,8 @@ pub(crate) enum ListElem {
     FloatRows,
     /// `List[Matrix]` — a slice of the runtime `AlmideMatrix`.
     Matrix,
+    /// `List[Bytes]` — a slice of the runtime's `Vec<u8>` blocks.
+    Bytes,
     /// A type parameter of the declaration: any list the render carries.
     Any,
 }
@@ -704,6 +706,7 @@ fn floor_list_param(elem: &TypeExpr, type_params: &BTreeSet<String>) -> Option<F
         "Float" => ListElem::Float,
         "Bool" => ListElem::Bool,
         "Matrix" => ListElem::Matrix,
+        "Bytes" => ListElem::Bytes,
         "String" => ListElem::Str,
         n if n == VALUE_TYPE => ListElem::Value,
         a if type_params.contains(a) => ListElem::Any,
