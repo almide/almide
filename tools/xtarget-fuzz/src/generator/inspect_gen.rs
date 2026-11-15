@@ -603,6 +603,16 @@ impl Target {
                         .iter()
                         .chain(effect_recipes::EFFECT_RECIPES)
                         .any(|r| r.func == format!("{}.{}", sig.module, sig.func));
+                    // `XF_CONFORMER=<Type>`: measure a bounded variable at a
+                    // second admissible conformer (a Read/Write handle other
+                    // than the standard stream, HttpResponse for HttpMessage).
+                    if let Some(t) = std::env::var("XF_CONFORMER")
+                        .ok()
+                        .and_then(|want| fits.iter().find(|t| t.render() == want).copied())
+                    {
+                        subst.entry(v).or_insert(t.clone());
+                        continue;
+                    }
                     let second = (fill == GenType::String && !has_recipe)
                         .then(|| {
                             let rest = fits.iter().skip(1);
@@ -637,10 +647,18 @@ impl Target {
             .zip(sig.params.iter().cloned())
             .collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
-        let recipe = SHAPE_RECIPES
-            .iter()
-            .chain(effect_recipes::EFFECT_RECIPES)
-            .find(|r| r.func == name);
+        let alt = std::env::var("XF_CONFORMER").ok().and_then(|c| {
+            effect_recipes::ALT_RECIPES
+                .iter()
+                .find(|(conf, r)| *conf == c && r.func == name)
+                .map(|(_, r)| r)
+        });
+        let recipe = alt.or_else(|| {
+            SHAPE_RECIPES
+                .iter()
+                .chain(effect_recipes::EFFECT_RECIPES)
+                .find(|r| r.func == name)
+        });
         let routed = ROUTED.iter().find(|r| r.func == name);
         let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
         if let Some(r) = routed {
@@ -1261,7 +1279,13 @@ impl Target {
     /// A call that consumes its whole input: its diamond runs each path alone.
     pub fn diamond_runs_paths_alone(&self) -> bool {
         // A call that does not return ends its path's program.
-        self.never || self.name == "io.read_all"
+        // Every stdin reader consumes what the next path would read: each
+        // path gets the same input of its own.
+        self.never
+            || matches!(
+                self.name.as_str(),
+                "io.read_all" | "io.read_to_end" | "io.read_exact" | "io.read" | "io.read_line"
+            )
     }
 
     fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {

@@ -717,12 +717,27 @@ fn wait_capped(
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
     );
-    let err_t = drain(
-        child
-            .stderr
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
+    // stderr is read only for a failure's first lines: keep its first MiB and
+    // discard the rest as it streams (io.eprint's probe writes k·16n bytes to
+    // it, and holding them all ran the harness itself out of memory at 30 GB).
+    let err_t = {
+        let pipe = child.stderr.take();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let mut chunk = [0u8; 65536];
+                while let Ok(got) = p.read(&mut chunk) {
+                    if got == 0 {
+                        break;
+                    }
+                    if buf.len() < (1 << 20) {
+                        buf.extend_from_slice(&chunk[..got]);
+                    }
+                }
+            }
+            buf
+        })
+    };
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {

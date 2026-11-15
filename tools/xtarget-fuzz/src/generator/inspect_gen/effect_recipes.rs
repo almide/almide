@@ -225,11 +225,11 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // and its shared-memory files (#3620). A call that consumes what it is
     // handed gets a fresh one every step.
     Recipe { func: "unix.connect", size: "", args: &[("path", UNIX_SINK)] },
-    Recipe { func: "unix.listen", size: "", args: &[("path", "\"l${{i}}.sock\"")] },
+    Recipe { func: "unix.listen", size: "", args: &[("path", "{ let _ = fs.remove(\"l${{i}}.sock\")\n  \"l${{i}}.sock\" }")] },
     Recipe {
         func: "unix.accept",
         size: "",
-        args: &[("listener", "{ let ul = unix.listen(\"a${{i}}.sock\")!\n  let _uc: Result[Fd, String] = unix.connect(\"a${{i}}.sock\")\n  ul }")],
+        args: &[("listener", "{ let _ = fs.remove(\"a${{i}}.sock\")\n  let ul = unix.listen(\"a${{i}}.sock\")!\n  let _uc: Result[Fd, String] = unix.connect(\"a${{i}}.sock\")\n  ul }")],
     },
     Recipe {
         func: "unix.write_fds",
@@ -241,7 +241,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
         size: "",
         args: &[(
             "sock",
-            "{ let ul = unix.listen(\"t${{i}}.sock\")!\n  let uc = unix.connect(\"t${{i}}.sock\")!\n  let us = unix.accept(ul)!\n  unix.write_fds(uc, bytes.from_string(\"hello world\"), [unix.shm_create(8)!])!\n  io.close(uc)!\n  io.close(ul)!\n  us }",
+            "{ let _ = fs.remove(\"t${{i}}.sock\")\n  let ul = unix.listen(\"t${{i}}.sock\")!\n  let uc = unix.connect(\"t${{i}}.sock\")!\n  let us = unix.accept(ul)!\n  unix.write_fds(uc, bytes.from_string(\"hello world\"), [unix.shm_create(8)!])!\n  io.close(uc)!\n  io.close(ul)!\n  us }",
         )],
     },
     Recipe {
@@ -249,7 +249,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
         size: "",
         args: &[(
             "xs",
-            "{ let ul = unix.listen(\"s.sock\")!\n  let uc = unix.connect(\"s.sock\")!\n  let us = unix.accept(ul)!\n  unix.write_fds(uc, bytes.from_string(\"hello world\"), [])!\n  [us] }",
+            "{ let _ = fs.remove(\"s${{i}}.sock\")\n  let ul = unix.listen(\"s${{i}}.sock\")!\n  let uc = unix.connect(\"s${{i}}.sock\")!\n  let us = unix.accept(ul)!\n  unix.write_fds(uc, bytes.from_string(\"hello world\"), [])!\n  [us] }",
         ), ("timeout_ms", "1000")],
     },
     Recipe { func: "unix.shm_create", size: "size", args: &[("size", "{n}")] },
@@ -275,6 +275,16 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
     Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
     Recipe { func: "http.cancel", size: "", args: &[("c", FRESH_CALL)] },
+];
+
+/// Recipes for a second admissible conformer of a bounded handle, chosen with
+/// `XF_CONFORMER=<Type>`: the call measured over a descriptor of the probe's
+/// own instead of a standard stream.
+pub(super) const ALT_RECIPES: &[(&str, Recipe)] = &[
+    // Writes to the fixture's sink, which drains every byte.
+    ("Fd", Recipe { func: "io.write", size: "data", args: &[("h", "unix.connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!"), ("data", "bytes.from_string(string.repeat(\"aé\", 4 * {n}))")] }),
+    // A shared-memory descriptor of its own per step.
+    ("Fd", Recipe { func: "io.close", size: "", args: &[("h", "{ let _step = {i}\n  unix.shm_create(8)! }")] }),
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive

@@ -660,7 +660,8 @@ pub const NOMINALS: &[Nominal] = &[
         small: ok_or_panic!("unix.shm_create(8)"),
         sized: ok_or_panic!("unix.shm_create({n})"),
         leaves: &[ok_or_panic!("unix.shm_create(8)"), ok_or_panic!("unix.shm_create(2)"), ok_or_panic!("unix.shm_create(3)")],
-        observe: "bytes.to_list(unix.shm_read({v}, 0, 2)!)",
+        // A socket has no offset (shm_read is ESPIPE on it): it reads as [].
+        observe: "bytes.to_list(unix.shm_read({v}, 0, 2) ?? bytes.new())",
         observed: || GenType::List(Box::new(GenType::Int)),
         digest: "1",
         observe_calls_effect: true,
