@@ -161,6 +161,15 @@ pub fn cmd_inspect(args: &[String]) {
     verdicts.push(("parity", parity(&ctx, &name, args)));
     let per_inst = |f: &dyn Fn(&Target) -> String| -> String {
         match &heap {
+            // Every variable pinned: the one instantiation, labelled with its
+            // bindings (String for a Map key).
+            None if !target.pinned.is_empty() => {
+                let v = f(&target);
+                match v.split_once(": ") {
+                    Some((verdict, body)) => format!("{verdict}: [vars={}] {body}", target.pinned),
+                    None => v,
+                }
+            }
             None => f(&target),
             Some(Ok(h)) => both_labelled(&target.vars, &f(&target), &h.vars, &f(h)),
             Some(Err(e)) => {

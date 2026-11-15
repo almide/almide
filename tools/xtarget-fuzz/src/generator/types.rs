@@ -173,6 +173,14 @@ impl GenType {
         }
     }
 
+    /// A value held inline, with no heap allocation behind it.
+    pub fn is_scalar(&self) -> bool {
+        matches!(
+            self,
+            GenType::Int | GenType::Float | GenType::Bool | GenType::Unit | GenType::Sized(_)
+        )
+    }
+
     /// A type a `Set` can hold: hashable and equal by value (no Float — a
     /// `Set[Float]` is refused by the checker).
     pub fn is_set_elem(&self) -> bool {

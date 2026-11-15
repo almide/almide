@@ -46,6 +46,10 @@ pub struct Target {
     /// What the free type variables were bound to, as the verdicts label
     /// each instantiation (`Int`; `Bytes` for `[B: Body]` at the Int fill).
     pub vars: String,
+    /// The bindings of a target whose type variables are all pinned (a Map
+    /// key is String): its one instantiation is labelled with them, since it
+    /// is the heap instantiation the ledger asks for.
+    pub pinned: String,
     /// The literal-only parameters (E117): written inline at every call,
     /// never bound to a name first ([`Signature::literal_at`]).
     literal: Vec<(usize, &'static [&'static str])>,
@@ -379,6 +383,21 @@ const SHAPE_RECIPES: &[Recipe] = &[
         args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
     },
     Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
+    // The fixed-width parsers in a radix: n leading zeros then 0x7f, digits
+    // of radix 16 whose value every width holds, so the parse succeeds and
+    // walks n + 2 digits (the generic "aéaé…" was refused at its first
+    // character; n significant digits would overflow the width).
+    Recipe { func: "int8.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int16.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int32.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int64.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint8.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint16.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint32.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint64.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    // A pop from a buffer of n bytes: the derived one-parameter domain did not
+    // scale, so the probe had no size and popped an empty buffer (`none`).
+    Recipe { func: "bytes.pop", size: "b", args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
     // regex: the subject is the size. A search's one hit is at the end (the
@@ -420,6 +439,8 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${100000000 + {n} - 1}\"")] },
 ];
 
+/// n zeros then `7f`: valid in radix 16, 127 in every fixed width.
+const RADIX_DIGITS: &str = "string.repeat(\"0\", {n}) + \"7f\"";
 /// A pattern whose one match is the subject's tail ([`SUBJECT_TAIL`]).
 const REGEX_TAIL: &str = "regex.new(\"a(b)\")";
 const SUBJECT_TAIL: &str = "string.repeat(\"aé\", {n}) + \"ab\"";
@@ -537,13 +558,54 @@ impl Target {
         // else its first conformer other than the heap fill String: the two
         // instantiations stay two different lowerings where the bound allows.
         for v in vars {
+            // At the heap fill (String) a bound String does not meet takes the
+            // next conformer the signature can hold (Float for `Numeric`; a
+            // Set holds no Float, so `set.product` takes a sized Int): the second
+            // pass must not repeat the first. A heap conformer (`BigInt`) is
+            // not preferred: `list.product` of n BigInts grows a quadratic
+            // number, past any probe's cap.
             let pick = match sig.bound_of(&v) {
-                Some(allowed) if !allowed.contains(&fill) => allowed
-                    .iter()
-                    .find(|t| **t != GenType::String)
-                    .or(allowed.first())
-                    .cloned()
-                    .unwrap_or_else(|| fill.clone()),
+                Some(allowed) if !allowed.contains(&fill) => {
+                    let holds = |t: &GenType| {
+                        // The other variables at the fill, as they will be.
+                        let mut s2 = subst.clone();
+                        for p in &sig.params {
+                            let mut used = Vec::new();
+                            p.collect_vars(&mut used);
+                            for u in used {
+                                s2.entry(u).or_insert_with(|| fill.clone());
+                            }
+                        }
+                        s2.insert(v.clone(), t.clone());
+                        sig.params
+                            .iter()
+                            .filter(|p| !matches!(p, SigType::Fn(..)))
+                            .all(|p| {
+                                let mut used = Vec::new();
+                                p.collect_vars(&mut used);
+                                !used.contains(&v) || p.instantiate(&s2).is_some()
+                            })
+                    };
+                    let fits: Vec<&GenType> =
+                        allowed.iter().filter(|t| **t != GenType::String && holds(t)).collect();
+                    let first = fits.first().copied();
+                    // A recipe spells its operands for one instantiation (io's
+                    // handles): it keeps that one. Else a non-sized second.
+                    let has_recipe = SHAPE_RECIPES
+                        .iter()
+                        .chain(effect_recipes::EFFECT_RECIPES)
+                        .any(|r| r.func == format!("{}.{}", sig.module, sig.func));
+                    let second = (fill == GenType::String && !has_recipe)
+                        .then(|| {
+                            let rest = fits.iter().skip(1);
+                            rest.clone()
+                                .find(|t| !matches!(t, GenType::Sized(_)))
+                                .or_else(|| fits.get(1))
+                                .copied()
+                        })
+                        .flatten();
+                    second.or(first).or(allowed.first()).cloned().unwrap_or_else(|| fill.clone())
+                }
                 _ => fill.clone(),
             };
             subst.entry(v).or_insert(pick);
@@ -656,6 +718,16 @@ impl Target {
         shown.sort();
         shown.dedup();
         let generic = !shown.is_empty();
+        // Every type variable pinned (a Map key is String): the one
+        // instantiation there is IS the heap one, and its evidence says so.
+        let pinned = if shown.is_empty() {
+            let mut p: Vec<String> = subst.values().map(|t| t.render()).collect();
+            p.sort();
+            p.dedup();
+            p.join(",")
+        } else {
+            String::new()
+        };
         let literal = (0..params.len())
             .filter_map(|i| sig.literal_at(i).map(|l| (i, l)))
             .collect();
@@ -672,6 +744,7 @@ impl Target {
             domain,
             generic,
             vars: shown.join(","),
+            pinned,
             literal,
             effect: sig.effect,
             observe: sig.observed_through,
