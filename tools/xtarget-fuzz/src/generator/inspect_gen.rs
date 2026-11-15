@@ -238,6 +238,17 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // Element-wise over two matrices of one shape: the second operand takes
     // the sized operand's shape (the generic 2×2 refused every call).
     Recipe { func: "matrix.zip_with", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
+    // A fixed-width conversion is in domain only for a value in range: 7 at
+    // whatever numeric type the source variable takes (a sized Int or BigInt
+    // panics). Sizeless: the conversion of one value.
+    Recipe { func: "int8.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int16.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int32.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int64.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint8.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint16.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint32.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint64.from", size: "", args: &[("x", "{seven}")] },
     // #4106: the message is the size (the key is fixed, one block, a
     // Secret[Bytes] like the tag — security table row 20). A verify
     // call is in-domain only with the right tag — the MAC of the same key and
@@ -890,7 +901,16 @@ impl Target {
             Some(GenType::String) => "int.to_string",
             _ => "",
         };
+        // `{seven}`: 7 in the instantiated type, in range of every fixed-width
+        // target (a conversion's sized BigInt or Int is out of its range).
+        let seven_v = match &ty {
+            Some(GenType::Int) => "7".to_string(),
+            Some(GenType::Float) => "7.0".to_string(),
+            Some(g) => format!("{}.from(7)", g.render().to_lowercase()),
+            None => "7".to_string(),
+        };
         e.replace("{sized_flat}", &flat_v)
+            .replace("{seven}", &seven_v)
             .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
             .replace("{small_elem}", &elem_v)
