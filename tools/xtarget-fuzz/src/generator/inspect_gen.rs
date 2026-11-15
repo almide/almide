@@ -235,6 +235,9 @@ const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) =>
 pub mod effect_recipes;
 
 const SHAPE_RECIPES: &[Recipe] = &[
+    // Element-wise over two matrices of one shape: the second operand takes
+    // the sized operand's shape (the generic 2×2 refused every call).
+    Recipe { func: "matrix.zip_with", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
     // #4106: the message is the size (the key is fixed, one block, a
     // Secret[Bytes] like the tag — security table row 20). A verify
     // call is in-domain only with the right tag — the MAC of the same key and
