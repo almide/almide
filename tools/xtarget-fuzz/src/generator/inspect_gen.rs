@@ -894,21 +894,61 @@ impl Target {
 
     /// `(p0, ..) => body`: a parameter of the return type passes through,
     /// else a small value of it — the cheapest callback that keeps the types.
+    ///
+    /// The answer is never a constant the optimiser can see through: a
+    /// callback that ignores its element (`(acc, x) => acc`, `(x) => true`)
+    /// let LLVM fold the whole walk of `list.fold` / `list.drop_while` away on
+    /// native, which then measured O(1) while wasm measured n. So the answer
+    /// reads an element: `digest(x) >= 0` holds for every value the probes
+    /// build (each digest is a length, a count, an element >= 0 or a 0/1), so
+    /// the answer is the same as the constant's — a predicate still holds for
+    /// every element (a search still never hits), a fold still keeps its
+    /// accumulator — but only a load of each element can tell.
     fn lambda(&self, ps: &[SigType], r: &SigType) -> String {
         let names: Vec<String> = (0..ps.len()).map(|k| format!("p{k}")).collect();
         let want = r.instantiate(&self.subst);
-        let body = ps
+        // `digest(p) >= 0` for a parameter whose digest is a plain read.
+        let opaque = |skip: Option<usize>| -> Option<String> {
+            ps.iter().enumerate().filter(|(k, _)| Some(*k) != skip).find_map(|(k, p)| {
+                let g = p.instantiate(&self.subst)?;
+                (!g.observe_calls_effect()).then(|| format!("{} >= 0", digest(&names[k], &g)))
+            })
+        };
+        let pass = ps
             .iter()
-            .zip(&names)
-            .find(|(p, _)| p.instantiate(&self.subst) == want)
-            .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| match want {
-                // The worst case scans everything: a search that never hits,
-                // a filter that is evaluated on every element.
-                Some(GenType::Bool) if STOPS_ON_TRUE.contains(&self.func()) => "false".into(),
-                Some(ref g) => small(g),
-                None => "()".into(),
-            });
+            .position(|p| p.instantiate(&self.subst) == want);
+        let body = match (pass, &want) {
+            // The accumulator kept, unless an element says otherwise (none does).
+            // The other branch is an element of the same type where there is
+            // one: a constant there can equal the accumulator's start (fold's
+            // init is `small` too), and `if c then acc else init` from init is
+            // init again, foldable whatever c is.
+            (Some(k), Some(g)) => match opaque(Some(k)) {
+                Some(c) => {
+                    let other = ps
+                        .iter()
+                        .enumerate()
+                        .find(|(j, p)| *j != k && p.instantiate(&self.subst).as_ref() == Some(g))
+                        .map_or_else(|| small(g), |(j, _)| names[j].clone());
+                    format!("if {c} then {} else {other}", names[k])
+                }
+                None => names[k].clone(),
+            },
+            (Some(k), None) => names[k].clone(),
+            // The worst case scans everything: a search that never hits,
+            // a filter that is evaluated on every element.
+            (None, Some(GenType::Bool)) => {
+                let never = STOPS_ON_TRUE.contains(&self.func());
+                match opaque(None) {
+                    Some(c) if never => format!("not ({c})"),
+                    Some(c) => c,
+                    None if never => "false".into(),
+                    None => "true".into(),
+                }
+            }
+            (None, Some(g)) => small(g),
+            (None, None) => "()".into(),
+        };
         format!("({}) => {body}", names.join(", "))
     }
 
