@@ -35,14 +35,10 @@ fn __hc_walk_len(b: Bytes) -> Int = {
 
 // The frame is BYTES: the body cell carries the request's exact bytes, which
 // no String may hold (#4744).
-fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string(
-  "${__hc_cell(method)}${__hc_walk_len(body)}\n",
-) + body + bytes.from_string(
-  list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
-    "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
-    (acc, cell) => acc + cell,
-  ),
-)
+fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string("${__hc_cell(method)}${__hc_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
+  "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+  (acc, cell) => acc + cell,
+))
 
 effect fn __http_call_open(url: String, frame: Bytes) -> Result[HttpCall, String] = _
 

@@ -20,6 +20,7 @@
 // pair walks never pair it (`param` answers none for it, as native does), a
 // route binding goes in front of it, and set_body / set_body_bytes drop it.
 import hex
+
 fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
@@ -110,11 +111,16 @@ fn http_req_set_header(req: List[String], key: String, value: String) -> List[St
   value,
 )
 
-fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(__hq_no_raw(req), 2, body)
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(
+  __hq_no_raw(req),
+  2,
+  body,
+)
 
 // The trailing raw-body cell, when the slots past the headers count odd.
-fn __hq_raw(req: List[String]) -> String? = if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
-else none
+fn __hq_raw(req: List[String]) -> String? =
+  if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
+  else none
 
 fn __hq_no_raw(req: List[String]) -> List[String] = match __hq_raw(req) {
   some(_) => list.take(req, list.len(req) - 1),
