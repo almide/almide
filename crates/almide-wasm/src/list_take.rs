@@ -10,8 +10,10 @@
 //! its block is a heap block at rc 1, each element is taken out of its slot
 //! (the slot is nulled, so the release after the loop walks a null there)
 //! and the callback's one read of its parameter is lowered as a MOVE. A
-//! shared source keeps its elements: the callback's element then takes a +1
-//! of its own, so it holds one credit on either path and the move is exact.
+//! shared source keeps its elements: there the callback runs as it always
+//! did, on a lent element. The callback body is lowered once per arm, so
+//! each arm's RC instructions are exactly the ones its witness records — no
+//! arm holds a call (a +1 on the element) the ownership witness never saw.
 //!
 //! The read must be the callback's only one, and the body itself or an
 //! argument of a call reached from the body only through call arguments: it
@@ -21,7 +23,6 @@
 
 use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::{IrExpr, IrExprKind, VarId};
-use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -81,11 +82,9 @@ impl Emitter<'_> {
         Ok(take)
     }
 
-    /// After the element is loaded into `param`: take it out of its slot
-    /// (`bh`'s element `ih`) when the source gives it up, else take a +1 on
-    /// it, so the callback's element holds one credit either way.
-    pub(crate) fn list_take_elem(&mut self, take: u32, elem: SliceTy, (bh, ih): (u32, u32), param: u32) {
-        self.f.instructions().local_get(take).if_(BlockType::Empty);
+    /// The element just loaded leaves its slot (`bh`'s element `ih`): the
+    /// slot is nulled, so the source's release after the loop skips it.
+    pub(crate) fn list_take_slot(&mut self, elem: SliceTy, (bh, ih): (u32, u32)) {
         self.f
             .instructions()
             .local_get(bh)
@@ -95,6 +94,5 @@ impl Emitter<'_> {
             .i32_add()
             .i32_const(0);
         self.store_ty_slot(elem, 0);
-        self.f.instructions().else_().local_get(param).call(F_INC).end();
     }
 }

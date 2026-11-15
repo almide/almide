@@ -566,31 +566,29 @@ impl Emitter<'_> {
             .local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        if let Some(t) = take {
-            self.list_take_elem(t, elem, (bh, ih), params[0]);
-        }
         self.witness_callback_open(cb, None);
-        // dest addr, then value, then store
-        self.f
-            .instructions()
-            .local_get(rh)
-            .local_get(ih)
-            .i32_const(u.slot_size() as i32)
-            .i32_mul()
-            .i32_add();
-        if let Some(read) = taken {
-            self.owned_call_marks.set_moving(read, true);
+        match (take, taken) {
+            // Two arms, each witnessed as it runs (#4612): a source that gives
+            // its element up hands it to the callback's one read as a move,
+            // with no RC instruction; a shared one keeps the ordinary lent
+            // element. Neither arm holds an RC call the other's record lacks.
+            (Some(t), Some(read)) => {
+                self.f.instructions().local_get(t).if_(BlockType::Empty);
+                self.witness_branch_open();
+                self.witness_branch_arm();
+                self.list_take_slot(elem, (bh, ih));
+                self.owned_call_marks.set_moving(read, true);
+                let moved = self.map_store_body(body, u, (rh, ih));
+                self.owned_call_marks.set_moving(read, false);
+                moved?;
+                self.f.instructions().else_();
+                self.witness_branch_arm();
+                self.map_store_body(body, u, (rh, ih))?;
+                self.witness_branch_close();
+                self.f.instructions().end();
+            }
+            _ => self.map_store_body(body, u, (rh, ih))?,
         }
-        self.lower(body, Some(u))?;
-        // A pass-through body (`(x) => x`, a field of x) hands back a
-        // VIEW of the source's element: the result spine is a holder and
-        // takes the share here (#2010 stage 2b).
-        self.rc_share_guard(body, u);
-        self.witness_store(body, u);
-        if let Some(read) = taken {
-            self.owned_call_marks.set_moving(read, false);
-        }
-        self.store_ty_slot(u, 0);
         self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
@@ -602,6 +600,27 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(u)))))
+    }
+
+    /// One element of a map: the callback's value stored at element `ih`
+    /// of the result `rh`.
+    fn map_store_body(&mut self, body: &IrExpr, u: SliceTy, (rh, ih): (u32, u32)) -> Result<(), EmitError> {
+        // dest addr, then value, then store
+        self.f
+            .instructions()
+            .local_get(rh)
+            .local_get(ih)
+            .i32_const(u.slot_size() as i32)
+            .i32_mul()
+            .i32_add();
+        self.lower(body, Some(u))?;
+        // A pass-through body (`(x) => x`, a field of x) hands back a
+        // VIEW of the source's element: the result spine is a holder and
+        // takes the share here (#2010 stage 2b).
+        self.rc_share_guard(body, u);
+        self.witness_store(body, u);
+        self.store_ty_slot(u, 0);
+        Ok(())
     }
 
     pub(crate) fn lower_list_filter(
