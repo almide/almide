@@ -381,4 +381,54 @@ mod tests {
         assert!(errs.iter().any(|e| e.kind == ViolationKind::BranchDisagreement));
         assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree && e.value == ValueId(0)));
     }
+
+    // #4749 — two loop slots copied from two outer objects; one arm rebinds the
+    // first to a fresh object and ALIASES the second onto it (`dnames = ["p"];
+    // need = dnames`). Each path holds one reference per slot. `share` makes the
+    // second slot take a real reference (`Dup`); without it both slots hold the
+    // fresh object's ONE reference, which the two drops after the join free twice.
+    fn shape_aliased_slot_rebind(share: bool) -> MirFunction {
+        let (a, b, s1, s2, c, f, d) = (v(0), v(1), v(2), v(3), v(4), v(5), v(6));
+        let mut ops = vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::Alloc { dst: b, repr: heap(), init: Init::Opaque },
+            Op::Dup { dst: s1, src: a },
+            Op::Dup { dst: s2, src: b },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Drop { v: s1 },
+            Op::Alloc { dst: f, repr: heap(), init: Init::Opaque },
+            Op::SetLocal { local: s1, src: f },
+            Op::Drop { v: s2 },
+        ];
+        if share {
+            ops.extend([Op::Dup { dst: d, src: s1 }, Op::SetLocal { local: s2, src: d }]);
+        } else {
+            ops.push(Op::SetLocal { local: s2, src: s1 });
+        }
+        ops.extend([
+            Op::Else { val: None },
+            Op::EndIf { val: None },
+            Op::Borrow { v: s1 },
+            Op::Borrow { v: s2 },
+            Op::Drop { v: s2 },
+            Op::Drop { v: s1 },
+            Op::Drop { v: a },
+            Op::Drop { v: b },
+        ]);
+        func(ops)
+    }
+
+    #[test]
+    fn one_fresh_object_aliased_into_two_rebound_slots_verifies_clean() {
+        assert_eq!(verify_ownership(&shape_aliased_slot_rebind(true)), Ok(()));
+    }
+
+    #[test]
+    fn two_slots_sharing_one_reference_after_a_rebind_are_still_caught() {
+        // Negative control: the alias took no reference of its own, so on the
+        // then path the two drops after the join release one reference twice.
+        let errs = verify_ownership(&shape_aliased_slot_rebind(false)).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::BranchDisagreement), "{errs:?}");
+    }
 }

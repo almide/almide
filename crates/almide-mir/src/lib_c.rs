@@ -677,6 +677,15 @@ impl OwnershipScan {
     /// compares the slot's reference rather than two unrelated object ids. An
     /// object that already existed at the `IfThen` is never renamed: two
     /// pre-existing objects on the two paths still disagree, as before.
+    ///
+    /// Each slot reads its object from the CURRENT arm state, not a snapshot
+    /// taken before the loop (#4749): when one arm-fresh object fills two slots
+    /// (`dnames = ["p"]; need = dnames`), the first slot's rename moves it, with
+    /// both references, onto that slot's other-arm object. The second slot must
+    /// then see where its reference now lives and move it onto a slot object of
+    /// its own; a stale snapshot named the object that no longer existed, so
+    /// nothing moved and the arms disagreed although each path holds exactly one
+    /// reference per slot.
     fn unify_rebound_slots(
         &mut self,
         entry_objects: &BTreeSet<ValueId>,
@@ -684,8 +693,9 @@ impl OwnershipScan {
         then_dead: &BTreeMap<ValueId, bool>,
         then_obj: &mut BTreeMap<ValueId, ValueId>,
     ) {
-        let slots: Vec<(ValueId, ValueId)> = then_obj.iter().map(|(h, o)| (*h, *o)).collect();
-        for (h, oa) in slots {
+        let slots: Vec<ValueId> = then_obj.keys().copied().collect();
+        for h in slots {
+            let Some(&oa) = then_obj.get(&h) else { continue };
             let Some(&ob) = self.object_of.get(&h) else { continue };
             let live_both = !then_dead.get(&h).copied().unwrap_or(true)
                 && !self.dead.get(&h).copied().unwrap_or(true);
