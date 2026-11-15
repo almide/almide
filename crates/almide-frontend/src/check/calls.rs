@@ -879,6 +879,22 @@ impl Checker {
             }
             if let Some(bound_ty) = bindings.get(tv_name) {
                 let concrete_ty = resolve_ty(bound_ty, &self.uf);
+                // The built-in `Ord` (#4758) is the order `list.sort` / `max` use:
+                // judged by the same predicate as the runtime's `Ord`-bounded
+                // intrinsics (`env.is_ord`, E030), never by the conformance table,
+                // which lists no primitive (an `[A: Ord]` refused Int and took a
+                // Set). A bare Float orders (the `_float` twins); an open slot is
+                // E025's business.
+                let ord = almide_base::intern::sym("Ord");
+                if proto_names.contains(&ord) {
+                    if !matches!(concrete_ty, Ty::Unknown | Ty::TypeVar(_) | Ty::Float) && !self.env.is_ord(&concrete_ty) {
+                        let ty_name = Self::type_display_name(&concrete_ty);
+                        let diag = Self::unordered_diag(&ty_name, name, self.current_span);
+                        self.diagnostics.push(diag);
+                    }
+                }
+                let proto_names: Vec<Sym> = proto_names.iter().copied().filter(|p| *p != ord).collect();
+                let proto_names = &proto_names;
                 let type_name = self.resolve_type_name_for_protocol(&concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {

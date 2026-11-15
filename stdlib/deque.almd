@@ -178,25 +178,25 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
-fn sort[A](d: Deque[A]) -> List[A] = list.sort(to_list(d))
+fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
 
 /// Elements sorted by key f(x), stable; f runs once per element.
-fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
+fn sort_by[A, B: Ord](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
 
 /// Elements sorted by cmp, stable: negative puts a first.
 fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(to_list(d), cmp)
 
 /// Least element, or none when empty.
-fn min[A](d: Deque[A]) -> A? = list.min(to_list(d))
+fn min[A: Ord](d: Deque[A]) -> A? = list.min(to_list(d))
 
 /// Greatest element, or none when empty.
-fn max[A](d: Deque[A]) -> A? = list.max(to_list(d))
+fn max[A: Ord](d: Deque[A]) -> A? = list.max(to_list(d))
 
 /// Element with the least key f(x); the nearest the front on ties.
-fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
+fn min_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
 
 /// Element with the greatest key f(x); the nearest the front on ties.
-fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
+fn max_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
 
 /// Least element by cmp; the nearest the front on ties.
 fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(to_list(d), cmp)

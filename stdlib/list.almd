@@ -501,10 +501,10 @@ fn __key_order[K](a: K, b: K) -> Int =
   }
 
 /// Element with the least key f(x); the first on ties; f runs once per x.
-fn min_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
+fn min_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
 
 /// Element with the greatest key f(x); the first on ties; f runs once per x.
-fn max_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
+fn max_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
 
 // The element whose key keys[i] is the least (want = -1) or the greatest
 // (want = 1); a later element replaces the held one only when its key is
@@ -1117,7 +1117,7 @@ fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[L
 // ── the key-extracting cells ──
 // The keys are computed first, once per element in list order (the first err
 // stops there), then the total form runs over (key, element) pairs.
-fn __fallible_sort_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
+fn __fallible_sort_by[A, B: Ord, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -1162,7 +1162,7 @@ fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[
 // The key cells compute every key first, once per element in list order, as
 // `__fallible_sort_by` does; the comparator cells stop asking `cmp` at its
 // first err.
-fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_min_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -1170,7 +1170,7 @@ fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?,
   err(e) => err(e),
 }
 
-fn __fallible_max_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_max_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {

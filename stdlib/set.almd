@@ -134,25 +134,25 @@ fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partitio
 fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
-fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
 
 /// Members sorted by key f(x), stable; f runs once per member.
-fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+fn sort_by[A, B: Ord](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
 
 /// Members sorted by cmp, stable: negative puts a first.
 fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
 
 /// Least member, or none when empty.
-fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+fn min[A: Ord](s: Set[A]) -> A? = list.min(set.to_list(s))
 
 /// Greatest member, or none when empty.
-fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+fn max[A: Ord](s: Set[A]) -> A? = list.max(set.to_list(s))
 
 /// Member with the least key f(x); the first on ties.
-fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+fn min_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
 
 /// Member with the greatest key f(x); the first on ties.
-fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+fn max_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
 
 /// Least member by cmp; the first on ties.
 fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
@@ -325,7 +325,7 @@ fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map
   (x) => f(x)!,
 )
 
-fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+fn __fallible_sort_by[A, B: Ord, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -335,12 +335,12 @@ fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Resul
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+fn __fallible_min_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
   set.to_list(s),
   (x) => f(x)!,
 )
 
-fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+fn __fallible_max_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
   set.to_list(s),
   (x) => f(x)!,
 )
