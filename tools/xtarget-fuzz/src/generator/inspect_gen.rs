@@ -13,7 +13,7 @@ use std::fmt::Write;
 use super::catalogue::Signature;
 use super::nominal;
 use super::sig_type::SigType;
-use super::types::{render_print, GenType};
+use super::types::{coll_module, render_print, GenType};
 use super::Project;
 
 /// One function, instantiated, with the parameter its size is measured in.
@@ -190,6 +190,7 @@ fn has_size(t: &GenType) -> bool {
             | GenType::Matrix
             | GenType::Value
             | GenType::Nominal(_)
+            | GenType::Coll(..)
     )
 }
 
@@ -380,7 +381,52 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
+    // regex: the subject is the size. A search's one hit is at the end (the
+    // whole subject is scanned, and the hit is the success path); a full
+    // match matches the whole subject; the many-match functions meet n
+    // matches. A pattern is not a needle (SEARCH_PARAMS): the compilers get
+    // n literal pairs, a pattern they accept.
+    Recipe { func: "regex.new", size: "pattern", args: &[("pattern", "string.repeat(\"ab\", {n})")] },
+    Recipe { func: "regex.compile", size: "pattern", args: &[("pattern", "string.repeat(\"ab\", {n})")] },
+    Recipe { func: "regex.is_match", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.find", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.index_of", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.captures", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.is_full_match", size: "s", args: &[("re", "regex.new(\"(aé)*\")"), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.full_match", size: "s", args: &[("re", "regex.new(\"(aé)*\")"), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.find_all", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.captures_all", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.split", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.replace", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})"), ("rep", "\"x\"")] },
+    Recipe { func: "regex.replace_first", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL), ("rep", "\"x\"")] },
+    Recipe { func: "regex.replace_with", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.replace_first_with", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    // value paths: a lookup through a one-step path to the key the sized
+    // object holds last (`k<100000000 + i>`), so the step scans the object
+    // and hits.
+    Recipe { func: "value.get_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    Recipe { func: "value.set_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    Recipe { func: "value.remove_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    // Decoders on input they accept: n + 1 decimal digits; a fixed UUID
+    // text and 16 bytes; an address.
+    Recipe { func: "bigint.parse", size: "s", args: &[("s", "\"1\" + string.repeat(\"7\", {n})")] },
+    Recipe { func: "bigint.parse_radix", size: "s", args: &[("s", "\"1\" + string.repeat(\"f\", {n})"), ("radix", "16")] },
+    Recipe { func: "uuid.parse", size: "", args: &[("s", "\"0190a6e2-7c3b-7d4e-8f00-123456789abc\"")] },
+    Recipe { func: "uuid.from_bytes", size: "", args: &[("b", "bytes.from_list(list.range(0, 16) |> list.map((i) => i * 17 % 256))")] },
+    Recipe { func: "net.parse_ip", size: "", args: &[("s", "\"2001:db8::ff00:42:8329\"")] },
+    // The header the sized message holds last (`k<100000000 + i>`), so the
+    // lookup walks every header and hits.
+    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${100000000 + {n} - 1}\"")] },
 ];
+
+/// A pattern whose one match is the subject's tail ([`SUBJECT_TAIL`]).
+const REGEX_TAIL: &str = "regex.new(\"a(b)\")";
+const SUBJECT_TAIL: &str = "string.repeat(\"aé\", {n}) + \"ab\"";
+/// A pattern matching every `é` of the sized subject.
+const REGEX_EACH: &str = "regex.new(\"(é)\")";
+/// The path to the sized Value's last key.
+const LAST_KEY_PATH: &str = "value.key(value.root(), \"k${100000000 + {n} - 1}\")";
 
 /// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
 /// in-domain leaves ([`recipe_leaf`]).
@@ -599,7 +645,7 @@ impl Target {
             .position(|(_, t)| concrete(t).as_ref() == Some(&ret))
             .filter(|_| {
                 sig.verdict.is_none()
-                    || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_))
+                    || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_) | GenType::Coll(..))
             });
         let forced = sig.forced_bindings();
         let mut shown: Vec<String> = subst
@@ -1478,6 +1524,7 @@ fn small(t: &GenType) -> String {
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
         GenType::Secret(e) => format!("secret.new({})", small(e)),
+        GenType::Coll(k, e) => format!("{}.from_list([{}, {}])", coll_module(k), small(e), small(e)),
     }
 }
 
@@ -1488,7 +1535,8 @@ fn elem_of(t: &GenType) -> Option<GenType> {
         | GenType::Set(e)
         | GenType::Map(e)
         | GenType::Option(e)
-        | GenType::Result(e) => Some((**e).clone()),
+        | GenType::Result(e)
+        | GenType::Coll(_, e) => Some((**e).clone()),
         _ => None,
     }
 }
@@ -1517,6 +1565,7 @@ fn elem(t: &GenType) -> String {
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
         GenType::Secret(e) => format!("secret.new({})", elem(e)),
+        GenType::Coll(k, e) => format!("{}.from_list([{}])", coll_module(k), elem(e)),
         other => small(other),
     }
 }
@@ -1538,6 +1587,12 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| nominal::fill(d.sized, "", n)),
         // The size of what it holds.
         GenType::Secret(e) => format!("secret.new({})", sized(e, n)),
+        // n elements, through the collection's own builder.
+        GenType::Coll(k, e) => format!(
+            "{}.from_list(list.range(0, {n}) |> list.map((i) => {}))",
+            coll_module(k),
+            elem(e)
+        ),
         other => small(other),
     }
 }
@@ -1622,6 +1677,7 @@ fn digest(v: &str, t: &GenType) -> String {
         }
         // What it holds, read through the one way out.
         GenType::Secret(e) => digest(&format!("secret.reveal({v})"), e),
+        GenType::Coll(k, _) => format!("{}.len({v})", coll_module(k)),
     }
 }
 

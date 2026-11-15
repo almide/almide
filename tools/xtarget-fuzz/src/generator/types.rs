@@ -66,6 +66,24 @@ pub enum GenType {
     /// `secret.Secret[inner]` (#4107): built with `secret.new`, observed
     /// through `secret.reveal` — its own rendering is always `Secret(***)`.
     Secret(Box<GenType>),
+    /// A generic stdlib collection over its element (`Deque[A]`, `Heap[A]`),
+    /// built with its module's `from_list` and observed through its
+    /// `to_list` ([`COLLECTIONS`]).
+    Coll(&'static str, Box<GenType>),
+}
+
+/// The generic stdlib collections the grammar builds: `(type, module)`.
+/// Each is made by `<module>.from_list(xs)`, read back by
+/// `<module>.to_list(c)` and sized by `<module>.len(c)`.
+pub const COLLECTIONS: &[(&str, &str)] = &[("Deque", "deque"), ("Heap", "heap")];
+
+/// The module of collection `name`.
+pub fn coll_module(name: &str) -> &'static str {
+    COLLECTIONS
+        .iter()
+        .find(|(t, _)| *t == name)
+        .map(|(_, m)| *m)
+        .unwrap_or("deque")
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -140,9 +158,15 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
-            GenType::Nominal(k) => out.push_str(k),
+            GenType::Nominal(k) => out.push_str(super::nominal::spelled(k)),
             GenType::Secret(e) => {
                 out.push_str("Secret[");
+                e.render_into(out);
+                out.push(']');
+            }
+            GenType::Coll(k, e) => {
+                out.push_str(k);
+                out.push('[');
                 e.render_into(out);
                 out.push(']');
             }
@@ -236,6 +260,10 @@ impl GenType {
         if let GenType::Secret(e) = self {
             return e.observe(&format!("secret.reveal({v})"), depth + 1);
         }
+        if let GenType::Coll(k, e) = self {
+            return GenType::List(e.clone())
+                .observe(&format!("{}.to_list({v})", coll_module(k)), depth + 1);
+        }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
@@ -282,7 +310,8 @@ impl GenType {
             | GenType::Result(e)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => e.observe_calls_effect(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
             GenType::Tuple3(a, b, c) => {
                 a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect()
@@ -301,7 +330,8 @@ impl GenType {
             | GenType::Result(e)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => e.refuses_var(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
@@ -322,6 +352,7 @@ impl GenType {
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
             GenType::Secret(e) => return e.observed(),
+            GenType::Coll(_, e) => return GenType::List(e.clone()).observed(),
             GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
             GenType::Tuple3(a, b, c) => GenType::Tuple3(inner(a)?, inner(b)?, inner(c)?),
@@ -348,6 +379,8 @@ impl GenType {
             GenType::Nominal(_) | GenType::ResultNom(..) => false,
             // Prints `Secret(***)`: observed through `secret.reveal`.
             GenType::Secret(_) => false,
+            // No string form of its own: observed through its `to_list`.
+            GenType::Coll(..) => false,
         }
     }
 
@@ -371,7 +404,8 @@ impl GenType {
             | GenType::ResultNom(e, _)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => 1 + e.depth(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => 1 + e.depth(),
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
             GenType::Tuple3(a, b, c) => 1 + a.depth().max(b.depth()).max(c.depth()),
         }

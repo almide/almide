@@ -168,14 +168,20 @@ fn declared_conformances() -> &'static [(String, Vec<String>)] {
 /// docs/roadmap/active/effect-inspection-harness.md). Every other effect
 /// function stays out.
 pub const SANDBOXED_EFFECT_MODULES: &[&str] =
-    &["fs", "env", "io", "args", "process", "net", "http"];
+    &["fs", "env", "io", "args", "process", "net", "http", "unix"];
 
 /// Modules whose functions the stock runtime cannot serve but the embedded
 /// host does (`target-availability.toml` rows whose only leg is stock-p1):
 /// a program calling one runs its wasm leg on the embedded host
 /// ([`needs_embedded`], ADR-0027 D1). `process` runs a fixed command set
 /// (D4, `term.rs`).
-pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process", "net", "http"];
+pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process", "net", "http", "unix"];
+
+/// Conformers a bounded variable does not take in one function: a call on
+/// one of them waits on the host forever. `io.read_to_end` of a stream to the
+/// echo fixture (the only `TcpStream` the grammar builds) never sees its end,
+/// since the echo never closes; it reads stdin and a shared-memory file.
+const BOUND_EXCLUDES: &[(&str, &str)] = &[("io.read_to_end", "TcpStream")];
 
 /// The functions that never return (`-> Never`), each with the domain its
 /// arguments are brought into: a program calls one only as its last
@@ -446,6 +452,16 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ),
     // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
     ("net", include_str!("../../../../stdlib/net.almd"), true),
+    // Unix-domain sockets and shared memory over the fixture's sink and
+    // descriptors of the program's own (`net_unix_args.rs`).
+    ("unix", include_str!("../../../../stdlib/unix.almd"), true),
+    ("bool", include_str!("../../../../stdlib/bool.almd"), false),
+    // The generic collections (`GenType::Coll`).
+    ("deque", include_str!("../../../../stdlib/deque.almd"), false),
+    ("heap", include_str!("../../../../stdlib/heap.almd"), false),
+    ("bigint", include_str!("../../../../stdlib/bigint.almd"), true),
+    // `v4` / `v7` are host-decided (`verdicts.rs`).
+    ("uuid", include_str!("../../../../stdlib/uuid.almd"), true),
 ];
 
 /// The ADR-0001 clock constructors (`duration.ms(n)`, `compute.s(n)`, …):
@@ -1045,6 +1061,11 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
             let more = conformers(sym_str(*b));
             allowed.retain(|t| more.contains(t));
         }
+        allowed.retain(|t| {
+            !BOUND_EXCLUDES
+                .iter()
+                .any(|(f, k)| *f == format!("{module}.{func}") && *t == GenType::Nominal(k))
+        });
         if allowed.is_empty() {
             return None;
         }

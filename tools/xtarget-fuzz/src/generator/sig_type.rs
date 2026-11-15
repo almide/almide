@@ -58,6 +58,8 @@ pub enum SigType {
     Nominal(&'static str),
     /// `secret.Secret[A]` (#4107): built with `secret.new`, read with `secret.reveal`.
     Secret(Box<SigType>),
+    /// A generic stdlib collection ([`super::types::COLLECTIONS`]).
+    Coll(&'static str, Box<SigType>),
     /// `Never`: the call does not return. It has no value, so no goal
     /// unifies with it; a program calls such a function only as its last
     /// statement ([`super::catalogue::NEVER_RETURNING`]).
@@ -67,7 +69,9 @@ pub enum SigType {
 /// Single-letter (or short) names the stdlib uses for generic type
 /// parameters. We treat a `TypeExpr::Simple` whose name is one of these
 /// as a type variable rather than a nominal type.
-const TYPE_VAR_NAMES: &[&str] = &["A", "B", "C", "K", "V", "T", "U", "E", "F"];
+/// `S` is the numeric source of the conversions (`int8.from[S: Numeric]`),
+/// `M` an `HttpMessage` (`http.body[M]`), `H` an io handle (`io.read[H: Read]`).
+const TYPE_VAR_NAMES: &[&str] = &["A", "B", "C", "K", "V", "T", "U", "E", "F", "S", "M", "H"];
 
 impl SigType {
     /// Convert an AST type expression into a `SigType`, or `None` if the
@@ -121,6 +125,11 @@ impl SigType {
                     ("Secret", 1) => {
                         Some(SigType::Secret(Box::new(Self::from_type_expr(&args[0])?)))
                     }
+                    // A generic collection (`Deque[A]`, `Heap[A]`).
+                    (c, 1) if super::types::COLLECTIONS.iter().any(|(t, _)| *t == c) => {
+                        let k = super::types::COLLECTIONS.iter().find(|(t, _)| *t == c)?.0;
+                        Some(SigType::Coll(k, Box::new(Self::from_type_expr(&args[0])?)))
+                    }
                     // A nominal spelled with arguments (`Matrix[Float32]`).
                     (_, 1) => match &args[0] {
                         TypeExpr::Simple { name: arg } => {
@@ -162,9 +171,11 @@ impl SigType {
                     out.push(n.clone());
                 }
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => {
-                e.collect_vars(out)
-            }
+            SigType::List(e)
+            | SigType::Option(e)
+            | SigType::Set(e)
+            | SigType::Secret(e)
+            | SigType::Coll(_, e) => e.collect_vars(out),
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
@@ -207,9 +218,11 @@ impl SigType {
                 bind_slot_to_string(err, out);
                 ok.collect_forced_bindings(out);
             }
-            SigType::List(e) | SigType::Option(e) | SigType::Set(e) | SigType::Secret(e) => {
-                e.collect_forced_bindings(out)
-            }
+            SigType::List(e)
+            | SigType::Option(e)
+            | SigType::Set(e)
+            | SigType::Secret(e)
+            | SigType::Coll(_, e) => e.collect_forced_bindings(out),
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
@@ -251,6 +264,7 @@ impl SigType {
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
             SigType::Secret(e) => Some(GenType::Secret(Box::new(e.instantiate(subst)?))),
+            SigType::Coll(k, e) => Some(GenType::Coll(k, Box::new(e.instantiate(subst)?))),
             // The error slot is fixed to String regardless of the bound
             // variable, or is the nominal the signature names
             // (`Result[T, HttpResponse]`, GenType::ResultNom). Any other
@@ -331,6 +345,7 @@ impl SigType {
             }
             (SigType::Map(_k, v), GenType::Map(gv)) => v.unify_with_goal(gv, subst),
             (SigType::Set(e), GenType::Set(g)) => e.unify_with_goal(g, subst),
+            (SigType::Coll(a, e), GenType::Coll(b, g)) => a == b && e.unify_with_goal(g, subst),
             _ => false,
         }
     }
