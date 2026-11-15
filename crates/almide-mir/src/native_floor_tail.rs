@@ -243,7 +243,7 @@ fn render_arg(cx: &CallCx, p: &FloorParam, code: &str, got: &NTy, dying_here: bo
         FloorParam::Value(by_ref) => value_arg(cx, *by_ref, code, got, dying_here)?,
         FloorParam::Runtime(t, by_ref) => {
             if !t.accepts(*got) { return Err(mismatch()); }
-            runtime_type_arg(*by_ref, code, got)
+            runtime_type_arg(*by_ref, code, got, dying_here)
         }
         FloorParam::Set(_) | FloorParam::SetElem(_) | FloorParam::Matrix(_) | FloorParam::BytesMut => runtime_arg(cx, p, code, got, dying_here)?,
         FloorParam::Bytes => bytes_arg(code, got).ok_or_else(mismatch)?,
@@ -267,13 +267,26 @@ fn owned_list_arg(cx: &CallCx, elem: ListElem, code: &str, got: &NTy, dying_here
     Ok(if moves { crate::render_native_move::take_expr(code) } else { format!("({borrowed}).to_vec()") })
 }
 
-/// An accepted runtime-typed value, borrowed or cloned as the param asks.
-fn runtime_type_arg(by_ref: bool, code: &str, got: &NTy) -> String {
+/// An accepted runtime-typed value, borrowed or cloned as the param asks. The
+/// caller's own value at its last use (`dying_here`) moves into a by-value
+/// param, as v0 hands it to the `@consume` runtime body (#4771): a rebind
+/// `x = http.set_status(x, ..)` copied the whole response on every step. A
+/// runtime type has no `Default` to leave behind, so it moves only as itself.
+fn runtime_type_arg(by_ref: bool, code: &str, got: &NTy, dying_here: bool) -> String {
     match (by_ref, got) {
         (true, NTy::RecRef(_)) => code.to_string(),
         (true, _) => format!("&{code}"),
+        (false, NTy::Rec(_)) if dying_here && moves_as_itself(code) => code.to_string(),
         (false, _) => format!("({code}).clone()"),
     }
+}
+
+/// Whether the binding `code` moves as itself ([`crate::render_native_move::take_expr`]'s
+/// move arm, never its `std::mem::take`, which needs a `Default`).
+fn moves_as_itself(code: &str) -> bool {
+    let id = code.strip_prefix('v').and_then(|n| n.parse::<u32>().ok()).map(crate::ValueId);
+    id.is_some_and(|v| !crate::native_inout::is_rendering_inout(v) && crate::render_native_move::moves_as_itself(v))
+        && !crate::render_native_move::drill_no_moves()
 }
 
 /// A readonly Bytes param's argument.
