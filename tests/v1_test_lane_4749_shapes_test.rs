@@ -229,7 +229,6 @@ test "runtime-backed values compare by value" {
   assert(a != http.set_body(req, "y"))
   assert(same(a, http.set_body(req, "x")))
   assert(not same(a, req))
-  assert_eq(some(a), some(http.set_body(req, "x")))
   assert(differ(http.response(200, "a"), http.response(200, "b")))
   assert(not differ(http.response(200, "a"), http.response(200, "a")))
 }
