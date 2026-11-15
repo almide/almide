@@ -39965,7 +39965,10 @@ fn __to_upper_words(src: Int, dst: Int, n: Int, from: Int) -> Int = {
     let w = prim.load64(src + i)
     if prim.band(w, -9187201950435737472) != 0 then break
     else ()
-    let m = prim.band(prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)), -9187201950435737472)
+    let m = prim.band(
+      prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)),
+      -9187201950435737472,
+    )
     prim.store64(dst + i, prim.bxor(w, prim.bshr_u(m, 2)))
     i = i + 8
   }
@@ -40038,7 +40041,10 @@ fn string_to_upper(s: String) -> String = {
       let w = prim.load64(p + done)
       if prim.band(w, -9187201950435737472) != 0 then break
       else ()
-      let m = prim.band(prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)), -9187201950435737472)
+      let m = prim.band(
+        prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)),
+        -9187201950435737472,
+      )
       prim.store64(p + done, prim.bxor(w, prim.bshr_u(m, 2)))
       done = done + 8
     }
