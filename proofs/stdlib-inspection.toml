@@ -15718,7 +15718,7 @@ name = "process.start"
 sig = "effect (c: ProcessCommand) -> ProcessChild ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.stop"
