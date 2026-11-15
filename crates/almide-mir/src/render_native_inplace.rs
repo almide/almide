@@ -226,7 +226,8 @@ fn str_key(i: usize, tys: &BTreeMap<ValueId, NTy>, out: &mut String, start: usiz
     }
     let copied = format!("AlmideString::from({})", var(key));
     let Some(after) = rest.strip_prefix(copied.as_str()).filter(|a| a.starts_with(", ") || *a == ");") else { return };
-    let Some((twin, items)) = crate::native_floor::str_key_twin(symbol) else { return };
+    let Some((twin, items)) = crate::native_floor::str_key_twin(symbol)
+        .or_else(|| crate::native_hof::static_str_key_twin(symbol)) else { return };
     let edited = format!("{}{head} = {twin}({first}, {}{after}\n", &body[..line_at], var(key));
     out.truncate(start);
     out.push_str(&edited);
