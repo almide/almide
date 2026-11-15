@@ -127,6 +127,173 @@ const EVIDENCE: &[&str] = &["stamp", "order", "parity", "complexity", "diamond",
 /// The criteria the harness measures once per instantiation of a generic.
 const HEAP_EVIDENCE: &[&str] = &["complexity", "alloc", "diamond"];
 
+/// One type variable of a generic stdlib function: `None` when unbounded,
+/// else every type the checker accepts for all of its bounds, each with
+/// whether it is a refcounted heap block (`is_heap_ty`).
+type VarBound = Option<Vec<(String, bool)>>;
+
+/// Every type the checker accepts for protocol `proto`, with its heap
+/// classification: the built-in table's conformers and named conformers
+/// (`register_builtin_protocols` seeds `type_protocols` from exactly these),
+/// then each bundled type whose declaration names the protocol
+/// (`type BigInt: Numeric, Integer = …`, `mod type Fd: Read, … = Int`).
+fn conformers(proto: &str) -> Vec<(String, bool)> {
+    use almide::types::{is_heap_ty, Ty};
+    let declared = |name: &str| -> Option<(Vec<String>, Ty)> {
+        let module = almide_frontend::bundled_sigs::bundled_type_owner(name)?;
+        let program = almide_lang::parse_cached(almide_lang::decl_index::types_source(module)?)?;
+        program.decls.iter().find_map(|d| match d {
+            almide::ast::Decl::Type { name: n, ty, deriving, .. } if n.as_str() == name => Some((
+                deriving.iter().flatten().map(|p| p.as_str().to_string()).collect(),
+                almide::canonicalize::resolve::resolve_type_expr(ty, None),
+            )),
+            _ => None,
+        })
+    };
+    // A runtime-backed type with no `type` declaration (HttpRequest) is a
+    // nominal, which is a heap block by the same classification.
+    let named_heap = |name: &str| {
+        declared(name).map_or_else(|| is_heap_ty(&Ty::Named(almide::intern::sym(name), Default::default())), |(_, t)| is_heap_ty(&t))
+    };
+    let mut out: Vec<(String, bool)> = Vec::new();
+    if let Some(p) = almide::canonicalize::protocols::builtin_protocol(proto) {
+        out.extend(p.conformers.iter().map(|t| (t.display(), is_heap_ty(t))));
+        out.extend(p.named_conformers.iter().map(|n| (n.to_string(), named_heap(n))));
+    }
+    let mut owners: Vec<&String> = almide_frontend::bundled_sigs::bundled_type_owners().keys().collect();
+    owners.sort();
+    for name in owners {
+        if let Some((_, t)) = declared(name).filter(|(ps, _)| ps.iter().any(|p| p == proto)) {
+            if !out.iter().any(|(n, _)| n == name) {
+                out.push((name.clone(), is_heap_ty(&t)));
+            }
+        }
+    }
+    out
+}
+
+/// Each type variable of stdlib function `module.fn`, with the types its
+/// bounds admit (the intersection over a variable's several bounds). The
+/// bounds are read from the fn's declaration in the bundled source the
+/// checker parses (`[S: Numeric]`); a fn not found there counts as one
+/// unbounded variable, which keeps the String requirement.
+fn bounds_of(name: &str) -> Vec<VarBound> {
+    let Some((m, f)) = name.split_once('.') else { return vec![None] };
+    let Some(program) = almide::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached) else {
+        return vec![None];
+    };
+    let Some(generics) = program.decls.iter().find_map(|d| match d {
+        almide::ast::Decl::Fn { name, generics, .. } if name.as_str() == f => Some(generics.clone().unwrap_or_default()),
+        _ => None,
+    }) else {
+        return vec![None];
+    };
+    if generics.is_empty() {
+        return vec![None];
+    }
+    generics
+        .iter()
+        .map(|g| {
+            let bs = g.bounds.as_ref().filter(|bs| !bs.is_empty())?;
+            let mut admitted = conformers(bs[0].as_str());
+            for b in &bs[1..] {
+                let more = conformers(b.as_str());
+                admitted.retain(|(n, _)| more.iter().any(|(m, _)| m == n));
+            }
+            Some(admitted)
+        })
+        .collect()
+}
+
+/// What a generic row's per-instantiation `field` lacks under its variables'
+/// bounds, or `None` when it carries what the rule needs.
+fn instantiation_problem(field: &str, vars: &[VarBound]) -> Option<String> {
+    let string_bindable = vars.is_empty()
+        || vars.iter().any(|v| v.as_ref().is_none_or(|c| c.iter().any(|(n, _)| n == "String")));
+    if string_bindable {
+        return (!field.contains("[vars=String]")).then(|| "has no [vars=String] measurement".to_string());
+    }
+    let tags: Vec<&str> = field
+        .split("[vars=")
+        .skip(1)
+        .filter_map(|s| s.split_once(']').map(|(t, _)| t))
+        .collect();
+    let Some(first) = tags.first().copied() else {
+        return Some("has no [vars=…] measurement".to_string());
+    };
+    let seconds: Vec<&str> = tags.iter().copied().filter(|t| *t != first).collect();
+    if seconds.is_empty() {
+        return Some(format!(
+            "binds a variable String does not conform to, and has no second conformer measurement beside [vars={first}]"
+        ));
+    }
+    let mut why = Vec::new();
+    for tag in seconds {
+        let elems: Vec<&str> = tag.split(',').collect();
+        let foreign: Vec<&str> = elems
+            .iter()
+            .copied()
+            .filter(|e| !vars.iter().flatten().any(|c| c.iter().any(|(n, _)| n == e)))
+            .collect();
+        if !foreign.is_empty() {
+            why.push(format!("[vars={tag}] names {} that does not conform to the bound", foreign.join(", ")));
+            continue;
+        }
+        let missing_heap: Vec<String> = vars
+            .iter()
+            .flatten()
+            .filter(|c| c.iter().any(|(_, h)| *h))
+            .filter(|c| !elems.iter().any(|e| c.iter().any(|(n, h)| n == e && *h)))
+            .map(|c| c.iter().filter(|(_, h)| *h).map(|(n, _)| n.as_str()).collect::<Vec<_>>().join("/"))
+            .collect();
+        if !missing_heap.is_empty() {
+            why.push(format!(
+                "[vars={tag}] is not heap-backed, but the bound admits the heap-backed {}",
+                missing_heap.join(", ")
+            ));
+            continue;
+        }
+        return None;
+    }
+    Some(why.join("; "))
+}
+
+/// The bounded-instantiation rule refuses each of its negative controls and
+/// accepts the measurements it exists for, over the real conformance tables.
+#[test]
+fn the_bounded_instantiation_rule_refuses_its_negative_controls() {
+    let bound = |p: &str| -> Vec<VarBound> { vec![Some(conformers(p))] };
+    // The tables themselves: what the controls stand on.
+    assert!(conformers("Body").iter().any(|(n, _)| n == "String"), "{:?}", conformers("Body"));
+    assert!(conformers("Numeric").iter().any(|(n, h)| n == "BigInt" && *h), "{:?}", conformers("Numeric"));
+    assert!(conformers("Read").iter().all(|(_, h)| !*h), "{:?}", conformers("Read"));
+    assert!(conformers("HttpMessage").iter().all(|(_, h)| *h), "{:?}", conformers("HttpMessage"));
+    // Refused: the bound admits String, and only a conformer was measured.
+    assert!(instantiation_problem("PASS: [vars=Bytes] call … || [vars=SafeHtml] call …", &bound("Body")).is_some());
+    // Refused: the second tag names a type that does not conform.
+    assert!(instantiation_problem("PASS: [vars=Int] call … || [vars=Bytes] call …", &bound("Numeric")).is_some());
+    // Refused: a non-heap second tag where a heap-backed conformer exists.
+    assert!(instantiation_problem("PASS: [vars=Int] call … || [vars=Float] call …", &bound("Numeric")).is_some());
+    // Refused: one instantiation only.
+    assert!(instantiation_problem("PASS: [vars=Stdin] call …", &bound("Read")).is_some());
+    // Refused: an unbounded variable still needs String.
+    assert!(instantiation_problem("PASS: [vars=Int] call … || [vars=Float] call …", &[None]).is_some());
+    // Accepted.
+    assert_eq!(instantiation_problem("PASS: [vars=Bytes] call … || [vars=String] call …", &bound("Body")), None);
+    assert_eq!(instantiation_problem("PASS: [vars=Int] call … || [vars=BigInt] call …", &bound("Numeric")), None);
+    assert_eq!(instantiation_problem("PASS: [vars=Stdin] call … || [vars=Fd] call …", &bound("Read")), None);
+    assert_eq!(
+        instantiation_problem("PASS: [vars=HttpRequest] call … || [vars=HttpResponse] call …", &bound("HttpMessage")),
+        None
+    );
+    // The signatures the rule reads: a Numeric conversion and a Read handle
+    // bind no String, `list.map` binds it freely.
+    let int_from = bounds_of("int.from");
+    assert!(int_from.iter().all(|v| v.as_ref().is_some_and(|c| !c.iter().any(|(n, _)| n == "String"))), "{int_from:?}");
+    assert!(bounds_of("io.read").iter().all(|v| v.is_some()));
+    assert!(bounds_of("list.map").iter().any(|v| v.is_none()));
+}
+
 #[test]
 fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
     let path = root().join(LEDGER);
@@ -174,10 +341,21 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
                 // Int AND at String (the 10-16 ruling): the heap-element path
                 // is a different lowering from Int's, and an Int-only stamp
                 // never ran it (wasm list.flat_map was O(n^2) bytes there).
+                // String is still required wherever it can be bound: an
+                // unbounded variable, or a bound String conforms to. A bound
+                // String does NOT conform to (`[S: Numeric]`, `[H: Read]`,
+                // `[M: HttpMessage]`) takes a second measured conformer
+                // instead (the owner's 11-16 ruling), read off the checker's
+                // own conformance data: a heap-backed conformer when the bound
+                // has one (BigInt, HttpResponse — the heap path the String
+                // rule exists to run), else one that differs from the first
+                // instantiation; the named type must really conform.
                 if want.get(&name).is_some_and(|w| w.2) {
+                    let vars = bounds_of(&name);
                     for k in HEAP_EVIDENCE {
-                        if !r.get(*k).and_then(|v| v.as_str()).is_some_and(|s| s.contains("[vars=String]")) {
-                            problems.push(format!("{name}: generic, but `{k}` has no [vars=String] measurement"));
+                        let field = r.get(*k).and_then(|v| v.as_str()).unwrap_or("");
+                        if let Some(p) = instantiation_problem(field, &vars) {
+                            problems.push(format!("{name}: generic, but `{k}` {p}"));
                         }
                     }
                 }
