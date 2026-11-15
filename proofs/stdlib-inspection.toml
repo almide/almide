@@ -13825,7 +13825,7 @@ name = "io.read"
 sig = "effect (h: H, max: Int) -> Bytes ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "io.read_exact"
@@ -13943,7 +13943,7 @@ name = "process.output"
 sig = "effect (c: ProcessCommand) -> ProcessStatus ! String"
 class = "effect"
 status = "uninspected"
-order = "1; rebind (loop, tail, fold) 1"
+order = "n; rebind (loop, tail, fold) n"
 
 [[fn]]
 name = "process.poll"
