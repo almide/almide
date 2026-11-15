@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "96"
+# uninspected_ceiling = "95"
 
 [[fn]]
 name = "args.option"
@@ -1897,8 +1897,14 @@ order = "n; rebind (loop, tail, fold) n"
 name = "http.headers"
 sig = "(m: M) -> List[(String, String)]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:eb27c1adf3a35bc7"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect at two admissible conformers of the bounded handle: the first conformer (HttpRequest for HttpMessage) from inspect-catalogue-238 96043f6c418a9b701b5e6344154218243057b3e5, and a second conformer (XF_CONFORMER: HttpResponse) from 8e7dce397049bc93378c7bef96bff918bab36de4 with XF_SIZE_STEPS=8 XF_REPS=5 from n=5000 (8 sizes, the median of 5 runs per size; coordinator ruling 2026-11-16), both built against the same stdlib (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 165 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=HttpRequest] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 3.658e7/7.316e7/1.463e8/2.927e8/5.853e8 fit n (rms 0.0%) moved 4.403e5/8.803e5/1.760e6/3.520e6/7.040e6B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.060s wasm k=4..8 7.385e7/1.477e8/2.954e8/5.907e8/1.181e9 fit n (rms 0.0%) moved 1.280e6/2.560e6/5.120e6/1.024e7/2.048e7B fit n (rms 0.0%) wall 0.005/0.015/0.025/0.056/0.096s (order n ok) || [vars=HttpRequest] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 3.659e7/7.316e7/1.463e8/2.927e8/5.853e8 fit n (rms 0.0%) moved 4.403e5/8.803e5/1.760e6/3.520e6/7.040e6B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.020/0.043s wasm k=4..8 7.385e7/1.477e8/2.954e8/5.908e8/1.181e9 fit n (rms 0.0%) moved 1.280e6/2.560e6/5.120e6/1.024e7/2.048e7B fit n (rms 0.0%) wall 0.005/0.010/0.025/0.051/0.101s (order n ok) || [vars=HttpResponse] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..640000 sizes=8 median-of=5 native k=4..8 3.559e7/7.088e7/1.410e8/2.787e8/5.555e8/1.107e9/2.205e9/4.426e9 fit n (rms 0.5%) moved 4.416e5/8.816e5/1.762e6/3.522e6/7.042e6/1.408e7/2.816e7/5.632e7B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.030/0.061/0.126/0.268/0.609s wasm k=16..32 6.427e7/1.285e8/2.570e8/5.140e8/1.028e9/2.056e9/4.111e9/8.223e9 fit n (rms 0.0%) moved 6.402e5/1.280e6/2.560e6/5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.015/0.030/0.056/0.112/0.218/0.440/0.886s (order n ok) || [vars=HttpResponse] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..640000 sizes=8 median-of=5 native k=4..8 3.561e7/7.069e7/1.415e8/2.783e8/5.562e8/1.110e9/2.215e9/4.415e9 fit n (rms 2.2%) moved 4.416e5/8.816e5/1.762e6/3.522e6/7.042e6/1.408e7/2.816e7/5.632e7B fit n (rms 0.0%) wall 0.005/0.010/0.010/0.030/0.061/0.121/0.268/0.608s wasm k=16..32 6.427e7/1.285e8/2.570e8/5.140e8/1.028e9/2.056e9/4.111e9/8.223e9 fit n (rms 0.0%) moved 6.402e5/1.280e6/2.560e6/5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.010/0.015/0.025/0.051/0.111/0.212/0.448/0.885s (order n ok)"
+alloc = "PASS: [vars=HttpRequest] call live=0 || [vars=HttpRequest] call live=0 || [vars=HttpResponse] call live=0 || [vars=HttpResponse] call live=0"
+diamond = "PASS: [vars=HttpRequest] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpRequest] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpResponse] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpResponse] direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
 name = "http.json"
 sig = "(status: Int, body: String) -> HttpResponse"
