@@ -1,0 +1,39 @@
+// A request's body is its bytes (#4744): `set_body_bytes` keeps what it was
+// given, `body_bytes` answers it exactly, and `body` is its lossy text — on
+// native and on the wasm legs' request rep alike.
+import http
+
+fn all_bytes() -> Bytes = bytes.from_list(list.range(0, 256))
+
+test "set_body_bytes round-trips every byte value" {
+  let req = http.set_body_bytes(http.new_request("PUT", "/x", "", [("X-A", "1")]), all_bytes())
+  assert_eq(http.body_bytes(req), all_bytes())
+  assert_eq(bytes.len(http.body_bytes(req)), 256)
+  assert_eq(http.body(req), bytes.to_string_lossy(all_bytes()))
+}
+
+test "a body that opens on a continuation byte round-trips" {
+  let b = bytes.from_list(list.range(128, 256) + list.range(0, 128))
+  let req = http.set_body_bytes(http.new_request("POST", "/", "", []), b)
+  assert_eq(http.body_bytes(req), b)
+}
+
+test "the headers and params beside a bytes body are unchanged" {
+  let req = http.set_header(http.set_body_bytes(http.new_request("PUT", "/x?q=1", "", [("X-A", "1")]), all_bytes()), "X-B", "2")
+  assert_eq(http.header(req, "x-a"), some("1"))
+  assert_eq(http.header(req, "X-B"), some("2"))
+  assert_eq(http.headers(req), [("X-A", "1"), ("X-B", "2")])
+  assert_eq(http.query_params(req), ok([("q", "1")]))
+  assert_eq(http.body_bytes(req), all_bytes())
+}
+
+test "valid UTF-8 bytes and text bodies are unchanged" {
+  let req = http.new_request("POST", "/", "λ€", [])
+  assert_eq(http.body_bytes(req), bytes.from_string("λ€"))
+  let as_bytes = http.set_body_bytes(req, bytes.from_string("😀x"))
+  assert_eq(http.body(as_bytes), "😀x")
+  assert_eq(as_bytes, http.set_body(req, "😀x"))
+  let reset = http.set_body(http.set_body_bytes(req, all_bytes()), "plain")
+  assert_eq(http.body_bytes(reset), bytes.from_string("plain"))
+  assert_eq(reset, http.set_body(req, "plain"))
+}

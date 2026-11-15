@@ -762,7 +762,7 @@ impl Checker {
             self.record_purity_ref(callee, span);
         }
         self.reject_mut_param_fn_value(name, &sig, user_fn);
-        Some(self.fn_value_ty(&sig))
+        Some(self.instantiated_fn_value_ty(&sig))
     }
 
     /// The Ty a named fn carries when referenced as a VALUE (#1055, #1148):
@@ -785,6 +785,23 @@ impl Checker {
         }
     }
 
+    /// [`Self::fn_value_ty`] of a module fn named as a value, with the
+    /// signature's own type parameters replaced by fresh inference vars —
+    /// the instantiation a call of it gets, and a constructor named as a
+    /// value gets (`ctor_fn_value_ty`). The slot the value lands in (a
+    /// `list.map` callback) then fixes them, so the eta-expanded lambda the
+    /// lowering builds from this type is typed from the use site. Kept as
+    /// the declared letters, `list.map(rows, list.len)` checked clean (a
+    /// rigid `A` unifies with anything) and reached codegen as a lambda over
+    /// `List[A]` (#4745).
+    pub(crate) fn instantiated_fn_value_ty(&mut self, sig: &crate::types::FnSig) -> Ty {
+        let ty = self.fn_value_ty(sig);
+        if sig.generics.is_empty() {
+            return ty;
+        }
+        let fresh: std::collections::HashMap<Sym, Ty> = sig.generics.iter().map(|g| (*g, self.fresh_var())).collect();
+        crate::types::substitute(&ty, &fresh)
+    }
 
     /// Emit the E003 for an identifier that resolves to nothing, and return the
     /// recovery type.

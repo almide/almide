@@ -1,0 +1,45 @@
+// A generic stdlib fn passed by name where a callback is expected (#4745):
+// its eta expansion is typed from the call site, as the written lambda is.
+// The walker route (`--target rust`) used to refuse it as a compiler bug with
+// the fn's own `A` unresolved; tests/generic_fn_value_eta_test.rs pins that
+// route, this file the values on the test legs.
+
+fn widest(rows: List[List[String]]) -> Int = rows |> list.map(list.len) |> list.max ?? 0
+
+test "a one-parameter generic fn by name in list.map" {
+  assert_eq(widest([["a", "b"], ["c"]]), 2)
+  assert_eq(list.map([["a", "b"], ["c"], []], list.len), [2, 1, 0])
+  assert_eq(list.map([[1, 2, 3], [4]], list.reverse), [[3, 2, 1], [4]])
+  assert_eq(list.map([some(1), none, some(3)], option.is_some), [true, false, true])
+}
+
+test "a monomorphic fn by name over a mapped list" {
+  let words = list.map(["ab", "cde"], string.to_upper)
+  assert_eq(list.map(words, string.len), [2, 3])
+}
+
+test "a two-parameter generic fn by name" {
+  let keys = list.map([map.from_list([("a", 1)])], map.keys)
+  assert_eq(keys, [["a"]])
+  let sizes = list.map([map.from_list([("a", 1)]), map.new()], map.len)
+  assert_eq(sizes, [1, 0])
+}
+
+test "one generic fn by name at two element types" {
+  assert_eq(list.map([["x"]], list.len), [1])
+  assert_eq(list.map([[1.5, 2.5]], list.len), [2])
+}
+
+test "the written lambda the expansion matches" {
+  assert_eq(list.map([["a", "b"], ["c"]], (row) => list.len(row)), [2, 1])
+}
+
+// #4747: on wasm the expansion over 8-byte elements read its list through
+// the unresolved `A` as 4-byte slots, so `list.len` answered twice the length.
+test "list.len and map.len by name over 8-byte elements" {
+  assert_eq(list.map([[3, 1], [1, 2]], list.len), [2, 2])
+  assert_eq(list.map([[1.5, 2.5, 3.5]], list.length), [3])
+  assert_eq(list.map([map.from_list([(1, 2), (3, 4)])], map.len), [2])
+  assert_eq(option.map(some([1, 2, 3]), list.len), some(3))
+  assert_eq(list.max_by([[1], [1, 2]], list.len), some([1, 2]))
+}
