@@ -41,7 +41,7 @@ echo "== run the proven checker on real certificates (one object per line) =="
 printf 'ID\nIIDD\n' > $GATE_TMP/balanced.cert     # two balanced objects → ACCEPT
 printf 'IIDD\nIDD\n' > $GATE_TMP/double_free.cert  # 2nd object double-frees → REJECT
 printf 'ID\nIID\n'  > $GATE_TMP/leak.cert          # 2nd object leaks → REJECT
-printf 'IR\nIADR\n' > $GATE_TMP/perceus.cert       # perceus: reuse-release on a UNIQUE object (rc=1) → ACCEPT
+printf 'IR\nIADR\n' > $GATE_TMP/perceus.cert       # reuse-release: refused on every line since #4753 (a line count is not uniqueness) → REJECT
 printf 'R\n'        > $GATE_TMP/reuse_uaf.cert      # reuse with nothing owned (rc=0) → REJECT
 printf 'IARD\n'    > $GATE_TMP/shared_reuse.cert    # reuse of a SHARED object (rc=2): balances but unsound → REJECT
 printf 'IIDD\n'    > $GATE_TMP/stack.cert          # operand-STACK balance (push push pop pop) ≡ the same fold → ACCEPT
@@ -73,7 +73,7 @@ run() { # path expected_exit
 run $GATE_TMP/balanced.cert 0
 run $GATE_TMP/double_free.cert 1
 run $GATE_TMP/leak.cert 1
-run $GATE_TMP/perceus.cert 0
+run $GATE_TMP/perceus.cert 1
 run $GATE_TMP/reuse_uaf.cert 1
 run $GATE_TMP/shared_reuse.cert 1
 run $GATE_TMP/stack.cert 0

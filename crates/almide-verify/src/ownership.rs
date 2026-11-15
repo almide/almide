@@ -1,7 +1,9 @@
 //! The ownership checker — the Rust mirror of `proofs/OwnershipChecker.v`'s
 //! `check_xc` (certificate format v6: flat events, `(…)` loops, `[…|…]`
 //! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker and
-//! the `t` arm-abort terminal; format v7 adds the `s` arm share-out, #4278),
+//! the `t` arm-abort terminal; format v7 adds the `s` arm share-out, #4278;
+//! format v8 adds the `k` take and the `u` probe with the drain rule,
+//! ADR-0034, and refuses `r` on every line, #4753),
 //! with the owned-line resurrection rule (#3229:
 //! on a line born by a top-level `i`, every later `a` must meet a live count).
 //!
@@ -23,6 +25,11 @@ enum Op {
     /// `ShareOut` (#4278, `s`): an arm's share-out of its argument — +0 on
     /// the argument's line (the share's credit is the arm result's `i`).
     ShareOut,
+    /// `Take` (ADR-0034, `k`): +1 on the receiving line — a credit moved out
+    /// of a cleared container slot.
+    Take,
+    /// `Probe` (ADR-0034, `u`): +0 on the container's line, Borrow's guard.
+    Probe,
 }
 
 /// `CertItem` — one element of a parsed certificate line.
@@ -49,6 +56,8 @@ fn parse_byte(b: u8) -> Option<Op> {
         b'r' => Some(Op::Reuse),
         b'b' => Some(Op::Borrow),
         b's' => Some(Op::ShareOut),
+        b'k' => Some(Op::Take),
+        b'u' => Some(Op::Probe),
         _ => None,
     }
 }
@@ -62,18 +71,18 @@ fn is_tmark(b: u8) -> bool {
     b == b't' || b == b'T'
 }
 
-/// `exec`: fold the refcount; `None` is a fault (a release at 0, a reuse of a
-/// shared or dead object, a borrow of a dead one).
+/// `exec`: fold the refcount; `None` is a fault (a release at 0, any reuse —
+/// #4753: a line's count of 1 is not uniqueness — a borrow or probe of a
+/// dead object).
 fn exec(ops: &[Op], mut rc: i64) -> Option<i64> {
     for op in ops {
         rc = match op {
-            Op::Inc | Op::Alias => rc + 1,
+            Op::Inc | Op::Alias | Op::Take => rc + 1,
             Op::Dec | Op::MoveOut if rc <= 0 => return None,
             Op::Dec | Op::MoveOut => rc - 1,
-            Op::Reuse if rc == 1 => 0,
             Op::Reuse => return None,
-            Op::Borrow if rc <= 0 => return None,
-            Op::Borrow => rc,
+            Op::Borrow | Op::Probe if rc <= 0 => return None,
+            Op::Borrow | Op::Probe => rc,
             Op::ShareOut => rc,
         };
     }
@@ -348,7 +357,50 @@ fn guard_line(items: &[Item]) -> Vec<Item> {
 /// `check_xc`: every line of the certificate, with the owned-line
 /// resurrection probe, is fault-free and balanced.
 pub(crate) fn check_xc(witness: &[u8]) -> bool {
-    parse(witness).iter().all(|line| check_line(&guard_line(line)))
+    parse(witness).iter().all(|line| check_line(&guard_line(line)) && drained(line))
+}
+
+/// `item_probe_free`: no `Probe` anywhere in the item.
+fn item_probe_free(item: &Item) -> bool {
+    let free = |ops: &[Op]| !ops.contains(&Op::Probe);
+    match item {
+        Item::Op(o) => *o != Op::Probe,
+        Item::Loop(b) => free(b),
+        Item::CondLoop(t, e) | Item::Branch(t, e) | Item::BranchRet(_, t, e) | Item::BranchAbort(_, t, e) => {
+            free(t) && free(e)
+        }
+        Item::Poison => true,
+    }
+}
+
+/// `drained_post`: after the first probe — probes (flat, or a loop of probes
+/// only), then at most one release (`Dec` / `MoveOut`) ending the line.
+fn drained_post(items: &[Item]) -> bool {
+    match items {
+        [] => true,
+        [Item::Op(Op::Probe), rest @ ..] => drained_post(rest),
+        [Item::Op(Op::Dec | Op::MoveOut)] => true,
+        [Item::Loop(b), rest @ ..] => b.iter().all(|o| *o == Op::Probe) && drained_post(rest),
+        _ => false,
+    }
+}
+
+/// `drained` (ADR-0034 D2): a holder that probed a container only probes it
+/// again or releases it once, at the end of the line.
+fn drained(items: &[Item]) -> bool {
+    match items {
+        [] => true,
+        [Item::Op(Op::Probe), rest @ ..] => drained_post(rest),
+        [Item::Op(_), rest @ ..] => drained(rest),
+        [Item::Loop(b), rest @ ..] => {
+            if !b.contains(&Op::Probe) {
+                drained(rest)
+            } else {
+                b.iter().all(|o| *o == Op::Probe) && drained_post(rest)
+            }
+        }
+        [c, rest @ ..] => item_probe_free(c) && drained(rest),
+    }
 }
 
 /// `item_no_reuse` (HelperSig.v): no `Reuse` anywhere in the item.

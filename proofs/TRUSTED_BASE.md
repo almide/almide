@@ -212,6 +212,13 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_xc_abort_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_xc_no_resurrection` | OwnershipChecker.v | Closed under the global context |
 | `check_line_prefix_safe` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_drained_sound` | OwnershipChecker.v | Closed under the global context |
+| `take_handover_sound` | OwnershipChecker.v | Closed under the global context |
+| `probe_exclusive` | UniqueTake.v | Closed under the global context |
+| `take_preserves` | UniqueTake.v | Closed under the global context |
+| `retain_preserves` | UniqueTake.v | Closed under the global context |
+| `release_walk_once` | UniqueTake.v | Closed under the global context |
+| `take_then_release` | UniqueTake.v | Closed under the global context |
 | `merge_subset_sound` | Subset.v | Closed under the global context |
 | `subset_check_fast_sound` | Subset.v | Closed under the global context |
 | `rc_inc_bytes_isa_effect` | WasmDecode.v | Closed under the global context |
@@ -842,7 +849,7 @@ The earlier progression described its scope as follows:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (152 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (161 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
