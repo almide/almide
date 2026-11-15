@@ -127,6 +127,21 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
 /// declares and the self-host registry links one; `None` when `name` is not
 /// runtime-backed.
 pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
+    runtime_backed_surface(name, "repr")
+}
+
+/// The function that COMPARES two values of a runtime-backed type (#4749):
+/// `<module>.__<type_in_snake_case>_eq` (`http.__http_request_eq`), derived
+/// from the row like [`runtime_backed_repr_surface`]. Native implements it as
+/// the runtime struct's `PartialEq` — the `==` the other render emits — so the
+/// certified render's `==` over such a value is that same comparison. The wasm
+/// legs compare the self-hosted rep's carrier instead and never call it.
+pub fn runtime_backed_eq_surface(name: &str) -> Option<String> {
+    runtime_backed_surface(name, "eq")
+}
+
+/// `<module>.__<type_in_snake_case>_<op>` for a runtime-backed `name`.
+fn runtime_backed_surface(name: &str, op: &str) -> Option<String> {
     let owner = runtime_backed_type_owner(name)?;
     let bare = name.rsplit_once('.').map(|(_, b)| b).unwrap_or(name);
     let mut snake = String::new();
@@ -136,15 +151,25 @@ pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
         }
         snake.push(c.to_ascii_lowercase());
     }
-    Some(format!("{owner}.__{snake}_repr"))
+    Some(format!("{owner}.__{snake}_{op}"))
 }
 
 /// Is `module.func` the declared repr of one of `module`'s runtime-backed
 /// types ([`runtime_backed_repr_surface`])? A repr reads its value and builds
 /// text: it is pure whatever module declares it.
 pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
+    is_runtime_backed_surface(module, func, runtime_backed_repr_surface)
+}
+
+/// Is `module.func` the declared equality of one of `module`'s runtime-backed
+/// types ([`runtime_backed_eq_surface`])? It reads its two values: pure.
+pub fn is_runtime_backed_eq(module: &str, func: &str) -> bool {
+    is_runtime_backed_surface(module, func, runtime_backed_eq_surface)
+}
+
+fn is_runtime_backed_surface(module: &str, func: &str, surface: fn(&str) -> Option<String>) -> bool {
     RUNTIME_BACKED_TYPES.iter().any(|(m, ty)| {
-        *m == module && runtime_backed_repr_surface(ty).is_some_and(|s| s.split_once('.').map(|(_, f)| f) == Some(func))
+        *m == module && surface(ty).is_some_and(|s| s.split_once('.').map(|(_, f)| f) == Some(func))
     })
 }
 

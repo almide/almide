@@ -21,15 +21,26 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
-  flat,
-  2 * (list.len(flat) / 2),
-) |> list.map((c) => __hc_cell(c)) |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
-  (acc, cell) => acc + cell,
-)
+// The body cell's length as the host's cell walk counts it (#4744): one per
+// byte that is not a UTF-8 continuation, plus one when the cell opens on a
+// continuation — `string.len` of valid text.
+fn __hc_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
 
-effect fn __http_call_open(url: String, frame: String) -> Result[HttpCall, String] = _
+// The frame is BYTES: the body cell carries the request's exact bytes, which
+// no String may hold (#4744).
+fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string("${__hc_cell(method)}${__hc_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
+  "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+  (acc, cell) => acc + cell,
+))
+
+effect fn __http_call_open(url: String, frame: Bytes) -> Result[HttpCall, String] = _
 
 // The two non-blocking leaves are declared WITHOUT `effect`: the surfaces
 // they serve (`poll` answers an Option, `read_new` a String) are called with
@@ -49,7 +60,7 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 // `http.start`'s private `__call_start` (the limits record already spread).
-effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
   __hc_frame(method, body, flat, total_ms, idle_ms),
 )

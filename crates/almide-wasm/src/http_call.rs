@@ -59,7 +59,10 @@ impl Emitter<'_> {
             .or_else(|| crate::fs_meta::proc_child_op(name));
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
-            self.fs_call_str2(a, b, op)?;
+            // The response leaf's frame is Bytes: its body cell is the
+            // request's exact bytes (#4744). Both are the text block layout.
+            let frame_ty = if op == OP_HTTP_FRAMED_RESPONSE { crate::bytes::BYTES } else { STR };
+            self.fs_call_two((a, STR), (b, frame_ty), op)?;
             // The text and status leaves answer the response body as the
             // server sent it: decode it lossily, as native does (#4387). The
             // response leaf's answer keeps the raw body cell `body_bytes`
@@ -178,7 +181,9 @@ impl Emitter<'_> {
         // The drop glue is part of the type: register it (and its op) with
         // the first producer, whatever releases the block later.
         let _ = self.dec_fn_of(t);
-        self.fs_call_str2(url, frame, OP_HTTP_CALL_OPEN)?;
+        // The start frame is Bytes: its body cell is the request's exact
+        // bytes (#4744).
+        self.fs_call_two((url, STR), (frame, crate::bytes::BYTES), OP_HTTP_CALL_OPEN)?;
         let hret = self.hold_i64()?;
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();

@@ -128,7 +128,16 @@ fn count_uses_in_expr(expr: &IrExpr, table: &mut VarTable) {
             if let Some(t) = var_tuple { loop_vars.extend(t.iter().copied()); }
             count_uses_in_loop_body(iterable, body, &loop_vars, table)
         }
-        IrExprKind::While { cond, body } => count_uses_in_loop_body(cond, body, &[], table),
+        // A `while` condition runs on every iteration too, unlike a `for`
+        // head: an outer var it reads is used N times, so it is bumped like
+        // the body's (#4752 — a borrowed `String` param handed on to an
+        // owned slot in the condition was emitted as a bare `&str`).
+        IrExprKind::While { cond, body } => {
+            count_uses_in_loop_body(cond, body, &[], table);
+            let mut cond_locals = HashSet::new();
+            collect_bound_vars_in_expr(cond, &mut cond_locals);
+            bump_vars_in_expr(cond, &cond_locals, table);
+        }
         IrExprKind::Lambda { params, body, .. } => count_uses_in_lambda(params, body, table),
         IrExprKind::StringInterp { parts } => count_uses_in_string_interp(parts, table),
         IrExprKind::IterChain { source, steps, collector, .. } => {

@@ -12,6 +12,15 @@
 // Header names compare case-insensitively (RFC 9110 §5.1) through the same
 // ASCII-only per-char fold http_response uses, so native and wasm agree on a
 // non-ASCII name too.
+//
+// A body given as bytes that are not UTF-8 (#4744, native's `body_raw`): the
+// body cell holds their lossy text, and ONE trailing cell `/<hex of the
+// bytes>` follows the bound params, so the slots past the headers count odd.
+// Hex keeps every String block valid UTF-8 (proofs/utf8-producers.toml). The
+// pair walks never pair it (`param` answers none for it, as native does), a
+// route binding goes in front of it, and set_body / set_body_bytes drop it.
+import hex
+
 fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
   none => c,
@@ -102,7 +111,40 @@ fn http_req_set_header(req: List[String], key: String, value: String) -> List[St
   value,
 )
 
-fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(
+  __hq_no_raw(req),
+  2,
+  body,
+)
+
+// The trailing raw-body cell, when the slots past the headers count odd.
+fn __hq_raw(req: List[String]) -> String? =
+  if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
+  else none
+
+fn __hq_no_raw(req: List[String]) -> List[String] = match __hq_raw(req) {
+  some(_) => list.take(req, list.len(req) - 1),
+  none => req,
+}
+
+// native `almide_http_req_body_bytes`: the raw cell's bytes when there is
+// one, else the body text's UTF-8 bytes.
+@implements("http.__http_request_body_bytes")
+fn http_req_body_bytes(req: List[String]) -> Bytes = {
+  let text = bytes.from_string(list.get(req, 2) ?? "")
+  match __hq_raw(req) {
+    some(raw) => hex.decode(string.drop(raw, 1)) ?? text,
+    none => text,
+  }
+}
+
+// native `almide_http_req_set_body_bytes`: valid UTF-8 is the text itself;
+// other bytes keep their hex in the raw cell beside the lossy text.
+@implements("http.__http_request_set_body_bytes")
+fn http_req_set_body_bytes(req: List[String], body: Bytes) -> List[String] = match bytes.to_string(body) {
+  ok(text) => list.set(__hq_no_raw(req), 2, text),
+  err(_) => list.set(__hq_no_raw(req), 2, bytes.to_string_lossy(body)) + ["/" + hex.encode(body)],
+}
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)

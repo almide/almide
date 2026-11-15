@@ -205,6 +205,11 @@ pub struct AlmideHttpRequest {
     /// Path parameters bound by `http.router` (#2588): `{id}` in the route
     /// pattern → `("id", "42")`. Empty for a request the listener parsed.
     pub params: Vec<(String, String)>,
+    /// The body's bytes when `set_body_bytes` was given bytes that are not
+    /// valid UTF-8, so `body` holds their lossy decoding while `body_bytes`
+    /// and `http.send` / `http.start` carry these exactly (#4744) — the
+    /// response's `body_raw` rule. `None` whenever `body` IS the body.
+    pub body_raw: Option<Vec<u8>>,
 }
 
 /// `http.new_request` (#2588): a request built in code, so a handler or a
@@ -217,6 +222,7 @@ pub fn almide_rt_http___new_request(method: &str, target: &str, body: &str, flat
         body: body.to_string(),
         headers: header_pairs(flat),
         params: Vec::new(),
+        body_raw: None,
     }
 }
 
@@ -267,6 +273,12 @@ impl AlmideRepr for AlmideHttpRequest {
 pub fn almide_http_req_repr(req: &AlmideHttpRequest) -> AlmideString { req.almide_repr().into_almide() }
 pub fn almide_http_resp_repr(resp: &AlmideHttpResponse) -> AlmideString { resp.almide_repr().into_almide() }
 
+// `http.__http_request_eq` / `__http_response_eq` / `__http_call_eq` (#4749):
+// the declared equalities are the structs' own `PartialEq`, the `==` the other
+// render emits; the certified native render calls them for a `==` over one.
+pub fn almide_http_req_eq(a: &AlmideHttpRequest, b: &AlmideHttpRequest) -> bool { a == b }
+pub fn almide_http_resp_eq(a: &AlmideHttpResponse, b: &AlmideHttpResponse) -> bool { a == b }
+
 pub fn almide_http_req_method(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.method.clone() })(); __almide_v.into_almide() }
 pub fn almide_http_req_path(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.path.clone() })(); __almide_v.into_almide() }
 pub fn almide_http_req_body(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.body.clone() })(); __almide_v.into_almide() }
@@ -292,7 +304,32 @@ pub fn almide_http_req_set_header(mut req: AlmideHttpRequest, key: &str, value: 
 
 pub fn almide_http_req_set_body(mut req: AlmideHttpRequest, body: &str) -> AlmideHttpRequest {
     req.body = body.to_string();
+    req.body_raw = None;
     req
+}
+
+/// `http.set_body_bytes` on a request (#4744): the bytes are the body. Valid
+/// UTF-8 is held as the text itself; anything else keeps its exact bytes in
+/// `body_raw` beside the lossy text `body` answers — the fetched response's
+/// rule (`AlmideHttpResponse::fetched`).
+pub fn almide_http_req_set_body_bytes(mut req: AlmideHttpRequest, body: &Vec<u8>) -> AlmideHttpRequest {
+    match std::str::from_utf8(body) {
+        Ok(text) => {
+            req.body = text.to_string();
+            req.body_raw = None;
+        }
+        Err(_) => {
+            req.body = String::from_utf8_lossy(body).into_owned();
+            req.body_raw = Some(body.clone());
+        }
+    }
+    req
+}
+
+/// `http.body_bytes` on a request: the bytes `set_body_bytes` was given,
+/// never the lossy text `body` answers.
+pub fn almide_http_req_body_bytes(req: &AlmideHttpRequest) -> Vec<u8> {
+    req.body_raw.clone().unwrap_or_else(|| req.body.as_bytes().to_vec())
 }
 
 pub fn almide_http_get(url: &str) -> Result<AlmideString, AlmideString> {
@@ -328,10 +365,12 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &[Almid
 // the shared core, so the three shapes cannot drift apart.
 
 pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, AlmideString> {
-    almide_http_request_response("GET", url, "", &[])
+    almide_http_request_response("GET", url, &Vec::new(), &[])
 }
 
-pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
+/// `http.send`: the request body is its bytes (`http.body_bytes`), sent
+/// exactly as given (#4744).
+pub fn almide_http_request_response(method: &str, url: &str, body: &Vec<u8>, headers: &[AlmideString]) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
     request_response_bytes(method, url, body, &header_pairs(headers))
         .map(|(status, headers, raw)| AlmideHttpResponse::fetched(status, headers, raw))
 })(); __almide_r.map_err(Into::into) }
@@ -376,6 +415,7 @@ impl AlmideRepr for AlmideHttpCall {
 
 // `http.__http_call_repr` (#4204): a call in flight shows only its type name.
 pub fn almide_http_call_repr(c: &AlmideHttpCall) -> AlmideString { c.almide_repr().into_almide() }
+pub fn almide_http_call_eq(a: &AlmideHttpCall, b: &AlmideHttpCall) -> bool { a == b }
 
 impl PartialEq for AlmideHttpCall {
     fn eq(&self, other: &Self) -> bool {
@@ -396,7 +436,7 @@ fn http_call_response(r: Result<HttpTextResponse, String>) -> Result<AlmideHttpR
 pub fn almide_http_call_start(
     method: &str,
     url: &str,
-    body: &str,
+    body: &[u8],
     headers: &[AlmideString],
     total_ms: i64,
     idle_ms: i64,
@@ -407,10 +447,11 @@ pub fn almide_http_call_start(
 
 /// `http.start` — the private `__call_start` its Almide wrapper calls with
 /// the limits record spread into two Ints (the sibling-call mangling names it).
+/// The body is the request's bytes, sent exactly as given (#4744).
 pub fn almide_rt_http___call_start(
     method: &str,
     url: &str,
-    body: &str,
+    body: &Vec<u8>,
     headers: &[AlmideString],
     total_ms: i64,
     idle_ms: i64,
@@ -476,7 +517,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // a division by zero no longer ends the server.
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
-        let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new() };
+        let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new(), body_raw: None };
         almide_request_hooks(0);
         almide_containment(true);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
