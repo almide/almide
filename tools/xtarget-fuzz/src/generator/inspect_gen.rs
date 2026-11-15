@@ -241,6 +241,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // A fixed-width conversion is in domain only for a value in range: 7 at
     // whatever numeric type the source variable takes (a sized Int or BigInt
     // panics). Sizeless: the conversion of one value.
+    // A product of n ones: the fold's n multiplications at one limb each.
+    Recipe { func: "list.product", size: "xs", args: &[("xs", "list.repeat({one_elem}, {n})")] },
+    Recipe { func: "deque.product", size: "d", args: &[("d", "deque.from_list(list.repeat({one_elem}, {n}))")] },
     Recipe { func: "int8.from", size: "", args: &[("x", "{seven}")] },
     Recipe { func: "int16.from", size: "", args: &[("x", "{seven}")] },
     Recipe { func: "int32.from", size: "", args: &[("x", "{seven}")] },
@@ -909,7 +912,16 @@ impl Target {
             Some(g) => format!("{}.from(7)", g.render().to_lowercase()),
             None => "7".to_string(),
         };
+        // `{one_elem}`: 1 in the element type, so a product over n of them
+        // stays one limb at every size (n distinct BigInts multiply out to
+        // a number of n log n bits, the probe's own growth, not the fold's).
+        let one_elem_v = match ty.as_ref().and_then(elem_of) {
+            Some(GenType::Int) | None => "1".to_string(),
+            Some(GenType::Float) => "1.0".to_string(),
+            Some(g) => format!("{}.from(1)", g.render().to_lowercase()),
+        };
         e.replace("{sized_flat}", &flat_v)
+            .replace("{one_elem}", &one_elem_v)
             .replace("{seven}", &seven_v)
             .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
