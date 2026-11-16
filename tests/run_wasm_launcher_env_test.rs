@@ -3,6 +3,8 @@
 //! directory, #874) is seen by `env.get` and listed by `env.vars` on both
 //! targets. The embedded host read only its own process environment, which
 //! the launcher never exported the variable into, so wasm answered `none`.
+//! Every variable the launcher exports is listed on both (`RUST_MIN_STACK`
+//! too).
 
 use std::process::Command;
 
@@ -11,6 +13,7 @@ effect fn main() -> Unit = {
   let vs = env.vars()!
   let g = env.get("ALMIDE_CWD") ?? "<unset>"
   println("vars: ${map.get(vs, "ALMIDE_CWD") ?? "<unset>"}; get: ${g}")
+  println("names: ${list.sort(map.keys(vs))}")
 }
 "#;
 
@@ -34,6 +37,9 @@ fn both_targets_see_the_launchers_cwd() {
     let native = run(&cwd, false);
     let wasm = run(&cwd, true);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(native, want, "native");
+    assert!(native.starts_with(&want), "native: {native}");
+    assert!(native.contains("\"RUST_MIN_STACK\""), "native: {native}");
+    // The whole list of names, not just ALMIDE_CWD: RUST_MIN_STACK, which
+    // the launcher also exports, was the next divergence.
     assert_eq!(wasm, native, "wasm differs from native");
 }
