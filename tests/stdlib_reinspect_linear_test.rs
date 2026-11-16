@@ -15,6 +15,10 @@
 //! - `parse_radix` (#4765): `int.parse_radix` walked its digits with a
 //!   `[b, ..rest]` match, copying the rest per digit; the fixed-width
 //!   `parse_radix` fns delegate to it.
+//! - `heap` (#4777): `heap.push` took `var slots = h.slots`, a second
+//!   reference, so its first swap copied the whole slot list on every push
+//!   (and `heap.from_list`, n pushes, was quadratic). The sifts now swap in
+//!   the heap's own list; `from_list` heapifies bottom-up. n log n overall.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -37,6 +41,17 @@ effect fn main() -> Unit = {
       }
       println("${int.parse_radix(digits, 16) ?? 0} ${sized}")
     },
+    "heap" => {
+      var h = heap.from_list(list.range(0, n) |> list.map((i) => (i * 7919) % 100003))
+      for i in 0..<n {
+        heap.push(h, (i * 104729) % 100003)
+      }
+      var acc = 0
+      for _ in 0..<(2 * n) {
+        acc = (acc + (heap.pop(h) ?? 0)) % 1000003
+      }
+      println("${acc} ${heap.len(h)}")
+    },
     _ => println("usage"),
   }
 }
@@ -52,7 +67,16 @@ struct Case {
 
 const CASES: &[Case] = &[
     Case { mode: "parse_radix", native_n: 2_000_000, wasm_n: 100_000, expected: |_| "127 127\n".to_string() },
+    Case { mode: "heap", native_n: 200_000, wasm_n: 5_000, expected: heap_expected },
 ];
+
+/// The `heap` mode's line: every pushed value popped in ascending order.
+fn heap_expected(n: u64) -> String {
+    let mut all: Vec<u64> = (0..n).map(|i| (i * 7919) % 100003).chain((0..n).map(|i| (i * 104729) % 100003)).collect();
+    all.sort_unstable();
+    let acc = all.iter().fold(0, |acc, v| (acc + v) % 1000003);
+    format!("{acc} 0\n")
+}
 
 /// The scratch dir holding the program, its native binary and its stock wasm.
 fn build(tag: &str) -> PathBuf {
