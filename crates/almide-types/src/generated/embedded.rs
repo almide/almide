@@ -28803,51 +28803,36 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 
 
 
+
+
+
 @implements("matrix.concat_rows")
 fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = {
-  var out = matrix.from_lists([])
-  var rows: List[List[Float]] = []
-  var cols = 0
-  var started = false
-  for m in xs {
-    if matrix.rows(m) == 0 then {
-      if started then ()
-      else {
-        out = m
-      }
-    } else if started then {
-      if matrix.cols(m) != cols then {
-        let probe = matrix.__append_rows(matrix.zeros(1, cols), matrix.zeros(1, matrix.cols(m)))
-        cols = matrix.cols(probe)
-      } else ()
-      if list.is_empty(rows) then {
-        rows = matrix.to_lists(out)
-      } else ()
-      for r in matrix.to_lists(m) {
-        list.push(rows, r)
-      }
-    } else {
-      started = true
-      out = m
-      cols = matrix.cols(m)
-    }
+  let full = xs |> list.filter((m) => matrix.rows(m) > 0)
+  match list.first(full) {
+    none => list.last(xs) ?? matrix.from_lists([]),
+    some(first) => if list.len(full) == 1 then first
+    else {
+      let cols = matrix.cols(first)
+      let widths = full |> list.map((m) => if matrix.cols(m) == cols then cols
+      else matrix.cols(matrix.__append_rows(matrix.zeros(1, cols), matrix.zeros(1, matrix.cols(m)))))
+      if list.fold(widths, 0, (acc, w) => acc + w) < 0 then first
+      else matrix.from_lists(full |> list.flat_map((m) => matrix.to_lists(m) |> list.map((r) => r)))
+    },
   }
-
-  if list.is_empty(rows) then out else matrix.from_lists(rows)
 }
 
 
 
-fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float) -> List[List[Float]] = {
-  var out: List[List[Float]] = []
-  for i in 0..<list.len(la) {
-    match (list.get(la, i), list.get(lb, i)) {
-      (some(ra), some(rb)) => list.push(out, list.zip_with(ra, rb, f)),
-      _ => (),
-    }
-  }
-  out
-}
+fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float) -> List[List[Float]] = list.zip_with(
+  la,
+  lb,
+  (ra, rb) => list.zip_with(ra, rb, f),
+)
+
+
+
+
 
 @implements("matrix.zip_with")
 fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = {
@@ -28871,17 +28856,10 @@ fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
 
 
 
-fn __matrix_f16_codes(rows: List[List[Float]]) -> List[Int] = {
-  var out: List[Int] = []
-  for row in rows {
-    for x in row {
-      let h = __matrix_f16_bits(x)
-      list.push(out, int.band(h, 255))
-      list.push(out, int.bshr(h, 8))
-    }
-  }
-  out
-}
+fn __matrix_f16_codes(rows: List[List[Float]]) -> List[Int] = rows |> list.flat_map((row) => row |> list.flat_map((x) => {
+  let h = __matrix_f16_bits(x)
+  [0, 8] |> list.map((sh) => int.band(int.bshr(h, sh), 255))
+}))
 
 @implements("matrix.to_bytes_f16_le")
 fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_codes(matrix.to_lists(m)))
