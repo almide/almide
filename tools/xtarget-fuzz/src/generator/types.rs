@@ -234,17 +234,20 @@ impl GenType {
         };
         // An observation that calls an effect closure (a handler) cannot sit
         // in a plain callback: an Option or Result is taken apart with a
-        // `match`, a list mapped in its fallible form.
+        // `match`, a list mapped in its fallible form — when the observation
+        // propagates (`h(req)!`); one that recovers its own error (`?? []`)
+        // maps in the plain form (a trailing `!` on a List is E034).
         if let GenType::List(e) | GenType::Option(e) | GenType::Result(e) = self {
             if e.observe_calls_effect() {
                 let (pre, expr) = e.observe(&x, depth + 1)?;
                 if !pre.is_empty() {
                     return None;
                 }
+                let bang = if expr.contains(")!") { "!" } else { "" };
                 return Some((
                     String::new(),
                     match self {
-                        GenType::List(_) => format!("list.map({v}, ({x}) => {expr})!"),
+                        GenType::List(_) => format!("list.map({v}, ({x}) => {expr}){bang}"),
                         GenType::Option(_) => {
                             format!("match {v} {{ some({x}) => some({expr}), none => none }}")
                         }
