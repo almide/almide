@@ -77,7 +77,7 @@ pub const DECL_INDEX: &[DeclRow] = &[
     ("fs_write_bytes", &["__wbr_copy", "fs_write_bytes"], &[], false),
     ("hash", &["fnv1a32", "sha256", "sha256_hex", "crc32", "adler32", "h_shr64", "h_rotr64", "h_len_bytes", "h_pad", "h_word64", "h_out", "h_hex", "h_sha512_k", "sha512", "sha512_hex", "h_digest", "h_hmac", "hmac_sha256", "hmac_sha512", "is_valid_hmac_sha256", "is_valid_hmac_sha512"], &[], false),
     ("hash_impl", &["__fnv_go", "hash_fnv1a32", "__sha_k", "__ror32", "__sha_copy", "__sha_zero", "__sha_len64", "__sha_w16", "__sha_wext", "__sha_rounds", "__sha_blocks", "__sha_out", "__sha_init", "__sha256_digest", "hash_sha256", "__sha_hex_fill", "hash_sha256_hex"], &[], false),
-    ("heap", &["__natural", "new", "new_by", "new_with", "from_list", "__before", "__swap", "push", "pop", "clear", "peek", "len", "is_empty", "to_list", "contains", "any", "all", "count", "filter"], &[(18, 19)], false),
+    ("heap", &["__natural", "new", "new_by", "new_with", "from_list", "__before", "__sift_up", "__sift_down", "__heapify", "__drop_root", "push", "pop", "clear", "peek", "len", "is_empty", "to_list", "contains", "any", "all", "count", "filter"], &[(18, 19)], false),
     ("hex", &["encode", "encode_upper", "decode"], &[], false),
     ("hex_encode", &["__hex_digit", "__hex_fill", "hex_encode", "hex_encode_upper", "__hexd_nib", "__hexd_scan", "__hexd_fill", "hex_decode"], &[], false),
     ("html", &["escape", "raw", "to_string", "concat", "empty", "__html_ascii", "__html_blank", "__html_name_char", "__html_name_ok", "__html_url_attr_name", "__html_active_attr_name", "__html_attr_value", "attr", "__html_scheme_char", "__html_scheme", "__html_blocked_url", "url_attr", "script_json", "__safe_html_media_type", "__safe_html_to_text"], &[(10, 10)], false),

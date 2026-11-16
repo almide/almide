@@ -600,11 +600,15 @@ local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_f
   [],
 )
 
+
+
 local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
-  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
-  else {
+  if i < 0 then {
+    let q = list.reverse(acc)
+    (list.take(q, top_nonzero(q, list.len(q))), rem)
+  } else {
     let cur = rem * limb_base() + limb(a, i)
-    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+    divmod_small_from(a, d, i - 1, cur % d, acc + [cur / d])
   }
 
 
@@ -2029,10 +2033,18 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.min_by(bytes.to_list(b), f)
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = {
+
+
+  let xs = bytes.to_list(b)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,
@@ -9691,35 +9703,36 @@ fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
 fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
-  var h: Heap[A] = new()
-  for x in xs {
-    push(h, x)
-  }
+
+  let empty: Heap[A] = new()
+  let n = list.len(xs)
+  let cmp = empty.cmp
+  var h: Heap[A] = { slots: list.zip(xs, list.range(0, n)), next: n, cmp: cmp }
+  __heapify(h.slots, cmp)
   h
 }
 
 
-fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
-  let c = (h.cmp)(a.0, b.0)
+fn __before[A](cmp: (A, A) -> Int, a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = cmp(a.0, b.0)
   c < 0 or (c == 0 and a.1 < b.1)
 }
 
 
-fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
 
 
-/// Adds x in place.
-fn push[A](mut h: Heap[A], x: A) -> Unit = {
-  var slots = h.slots
-  list.push(slots, (x, h.next))
-  var i = list.len(slots) - 1
+
+
+
+fn __sift_up[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  var j = i
   var moving = true
-  while moving and i > 0 {
-    let parent = (i - 1) / 2
-    match (list.get(slots, i), list.get(slots, parent)) {
-      (some(child), some(up)) => if __before(h, child, up) then {
-        slots = __swap(slots, i, parent)
-        i = parent
+  while moving and j > 0 {
+    let parent = (j - 1) / 2
+    match (list.get(slots, j), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(cmp, child, up) then {
+        slots = list.swap(slots, j, parent)
+        j = parent
       } else {
         moving = false
       },
@@ -9728,48 +9741,77 @@ fn push[A](mut h: Heap[A], x: A) -> Unit = {
       },
     }
   }
-  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+
+fn __sift_down[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  let size = list.len(slots)
+  var j = i
+  var moving = true
+  while moving {
+    let l = 2 * j + 1
+    let r = l + 1
+    var best = j
+    match (list.get(slots, l), list.get(slots, best)) {
+      (some(a), some(b)) => if l < size and __before(cmp, a, b) then {
+        best = l
+      } else (),
+      _ => (),
+    }
+    match (list.get(slots, r), list.get(slots, best)) {
+      (some(a), some(b)) => if r < size and __before(cmp, a, b) then {
+        best = r
+      } else (),
+      _ => (),
+    }
+    if best == j then {
+      moving = false
+    } else {
+      slots = list.swap(slots, j, best)
+      j = best
+    }
+  }
+}
+
+
+fn __heapify[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  var i = list.len(slots) / 2 - 1
+  while i >= 0 {
+    __sift_down(slots, cmp, i)
+    i = i - 1
+  }
+}
+
+
+
+fn __drop_root[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  let n = list.len(slots)
+  if n > 0 then {
+    slots = list.swap(slots, 0, n - 1)
+    let _ = list.pop(slots)
+    __sift_down(slots, cmp, 0)
+  } else ()
+}
+
+
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  let k = h.next
+  let i = list.len(h.slots)
+  list.push(h.slots, (x, k))
+  let cmp = h.cmp
+  __sift_up(h.slots, cmp, i)
+  h = { ...h, next: k + 1 }
 }
 
 /// Removes and yields the first element out; none when empty.
 fn pop[A](mut h: Heap[A]) -> A? = {
-  let n = list.len(h.slots)
-  if n == 0 then none
-  else {
-    let top = list.get(h.slots, 0)
-    var slots = __swap(h.slots, 0, n - 1)
-    let _ = list.pop(slots)
-    let size = n - 1
-    var i = 0
-    var moving = true
-    while moving {
-      let l = 2 * i + 1
-      let r = l + 1
-      var best = i
-      match (list.get(slots, l), list.get(slots, best)) {
-        (some(a), some(b)) => if l < size and __before(h, a, b) then {
-          best = l
-        } else (),
-        _ => (),
-      }
-      match (list.get(slots, r), list.get(slots, best)) {
-        (some(a), some(b)) => if r < size and __before(h, a, b) then {
-          best = r
-        } else (),
-        _ => (),
-      }
-      if best == i then {
-        moving = false
-      } else {
-        slots = __swap(slots, i, best)
-        i = best
-      }
-    }
-    h = { slots: slots, next: h.next, cmp: h.cmp }
-    match top {
-      some((x, _)) => some(x),
-      none => none,
-    }
+  let top = list.get(h.slots, 0)
+  let cmp = h.cmp
+  __drop_root(h.slots, cmp)
+  match top {
+    some((x, _)) => some(x),
+    none => none,
   }
 }
 
@@ -11997,18 +12039,23 @@ local fn prefix_radix(b: Int) -> Int = match b {
 
 local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
   [] => err("invalid digit found in string"),
-  _ => accumulate_digits(digits, radix, acc, negative),
+  _ => accumulate_digits(digits, 0, radix, acc, negative),
 }
 
-local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
-  [] => if negative then ok(acc)
+
+
+local fn accumulate_digits(digits: List[Int], i: Int, radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match list.get(
+  digits,
+  i,
+) {
+  none => if negative then ok(acc)
   else if acc == int.min_value() then err("number too large to fit in target type")
   else ok(0 - acc),
-  [b, ..rest] => {
+  some(b) => {
     let d = digit_value(b)
     if d >= radix then err("invalid digit found in string")
     else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
-    else accumulate_digits(rest, radix, acc * radix - d, negative)
+    else accumulate_digits(digits, i + 1, radix, acc * radix - d, negative)
   },
 }
 
@@ -37831,10 +37878,18 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.min_by(string.to_list(s), f)
 
 /// The last character with the largest key; none if empty.
-fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = {
+
+
+  let xs = string.to_list(s)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
