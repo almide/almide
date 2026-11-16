@@ -309,6 +309,28 @@ thread_local! {
 /// The forward scan of [`dying_after`] over the ops after the copy at
 /// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
 /// first, `None` = neither before the end of the function.
+/// The ops of the else-arm that follows the then-arm `ops[at]` is in, when
+/// `at` is in a then-arm outside every loop (inside one, a later round may
+/// run either arm): the else-arm never runs on `at`'s path. `None` when there
+/// is no such arm.
+pub(crate) fn else_arm_after(func: &MirFunction, at: usize) -> Option<std::ops::Range<usize>> {
+    if crate::mir_liveness::per_function(func, "loops", || loop_of(func))[at].is_some() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut else_at = None;
+    for (k, op) in func.ops.iter().enumerate().skip(at + 1) {
+        match op {
+            Op::IfThen { .. } => depth += 1,
+            Op::EndIf { .. } if depth > 0 => depth -= 1,
+            Op::EndIf { .. } => return else_at.map(|e| e..k),
+            Op::Else { .. } if depth == 0 => else_at = Some(k + 1),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
     let skip = SKIP_READS.with(|m| m.borrow().clone());
     // An address into the block computed before the copy and read after it
@@ -321,8 +343,12 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
     let mut depth = 0i32;
     let mut straight = true;
     let mut reads = Vec::new();
+    // The copy's own then-arm ends at its `Else`: the else-arm never runs on
+    // this path, so its reads are skipped (a record rebuilt in the then-arm
+    // otherwise copied every field the else-arm also names).
+    let else_arm = else_arm_after(func, at);
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
-        if skip.contains(&j) {
+        if skip.contains(&j) || else_arm.as_ref().is_some_and(|r| r.contains(&j)) {
             continue;
         }
         if straight {
