@@ -32,6 +32,8 @@
 //!   through a List, so a sole owner's rebind copied the whole deque.
 //! - `deque_pop` (#4778): a value-returning `list.pop` straight on a field of
 //!   the `mut` deque copied that list per pop on wasm.
+//! - `regex_replace` (#4779): the wasm self-host appended each match to a
+//!   String accumulator, copying the result per match.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -42,6 +44,7 @@ use std::time::{Duration, Instant};
 
 const SOURCE: &str = r#"import bigint
 import env
+import regex
 
 effect fn main() -> Unit = {
   let args = env.args()
@@ -104,6 +107,10 @@ effect fn main() -> Unit = {
       }
       println("${acc} ${deque.len(d)}")
     },
+    "regex_replace" => {
+      let r = regex.replace(regex.new("(é)"), string.repeat("aé", n), "x")
+      println("${string.len(r)} ${string.slice(r, 0, 4)}")
+    },
     _ => println("usage"),
   }
 }
@@ -126,6 +133,7 @@ const CASES: &[Case] = &[
     Case { mode: "f16", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{}\n", 4 * n) },
     Case { mode: "deque", native_n: 400_000, wasm_n: 40_000, expected: |n| format!("{} {}\n", n + 1 - 2 * (n / 4), n / 4 - 1) },
     Case { mode: "deque_pop", native_n: 2_000_000, wasm_n: 100_000, expected: |n| format!("{} {}\n", (n / 4) * (n - n / 4), n - 2 * (n / 4)) },
+    Case { mode: "regex_replace", native_n: 1_000_000, wasm_n: 20_000, expected: |n| format!("{} axax\n", 2 * n) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 
