@@ -418,10 +418,18 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.min_by(string.to_list(s), f)
 
 /// The last character with the largest key; none if empty.
-fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = {
+  // One pass, not a sort (#4755): f runs once per character, front to back; the
+  // walk from the back keeps the last of equal largest keys.
+  let xs = string.to_list(s)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
