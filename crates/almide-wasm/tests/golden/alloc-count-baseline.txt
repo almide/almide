@@ -563,7 +563,7 @@
 113	102	1879	113	spec/wasm_cross/math_log_gamma_negative.almd
 29	26	795	29	spec/wasm_cross/math_pow.almd
 0	0	0	0	spec/wasm_cross/math_transcendental_bits.almd
-245	212	3542	245	spec/wasm_cross/matrix_composition_family.almd
+247	213	3598	247	spec/wasm_cross/matrix_composition_family.almd
 28	3	288	28	spec/wasm_cross/matrix_dims_guard.almd
 8	0	210	1	spec/wasm_cross/matrix_dims_guard_overflow.almd
 3	0	106	0	spec/wasm_cross/matrix_dims_guard_product.almd
@@ -577,7 +577,7 @@
 222	171	8605	222	spec/wasm_cross/matrix_mul_no_fma.almd
 42	27	637	42	spec/wasm_cross/matrix_neg_signed_zero.almd
 50	34	1704	50	spec/wasm_cross/matrix_pow_libm.almd
-530	498	7416	530	spec/wasm_cross/matrix_producers_uniform_rows.almd
+534	502	7472	534	spec/wasm_cross/matrix_producers_uniform_rows.almd
 48	33	757	48	spec/wasm_cross/matrix_product_family.almd
 17	7	316	17	spec/wasm_cross/matrix_select_rows.almd
 11	2	175	8	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
