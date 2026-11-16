@@ -178,18 +178,25 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
             tables.insert(key.clone(), (ps.clone(), modes.clone(), *ret, Vec::new()));
         }
     });
-    let lambdas = user_fns.keys().copied().filter(|n| n.starts_with("__lambda_"));
-    for (idx, name) in lambdas.enumerate() {
-        let Some((ps, ret)) = lambda_sig(sigs, name) else { continue };
-        let moved = lambda_moves(user_fns[name]);
-        // The lending table of its kinds, and the handing-over one of its modes.
-        for m in [vec![false; ps.len()], moved.clone()] {
-            let Some(key) = sig_key(&ps, &m, ret) else { continue };
-            tables.entry(key).or_insert_with(|| (ps.clone(), m, ret, Vec::new()));
+    let lambdas: Vec<(usize, &str, Vec<NativeSigKind>, Option<NativeSigKind>)> = user_fns
+        .keys()
+        .copied()
+        .filter(|n| n.starts_with("__lambda_"))
+        .enumerate()
+        .filter_map(|(idx, name)| lambda_sig(sigs, name).map(|(ps, ret)| (idx, name, ps, ret)))
+        .collect();
+    // The lending table of each lambda's kinds, and the handing-over one of
+    // its modes.
+    for (_, name, ps, ret) in &lambdas {
+        for m in [vec![false; ps.len()], lambda_moves(user_fns[name])] {
+            let Some(key) = sig_key(ps, &m, *ret) else { continue };
+            tables.entry(key).or_insert_with(|| (ps.clone(), m, *ret, Vec::new()));
         }
-        // Every table of its kinds, whatever it hands over: a call through
-        // one may reach any lambda of the signature, and each arm adapts
-        // (#4762) — a handed arg the lambda only reads is lent to it.
+    }
+    // Every table of its kinds, whatever it hands over: a call through one
+    // may reach any lambda of the signature, and each arm adapts (#4762) — a
+    // handed arg the lambda only reads is lent to it.
+    for (idx, name, ps, ret) in lambdas {
         for (tps, _, tret, fns) in tables.values_mut() {
             if *tps == ps && *tret == ret && !fns.contains(&(idx, name)) {
                 fns.push((idx, name));
