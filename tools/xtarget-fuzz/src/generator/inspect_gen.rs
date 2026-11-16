@@ -462,8 +462,8 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "net.parse_ip", size: "", args: &[("s", "\"2001:db8::ff00:42:8329\"")] },
     // The header the sized message holds last (`k<100000000 + i>`), so the
     // lookup walks every header and hits.
-    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${100000000 + {n} - 1}\"")] },
-    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${100000000 + {n}}\"")] },
+    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${100000000 + {n}}\"")] },
 ];
 
 /// n zeros then `7f`: valid in radix 16, 127 in every fixed width.
@@ -1114,7 +1114,7 @@ impl Target {
             let varies = !matches!(self.ty(i), Some(GenType::String))
                 && !self.ty(i).is_some_and(|t| t.refuses_var())
                 && !self.is_routed(i);
-            let kw = if varies || Some(i) == self.mut_param {
+            let kw = if varies || Some(i) == self.mut_param || self.per_step(i) {
                 "var"
             } else {
                 "let"
@@ -1141,12 +1141,22 @@ impl Target {
                 self.recipe_expr(p, n, "i")
             );
         }
-        if let Some((i, true)) = slot {
-            let _ = writeln!(
-                s,
-                "    x = {}",
-                vary("x", &self.ty(i).unwrap_or(GenType::Int), n)
-            );
+        // A sized operand its recipe builds per step (a stream read to its
+        // end, `{i}` in the recipe) is rebuilt every iteration in BOTH
+        // programs, as a per-step operand is: bound once, the first call
+        // consumed it and every later call read an ended stream.
+        match slot {
+            Some((i, _)) if self.per_step(i) => {
+                let _ = writeln!(s, "    x = {}", self.recipe_expr(i, n, "i"));
+            }
+            Some((i, true)) => {
+                let _ = writeln!(
+                    s,
+                    "    x = {}",
+                    vary("x", &self.ty(i).unwrap_or(GenType::Int), n)
+                );
+            }
+            _ => {}
         }
         if with_call {
             let _ = writeln!(

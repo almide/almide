@@ -121,7 +121,9 @@ pub const NOMINALS: &[Nominal] = &[
         name: "HttpResponse",
         module: "http",
         small: "http.with_headers(200, \"aé\", [(\"k\", \"v\")])",
-        sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        // One header past n: a header looked up by name (`http.header`'s last
+        // key) is present at n = 0 too, the fixed-cost probe's size.
+        sized: "http.with_headers(200, \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
             "http.with_headers(404, \"aé\", [(\"x-kind\", \"text/plain\")])",
@@ -140,7 +142,7 @@ pub const NOMINALS: &[Nominal] = &[
         name: "HttpRequest",
         module: "http",
         small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [(\"k\", \"v\")])",
-        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
             "http.new_request(\"GET\", \"/\", \"\", [])",
             "http.new_request(\"POST\", \"/users/42\", \"aé\", [(\"content-type\", \"text/plain\")])",
