@@ -398,7 +398,7 @@ fn a_100_continue_is_skipped_for_the_final_response() {
     let (port, _rx) = origin(reply);
     let r = get_ok(&format!("http://127.0.0.1:{port}/"));
     assert_eq!((r.0, r.2.as_str()), (200, "ok"));
-    assert!(r.1.iter().any(|(k, _)| k == "X-Final") && !r.1.iter().any(|(k, _)| k == "Link"));
+    assert!(r.1.iter().any(|(k, _)| k == "x-final") && !r.1.iter().any(|(k, _)| k.eq_ignore_ascii_case("link")));
     let (port, _rx) = origin(reply);
     let r = start_get(&format!("http://127.0.0.1:{port}/")).expect("the started call is answered");
     assert_eq!((r.0, r.2.as_str()), (200, "ok"));
