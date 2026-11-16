@@ -408,10 +408,12 @@ const SHAPE_RECIPES: &[Recipe] = &[
         args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
     },
     Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
-    // The fixed-width parsers in a radix: n leading zeros then 0x7f, digits
+    // The parsers in a radix (Int's and the fixed widths that delegate to
+    // it): n leading zeros then 0x7f, digits
     // of radix 16 whose value every width holds, so the parse succeeds and
     // walks n + 2 digits (the generic "aéaé…" was refused at its first
     // character; n significant digits would overflow the width).
+    Recipe { func: "int.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
     Recipe { func: "int8.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
     Recipe { func: "int16.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
     Recipe { func: "int32.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
