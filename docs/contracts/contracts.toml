@@ -6044,3 +6044,15 @@ evidence  = [
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_handed_out_again_holds_one_share", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_unreleasing_host_runs_in_bounded_memory", class = "fixture" },
 ]
+
+# ── HTTP: A FETCHED RESPONSE'S FIELD NAMES ARE LOWERCASE ON EVERY LANE ─
+[[contract]]
+id        = "C-455"
+spec      = "ALS-R5"
+title     = "A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane"
+statement = "ALS-R5 (almide/almide#4766): every response the http client hands a program — the full-response family (`http.get_response` / `post_response` / `put_response` / `patch_response` / `delete_response` / `request_response`), `http.send` and the call handle's `http.wait` — carries its header fields with each name in ASCII lowercase, in the order the server sent them with repeats kept, and each value exactly as sent (surrounding whitespace trimmed). The fields the client manages (C-370's nine: connection, keep-alive, proxy-authenticate, proxy-authorization, proxy-connection, transfer-encoding, upgrade, host, http2-settings) are left out, so `http.headers`, `http.header` and `http.header_values` never answer them. `http.header` and `http.header_values` still match a name ASCII case-insensitively. This is the form a stock wasi:http host hands a guest (its `fields` store lowercase names and withhold the managed ones), so native, the embedded lane and the stock WASI 0.3 component answer the same list. Before, native and the call handle on both legs kept the server's spelling and the managed fields while the full-response family on the wasm lanes lowercased the names, so a program that printed, compared or forwarded the list saw a different answer per target. A response a program BUILDS (`http.response`, `http.with_headers`, `http.set_header`) keeps the names it was given; this contract covers fetched responses only. Evidence: spec/embedded_cross/http_response_header_names.almd serves itself mixed-case names, a repeated field in two spellings, a chunked body with `Transfer-Encoding`, and `Connection`, through `http.start` / `http.wait` on native and the embedded lane."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/http_response_header_names.almd", class = "fixture" },
+]

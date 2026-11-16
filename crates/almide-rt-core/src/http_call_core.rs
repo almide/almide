@@ -186,7 +186,7 @@ pub fn http_call_take_new(st: &mut AlmideHttpCallState) -> String {
 fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> Result<HttpTextResponse, String> {
     match (outcome, &st.head) {
         (Err(e), _) => Err(e.clone()),
-        (Ok(()), Some(h)) => Ok((h.status, h.headers.clone(), String::from_utf8_lossy(&st.body).into_owned())),
+        (Ok(()), Some(h)) => Ok((h.status, http_response_fields(h.headers.clone()), String::from_utf8_lossy(&st.body).into_owned())),
         (Ok(()), None) => Err("connection closed before headers received".to_string()),
     }
 }

@@ -10306,7 +10306,8 @@ fn header[M: HttpMessage](m: M, name: String) -> String? = m.__self_header(name)
 /// Every value of header name, any case, in wire order; [] if absent.
 fn header_values[M: HttpMessage](m: M, name: String) -> List[String] = m.__self_header_values(name)
 
-/// Every header as (name, value), wire spelling and order, repeats kept.
+/// Every header as (name, value) in order, repeats kept; a fetched response
+/// names each in lowercase and omits the fields the client manages.
 fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 
 /// Body text; a fetched body is decoded as lossy UTF-8.
