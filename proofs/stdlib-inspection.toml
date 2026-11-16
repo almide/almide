@@ -8141,14 +8141,14 @@ name = "heap.all"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
-order = "n; rebind (loop, tail, fold) n"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "heap.any"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
 class = "pure"
 status = "uninspected"
-order = "n; rebind (loop, tail, fold) n"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "heap.clear"
@@ -8169,14 +8169,14 @@ name = "heap.count"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Int"
 class = "pure"
 status = "uninspected"
-order = "n; rebind (loop, tail, fold) n"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "heap.filter"
 sig = "(h: Heap[A], f: (A) -> Bool) -> Heap[A]"
 class = "pure"
 status = "uninspected"
-order = "n; rebind (loop, tail, fold) n"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "heap.from_list"
@@ -8264,7 +8264,7 @@ name = "heap.to_list"
 sig = "(h: Heap[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
-order = "n; rebind (loop, tail, fold) n"
+order = "nlogn; rebind (loop, tail, fold) nlogn"
 
 [[fn]]
 name = "list.binary_search_by"
