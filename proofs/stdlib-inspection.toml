@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "95"
+# uninspected_ceiling = "96"
 
 [[fn]]
 name = "args.option"
@@ -6451,14 +6451,8 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "zlib.inflate"
 sig = "(b: Bytes) -> Result[Bytes, String]"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:9d3a53bb1f15af6c"
-stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 c7170f27e619b5318b48e0dd7371345c7b5ef0ad with XF_SIZE_STEPS=8 XF_REPS=5 (8 sizes, the median of 5 runs per size; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
+status = "uninspected"
 order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 90 of them clean on every leg; unique findings 0"
-complexity = "PASS (coordinator ruling 2026-11-16: amortized n under geometric output-buffer growth — the decoder's output buffer doubles, so bytes moved is a sawtooth at small n and the native instruction doubling ratios rise 1.68/2.22/2.10/2.05/2.02/2.01/2.005 to 2 over n=20000..2560000 (8 sizes, median of 5); wasm fits n; stamped as the declared n; the harness line follows unchanged) FAIL: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..2560000 sizes=8 median-of=5 native k=256..512 6.092e7/1.022e8/2.266e8/4.752e8/9.724e8/1.966e9/3.954e9/7.929e9 fit nlogn (rms 6.6%) moved 8.586e6/1.368e7/4.069e7/9.473e7/2.028e8/4.190e8/8.512e8/1.716e9B fit nlogn (rms 12.8%) wall 0.005/0.010/0.015/0.035/0.066/0.137/0.268/0.536s wasm k=16..32 3.424e7/6.770e7/1.346e8/2.685e8/5.362e8/1.072e9/2.142e9/4.284e9 fit n (rms 0.0%) moved 5.669e5/1.091e6/2.139e6/4.236e6/8.430e6/1.682e7/3.359e7/6.714e7B fit n (rms 0.0%) wall 0.000/0.005/0.010/0.015/0.030/0.066/0.137/0.262s (unexplained: a series fits no class within 3%)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "net.tcp_local_port"
