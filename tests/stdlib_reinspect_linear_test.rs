@@ -28,6 +28,8 @@
 //! - `concat_rows` (#4770), `zip_with` (#4786), `f16` (#4775): the matrix
 //!   self-hosts (and native concat_rows) built their result by appending to
 //!   an accumulator that each step copied; one pass each now.
+//! - `deque` (#4773): `deque.drop`, `drop_end` and `set` round-tripped
+//!   through a List, so a sole owner's rebind copied the whole deque.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -82,6 +84,16 @@ effect fn main() -> Unit = {
       println("${matrix.rows(c)} ${matrix.get(c, n - 1, 1) == some(1.0)}")
     },
     "f16" => println("${bytes.len(matrix.to_bytes_f16_le(matrix.zeros(n, 2)))}"),
+    "deque" => {
+      var d = deque.from_list(list.range(0, n))
+      deque.push_front(d, -1)
+      for k in 0..<(n / 4) {
+        d = deque.drop(d, 1)
+        d = deque.drop_end(d, 1)
+        d = deque.set(d, 0, k)
+      }
+      println("${deque.len(d)} ${deque.first(d) ?? -1}")
+    },
     _ => println("usage"),
   }
 }
@@ -102,6 +114,7 @@ const CASES: &[Case] = &[
     Case { mode: "concat_rows", native_n: 400_000, wasm_n: 10_000, expected: |n| format!("{}\n", 2 * n) },
     Case { mode: "zip_with", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{n} true\n") },
     Case { mode: "f16", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{}\n", 4 * n) },
+    Case { mode: "deque", native_n: 400_000, wasm_n: 40_000, expected: |n| format!("{} {}\n", n + 1 - 2 * (n / 4), n / 4 - 1) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 

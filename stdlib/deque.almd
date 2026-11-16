@@ -118,19 +118,51 @@ fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
-fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
+  // Trimmed on the deque's own lists (#4773): a round trip through a List
+  // copied the whole deque, even for a sole owner's rebind. Past the front
+  // list, what is left of the back is split in two, as pop_front does, so a
+  // run of drops stays O(1) each, amortised.
+  let k = int.max(n, 0)
+  let f = list.len(d.front)
+  if k > f then {
+    let rest = list.drop(d.back, k - f)
+    let keep = (list.len(rest) + 1) / 2
+    { front: list.reverse(list.take(rest, keep)), back: list.drop(rest, keep) }
+  } else { ...d, front: list.drop_end(d.front, k) }
+}
 
 /// Last n elements, as list.take_end.
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
-fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
+  let k = int.max(n, 0)
+  let b = list.len(d.back)
+  if k > b then {
+    // The front list is stored reversed: the deque's last elements are its first.
+    let xs = list.reverse(list.drop(d.front, k - b))
+    let keep = list.len(xs) / 2
+    { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else { ...d, back: list.drop_end(d.back, k) }
+}
 
 /// Indices start..<end, as list.slice.
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
-fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
+  // Slot i of the front list counts from its end (the front is stored
+  // reversed); a negative i lands past it, out of range, as list.set's.
+  let f = list.len(d.front)
+  if i >= f then __set_back(d, i - f, x)
+  else __set_front(d, f - 1 - i, x)
+}
+
+// One list of the pair rewritten, the other moved over as it is.
+fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.set(d.front, j, x) }
+
+fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
