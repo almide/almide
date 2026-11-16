@@ -333,3 +333,21 @@ test "joining and repeating valid pieces stays valid" {
     }
   }
 }
+
+test "ordered containers hand back the caller's valid Strings" {
+  let all = adversary()
+  let d = deque.from_list(all)
+  let s = set.from_list(all)
+  let h = heap.from_list(all)
+  let empty: Heap[String] = heap.new()
+  for x in [deque.max(d), deque.min(d), set.max(s), set.min(s), heap.peek(h)] {
+    match x {
+      some(t) => assert(utf8_ok(t)),
+      none => assert(false, "an ordered container lost its elements"),
+    }
+  }
+  assert(heap.peek(empty) == none)
+  for t in deque.sort(d) + set.sort(s) + heap.to_list(h) {
+    assert(utf8_ok(t))
+  }
+}

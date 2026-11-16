@@ -31,31 +31,40 @@ impl Checker {
             if !reported.insert(format!("{fn_name}:{ty_name}")) {
                 continue;
             }
-            let mut diag = err(
-                format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
-                // Adjacent literals, not one line with the source indentation baked
-                // into it (#2167): the hint used to render with 18-space runs where
-                // its line breaks had been. It must also name the DERIVE — a record
-                // or variant orders, but only when it declares `: Ord` (#1521), and a
-                // reader whose record was rejected for exactly that reason was being
-                // told records are fine.
-                concat!(
-                    "Ordering needs Int, Bool, String or Float, or a tuple/list/Option of those. ",
-                    "A record or variant orders too \u{2014} by field declaration order, by case ",
-                    "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
-                    "Map, Set and function values have no order, and a Float INSIDE a compound has ",
-                    "none either (native's derive cannot order f64; a Matrix and a Value hold Floats) ",
-                    "\u{2014} compare via an explicit key instead.",
-                )
-                .to_string(),
-                format!("call to {}", fn_name),
-            ).with_code("E030");
-            if let Some(s) = span {
-                diag.line = Some(s.line);
-                diag.col = Some(s.col);
-            }
+            let diag = Self::unordered_diag(&ty_name, &fn_name, span);
             self.diagnostics.push(diag);
         }
+    }
+
+    /// E030 for `ty_name`, which has no order, at a call to `fn_name`: the
+    /// one diagnostic every ordering requirement reports — the runtime's
+    /// `Ord`-bounded intrinsics (`list.max`) and a declared `[A: Ord]` bound
+    /// (`deque.max`, `heap.new`, a user's own generic) alike (#4758).
+    pub(crate) fn unordered_diag(ty_name: &str, fn_name: &str, span: Option<crate::ast::Span>) -> Diagnostic {
+        let mut diag = err(
+            format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
+            // Adjacent literals, not one line with the source indentation baked
+            // into it (#2167): the hint used to render with 18-space runs where
+            // its line breaks had been. It must also name the DERIVE — a record
+            // or variant orders, but only when it declares `: Ord` (#1521), and a
+            // reader whose record was rejected for exactly that reason was being
+            // told records are fine.
+            concat!(
+                "Ordering needs Int, Bool, String or Float, or a tuple/list/Option of those. ",
+                "A record or variant orders too \u{2014} by field declaration order, by case ",
+                "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
+                "Map, Set and function values have no order, and a Float INSIDE a compound has ",
+                "none either (native's derive cannot order f64; a Matrix and a Value hold Floats) ",
+                "\u{2014} compare via an explicit key instead.",
+            )
+            .to_string(),
+            format!("call to {}", fn_name),
+        ).with_code("E030");
+        if let Some(s) = span {
+            diag.line = Some(s.line);
+            diag.col = Some(s.col);
+        }
+        diag
     }
 
     /// E029: every `Ty::Named` mentioned in an ANNOTATION must be a declared

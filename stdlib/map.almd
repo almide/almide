@@ -171,7 +171,7 @@ fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = l
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
-fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
+fn sort_by[K, V, B: Ord](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
   map.to_list(m),
   f,
 )
@@ -183,10 +183,10 @@ fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] =
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
+fn min_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
+fn max_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
@@ -433,7 +433,7 @@ fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) ->
   (p) => f(p)!,
 )
 
-fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
+fn __fallible_sort_by[K, V, B: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -443,12 +443,12 @@ fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[I
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
+fn __fallible_min_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
   map.to_list(m),
   (p) => f(p)!,
 )
 
-fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
+fn __fallible_max_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
   map.to_list(m),
   (p) => f(p)!,
 )

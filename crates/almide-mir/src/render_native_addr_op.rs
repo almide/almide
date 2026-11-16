@@ -598,7 +598,7 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
                 crate::native_value_repr::tuple_copy(&var(sv.base), g, f).expect("the arm's guard saw this tuple copy succeed"),
             // `[]` into a field of another list type: that type's empty list.
             Some(NTy::Vec)
-                if st.empty_lists.contains(&sv.base)
+                if st.still_empty_list(&sv.base)
                     && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
             {
                 "Vec::new()".to_string()
