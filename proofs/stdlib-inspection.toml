@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "21"
+# uninspected_ceiling = "18"
 
 [[fn]]
 name = "args.option"
@@ -16552,15 +16552,27 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "unix.select"
 sig = "effect (xs: List[Fd], timeout_ms: Int) -> List[Fd] ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:5c461477a52905b8"
+stamp = "almide 0.70.0 (dev, 55b626dca) at inspect-allclear 55b626dcaf61088a2a7ffa888f5b6c9f22ee8302 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 8925eadd1e0a9567f0e2831074638f7076035dc4 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 154 of them clean on every leg; unique findings 0"
+complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "unix.shm_create"
 sig = "effect (size: Int) -> Fd ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:661e0904a47564ae"
+stamp = "almide 0.70.0 (dev, 5b93aaf74) at inspect-allclear 5b93aaf74fedb53a4c26bd0da982fae46541dbdc (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 2354a5a8436fc8ccdfe8de9bba8966cdab05172f (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n, 8 sizes, median of 5, XF_REPS=11; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 167 of them clean on every leg; unique findings 0"
+complexity = "PASS by owner ruling (owner ruling 2026-11-16: flat native series, wasm jitter of 8-21% with no growth; the harness line follows unchanged) FAIL: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..2560000 sizes=8 median-of=11 native k=64..128 4.468e5/4.476e5/4.475e5/4.505e5/4.508e5/4.466e5/4.490e5/4.493e5 fit 1 (rms 0.3%) moved 2.734e4/2.734e4/2.734e4/2.734e4/2.734e4/2.734e4/2.734e4/2.734e4B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.000/0.000/0.000/0.000/0.000s wasm k=64..128 6.713e5/8.140e5/6.567e5/6.683e5/8.029e5/7.530e5/8.454e5/7.411e5 fit nlogn (rms 7.5%) moved 2.837e4/2.808e4/2.845e4/2.830e4/2.910e4/2.928e4/2.895e4/2.842e4B fit 1 (rms 0.0%) wall 0.005/0.009/0.005/0.005/0.005/0.005/0.005/0.005s (unexplained: a series fits no class within 3%)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "unix.shm_read"
@@ -16605,8 +16617,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "unix.take_fds"
 sig = "effect (sock: Fd) -> List[Fd] ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:29c21847a89f348f"
+stamp = "almide 0.70.0 (dev, 55b626dca) at inspect-allclear 55b626dcaf61088a2a7ffa888f5b6c9f22ee8302 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 8925eadd1e0a9567f0e2831074638f7076035dc4 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 157 of them clean on every leg; unique findings 0"
+complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "unix.write_fds"
