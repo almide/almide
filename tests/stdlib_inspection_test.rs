@@ -156,6 +156,31 @@ fn conformers(proto: &str) -> Vec<(String, bool)> {
         declared(name).map_or_else(|| is_heap_ty(&Ty::Named(almide::intern::sym(name), Default::default())), |(_, t)| is_heap_ty(&t))
     };
     let mut out: Vec<(String, bool)> = Vec::new();
+    // A protocol the checker judges by STRUCTURE (`Ord`, #4758) lists no
+    // conformers in the table: its admitted types are the candidates the
+    // checker's own predicate accepts — every primitive, each table
+    // protocol's conformers, and each bundled type.
+    let env = almide::types::TypeEnv::new();
+    let psym = almide::intern::sym(proto);
+    if env.structural_bound_admits(psym, &Ty::Int).is_some() {
+        let mut candidates: Vec<Ty> = vec![
+            Ty::Int, Ty::Float, Ty::Bool, Ty::String, Ty::Bytes, Ty::Unit,
+            Ty::Int8, Ty::Int16, Ty::Int32, Ty::Int64,
+            Ty::UInt8, Ty::UInt16, Ty::UInt32, Ty::UInt64, Ty::Float32, Ty::Float64,
+        ];
+        for b in almide::canonicalize::protocols::BUILTIN_PROTOCOLS {
+            candidates.extend(b.conformers.iter().cloned());
+        }
+        let mut owners: Vec<&String> = almide_frontend::bundled_sigs::bundled_type_owners().keys().collect();
+        owners.sort();
+        let named = owners.into_iter().filter_map(|n| declared(n).map(|(_, t)| (n.clone(), t)));
+        for (name, t) in candidates.into_iter().map(|t| (t.display(), t)).chain(named) {
+            if env.structural_bound_admits(psym, &t) == Some(true) && !out.iter().any(|(n, _)| *n == name) {
+                out.push((name, is_heap_ty(&t)));
+            }
+        }
+        return out;
+    }
     if let Some(p) = almide::canonicalize::protocols::builtin_protocol(proto) {
         out.extend(p.conformers.iter().map(|t| (t.display(), is_heap_ty(t))));
         out.extend(p.named_conformers.iter().map(|n| (n.to_string(), named_heap(n))));
