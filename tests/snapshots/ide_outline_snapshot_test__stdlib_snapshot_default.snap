@@ -288,7 +288,7 @@ fn int.__trunc(x: Int) -> Int
 fn int.__uint64_exact(x: Int) -> Option[UInt64]
 fn int.__uint64_sat(x: Int) -> UInt64
 fn int.abs(x: Int) -> Int
-fn int.accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String]
+fn int.accumulate_digits(digits: List[Int], radix: Int, start: Int, negative: Bool) -> Result[Int, String]
 fn int.accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String]
 fn int.band(a: Int, b: Int) -> Int
 fn int.bit_length(x: Int) -> Int
