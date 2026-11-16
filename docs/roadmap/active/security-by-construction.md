@@ -156,3 +156,10 @@ Gaps the sweep found inside rows 1–16 (each row's status changes only in its g
 Each row's status changes only in the PR that lands its gate. A row moves to **closed** when the
 mechanism is in CI and its negative control fails as expected; the PR quotes the control. The
 claim at the top is stated in the README and llms.txt only when every row is closed.
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4007 Fence every remaining unsafe in runtime/rs and compiler-emitted preludes into an FFI module (os-ffi / blas-ffi only), each with a Miri or ASan check; steps 1-3 and the ratchet landed
+- #4233 Per-request memory budget for http.serve (refuse before allocating, answer only that request) on native and embedded wasm; design doc first (security row 9, phase 2)

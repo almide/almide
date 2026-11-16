@@ -152,3 +152,9 @@ ledger, oracle registry for any new runtime routines, 3-way harness).
 - [llm-first-language.md](llm-first-language.md) — the MSR lens this design is judged by
 - [cross-target-completeness.md](cross-target-completeness.md) — the gates every phase must pass
 - `docs/specs/type-system.md` — the protocol system spec this extends
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #1460 Fold the stdlib's internal `_str` / `_hshare` twins into protocol-dispatched bodies once stdlib protocols land (scripts/str-twin-baseline.txt holds the count meanwhile)

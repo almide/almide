@@ -37,3 +37,9 @@ Gleam's `code_action.rs` provides examples of import management, pattern
 extraction and annotation insertion; Nickel's `analysis.rs` is a comparison
 for type- and contract-aware editor assistance. These are design references,
 not claims about Almide's current coverage.
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #2640 Generative LSP code actions in MSR order: add missing patterns from the exhaustiveness checker, fill record labels, generate a decoder, convert to pipe

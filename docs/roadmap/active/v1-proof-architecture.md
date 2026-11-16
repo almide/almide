@@ -218,3 +218,10 @@ Almide v1 は、これを言語とツールチェーンのアーキテクチャ�
 モデルの妥当性、抽出・実行環境・ハードウェア等の信頼は残る。
 「検査器一個だけが全信頼基底になる」「全コードが自動的に信頼不要になる」
 という達成済みの主張ではない。
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4010 Shrink the trusted base: a gated differential run against a second, independent wasm engine, and pin every floating toolchain step (items 1, 3, 4 landed)
+- #4014 Mechanize Almide source semantics and prove well-typed programs MemorySafe, with core→MIR semantic preservation (typed core + MemorySafe theorem landed; closures, records, strings, multi-arg calls remain)
