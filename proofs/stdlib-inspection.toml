@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "96"
+# uninspected_ceiling = "93"
 
 [[fn]]
 name = "args.option"
@@ -13118,8 +13118,14 @@ diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s
 name = "deque.product"
 sig = "(d: Deque[A]) -> A"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:c976d453277fad27"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 31e7d49700e7eda166addee5948fbcadc47c4d5e (as 7186701, with a product over n ones of the element type; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 169 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.276e7/8.548e7/1.709e8/3.418e8/6.836e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.035/0.076s wasm k=64..128 5.251e7/1.050e8/2.100e8/4.199e8/8.398e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.010/0.015/0.035/0.071/0.142s (order n ok) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 5.758e7/1.152e8/2.303e8/4.606e8/9.213e8 fit n (rms 0.0%) moved 3.200e5/6.400e5/1.280e6/2.560e6/5.120e6B fit n (rms 0.0%) wall 0.025/0.015/0.020/0.036/0.066s wasm k=1..2 7.762e7/1.552e8/3.105e8/6.210e8/1.242e9 fit n (rms 0.0%) moved 2.398e5/4.795e5/9.594e5/1.920e6/3.840e6B fit n (rms 0.1%) wall 0.001/0.052/0.041/0.081/0.147s (order n ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "deque.sum"
@@ -13476,15 +13482,27 @@ diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s
 name = "set.product"
 sig = "(s: Set[A]) -> A"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:1a7df90a1fb658c9"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 31e7d49700e7eda166addee5948fbcadc47c4d5e (as 7186701, with a product over n ones of the element type; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 166 program(s) call it, 139 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=2500..40000 native k=1024..2048 6.827e7/1.311e8/2.563e8/5.035e8/1.003e9 fit n (rms 0.3%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.015/0.021/0.036/0.051/0.136s wasm k=256..512 2.633e7/5.257e7/1.051e8/2.100e8/4.199e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.018/0.019/0.036/0.052/0.120s (order n ok) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=2500..40000 native k=4..8 2.023e7/4.043e7/8.077e7/1.616e8/3.230e8 fit n (rms 0.0%) moved 7.997e4/1.600e5/3.200e5/6.400e5/1.280e6B fit n (rms 0.0%) wall 0.000/0.024/0.004/0.036/0.104s wasm k=4..8 2.204e7/4.407e7/8.813e7/1.763e8/3.525e8 fit n (rms 0.0%) moved 4.013e4/8.018e4/1.599e5/3.199e5/6.401e5B fit n (rms 0.1%) wall 0.003/0.005/0.014/0.000/0.032s (order n ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "set.sum"
 sig = "(s: Set[A]) -> A"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:0ee548978e673535"
+stamp = "almide 0.70.0 (dev, ddb96f5d3) at develop ddb96f5d3beff308bff818ad5ed3a2a1d34e1158 (the full re-inspection of the uninspected rows; orders declared before measurement in 6fde80c07); xtarget-fuzz inspect from inspect-catalogue-238 31e7d49700e7eda166addee5948fbcadc47c4d5e (as 7186701, with a product over n ones of the element type; built against the same stdlib) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String; GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-southeast1-b / asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: no crate code changed by this inspection"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 167 program(s) call it, 140 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=2500..40000 native k=1024..2048 6.826e7/1.311e8/2.563e8/5.035e8/1.003e9 fit n (rms 0.3%) moved 0.000e0/0.000e0/1.000e0/0.000e0/1.000e0B fit 1 (rms 0.0%) wall 0.010/0.010/0.031/0.051/0.092s wasm k=256..512 2.633e7/5.257e7/1.051e8/2.100e8/4.199e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.066s (order n ok) || [vars=BigInt] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=2500..40000 native k=16..32 4.129e7/8.182e7/1.638e8/3.275e8/6.551e8 fit n (rms 0.3%) moved 3.199e5/6.399e5/1.280e6/2.560e6/5.120e6B fit n (rms 0.0%) wall 0.005/0.005/0.020/0.016/0.066s wasm k=4..8 2.204e7/4.407e7/8.813e7/1.763e8/3.525e8 fit n (rms 0.0%) moved 1.203e5/2.400e5/4.799e5/9.602e5/1.920e6B fit n (rms 0.1%) wall 0.005/0.010/0.010/0.010/0.000s (order n ok)"
+alloc = "PASS: [vars=Int] call live=0 || [vars=BigInt] call live=0"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=BigInt] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "uint16.from"
