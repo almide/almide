@@ -29860,10 +29860,26 @@ fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 @implements("bytes.__join")
 fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
   [] => bytes.zeros(0),
-  [first, ..rest] => rest |> list.fold(
-    first,
-    (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b),
-  ),
+  _ => {
+
+
+    let k = bytes.len(sep)
+    let total = list.fold(xs, 0 - k, (t, b) => t + k + bytes.len(b))
+    var out = bytes.zeros(total)
+    var at = 0
+    var first = true
+    for b in xs {
+      if first then {
+        first = false
+      } else {
+        bytes.copy_from(out, sep, at, 0, k)
+        at = at + k
+      }
+      bytes.copy_from(out, b, at, 0, bytes.len(b))
+      at = at + bytes.len(b)
+    }
+    out
+  },
 }
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"

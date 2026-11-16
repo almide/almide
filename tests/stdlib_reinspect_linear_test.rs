@@ -22,6 +22,9 @@
 //! - `bigdiv` (#4783): dividing by a one-limb BigInt prepended each quotient
 //!   limb, copying the quotient per limb (`bigint.floor_div` / `modulo` and
 //!   every division that takes the single-limb path).
+//! - `bytes_join` (#4785): wasm links the self-hosted `bytes.__join` for a
+//!   `list.join` over `List[Bytes]`; it folded `__concat`, copying the
+//!   accumulator per element. It now sizes the result once and fills it.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -61,6 +64,11 @@ effect fn main() -> Unit = {
       let d = bigint.from(1234567)
       println("${bigint.bit_length(bigint.floor_div(x, d))} ${bigint.to_string(bigint.modulo(x, d))}")
     },
+    "bytes_join" => {
+      let parts = list.range(0, n) |> list.map((i) => bytes.from_list([i % 256, 7]))
+      let j = list.join(parts, bytes.from_list([0]))
+      println("${bytes.len(j)} ${bytes.get(j, bytes.len(j) - 1) ?? -1}")
+    },
     _ => println("usage"),
   }
 }
@@ -77,6 +85,7 @@ struct Case {
 const CASES: &[Case] = &[
     Case { mode: "parse_radix", native_n: 2_000_000, wasm_n: 100_000, expected: |_| "127 127\n".to_string() },
     Case { mode: "heap", native_n: 200_000, wasm_n: 5_000, expected: heap_expected },
+    Case { mode: "bytes_join", native_n: 2_000_000, wasm_n: 100_000, expected: |n| format!("{} 7\n", 3 * n - 1) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 
