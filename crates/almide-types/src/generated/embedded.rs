@@ -4970,7 +4970,7 @@ fn pop[A](mut d: Deque[A]) -> A? = {
     let keep = list.len(xs) / 2
     d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
   } else ()
-  list.pop(d.back)
+  __pop_last(d.back)
 }
 
 /// Removes and yields the first element; none when empty.
@@ -4979,8 +4979,13 @@ fn pop_front[A](mut d: Deque[A]) -> A? = {
     let keep = (list.len(d.back) + 1) / 2
     d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
   } else ()
-  list.pop(d.front)
+  __pop_last(d.front)
 }
+
+
+
+
+fn __pop_last[A](mut xs: List[A]) -> A? = list.pop(xs)
 
 /// The first element, or none when empty.
 fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
@@ -34391,8 +34396,8 @@ fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> S
   let prog = __rx_program(p0, pe)
   let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
-  let acc = ""
-  __rx_replace_go(p0, pe, t0, m, rep, acc)
+  let acc: List[String] = []
+  list.join(__rx_replace_go(p0, pe, t0, m, rep, acc), "")
 }
 
 fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
@@ -34457,29 +34462,38 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
 
 
 
-fn __rx_replace_go(p: Int, pe: Int, pos: Int, m: Int, rep: String, acc: String) -> String = {
-  let te = __rx_te(m)
-  if pos > te then acc
-  else {
-    let st = __rx_find_start(p, pe, pos, m)
-    if st < 0 then acc + __rx_sub(pos, te)
-    else {
-      let en = __rx_end(m)
-      let acc2 = acc + __rx_sub(pos, st) + rep
-      if en > st then __rx_replace_go(p, pe, en, m, rep, acc2)
-      else {
-        if en < te then __rx_replace_go(
-          p,
-          pe,
-          en + __rx_w(en),
-          m,
-          rep,
-          acc2 + __rx_sub(en, en + __rx_w(en)),
-        )
-        else acc2
+
+
+
+fn __rx_replace_go(p: Int, pe: Int, pos0: Int, m: Int, rep: String, acc: List[String]) -> List[String] = {
+  var parts = acc
+  var pos = pos0
+  var going = true
+  while going {
+    let te = __rx_te(m)
+    if pos > te then {
+      going = false
+    } else {
+      let st = __rx_find_start(p, pe, pos, m)
+      if st < 0 then {
+        list.push(parts, __rx_sub(pos, te))
+        going = false
+      } else {
+        let en = __rx_end(m)
+        list.push(parts, __rx_sub(pos, st))
+        list.push(parts, rep)
+        if en > st then {
+          pos = en
+        } else if en < te then {
+          list.push(parts, __rx_sub(en, en + __rx_w(en)))
+          pos = en + __rx_w(en)
+        } else {
+          going = false
+        }
       }
     }
   }
+  parts
 }
 
 fn regex_replace(pat: String, s: String, rep: String) -> String = {
@@ -34491,8 +34505,8 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let te = t0 + prim.load32(sh + 4)
   let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
-  let acc = ""
-  let r = __rx_replace_go(p0, pe, t0, m, rep, acc)
+  let acc: List[String] = []
+  let r = list.join(__rx_replace_go(p0, pe, t0, m, rep, acc), "")
   if __rx_gave_up(m) then __rx_vm_replace(p0, pe, t0, te, m, rep)
   else r
 }

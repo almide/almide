@@ -778,12 +778,12 @@
 11	5	168	11	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 18	13	174	18	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 1926	1889	135496	1926	spec/wasm_cross/regex_captures_accumulator_release.almd
-158	130	9819120	158	spec/wasm_cross/regex_counted_repetition.almd
-1048	982	329694	1048	spec/wasm_cross/regex_engine.almd
-2194	1950	577291	2194	spec/wasm_cross/regex_fuzz_batch.almd
+159	131	9819134	159	spec/wasm_cross/regex_counted_repetition.almd
+1020	954	330035	1020	spec/wasm_cross/regex_engine.almd
+2111	1868	577024	2111	spec/wasm_cross/regex_fuzz_batch.almd
 156	140	6137	142	spec/wasm_cross/regex_invalid_pattern.almd
-150	116	310094	150	spec/wasm_cross/regex_linear_time.almd
-3416	3250	2216985	3416	spec/wasm_cross/regex_many_patterns.almd
+154	120	310094	154	spec/wasm_cross/regex_linear_time.almd
+3446	3283	2217033	3446	spec/wasm_cross/regex_many_patterns.almd
 122	94	119851390	122	spec/wasm_cross/regex_repetition_depth.almd
 1700116	819090	16841635	1700116	spec/wasm_cross/regex_scan_linear.almd
 31	18	5434	20	spec/wasm_cross/regex_size_cap.almd
