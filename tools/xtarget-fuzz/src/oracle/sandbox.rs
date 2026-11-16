@@ -173,7 +173,18 @@ impl World {
     /// [`Self::new`], with the stdin a probe's `// inspect-stdin: L N` header
     /// asks for: N lines of L `a`s each (the inspection's stdin readers).
     pub fn for_program(scratch: &Path, src: &str) -> Result<World, String> {
-        let w = World::new(scratch)?;
+        World::stdin_for(World::new(scratch)?, src)
+    }
+
+    /// [`Self::for_program`] at the fixed path `scratch/<name>`: runs that
+    /// compare outputs (the diamond's two legs) see one sandbox path, and
+    /// `env.vars()` lists it (`TMPDIR`, `XF_SANDBOX`).
+    pub fn for_program_named(scratch: &Path, src: &str, name: &str) -> Result<World, String> {
+        let (dir, stdin) = create_named(scratch, name).map_err(|e| format!("sandbox: {e}"))?;
+        World::stdin_for(World { dir, stdin }, src)
+    }
+
+    fn stdin_for(w: World, src: &str) -> Result<World, String> {
         let spec = src
             .lines()
             .next()

@@ -943,9 +943,10 @@ fn run_diamond(
     entry: &Path,
     wasm: bool,
 ) -> std::io::Result<std::process::Output> {
-    let world = World::for_program(
+    let world = World::for_program_named(
         &ctx.dir,
         &std::fs::read_to_string(entry).unwrap_or_default(),
+        "diamond-world",
     )
     .map_err(std::io::Error::other)?;
     let mut c = Command::new(&ctx.almide);

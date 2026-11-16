@@ -230,6 +230,11 @@ impl Toolchain {
                 env.push((k.into(), v));
             }
         }
+        // What `almide run` exports to the program it launches, on either
+        // target (`src/cli/run.rs` `launcher_env`): the embedded leg's host
+        // adds it, so the bare native binary and a stock runtime see it too.
+        env.push(("RUST_MIN_STACK".into(), "8388608".into()));
+        env.push(("ALMIDE_CWD".into(), absolute(dir).to_string_lossy().into_owned()));
         env
     }
 }
