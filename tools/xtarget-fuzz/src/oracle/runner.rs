@@ -322,6 +322,11 @@ impl Toolchain {
             // `TMPDIR` names the host path on every leg: the guest finds it
             // preopened at that same path.
             cmd.arg(format!("--dir={}::{}", tmp.display(), tmp.display()));
+            // `ALMIDE_CWD` (the launcher env every leg sees) names the tree's
+            // host path, which the guest resolves relative paths against: it
+            // finds the tree preopened at that same path too.
+            let abs = absolute(dir);
+            cmd.arg(format!("--dir={}::{}", abs.display(), abs.display()));
             for (k, v) in env {
                 cmd.arg(format!("--env={k}={v}"));
             }
