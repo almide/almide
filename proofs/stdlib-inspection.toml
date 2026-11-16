@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "25"
+# uninspected_ceiling = "21"
 
 [[fn]]
 name = "args.option"
@@ -1889,12 +1889,12 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "http.get_response"
 sig = "effect (url: String) -> HttpResponse ! String"
 class = "effect"
-status = "uninspected"
-impl = "fnv1a:6cf2b202920c02b4"
-stamp = "almide 0.68.0 (dev) at insp-0680b 07588809b (insp-0680 plus the fixed +qNaN a stdlib function manufactures #3846, the canonical allocator's O(1) large-block release #3849, the http client's retried interrupted read #3857, the table-driven zlib.crc32 #3848, and the counted judge's k bounded by the projected wall of its longest run #3859); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-20; codopsy: every workspace crate A at the same sha"
+status = "inspected"
+impl = "fnv1a:c0b19bf88201763f"
+stamp = "almide 0.70.0 (dev, 8697d20e9) at inspect-allclear 8697d20e993687a586ed35858674edba84f47b15 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 aaf3032577f068a75b522924888012c420dc4288 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n"
-parity = "PASS: seed 1792429423, 200 programs; 200 program(s) call it, 162 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 2.488e8/4.846e8/9.558e8/1.898e9/3.784e9 fit n (rms 0.0%) moved 1.507e7/2.792e7/5.362e7/1.050e8/2.078e8B fit n (rms 0.0%) wall 0.040/0.061/0.127/0.218/0.435s wasm k=256..512 1.968e8/3.400e8/6.295e8/1.204e9/2.353e9 fit n (rms 0.1%) moved 4.032e7/7.614e7/1.479e8/2.914e8/5.782e8B fit n (rms 0.0%) wall 0.071/0.097/0.162/0.273/0.511s (order n ok)"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 167 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 6.287e7/1.218e8/2.398e8/4.753e8/9.467e8 fit n (rms 0.0%) moved 3.778e6/6.991e6/1.342e7/2.627e7/5.197e7B fit n (rms 0.0%) wall 0.010/0.020/0.025/0.051/0.076s wasm k=64..128 4.184e7/6.888e7/1.213e8/2.246e8/4.321e8 fit n (rms 0.9%) moved 7.577e6/1.398e7/2.678e7/5.238e7/1.036e8B fit n (rms 0.0%) wall 0.015/0.020/0.030/0.056/0.107s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
@@ -2111,9 +2111,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "http.wait"
 sig = "effect (c: HttpCall) -> HttpResponse ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:da97179ee8bca0cf"
+stamp = "almide 0.70.0 (dev, 8697d20e9) at inspect-allclear 8697d20e993687a586ed35858674edba84f47b15 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 aaf3032577f068a75b522924888012c420dc4288 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
-
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 146 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.871e7/9.732e7/1.947e8/3.892e8/7.784e8 fit n (rms 0.0%) moved 6.671e5/1.312e6/2.617e6/5.229e6/1.044e7B fit n (rms 0.3%) wall 0.005/0.010/0.010/0.025/0.040s wasm k=64..128 7.826e7/1.564e8/3.126e8/6.253e8/1.251e9 fit n (rms 0.1%) moved 5.073e6/1.014e7/2.028e7/4.055e7/8.112e7B fit n (rms 0.0%) wall 0.010/0.020/0.035/0.060/0.132s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "http.with_headers"
@@ -16091,8 +16096,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "http.send"
 sig = "effect (req: HttpRequest) -> HttpResponse ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:987065950046a6e7"
+stamp = "almide 0.70.0 (dev, 8697d20e9) at inspect-allclear 8697d20e993687a586ed35858674edba84f47b15 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 aaf3032577f068a75b522924888012c420dc4288 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 144 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 2.559e7/4.671e7/8.885e7/1.732e8/3.417e8 fit n (rms 0.1%) moved 5.709e6/1.083e7/2.107e7/4.155e7/8.251e7B fit n (rms 0.0%) wall 0.010/0.005/0.015/0.030/0.045s wasm k=16..32 2.982e7/5.537e7/1.063e8/2.078e8/4.108e8 fit n (rms 0.2%) moved 3.499e6/6.699e6/1.310e7/2.590e7/5.150e7B fit n (rms 0.0%) wall 0.005/0.015/0.020/0.035/0.061s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "http.set_body"
@@ -16111,8 +16122,14 @@ diamond = "PASS: [vars=HttpRequest] direct = via left = via right on both legs (
 name = "http.set_body_bytes"
 sig = "(m: M, body: Bytes) -> M"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:2e5f920958249eff"
+stamp = "almide 0.70.0 (dev, b10321965) at inspect-allclear b1032196570552433674cb293690db6a90fbc827 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 aaf3032577f068a75b522924888012c420dc4288 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n, XF_REPS=11; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-south1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-16; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 168 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=HttpRequest] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=1..2 3.300e8/6.603e8/1.321e9/2.643e9/5.287e9 fit n (rms 0.1%) moved 2.600e6/5.200e6/1.040e7/2.080e7/4.160e7B fit n (rms 0.0%) wall 0.025/0.051/0.101/0.202/0.410s wasm k=1..2 3.068e8/6.136e8/1.227e9/2.455e9/4.909e9 fit n (rms 0.0%) moved 1.391e6/2.782e6/5.564e6/1.113e7/2.226e7B fit n (rms 0.0%) wall 0.030/0.056/0.116/0.228/0.481s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 4.239e7/4.239e7/4.239e7/4.239e7/4.238e7 fit 1 (rms 0.0%) moved 7.111e6/7.111e6/7.111e6/7.111e6/7.111e6B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.010s wasm k=16384..32768 3.936e7/3.937e7/3.937e7/4.020e7/4.020e7 fit 1 (rms 1.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.000/0.006s (order 1 ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 4.240e7/4.240e7/4.240e7/4.240e7/4.240e7 fit 1 (rms 0.0%) moved 7.111e6/7.111e6/7.111e6/7.111e6/7.111e6B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.000s wasm k=16384..32768 3.942e7/3.942e7/3.942e7/4.026e7/4.026e7 fit 1 (rms 1.0%) moved 0.000e0/1.600e2/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.001/0.005s (order 1 ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 4.239e7/4.239e7/4.239e7/4.239e7/4.239e7 fit 1 (rms 0.0%) moved 7.111e6/7.111e6/7.111e6/7.111e6/7.111e6B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=16384..32768 3.942e7/3.942e7/3.942e7/4.026e7/4.026e7 fit 1 (rms 1.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/8.000e1B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.000/0.000s (order 1 ok) || [vars=HttpResponse] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=1..2 5.427e7/1.077e8/2.145e8/4.281e8/8.553e8 fit n (rms 0.0%) moved 6.605e5/1.320e6/2.640e6/5.280e6/1.056e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.045/0.127s wasm k=4..8 7.400e7/1.478e8/2.955e8/5.909e8/1.182e9 fit n (rms 0.0%) moved 1.280e6/2.561e6/5.120e6/1.024e7/2.048e7B fit n (rms 0.0%) wall 0.005/0.015/0.030/0.061/0.127s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 3.366e7/3.355e7/3.359e7/3.466e7/3.464e7 fit 1 (rms 1.5%) moved 4.915e5/4.915e5/4.915e5/4.915e5/4.915e5B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.020s wasm k=1024..2048 3.646e7/3.646e7/3.646e7/3.646e7/3.646e7 fit 1 (rms 0.0%) moved 6.539e4/6.536e4/6.546e4/6.544e4/6.558e4B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s (order 1 ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 3.362e7/3.355e7/3.382e7/3.331e7/3.335e7 fit 1 (rms 0.6%) moved 4.915e5/4.915e5/4.915e5/4.915e5/4.915e5B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.010s wasm k=1024..2048 3.647e7/3.647e7/3.647e7/3.647e7/3.647e7 fit 1 (rms 0.0%) moved 6.539e4/6.568e4/6.558e4/6.562e4/6.544e4B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.004/0.005s (order 1 ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 sizes=5 median-of=11 native k=16384..32768 3.370e7/3.316e7/3.340e7/3.403e7/3.454e7 fit 1 (rms 1.4%) moved 4.915e5/4.915e5/4.915e5/4.915e5/4.915e5B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s wasm k=1024..2048 3.647e7/3.647e7/3.647e7/3.647e7/3.647e7 fit 1 (rms 0.0%) moved 6.563e4/6.541e4/6.549e4/6.552e4/6.544e4B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.000s (order 1 ok)"
+alloc = "PASS: [vars=HttpRequest] call live=0, loop live=0, tail live=0, fold live=0 || [vars=HttpResponse] call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: [vars=HttpRequest] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpResponse] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "http.set_status"
