@@ -287,7 +287,7 @@ pub(super) const ALT_RECIPES: &[(&str, Recipe)] = &[
     ("Fd", Recipe { func: "io.close", size: "", args: &[("h", "{ let _step = {i}\n  unix.shm_create(8)! }")] }),
     // A connection of its own per step to the sized Unix source, which
     // answers the n it is asked for and closes: the read ends where it does.
-    ("Fd", Recipe { func: "io.read_to_end", size: "h", args: &[("h", "{ let _step = {i}\n  let s = unix.connect(env.get(\"XF_UNIX_SOURCE\") ?? \"\")!\n  io.write(s, bytes.from_string(\"{n}\\n\"))!\n  s }")] }),
+    ("Fd", Recipe { func: "io.read_to_end", size: "h", args: &[("h", "{ let _step = {i}\n  let s = unix.connect(env.get(\"XF_UNIX_SOURCE\") ?? \"\")!\n  io.write(s, bytes.from_string(int.to_string({n}) + \"\\n\"))!\n  s }")] }),
     ("Fd", Recipe { func: "io.read_exact", size: "n", args: &[("h", "{ let _step = {i}\n  let s = unix.connect(env.get(\"XF_UNIX_SOURCE\") ?? \"\")!\n  io.write(s, bytes.from_string(int.to_string(2 * {n} + 16) + \"\\n\"))!\n  s }"), ("n", "{n}")] }),
 ];
 
