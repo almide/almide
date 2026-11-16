@@ -30,6 +30,8 @@
 //!   an accumulator that each step copied; one pass each now.
 //! - `deque` (#4773): `deque.drop`, `drop_end` and `set` round-tripped
 //!   through a List, so a sole owner's rebind copied the whole deque.
+//! - `deque_pop` (#4778): a value-returning `list.pop` straight on a field of
+//!   the `mut` deque copied that list per pop on wasm.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -94,6 +96,14 @@ effect fn main() -> Unit = {
       }
       println("${deque.len(d)} ${deque.first(d) ?? -1}")
     },
+    "deque_pop" => {
+      var d = deque.from_list(list.range(0, n))
+      var acc = 0
+      for _ in 0..<(n / 4) {
+        acc = acc + (deque.pop(d) ?? 0) - (deque.pop_front(d) ?? 0)
+      }
+      println("${acc} ${deque.len(d)}")
+    },
     _ => println("usage"),
   }
 }
@@ -115,6 +125,7 @@ const CASES: &[Case] = &[
     Case { mode: "zip_with", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{n} true\n") },
     Case { mode: "f16", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{}\n", 4 * n) },
     Case { mode: "deque", native_n: 400_000, wasm_n: 40_000, expected: |n| format!("{} {}\n", n + 1 - 2 * (n / 4), n / 4 - 1) },
+    Case { mode: "deque_pop", native_n: 2_000_000, wasm_n: 100_000, expected: |n| format!("{} {}\n", (n / 4) * (n - n / 4), n - 2 * (n / 4)) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 

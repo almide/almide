@@ -48,7 +48,7 @@ fn pop[A](mut d: Deque[A]) -> A? = {
     let keep = list.len(xs) / 2
     d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
   } else ()
-  list.pop(d.back)
+  __pop_last(d.back)
 }
 
 /// Removes and yields the first element; none when empty.
@@ -57,8 +57,13 @@ fn pop_front[A](mut d: Deque[A]) -> A? = {
     let keep = (list.len(d.back) + 1) / 2
     d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
   } else ()
-  list.pop(d.front)
+  __pop_last(d.front)
 }
+
+// list.pop through a `mut` list param: called on the deque's field place, it
+// takes the list itself. A value-returning list.pop straight on a field of the
+// `mut` deque copied the list per pop on wasm (#4778).
+fn __pop_last[A](mut xs: List[A]) -> A? = list.pop(xs)
 
 /// The first element, or none when empty.
 fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
