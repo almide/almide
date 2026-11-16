@@ -9902,11 +9902,13 @@ fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
 /// The elements where f holds, in a heap of the same order; equal elements
 /// keep the order they went in.
 fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
-  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
-  for x in to_list(h) {
-    if f(x) then push(out, x) else ()
-  }
-  out
+
+
+
+
+  let kept = list.filter(to_list(h), f)
+  let n = list.len(kept)
+  { slots: list.zip(kept, list.range(0, n)), next: n, cmp: h.cmp }
 }
 "#;
 pub const SRC_HEX: &str = r#"

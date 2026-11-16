@@ -213,9 +213,11 @@ fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
 /// The elements where f holds, in a heap of the same order; equal elements
 /// keep the order they went in.
 fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
-  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
-  for x in to_list(h) {
-    if f(x) then push(out, x) else ()
-  }
-  out
+  // The kept elements come out in pop order, which is ascending, and an
+  // ascending list is already a heap: they are numbered in that order, so
+  // equal elements keep it. (Pushing them one by one inside the callback's
+  // branch copied the heap per push on the native render.)
+  let kept = list.filter(to_list(h), f)
+  let n = list.len(kept)
+  { slots: list.zip(kept, list.range(0, n)), next: n, cmp: h.cmp }
 }
