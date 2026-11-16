@@ -31,7 +31,7 @@
 5932	spec/wasm_cross/bang_in_record_literal_field.almd
 5227	spec/wasm_cross/base64_decode_canonical.almd
 3364	spec/wasm_cross/base64_encode.almd
-15770	spec/wasm_cross/bigint_text_and_pow_limits.almd
+15900	spec/wasm_cross/bigint_text_and_pow_limits.almd
 5467	spec/wasm_cross/binary_operators.almd
 4213	spec/wasm_cross/binary_search_duplicate_keys.almd
 890	spec/wasm_cross/binding_stmts.almd
@@ -158,7 +158,7 @@
 4509	spec/wasm_cross/early_return_control_flow.almd
 4251	spec/wasm_cross/edge_closure_matrix.almd
 12940	spec/wasm_cross/edge_float_formatting.almd
-8562	spec/wasm_cross/edge_int_boundaries.almd
+8719	spec/wasm_cross/edge_int_boundaries.almd
 8221	spec/wasm_cross/edge_map_order.almd
 30346	spec/wasm_cross/edge_string_unicode.almd
 2980	spec/wasm_cross/effect_assign_unwrap.almd
@@ -366,7 +366,7 @@
 12558	spec/wasm_cross/heap_result_if_bind.almd
 2883	spec/wasm_cross/heap_result_if_bind_chain.almd
 12029	spec/wasm_cross/heap_result_if_eq_cond.almd
-10791	spec/wasm_cross/heap_result_if_match_arm_frame.almd
+10948	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 3853	spec/wasm_cross/heap_result_if_option_aggregate.almd
 2128	spec/wasm_cross/heap_result_if_record_arm.almd
 5997	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
@@ -403,7 +403,7 @@
 6250	spec/wasm_cross/int_div_pow2_nonneg_induction.almd
 3339	spec/wasm_cross/int_div_pow2_signed_induction.almd
 5829	spec/wasm_cross/int_float_ops.almd
-7122	spec/wasm_cross/int_from_hex.almd
+7267	spec/wasm_cross/int_from_hex.almd
 804	spec/wasm_cross/int_mod_by_zero.almd
 823	spec/wasm_cross/int_mod_overflow.almd
 4334	spec/wasm_cross/int_parse_overflow.almd
@@ -563,7 +563,7 @@
 15649	spec/wasm_cross/math_log_gamma_negative.almd
 9132	spec/wasm_cross/math_pow.almd
 20246	spec/wasm_cross/math_transcendental_bits.almd
-22719	spec/wasm_cross/matrix_composition_family.almd
+24202	spec/wasm_cross/matrix_composition_family.almd
 3383	spec/wasm_cross/matrix_dims_guard.almd
 2562	spec/wasm_cross/matrix_dims_guard_overflow.almd
 2657	spec/wasm_cross/matrix_dims_guard_product.almd
@@ -577,7 +577,7 @@
 10880	spec/wasm_cross/matrix_mul_no_fma.almd
 8627	spec/wasm_cross/matrix_neg_signed_zero.almd
 11195	spec/wasm_cross/matrix_pow_libm.almd
-16944	spec/wasm_cross/matrix_producers_uniform_rows.almd
+18428	spec/wasm_cross/matrix_producers_uniform_rows.almd
 9211	spec/wasm_cross/matrix_product_family.almd
 8410	spec/wasm_cross/matrix_select_rows.almd
 3387	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
@@ -659,7 +659,7 @@
 5025	spec/wasm_cross/nested_list_list_string.almd
 4540	spec/wasm_cross/nested_list_option_result.almd
 6274	spec/wasm_cross/nested_map_list_values.almd
-7483	spec/wasm_cross/nested_match_heap_arm.almd
+7640	spec/wasm_cross/nested_match_heap_arm.almd
 3123	spec/wasm_cross/nested_match_two_scrutinees.almd
 2307	spec/wasm_cross/nested_payload_guard.almd
 11532	spec/wasm_cross/nested_place_assign.almd
@@ -687,7 +687,7 @@
 2066	spec/wasm_cross/option_none_unwrap_term.almd
 3202	spec/wasm_cross/option_payload_recursive_variant.almd
 2611	spec/wasm_cross/option_result.almd
-8787	spec/wasm_cross/option_result_ctors.almd
+9296	spec/wasm_cross/option_result_ctors.almd
 4532	spec/wasm_cross/option_tuple_payload_matrix.almd
 9060	spec/wasm_cross/option_unwrap_or_else_heap.almd
 8339	spec/wasm_cross/optional_chain_heap_field.almd
@@ -778,12 +778,12 @@
 2932	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 4554	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 30131	spec/wasm_cross/regex_captures_accumulator_release.almd
-35006	spec/wasm_cross/regex_counted_repetition.almd
-43153	spec/wasm_cross/regex_engine.almd
-55427	spec/wasm_cross/regex_fuzz_batch.almd
+34789	spec/wasm_cross/regex_counted_repetition.almd
+43225	spec/wasm_cross/regex_engine.almd
+55499	spec/wasm_cross/regex_fuzz_batch.almd
 29585	spec/wasm_cross/regex_invalid_pattern.almd
-34600	spec/wasm_cross/regex_linear_time.almd
-34287	spec/wasm_cross/regex_many_patterns.almd
+34381	spec/wasm_cross/regex_linear_time.almd
+34070	spec/wasm_cross/regex_many_patterns.almd
 30754	spec/wasm_cross/regex_repetition_depth.almd
 34058	spec/wasm_cross/regex_scan_linear.almd
 28735	spec/wasm_cross/regex_size_cap.almd
@@ -1052,7 +1052,7 @@
 21809	spec/wasm_cross/zlib_output_bound.almd
 27371	spec/wasm_cross/zlib_selfhost.almd
 9819	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
-13739	spec/wasm_fail/bigint_to_string_limit_aborts.almd
+13869	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 3422	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3591	spec/wasm_fail/int_parse_err_propagates.almd
 3336	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
