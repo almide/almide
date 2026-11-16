@@ -362,7 +362,7 @@ fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group
 fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
+fn sort_by[B: Ord](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
 
 // The stable merge, pushing into one output (#4196): the earlier merge
 // appended `acc + [y]` per step, a full copy on wasm, which made the sort
@@ -418,10 +418,10 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,

@@ -102,6 +102,8 @@ pub(crate) enum ListElem {
     FloatRows,
     /// `List[Matrix]` — a slice of the runtime `AlmideMatrix`.
     Matrix,
+    /// `List[Bytes]` — a slice of the runtime's `Vec<u8>` blocks.
+    Bytes,
     /// A type parameter of the declaration: any list the render carries.
     Any,
 }
@@ -401,10 +403,11 @@ pub(crate) fn by_value_only_through_twin(call: &str, k: usize) -> bool {
 
 /// A declared param the runtime body itself takes by value: an owned
 /// container, or an element it stores (`set.insert(s, x)`'s `x`). A map's
-/// key is not: its set has a twin that borrows a `String` key.
+/// key is not: its set has a twin that borrows a `String` key. A runtime type
+/// the body takes by value (`http.set_status`'s response, #4771) is one too.
 fn plain_by_value(p: Option<&FloorParam>) -> bool {
     matches!(p, Some(FloorParam::Map(false) | FloorParam::Set(false) | FloorParam::Value(false) | FloorParam::Matrix(false) | FloorParam::ListOwned(_)
-        | FloorParam::Elem(false) | FloorParam::SetElem(false)))
+        | FloorParam::Elem(false) | FloorParam::SetElem(false) | FloorParam::Runtime(_, false)))
 }
 
 /// The declared return of the self-hosted body registered under `call`.
@@ -703,6 +706,7 @@ fn floor_list_param(elem: &TypeExpr, type_params: &BTreeSet<String>) -> Option<F
         "Float" => ListElem::Float,
         "Bool" => ListElem::Bool,
         "Matrix" => ListElem::Matrix,
+        "Bytes" => ListElem::Bytes,
         "String" => ListElem::Str,
         n if n == VALUE_TYPE => ListElem::Value,
         a if type_params.contains(a) => ListElem::Any,

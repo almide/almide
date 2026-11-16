@@ -1070,7 +1070,7 @@ fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(byt
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 
 /// The bytes ordered by f's key; equal keys keep their order.
-fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
+fn sort_by[B: Ord](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
 // The stable merge, pushing into one output (#4196): the earlier merge
 // appended `acc + [y]` per step, a full copy on wasm, which made the sort
@@ -1123,10 +1123,10 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,

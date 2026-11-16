@@ -1976,7 +1976,7 @@ fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(byt
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 
 /// The bytes ordered by f's key; equal keys keep their order.
-fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
+fn sort_by[B: Ord](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
 
 
@@ -2029,10 +2029,10 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,
@@ -5091,25 +5091,25 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
-fn sort[A](d: Deque[A]) -> List[A] = list.sort(to_list(d))
+fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
 
 /// Elements sorted by key f(x), stable; f runs once per element.
-fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
+fn sort_by[A, B: Ord](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
 
 /// Elements sorted by cmp, stable: negative puts a first.
 fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(to_list(d), cmp)
 
 /// Least element, or none when empty.
-fn min[A](d: Deque[A]) -> A? = list.min(to_list(d))
+fn min[A: Ord](d: Deque[A]) -> A? = list.min(to_list(d))
 
 /// Greatest element, or none when empty.
-fn max[A](d: Deque[A]) -> A? = list.max(to_list(d))
+fn max[A: Ord](d: Deque[A]) -> A? = list.max(to_list(d))
 
 /// Element with the least key f(x); the nearest the front on ties.
-fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
+fn min_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
 
 /// Element with the greatest key f(x); the nearest the front on ties.
-fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
+fn max_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
 
 /// Least element by cmp; the nearest the front on ties.
 fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(to_list(d), cmp)
@@ -9677,10 +9677,10 @@ fn __natural[A](a: A, b: A) -> Int =
 
 
 /// An empty heap; the least element comes out first.
-fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+fn new[A: Ord]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
 
 /// An empty heap ordered by key f(x); the least key comes out first.
-fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+fn new_by[A, K: Ord](f: (A) -> K) -> Heap[A] = {
   slots: [],
   next: 0,
   cmp: (a, b) => __natural(f(a), f(b)),
@@ -9690,7 +9690,7 @@ fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
 fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
-fn from_list[A](xs: List[A]) -> Heap[A] = {
+fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
   var h: Heap[A] = new()
   for x in xs {
     push(h, x)
@@ -15560,10 +15560,10 @@ fn __key_order[K](a: K, b: K) -> Int =
   }
 
 /// Element with the least key f(x); the first on ties; f runs once per x.
-fn min_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
+fn min_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
 
 /// Element with the greatest key f(x); the first on ties; f runs once per x.
-fn max_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
+fn max_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
 
 
 
@@ -16176,7 +16176,7 @@ fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[L
 
 
 
-fn __fallible_sort_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
+fn __fallible_sort_by[A, B: Ord, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -16221,7 +16221,7 @@ fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[
 
 
 
-fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_min_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -16229,7 +16229,7 @@ fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?,
   err(e) => err(e),
 }
 
-fn __fallible_max_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_max_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -21355,7 +21355,7 @@ fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = l
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
-fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
+fn sort_by[K, V, B: Ord](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
   map.to_list(m),
   f,
 )
@@ -21367,10 +21367,10 @@ fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] =
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
+fn min_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
+fn max_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
@@ -21617,7 +21617,7 @@ fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) ->
   (p) => f(p)!,
 )
 
-fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
+fn __fallible_sort_by[K, V, B: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -21627,12 +21627,12 @@ fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[I
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
+fn __fallible_min_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
   map.to_list(m),
   (p) => f(p)!,
 )
 
-fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
+fn __fallible_max_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -36015,25 +36015,25 @@ fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partitio
 fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
-fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
 
 /// Members sorted by key f(x), stable; f runs once per member.
-fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+fn sort_by[A, B: Ord](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
 
 /// Members sorted by cmp, stable: negative puts a first.
 fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
 
 /// Least member, or none when empty.
-fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+fn min[A: Ord](s: Set[A]) -> A? = list.min(set.to_list(s))
 
 /// Greatest member, or none when empty.
-fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+fn max[A: Ord](s: Set[A]) -> A? = list.max(set.to_list(s))
 
 /// Member with the least key f(x); the first on ties.
-fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+fn min_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
 
 /// Member with the greatest key f(x); the first on ties.
-fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+fn max_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
 
 /// Least member by cmp; the first on ties.
 fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
@@ -36206,7 +36206,7 @@ fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map
   (x) => f(x)!,
 )
 
-fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+fn __fallible_sort_by[A, B: Ord, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -36216,12 +36216,12 @@ fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Resul
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+fn __fallible_min_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
   set.to_list(s),
   (x) => f(x)!,
 )
 
-fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+fn __fallible_max_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -37775,7 +37775,7 @@ fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group
 fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
+fn sort_by[B: Ord](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
 
 
 
@@ -37831,10 +37831,10 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,

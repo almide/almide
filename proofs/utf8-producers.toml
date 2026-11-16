@@ -206,6 +206,11 @@ string = true
 why = "HttpRequest and HttpResponse satisfy it; both hold header and body text"
 
 [[leaf]]
+name = "Ord"
+string = true
+why = "the bound String satisfies (list.max[T: Ord] can return a String)"
+
+[[leaf]]
 name = "Numeric"
 string = false
 why = "the numeric types; none holds a String"
@@ -231,6 +236,46 @@ string = false
 why = "the closable handles, all Int handles"
 
 # ── fn rows: every public stdlib function that hands out a String ──
+
+[[fn]]
+id = "deque.max"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "deque.min"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "deque.sort"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "heap.from_list"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "heap.new"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "set.max"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "set.min"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "set.sort"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::ordered containers hand back the caller's valid Strings"
 
 [[fn]]
 id = "args.option"

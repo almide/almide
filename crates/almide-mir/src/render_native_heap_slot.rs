@@ -94,7 +94,7 @@ fn slot_store_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, t: NTy, src: Val
     let got = tys.get(&base).copied();
     if got == Some(t) {
         Ok(crate::render_native_move::take_expr(&var(base)))
-    } else if got.is_some() && st.empty_lists.contains(&base) {
+    } else if got.is_some() && st.still_empty_list(&base) {
         // An empty list literal is every list type's empty list.
         Ok(format!("<{}>::default()", crate::render_native_rec::owned_ty(t)))
     } else {

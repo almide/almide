@@ -368,7 +368,8 @@ pub(crate) fn moves_at_call(
     if last_use(func, at, src, t, borrow_arms) {
         return true;
     }
-    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !crate::render_native_rec::has_default(t) {
+    // A kind with no `Default` (a runtime type) moves only as itself.
+    if drill_no_moves() || !matches!(t, NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_)) || !(crate::render_native_rec::has_default(t) || moves_as_itself(src)) {
         return false;
     }
     // (The function's result is fine here: what it returns is the rebound
@@ -557,6 +558,15 @@ pub(crate) fn set_moving_args(
     tys: &std::collections::BTreeMap<ValueId, NTy>,
     borrow_arms: &std::collections::BTreeSet<ValueId>,
 ) {
+    // A rebound arg whose own rebind comes next, with only its release between
+    // (the loop write-back `Drop v; SetLocal v = ..`), or that every later path
+    // rebinds before naming it again (`mir_liveness`), is re-initialized before
+    // any read: it moves as itself. Known before the moves are chosen, so a
+    // kind with no `Default` (a runtime type, #4771) can move there too.
+    let rebinds_next = |v: &ValueId| func.ops[at + 1..].iter().find(|o| !bookkeeping(o)).is_some_and(|o| matches!(o, Op::SetLocal { local, .. } if local == v));
+    let (later_reinit, mut reads) = (crate::mir_liveness::reinit_reads(func, at), Vec::new());
+    crate::mir_ops::op_reads(&func.ops[at], &mut reads);
+    REINIT.with(|m| *m.borrow_mut() = reads.iter().copied().filter(|v| rebinds_next(v)).chain(later_reinit.iter().copied()).collect());
     let moving: std::collections::BTreeSet<ValueId> = match &func.ops[at] {
         Op::CallFn { args, .. } => {
             let handles: Vec<ValueId> = args
@@ -583,22 +593,8 @@ pub(crate) fn set_moving_args(
             .collect(),
         _ => Default::default(),
     };
-    // A rebound arg whose own rebind comes next, with only its release
-    // between (the loop write-back `Drop v; SetLocal v = ..`): its binding
-    // is re-initialized before any read, so it moves as itself.
-    let mut reinit: std::collections::BTreeSet<ValueId> = moving
-        .iter()
-        .copied()
-        .filter(|v| {
-            func.ops[at + 1..]
-                .iter()
-                .find(|o| !bookkeeping(o))
-                .is_some_and(|o| matches!(o, Op::SetLocal { local, .. } if local == v))
-        })
-        .collect();
-    // Any rebound value the op reads that every later path rebinds before
-    // naming it again (`mir_liveness`).
-    reinit.extend(crate::mir_liveness::reinit_reads(func, at));
+    let mut reinit: std::collections::BTreeSet<ValueId> = moving.iter().copied().filter(rebinds_next).collect();
+    reinit.extend(later_reinit);
     REINIT.with(|m| *m.borrow_mut() = reinit);
     // A borrowed payload or field read handed to the call whose carrier dies
     // here, as do the carrier's other borrowed reads of it: the call can take
@@ -758,7 +754,7 @@ pub(crate) fn set_rebound(func: &MirFunction) {
 /// later. Anything else (a rebound slot, a field place) is taken.
 /// Whether `v`'s binding moves as itself in [`take_expr`] (bound once, or
 /// re-initialized before any read).
-fn moves_as_itself(v: ValueId) -> bool {
+pub(crate) fn moves_as_itself(v: ValueId) -> bool {
     !REBOUND.with(|m| m.borrow().contains(&v))
         || REINIT.with(|m| m.borrow().contains(&v))
         || CARRIER_PARAMS.with(|m| m.borrow().contains(&v))
