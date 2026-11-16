@@ -16,14 +16,57 @@ fn lent_receivers<'h>(args: &[CallArg], hof: &'h Hof, env: &Env) -> (Option<(usi
 
 /// The twin a call names once its callback took the lent element: the
 /// element twin (its text joins the shims) when no other route chose one.
+/// Or the lent-string twin ([`str_lent_route`]) once the callback took its
+/// strings by reference — offered only to a call no other route renames.
 fn elem_twin_taken(twin: &'static str, hof: &Hof, elem: Option<&(&str, &'static str, &'static str)>, side: &mut FnArgOut) -> &'static str {
     match elem {
         Some((_, name, item)) if side.lent && twin == hof.twin => {
             side.shims.push(item);
             name
         }
+        _ if side.str_lent && twin == hof.twin => match str_lent_route(hof) {
+            Some((name, items)) => {
+                side.shims.extend(items.iter().copied());
+                name
+            }
+            None => twin,
+        },
         _ => twin,
     }
+}
+
+thread_local! {
+    static STR_LENT: std::cell::RefCell<BTreeMap<String, Option<(&'static str, &'static [&'static str])>>> = const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// The twin a call names when its one callback takes each string it is
+/// handed by reference (#4741), and the twin's items: the runtime body's
+/// lent-string twin (`native_floor::str_lent_twin`) in the form `h` names its
+/// body — the body itself (a generic `F: Fn` callback) or its static twin.
+/// `fs.fold_lines` copied every line into an owned string for a step that
+/// only reads it; the twin lends the read buffer instead.
+fn str_lent_route(h: &Hof) -> Option<(&'static str, &'static [&'static str])> {
+    let callbacks = h.params.iter().filter(|(d, _)| matches!(d, DTy::Fn(..))).count();
+    if callbacks != 1 || h.owned.is_some() || h.mutable.contains(&true) {
+        return None;
+    }
+    STR_LENT.with(|m| {
+        *m.borrow_mut().entry(h.twin.clone()).or_insert_with(|| {
+            let (lent, text, mut items) = crate::native_floor::str_lent_twin(&h.symbol)?;
+            let name = if h.twin == h.symbol {
+                items.push(text);
+                lent
+            } else if h.twin == format!("{}_static", h.symbol) {
+                // The twin's static form, as the body's own static twin.
+                let (name, root) = static_twin(&lent, text)?;
+                items.push(Box::leak(root.into_boxed_str()));
+                name
+            } else {
+                return None;
+            };
+            Some((&*Box::leak(name.into_boxed_str()), &*Box::leak(items.into_boxed_slice())))
+        })
+    })
 }
 
 thread_local! {

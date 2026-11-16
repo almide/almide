@@ -81,11 +81,12 @@ impl WasiHttpHooks for RtCoreTransport {
     }
 }
 
-/// One request in rt-core's terms: method, URL, text body, header pairs.
+/// One request in rt-core's terms: method, URL, body bytes, header pairs.
+/// The body goes to rt-core exactly as the guest wrote it (#4744).
 struct Exchange {
     method: String,
     url: String,
-    body: String,
+    body: Vec<u8>,
     headers: Vec<(String, String)>,
 }
 
@@ -104,7 +105,7 @@ impl Exchange {
         Ok(Exchange {
             method: parts.method.as_str().to_string(),
             url: parts.uri.to_string(),
-            body: String::from_utf8_lossy(&body).into_owned(),
+            body: body.to_vec(),
             headers,
         })
     }

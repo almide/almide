@@ -23,6 +23,7 @@ WasmRcDec.v
 WasmEncode.v
 WasmExec.v
 CowSafety.v
+UniqueTake.v
 LargeList.v
 LargeTree.v
 StructuralRuntime.v

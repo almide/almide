@@ -879,6 +879,8 @@ impl Checker {
             }
             if let Some(bound_ty) = bindings.get(tv_name) {
                 let concrete_ty = resolve_ty(bound_ty, &self.uf);
+                let proto_names = self.check_ord_bound(name, proto_names, &concrete_ty);
+                let proto_names = &proto_names;
                 let type_name = self.resolve_type_name_for_protocol(&concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
@@ -904,6 +906,23 @@ impl Checker {
             }
         }
         self.check_protocol_bound_args(name, sig, bindings, judge);
+    }
+
+    /// The built-in `Ord` (#4758) is the order `list.sort` / `max` use: judged
+    /// by the same predicate as the runtime's `Ord`-bounded intrinsics
+    /// (`env.is_ord`, E030), never by the conformance table, which lists no
+    /// primitive (an `[A: Ord]` refused Int and took a Set). A bare Float
+    /// orders (the `_float` twins); an open slot is E025's business. Returns
+    /// the other bounds, for the conformance-table checks.
+    fn check_ord_bound(&mut self, name: &str, proto_names: &[Sym], concrete_ty: &Ty) -> Vec<Sym> {
+        let ord = almide_base::intern::sym("Ord");
+        let open_or_float = matches!(concrete_ty, Ty::Unknown | Ty::TypeVar(_) | Ty::Float);
+        if proto_names.contains(&ord) && !open_or_float && !self.env.is_ord(concrete_ty) {
+            let ty_name = Self::type_display_name(concrete_ty);
+            let diag = Self::unordered_diag(&ty_name, name, self.current_span);
+            self.diagnostics.push(diag);
+        }
+        proto_names.iter().copied().filter(|p| *p != ord).collect()
     }
 
     /// A container, tuple or function type has no conformance-table name, but

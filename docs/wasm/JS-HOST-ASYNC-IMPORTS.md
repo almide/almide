@@ -223,7 +223,7 @@ overlapped and 369 ms sequential.
 and a `Unit` hook. It marks nothing, so it needs no JSPI.
 
 A fixture with a marked extern needs a node with JSPI, so CI's JS host job runs
-the pinned Node 24.22.1 (`.github/workflows/ci.yml`), with a JSPI feature probe. Locally a
+the pinned Node 24.22.3 (`.github/workflows/ci.yml`), with a JSPI feature probe. Locally a
 node without JSPI skips those fixtures with a warning.
 
 The parser's acceptance and refusals are `crates/almide-syntax/src/parser/test_attributes.rs`

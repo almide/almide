@@ -34,6 +34,8 @@ Definition wasm_pattern (o : Op) : string :=
   | Reuse   => ""                 (* eager: no reuse; the perceus renderer emits rc_dec/reuse *)
   | Borrow  => ""                 (* a borrow reads through the handle — no RC instruction *)
   | ShareOut => "call $list_copy" (* an arm's share-out is an alias of its argument: an eager COPY *)
+  | Take    => "i32.store 0"      (* ADR-0034: the slot cleared; the credit moves, no RC call *)
+  | Probe   => "i32.load rc; i32.const 1; i32.eq" (* ADR-0034: the uniqueness test *)
   end.
 
 Definition is_release (o : Op) : bool :=

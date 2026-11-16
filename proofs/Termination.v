@@ -35,9 +35,11 @@ Fixpoint fuel_exec (fuel : nat) (ops : list Op) (rc : Z) : option (option Z) :=
           | Inc | Alias => fuel_exec f rest (rc + 1)
           | Dec | MoveOut =>
               if rc <=? 0 then Some None else fuel_exec f rest (rc - 1)
-          | Reuse => if Z.eqb rc 1 then fuel_exec f rest 0 else Some None
+          | Reuse => Some None
           | Borrow => if rc <=? 0 then Some None else fuel_exec f rest rc
           | ShareOut => fuel_exec f rest rc
+          | Take => fuel_exec f rest (rc + 1)
+          | Probe => if rc <=? 0 then Some None else fuel_exec f rest rc
           end
       end
   end.
@@ -54,9 +56,11 @@ Proof.
     + apply IH.
     + destruct (rc <=? 0); [ discriminate | apply IH ].
     + destruct (rc <=? 0); [ discriminate | apply IH ].
-    + destruct (Z.eqb rc 1); [ apply IH | discriminate ].
+    + discriminate.
     + destruct (rc <=? 0); [ discriminate | apply IH ].
     + apply IH.
+    + apply IH.
+    + destruct (rc <=? 0); [ discriminate | apply IH ].
 Qed.
 
 (* And the fueled interpreter AGREES with `exec` when it halts: termination does
@@ -71,9 +75,11 @@ Proof.
     + apply IH.
     + destruct (rc <=? 0); [ reflexivity | apply IH ].
     + destruct (rc <=? 0); [ reflexivity | apply IH ].
-    + destruct (Z.eqb rc 1); [ apply IH | reflexivity ].
+    + reflexivity.
     + destruct (rc <=? 0); [ reflexivity | apply IH ].
     + apply IH.
+    + apply IH.
+    + destruct (rc <=? 0); [ reflexivity | apply IH ].
 Qed.
 
 Example halts_example : fuel_exec (length [Inc; Alias; Dec; Dec]) [Inc; Alias; Dec; Dec] 0 = Some (Some 0).

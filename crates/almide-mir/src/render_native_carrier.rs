@@ -232,7 +232,7 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
         return Err(wall(format!("native: a {:?} carrier payload that is not a heap handle", tys.get(&v))));
     };
     let g = tys.get(&sv.base).copied();
-    if st.empty_lists.contains(&sv.base) && (matches!(k, NTy::Vec | NTy::VecStr)
+    if st.still_empty_list(&sv.base) && (matches!(k, NTy::Vec | NTy::VecStr)
         || k.rec().is_some_and(|i| crate::render_native_rec::list_elem(i).is_some())) {
         return Ok("Vec::new()".into());
     }

@@ -1,0 +1,37 @@
+// v1-vs-v0 shape bench (#4741): the chunk-parallel line fold, onebrc's
+// agg-par shape. The step splits each line and upserts a String-keyed record
+// map with a lambda of its own; the render must hand it to the threaded
+// runtime body (v0.69.0 did) and keep the found key borrowed (one copy per
+// new station, not one per line).
+import fs
+
+type Stats = { min: Int, max: Int, sum: Int, count: Int }
+
+fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] = match string.split_once(line, ";") {
+  some((station, temp)) => {
+    let t = int.parse(temp) ?? 0
+    map.upsert(
+      acc,
+      station,
+      Stats { min: t, max: t, sum: t, count: 1 },
+      (s) => Stats {
+        min: if t < s.min then t else s.min,
+        max: if t > s.max then t else s.max,
+        sum: s.sum + t,
+        count: s.count + 1,
+      },
+    )
+  },
+  none => acc,
+}
+
+fn line(i: Int) -> String = "s${i % 97};${(i * 7919) % 1999 - 999}"
+
+effect fn main() -> Unit = {
+  let path = fs.temp_dir()! + "/almide_chunked_line_fold.txt"
+  fs.write_text(path, list.range(0, 200000) |> list.map(line) |> list.join("\n"))!
+  let parts = fs.fold_lines_chunked(path, 8, map.new(), step)!
+  let rows = parts |> list.map((m) => map.to_list(m) |> list.fold(0, (n, (_, s)) => n + s.count + s.sum))
+  println(int.to_string(list.sum(rows)))
+  fs.remove(path)!
+}

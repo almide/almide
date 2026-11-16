@@ -25,6 +25,57 @@ pub(crate) fn slice_twin(symbol: &str) -> Option<(String, bool, Vec<bool>, Vec<&
     paired.then(|| Some((twin.clone(), pair, from, closure(&twin, rt).ok()?)))?
 }
 
+/// The viewing twin of the string body `symbol`: the runtime fn
+/// `<symbol>_ref`, paired from the signatures. Both take the same `&str`
+/// params; the body returns `AlmideString` and the twin a `&str` borrowed
+/// from its lifetime-carrying params. Returns the twin, which params its
+/// result borrows from, and its items. `None` when the runtime carries no
+/// such fn.
+pub(crate) fn view_twin(symbol: &str) -> Option<(String, Vec<bool>, Vec<&'static str>)> {
+    let rt = runtime_index();
+    let plain = |t: &String| squash(&without_lifetimes(t));
+    let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
+    let twin = format!("{symbol}_ref");
+    let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
+    if plain(&body_ret) != "AlmideString" || plain(&twin_ret) != "&str" {
+        return None;
+    }
+    let strs = |ps: &[String]| ps.iter().all(|p| plain(p) == "&str");
+    let from: Vec<bool> = twin_params.iter().map(|p| p.contains('\'')).collect();
+    let paired = body_params.len() == twin_params.len() && strs(&body_params) && strs(&twin_params) && from.contains(&true);
+    paired.then(|| Some((twin.clone(), from, closure(&twin, rt).ok()?)))?
+}
+
+/// What a streaming twin yields in place of the list's element reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StreamItem {
+    /// `&str` for a `Vec<AlmideString>` element: read only as `&(*e)[..]`.
+    Str,
+    /// `i64` for a `Vec<i64>` element: the value itself, not a reference.
+    Int,
+}
+
+/// The streaming twin of the list-building runtime body `symbol`: the runtime
+/// fn `<symbol>_iter`, paired from the signatures — the body's own params,
+/// returning `impl Iterator` of the items the body collects (`&str` for a
+/// `Vec<AlmideString>`, `i64` for a `Vec<i64>`). The body is the twin
+/// collected, so the stream is the list's elements in order. Returns the twin
+/// and its item. `None` when the runtime carries no such fn.
+pub(crate) fn stream_twin(symbol: &str) -> Option<(String, StreamItem)> {
+    let rt = runtime_index();
+    let plain = |t: &String| squash(&without_lifetimes(t));
+    let (body_params, body_ret) = rust_signature(signature_text(rt, symbol)?)?;
+    let twin = format!("{symbol}_iter");
+    let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
+    let item = match (plain(&body_ret).as_str(), plain(&twin_ret).as_str()) {
+        ("Vec<AlmideString>", "implIterator<Item=&str>+") => StreamItem::Str,
+        ("Vec<i64>", "implIterator<Item=i64>+") => StreamItem::Int,
+        _ => return None,
+    };
+    let same = body_params.len() == twin_params.len() && body_params.iter().zip(&twin_params).all(|(a, b)| plain(a) == plain(b));
+    same.then_some((twin, item))
+}
+
 /// A paired twin: its name and its items.
 type Twin = Option<(String, Vec<&'static str>)>;
 
@@ -141,4 +192,85 @@ pub(crate) fn refill_twin(symbol: &str) -> Twin {
     })();
     cache.lock().unwrap_or_else(|e| e.into_inner()).insert(symbol.to_string(), made.clone());
     made
+}
+
+/// The lent-string twin of the runtime body `symbol` (#4741), derived from
+/// the body's own text as its static twin is: `<symbol>_str_lent`, the body
+/// with the one `AlmideString` its callback (`Fn(..)`) is handed read as
+/// `&str`, and its one copy `AlmideString::from(<p>)` of a `<p>: &str` it
+/// holds handing `<p>` itself. The twin lends the string it hands the
+/// callback (a line of `fs.fold_lines`, borrowed from the read buffer) where
+/// the body copies it. It reaches exactly what the body reaches: the items
+/// are the body's own (closed under the fan header for a thread-crossing
+/// body). Returns the twin, its text and the body's items. `None` when the
+/// body has no such shape.
+pub(crate) fn str_lent_twin(symbol: &str) -> Option<(String, &'static str, Vec<&'static str>)> {
+    type Lent = Option<(String, &'static str, Vec<&'static str>)>;
+    static CACHE: OnceLock<Mutex<HashMap<String, Lent>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(symbol) {
+        return hit.clone();
+    }
+    let made = (|| {
+        const COPY: &str = "AlmideString::from(";
+        let rt = runtime_index();
+        let text = signature_text(rt, symbol)?;
+        let head = format!("fn {symbol}");
+        let at = text.find(&head)?;
+        let open = at + text[at..].find('{')?;
+        let (sig, count) = callback_strs_lent(&text[at + head.len()..open]);
+        let body = &text[open..];
+        if count != 1 || body.matches(COPY).count() != 1 {
+            return None;
+        }
+        let from = body.find(COPY)? + COPY.len();
+        let p = &body[from..from + body[from..].find(')')?];
+        let ident = !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !ident || !squash(body).contains(&format!("{p}:&str")) {
+            return None;
+        }
+        let twin = format!("{symbol}_str_lent");
+        let lent = format!("{}fn {twin}{sig}{}", &text[..at], body.replacen(&format!("{COPY}{p})"), p, 1));
+        let items = if almide_codegen::generated::runtime_fn_modes::crosses_threads(symbol) {
+            runtime_body_with_fan(symbol).ok()?.2
+        } else {
+            closure(symbol, rt).ok()?
+        };
+        Some((twin, &*Box::leak(lent.into_boxed_str()), items))
+    })();
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(symbol.to_string(), made.clone());
+    made
+}
+
+/// `sig` with every whole `AlmideString` inside a `Fn(..)` param list read
+/// as `&str`, and how many were.
+pub(crate) fn callback_strs_lent(sig: &str) -> (String, usize) {
+    const WORD: &str = "AlmideString";
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let (mut out, mut count, mut rest) = (String::new(), 0, sig);
+    while let Some(at) = rest.find("Fn(") {
+        // Squashed, `dyn Fn(` and `impl Fn(` read `dynFn(` and `implFn(`.
+        let before = &rest[..at];
+        let whole = !before.chars().next_back().is_some_and(ident) || before.ends_with("dyn") || before.ends_with("impl");
+        out.push_str(&rest[..at + 3]);
+        rest = &rest[at + 3..];
+        if !whole { continue; }
+        let mut depth = 1i32;
+        let close = rest.char_indices().find_map(|(k, c)| {
+            match c { '(' => depth += 1, ')' => depth -= 1, _ => {} }
+            (depth == 0).then_some(k)
+        }).unwrap_or(rest.len());
+        let mut args = &rest[..close];
+        while let Some(w) = args.find(WORD) {
+            let alone = !args[..w].chars().next_back().is_some_and(ident) && !args[w + WORD.len()..].chars().next().is_some_and(ident);
+            out.push_str(&args[..w]);
+            out.push_str(if alone { "&str" } else { WORD });
+            count += usize::from(alone);
+            args = &args[w + WORD.len()..];
+        }
+        out.push_str(args);
+        rest = &rest[close..];
+    }
+    out.push_str(rest);
+    (out, count)
 }

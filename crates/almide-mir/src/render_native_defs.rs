@@ -7,6 +7,7 @@ pub(crate) fn struct_defs() -> String {
         for (i, d) in r.borrow().iter().enumerate() {
             let target = alias_target(d);
             if let (true, Some(t)) = (d.alias.is_some() || d.cell_of.is_some(), &target) {
+                let t = crate::native_capture_borrow::alias_spelling(t, d.closure_of.is_some());
                 out.push_str(&format!("type {} = {t};\n\n", struct_name(i as u16)));
                 continue;
             }

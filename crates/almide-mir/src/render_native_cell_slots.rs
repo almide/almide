@@ -67,7 +67,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                     let src = st.addrs.get(&rhs).filter(|a| a.off == 0 && a.idx.is_none())
                         .ok_or_else(|| wall("native: a shared cell stores a partial or absent heap address"))?;
                     let got = ty(tys, &src.base).ok_or_else(|| wall("native: an untyped shared-cell payload"))?;
-                    let empty = st.empty_lists.contains(&src.base) && (matches!(payload, NTy::Vec | NTy::VecStr)
+                    let empty = st.still_empty_list(&src.base) && (matches!(payload, NTy::Vec | NTy::VecStr)
                         || matches!(payload, NTy::Rec(i) if rec::is_empty_collection(i) || rec::is_bytes(payload)));
                     if empty { format!("<{}>::default()", rec::owned_ty(payload)) }
                     else if let Some(value) = crate::native_value_repr::tuple_copy(&var(src.base), got, payload) { value }

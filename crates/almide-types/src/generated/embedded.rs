@@ -1976,7 +1976,7 @@ fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(byt
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 
 /// The bytes ordered by f's key; equal keys keep their order.
-fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
+fn sort_by[B: Ord](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
 
 
@@ -2029,10 +2029,10 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,
@@ -5091,25 +5091,25 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
-fn sort[A](d: Deque[A]) -> List[A] = list.sort(to_list(d))
+fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
 
 /// Elements sorted by key f(x), stable; f runs once per element.
-fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
+fn sort_by[A, B: Ord](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
 
 /// Elements sorted by cmp, stable: negative puts a first.
 fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(to_list(d), cmp)
 
 /// Least element, or none when empty.
-fn min[A](d: Deque[A]) -> A? = list.min(to_list(d))
+fn min[A: Ord](d: Deque[A]) -> A? = list.min(to_list(d))
 
 /// Greatest element, or none when empty.
-fn max[A](d: Deque[A]) -> A? = list.max(to_list(d))
+fn max[A: Ord](d: Deque[A]) -> A? = list.max(to_list(d))
 
 /// Element with the least key f(x); the nearest the front on ties.
-fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
+fn min_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
 
 /// Element with the greatest key f(x); the nearest the front on ties.
-fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
+fn max_by[A, K: Ord](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
 
 /// Least element by cmp; the nearest the front on ties.
 fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(to_list(d), cmp)
@@ -9677,10 +9677,10 @@ fn __natural[A](a: A, b: A) -> Int =
 
 
 /// An empty heap; the least element comes out first.
-fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+fn new[A: Ord]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
 
 /// An empty heap ordered by key f(x); the least key comes out first.
-fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+fn new_by[A, K: Ord](f: (A) -> K) -> Heap[A] = {
   slots: [],
   next: 0,
   cmp: (a, b) => __natural(f(a), f(b)),
@@ -9690,7 +9690,7 @@ fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
 fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
-fn from_list[A](xs: List[A]) -> Heap[A] = {
+fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
   var h: Heap[A] = new()
   for x in xs {
     push(h, x)
@@ -10234,7 +10234,7 @@ fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 /// Body text; a fetched body is decoded as lossy UTF-8.
 fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 
-/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+/// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
 /// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
@@ -10246,7 +10246,7 @@ fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self
 /// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body, decoded as lossy UTF-8; a response's Content-Type becomes application/octet-stream.
+/// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10326,7 +10326,11 @@ fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
-fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+
+
+@intrinsic("almide_http_req_body_bytes")
+@borrow_ref(m)
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = _
 
 @intrinsic("almide_http_req_set_header")
 @consume(m)
@@ -10336,10 +10340,9 @@ fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> Htt
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
-  m,
-  bytes.to_string_lossy(body),
-)
+@intrinsic("almide_http_req_set_body_bytes")
+@consume(m)
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = _
 
 
 fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
@@ -10402,13 +10405,15 @@ effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
 )
 
+
+
 @intrinsic("almide_http_request_response")
 @borrow_ref(flat)
-effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
+effect fn __request_response(method: String, url: String, body: Bytes, flat: List[String]) -> Result[HttpResponse, String] = _
 
 
 
@@ -10434,7 +10439,7 @@ type HttpLimits = { total_ms: Int, idle_ms: Int }
 effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
   http.method(req),
   http.path(req),
-  http.__http_request_body(req),
+  http.__http_request_body_bytes(req),
   http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
@@ -10442,7 +10447,7 @@ effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String
 
 @intrinsic("almide_rt_http___call_start")
 @borrow_ref(flat)
-effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+effect fn __call_start(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
@@ -10527,6 +10532,22 @@ fn __http_call_repr(c: HttpCall) -> String = _
 @intrinsic("almide_http_resp_repr")
 @borrow_ref(resp)
 fn __http_response_repr(resp: HttpResponse) -> String = _
+
+
+
+
+
+@intrinsic("almide_http_req_eq")
+@borrow_ref(a, b)
+fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
+
+@intrinsic("almide_http_call_eq")
+@borrow_ref(a, b)
+fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
+
+@intrinsic("almide_http_resp_eq")
+@borrow_ref(a, b)
+fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _
 
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
@@ -10855,15 +10876,26 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
-  flat,
-  2 * (list.len(flat) / 2),
-) |> list.map((c) => __hc_cell(c)) |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
-  (acc, cell) => acc + cell,
-)
 
-effect fn __http_call_open(url: String, frame: String) -> Result[HttpCall, String] = _
+
+
+fn __hc_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
+
+
+
+fn __hc_frame(method: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Bytes = bytes.from_string("${__hc_cell(method)}${__hc_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __hc_cell(c)) |> list.fold(
+  "${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+  (acc, cell) => acc + cell,
+))
+
+effect fn __http_call_open(url: String, frame: Bytes) -> Result[HttpCall, String] = _
 
 
 
@@ -10883,7 +10915,7 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 
-effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: Bytes, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
   __hc_frame(method, body, flat, total_ms, idle_ms),
 )
@@ -10955,7 +10987,23 @@ effect fn __request_impl(method: String, url: String, body: String, flat: List[S
   __http_frame(method, body, flat),
 )
 
-effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+
+
+
+
+
+effect fn __http_framed_response(url: String, frame: Bytes) -> Result[String, String] = _
+
+fn __http_walk_len(b: Bytes) -> Int = {
+  let xs = bytes.to_list(b)
+  let lead = match list.get(xs, 0) {
+    some(x) => if x >= 128 and x < 192 then 1 else 0,
+    none => 0,
+  }
+  lead + list.count(xs, (x) => x < 128 or x >= 192)
+}
+
+fn __http_byte_frame(method: String, body: Bytes, flat: List[String]) -> Bytes = bytes.from_string("${__http_cell(method)}${__http_walk_len(body)}\n") + body + bytes.from_string(list.take(flat, 2 * (list.len(flat) / 2)) |> list.map((c) => __http_cell(c)) |> list.join(""))
 
 
 fn __http_take_cell(f: String) -> (String, String) = {
@@ -10972,8 +11020,8 @@ else {
 }
 
 @implements("http.__request_response")
-effect fn __request_response_impl(method: String, url: String, body: String, flat: List[String]) -> Result[List[String], String] = {
-  let f = __http_framed_response(url, __http_frame(method, body, flat))!
+effect fn __request_response_impl(method: String, url: String, body: Bytes, flat: List[String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_byte_frame(method, body, flat))!
   let c1 = string.index_of(f, "\n") ?? 0
   let after_code = string.drop(f, c1 + 1)
   let c2 = string.index_of(after_code, "\n") ?? 0
@@ -10986,7 +11034,7 @@ effect fn __request_response_impl(method: String, url: String, body: String, fla
 effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
   "GET",
   url,
-  "",
+  bytes.from_string(""),
   [],
 )
 "#;
@@ -11003,6 +11051,15 @@ pub const SRC_HTTP_REQUEST: &str = r#"
 
 
 
+
+
+
+
+
+
+
+
+import hex
 
 fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
@@ -11094,7 +11151,40 @@ fn http_req_set_header(req: List[String], key: String, value: String) -> List[St
   value,
 )
 
-fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(
+  __hq_no_raw(req),
+  2,
+  body,
+)
+
+
+fn __hq_raw(req: List[String]) -> String? =
+  if (list.len(req) - __hq_params_at(req)) % 2 == 1 then list.last(req)
+  else none
+
+fn __hq_no_raw(req: List[String]) -> List[String] = match __hq_raw(req) {
+  some(_) => list.take(req, list.len(req) - 1),
+  none => req,
+}
+
+
+
+@implements("http.__http_request_body_bytes")
+fn http_req_body_bytes(req: List[String]) -> Bytes = {
+  let text = bytes.from_string(list.get(req, 2) ?? "")
+  match __hq_raw(req) {
+    some(raw) => hex.decode(string.drop(raw, 1)) ?? text,
+    none => text,
+  }
+}
+
+
+
+@implements("http.__http_request_set_body_bytes")
+fn http_req_set_body_bytes(req: List[String], body: Bytes) -> List[String] = match bytes.to_string(body) {
+  ok(text) => list.set(__hq_no_raw(req), 2, text),
+  err(_) => list.set(__hq_no_raw(req), 2, bytes.to_string_lossy(body)) + ["/" + hex.encode(body)],
+}
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)
@@ -15470,10 +15560,10 @@ fn __key_order[K](a: K, b: K) -> Int =
   }
 
 /// Element with the least key f(x); the first on ties; f runs once per x.
-fn min_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
+fn min_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
 
 /// Element with the greatest key f(x); the first on ties; f runs once per x.
-fn max_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
+fn max_by[A, K: Ord](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
 
 
 
@@ -16086,7 +16176,7 @@ fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[L
 
 
 
-fn __fallible_sort_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
+fn __fallible_sort_by[A, B: Ord, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -16131,7 +16221,7 @@ fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[
 
 
 
-fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_min_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -16139,7 +16229,7 @@ fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?,
   err(e) => err(e),
 }
 
-fn __fallible_max_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+fn __fallible_max_by[A, K: Ord, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
   xs,
   f,
 ) {
@@ -21265,7 +21355,7 @@ fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = l
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
-fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
+fn sort_by[K, V, B: Ord](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
   map.to_list(m),
   f,
 )
@@ -21277,10 +21367,10 @@ fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] =
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
+fn min_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
+fn max_by[K, V, U: Ord](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
@@ -21527,7 +21617,7 @@ fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) ->
   (p) => f(p)!,
 )
 
-fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
+fn __fallible_sort_by[K, V, B: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -21537,12 +21627,12 @@ fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[I
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
+fn __fallible_min_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
   map.to_list(m),
   (p) => f(p)!,
 )
 
-fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
+fn __fallible_max_by[K, V, U: Ord, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -35925,25 +36015,25 @@ fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partitio
 fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
-fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
 
 /// Members sorted by key f(x), stable; f runs once per member.
-fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+fn sort_by[A, B: Ord](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
 
 /// Members sorted by cmp, stable: negative puts a first.
 fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
 
 /// Least member, or none when empty.
-fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+fn min[A: Ord](s: Set[A]) -> A? = list.min(set.to_list(s))
 
 /// Greatest member, or none when empty.
-fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+fn max[A: Ord](s: Set[A]) -> A? = list.max(set.to_list(s))
 
 /// Member with the least key f(x); the first on ties.
-fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+fn min_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
 
 /// Member with the greatest key f(x); the first on ties.
-fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+fn max_by[A, K: Ord](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
 
 /// Least member by cmp; the first on ties.
 fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
@@ -36116,7 +36206,7 @@ fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map
   (x) => f(x)!,
 )
 
-fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+fn __fallible_sort_by[A, B: Ord, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -36126,12 +36216,12 @@ fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Resul
   (a, b) => cmp(a, b)!,
 )
 
-fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+fn __fallible_min_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
   set.to_list(s),
   (x) => f(x)!,
 )
 
-fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+fn __fallible_max_by[A, K: Ord, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -37685,7 +37775,7 @@ fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group
 fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
+fn sort_by[B: Ord](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
 
 
 
@@ -37741,10 +37831,10 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -39953,11 +40043,76 @@ fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: In
     }
   }
 
+
+
+
+
+
+
+fn __to_upper_words(src: Int, dst: Int, n: Int, from: Int) -> Int = {
+  var i = from
+  while i + 8 <= n {
+    let w = prim.load64(src + i)
+    if prim.band(w, -9187201950435737472) != 0 then break
+    else ()
+    let m = prim.band(
+      prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)),
+      -9187201950435737472,
+    )
+    prim.store64(dst + i, prim.bxor(w, prim.bshr_u(m, 2)))
+    i = i + 8
+  }
+  i
+}
+
+
+
+fn __to_upper_ascii(src: Int, dst: Int, n: Int, from: Int) -> Int = {
+  var i = from
+  while i < n {
+    let b = prim.load8(src + i)
+    if b >= 128 then break
+    else ()
+    prim.store8(dst + i, if b >= 97 and b <= 122 then b - 32 else b)
+    i = i + 1
+  }
+  i
+}
+
+
+fn __to_upper_ascii_end(src: Int, n: Int) -> Int = {
+  var i = 0
+  while i + 8 <= n and prim.band(prim.load64(src + i), -9187201950435737472) == 0 {
+    i = i + 8
+  }
+  while i < n and prim.load8(src + i) < 128 {
+    i = i + 1
+  }
+  i
+}
+
+
+
+
+fn __to_upper_fresh(p: Int, blen: Int, th: Int, sh: Int) -> String =
+  if __to_upper_ascii_end(p, blen) == blen then {
+    let buf = prim.alloc_str(blen)
+    let q = prim.handle(buf) + 12
+    let _d = __to_upper_ascii(p, q, blen, __to_upper_words(p, q, blen, 0))
+    buf
+  } else {
+    let buf = prim.alloc_str(blen * 3 + 8)
+    let outn = __to_upper_walk(p, p + blen, th, 285, sh, prim.handle(buf) + 12, 0)
+    prim.store32(prim.handle(buf) + 4, outn)
+    buf
+  }
+
 fn string_to_upper(s: String) -> String = {
   let tbl = "0000B500039C0110000E00000C01710000F80000D80710000FF00017801100010100010018200013300013203200013A00013908200014B00014A17200017A00017903200018000024301100018300018202200018800018701100018C00018B0110001920001910110001950001F601100019900019801100019A00023D01100019B00A7DC01100019E0002200110001A10001A00320001A80001A70110001AD0001AC0110001B00001AF0110001B40001B30220001B90001B80110001BD0001BC0110001BF0001F70110001C50001C40110001C60001C40110001C80001C70110001C90001C70110001CB0001CA0110001CC0001CA0110001CE0001CD0820001DD00018E0110001DF0001DE0920001F20001F10110001F30001F10110001F50001F40110001F90001F814200022300022209200023C00023B01100023F002C7E021000242000241011000247000246052000250002C6F011000251002C6D011000252002C7001100025300018101100025400018601100025600018902100025900018F01100025B00019001100025C00A7AB01100026000019301100026100A7AC01100026300019401100026400A7CB01100026500A78D01100026600A7AA01100026800019701100026900019601100026A00A7AE01100026B002C6201100026C00A7AD01100026F00019C011000271002C6E01100027200019D01100027500019F01100027D002C640110002800001A601100028200A7C50110002830001A901100028700A7B10110002880001AE01100028900024401100028A0001B102100028C0002450110002920001B701100029D00A7B201100029E00A7B001100034500039901100037100037002200037700037601100037B0003FD031000390F000000110003AC0003860110003AD0003880310003B0F000010110003B10003911110003C20003A30110003C30003A30910003CC00038C0110003CD00038E0210003D00003920110003D10003980110003D50003A60110003D60003A00110003D70003CF0110003D90003D80C20003F000039A0110003F10003A10110003F20003F90110003F300037F0110003F50003950110003F80003F70110003FB0003FA01100043000041020100045000040010100046100046011200048B00048A1B20004C20004C10720004CF0004C00110004D10004D0302000561000531261000587F000020110010D0001C902B10010FD001CBD0310013F80013F0061001C80000412011001C81000414011001C8200041E011001C83000421021001C85000422011001C8600042A011001C87000462011001C8800A64A011001C8A001C89011001D7900A77D011001D7D002C63011001D8E00A7C6011001E01001E004B2001E9B001E60011001EA1001EA0302001F00001F08081001F10001F18061001F20001F28081001F30001F38081001F40001F48061001F50F00003011001F51001F59011001F52F00004011001F53001F5B011001F54F00005011001F55001F5D011001F56F00006011001F57001F5F011001F60001F68081001F70001FBA021001F72001FC8041001F76001FDA021001F78001FF8021001F7A001FEA021001F7C001FFA021001F80F00007011001F81F00008011001F82F00009011001F83F0000A011001F84F0000B011001F85F0000C011001F86F0000D011001F87F0000E011001F88F0000F011001F89F00010011001F8AF00011011001F8BF00012011001F8CF00013011001F8DF00014011001F8EF00015011001F8FF00016011001F90F00017011001F91F00018011001F92F00019011001F93F0001A011001F94F0001B011001F95F0001C011001F96F0001D011001F97F0001E011001F98F0001F011001F99F00020011001F9AF00021011001F9BF00022011001F9CF00023011001F9DF00024011001F9EF00025011001F9FF00026011001FA0F00027011001FA1F00028011001FA2F00029011001FA3F0002A011001FA4F0002B011001FA5F0002C011001FA6F0002D011001FA7F0002E011001FA8F0002F011001FA9F00030011001FAAF00031011001FABF00032011001FACF00033011001FADF00034011001FAEF00035011001FAFF00036011001FB0001FB8021001FB2F00037011001FB3F00038011001FB4F00039011001FB6F0003A011001FB7F0003B011001FBCF0003C011001FBE000399011001FC2F0003D011001FC3F0003E011001FC4F0003F011001FC6F00040011001FC7F00041011001FCCF00042011001FD0001FD8021001FD2F00043011001FD3F00044011001FD6F00045011001FD7F00046011001FE0001FE8021001FE2F00047011001FE3F00048011001FE4F00049011001FE5001FEC011001FE6F0004A011001FE7F0004B011001FF2F0004C011001FF3F0004D011001FF4F0004E011001FF6F0004F011001FF7F00050011001FFCF0005101100214E0021320110021700021601010021840021830110024D00024B61A1002C30002C00301002C61002C60011002C6500023A011002C6600023E011002C68002C67032002C73002C72011002C76002C75011002C81002C80322002CEC002CEB022002CF3002CF2011002D000010A0261002D270010C7011002D2D0010CD01100A64100A64017200A68100A6800E200A72300A72207200A73300A7321F200A77A00A77902200A77F00A77E05200A78C00A78B01100A79100A79002200A79400A7C401100A79700A7960A200A7B500A7B408200A7C800A7C702200A7CD00A7CC08200A7F600A7F501100AB5300A7B301100AB700013A050100FB13F0005201100FB14F0005301100FB15F0005401100FB16F0005501100FB17F0005601100FF4100FF211A10104280104002810104D80104B02410105970105700B10105A301057C0F10105B301058C0710105BB010594021010CC0010C80331010D70010D501610118C00118A0201016E60016E40201016EBB016EA019101E92201E900221"
   let sp = "0003990003080003010003A50003080003010005350005520000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
+  let p = h + 12
 
 
 
@@ -39967,31 +40122,32 @@ fn string_to_upper(s: String) -> String = {
 
 
   let unique = prim.load32(h) == 1 and prim.load32(h + 8) > blen
-  var ascii_end = 0
+
+
+  var done = 0 - 1
   if unique then {
-    while ascii_end < blen {
-      let b = prim.load8(h + 12 + ascii_end)
+    done = 0
+    while done + 8 <= blen {
+      let w = prim.load64(p + done)
+      if prim.band(w, -9187201950435737472) != 0 then break
+      else ()
+      let m = prim.band(
+        prim.band(w + 2242545357980376863, prim.bxor(w + 361700864190383365, -1)),
+        -9187201950435737472,
+      )
+      prim.store64(p + done, prim.bxor(w, prim.bshr_u(m, 2)))
+      done = done + 8
+    }
+    while done < blen {
+      let b = prim.load8(p + done)
       if b >= 128 then break
       else ()
-      prim.store8(h + 12 + ascii_end, if b >= 97 and b <= 122 then b - 32 else b)
-      ascii_end = ascii_end + 1
+      prim.store8(p + done, if b >= 97 and b <= 122 then b - 32 else b)
+      done = done + 1
     }
   } else ()
-  if unique and ascii_end == blen then s
-  else {
-    let buf = prim.alloc_str(blen * 3 + 8)
-    let outn = __to_upper_walk(
-      h + 12,
-      h + 12 + blen,
-      prim.handle(tbl) + 12,
-      285,
-      prim.handle(sp) + 12,
-      prim.handle(buf) + 12,
-      0,
-    )
-    prim.store32(prim.handle(buf) + 4, outn)
-    buf
-  }
+  if done == blen then s
+  else __to_upper_fresh(p, blen, prim.handle(tbl) + 12, prim.handle(sp) + 12)
 }
 "#;
 pub const SRC_STRING_TRIM: &str = r#"
@@ -40040,35 +40196,94 @@ else if c == 8287 then true
 else if c == 12288 then true else false
 
 
+
+fn __trim_ascii_ws(b: Int) -> Bool = b == 32 or (b >= 9 and b <= 13)
+
+
+
 fn __trim_start(addr: Int, end: Int) -> Int = if addr >= end then addr
 else {
-  let packed = __trim_cp(addr)
-  if __trim_is_uws(__trim_cp_of(packed)) then __trim_start(addr + __trim_cp_len(packed), end) else addr
+  let b = prim.load8(addr)
+  if b < 128 then (if __trim_ascii_ws(b) then __trim_start(addr + 1, end) else addr)
+  else {
+    let packed = __trim_cp(addr)
+    if __trim_is_uws(__trim_cp_of(packed)) then __trim_start(addr + __trim_cp_len(packed), end) else addr
+  }
 }
 
 
 fn __trim_end(start: Int, end: Int) -> Int = if end <= start then end
 else {
-  let cb = __trim_cp_begin(start, end - 1)
-  if __trim_is_uws(__trim_cp_of(__trim_cp(cb))) then __trim_end(start, cb) else end
+  let b = prim.load8(end - 1)
+  if b < 128 then (if __trim_ascii_ws(b) then __trim_end(start, end - 1) else end)
+  else {
+    let cb = __trim_cp_begin(start, end - 1)
+    if __trim_is_uws(__trim_cp_of(__trim_cp(cb))) then __trim_end(start, cb) else end
+  }
 }
 
-fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
-else {
-  prim.store8(dst, prim.load8(src))
-  __trim_copy(src + 1, dst + 1, len - 1)
+
+
+
+fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = {
+  var i = 0
+  while i + 8 <= len {
+    prim.store64(dst + i, prim.load64(src + i))
+    i = i + 8
+  }
+  while i < len {
+    prim.store8(dst + i, prim.load8(src + i))
+    i = i + 1
+  }
+  dst + len
 }
+
+
+
+
+
+
+
+fn __trim_sole(h: Int, blen: Int) -> Bool = prim.load32(h) == 1 and prim.load32(h + 8) > blen
+
+
+fn __trim_copied(from: Int, nbytes: Int) -> String = {
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(from, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+
+
 
 fn string_trim(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
-  let ws_start = __trim_start(base, base + blen)
-  let ws_end = __trim_end(ws_start, base + blen)
-  let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
-  buf
+  let end = base + blen
+  var a = base
+  while a < end {
+    let b = prim.load8(a)
+    if b != 32 and (b < 9 or b > 13) then break
+    else ()
+    a = a + 1
+  }
+  let ws_start = if a < end and prim.load8(a) >= 128 then __trim_start(a, end) else a
+  var z = end
+  while z > ws_start {
+    let b = prim.load8(z - 1)
+    if b != 32 and (b < 9 or b > 13) then break
+    else ()
+    z = z - 1
+  }
+  let ws_end = if z > ws_start and prim.load8(z - 1) >= 128 then __trim_end(ws_start, z) else z
+  let nbytes = ws_end - ws_start
+  if nbytes == blen then s
+  else if prim.load32(h) == 1 and prim.load32(h + 8) > blen then {
+    let _e = __trim_copy(ws_start, base, nbytes)
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(ws_start, nbytes)
 }
 
 
@@ -40079,22 +40294,26 @@ fn string_trim_start(s: String) -> String = {
   let end = base + blen
   let ws_start = __trim_start(base, end)
   let nbytes = end - ws_start
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
-  buf
+  if nbytes == blen then s
+  else if __trim_sole(h, blen) then {
+    let _e = __trim_copy(ws_start, base, nbytes)
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(ws_start, nbytes)
 }
+
 
 
 fn string_trim_end(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let base = h + 12
-  let end = base + blen
-  let ws_end = __trim_end(base, end)
-  let nbytes = ws_end - base
-  let buf = prim.alloc_str(nbytes)
-  let _e = __trim_copy(base, prim.handle(buf) + 12, nbytes)
-  buf
+  let nbytes = __trim_end(base, base + blen) - base
+  if nbytes == blen then s
+  else if __trim_sole(h, blen) then {
+    prim.store32(h + 4, nbytes)
+    s
+  } else __trim_copied(base, nbytes)
 }
 "#;
 pub const SRC_TESTING: &str = r#"

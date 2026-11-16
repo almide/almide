@@ -318,7 +318,7 @@ pub fn http_exchange_raw(stream: &mut (impl std::io::Read + std::io::Write), url
 fn http_request_raw(
     method: &str,
     url: &str,
-    body: &str,
+    body: &[u8],
     headers: &[(String, String)],
 ) -> Result<HttpRawResponse, String> {
     let u = http_prepare(method, url, headers)?;
@@ -362,16 +362,18 @@ pub fn request_response(
     request_response_bytes(method, url, body, headers).map(|(c, h, b)| (c, h, String::from_utf8_lossy(&b).into_owned()))
 }
 
-/// `request_response` with the body still bytes: the embedded lane's
-/// wasi:http transport (ADR-0023 step 7) hands it to the component, whose
-/// shim decodes it exactly where the native caller would.
+/// `request_response` with both bodies bytes: the request body goes out
+/// exactly as given (`http.send` of a `set_body_bytes` request, #4744), and
+/// the response body comes back undecoded — the embedded lane's wasi:http
+/// transport (ADR-0023 step 7) hands it to the component, whose shim decodes
+/// it exactly where the native caller would.
 pub fn request_response_bytes(
     method: &str,
     url: &str,
-    body: &str,
+    body: impl AsRef<[u8]>,
     headers: &[(String, String)],
 ) -> Result<HttpRawResponse, String> {
-    http_request_raw(method, url, body, headers).map(|(c, mut h, b)| {
+    http_request_raw(method, url, body.as_ref(), headers).map(|(c, mut h, b)| {
         h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
         (c, h, b)
     })

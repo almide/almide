@@ -347,6 +347,7 @@ pub(crate) fn refused_native_bodies(
 ) -> Result<BTreeMap<String, LowerError>, LowerError> {
     let user_fns = prog.functions.iter().map(|f| (f.name.as_str(), f)).collect();
     crate::render_native_keyed::set_program(&user_fns, sigs);
+    crate::native_capture_borrow::plan(prog);
     let mut refused = BTreeMap::new();
     for func in prog.functions.iter().filter(|f| linked.contains(&f.name)) {
         match render_fn(func, &user_fns, sigs, &mut Vec::new()) {
@@ -360,6 +361,7 @@ pub(crate) fn refused_native_bodies(
 fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> Result<String, LowerError> {
     let _dispatch = crate::render_native_closure::DispatchScope::enter();
     crate::render_native_rec::reset_capture_kinds();
+    crate::native_capture_borrow::plan(prog);
     let user_fns: BTreeMap<&str, &MirFunction> = prog
         .functions
         .iter()
@@ -469,6 +471,11 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // missing arm can never be hit; the `_` arm is the §13 controlled halt.
     push_closure_dispatch_tables(&mut out, &user_fns, &fn_rets, sigs);
     crate::render_native_closure::push_typed_dispatch_tables(&mut out, &user_fns, sigs);
+    if crate::native_capture_borrow::active() {
+        let user = crate::native_capture_borrow::spell_closure_refs(&out[user_start..], &crate::render_native_rec::closure_ref_names());
+        out.truncate(user_start);
+        out.push_str(&user);
+    }
     if let Some(scope) = fs_scope {
         let user = scope.wrap_calls(&out[user_start..]);
         out.truncate(user_start);

@@ -306,6 +306,8 @@ pub fn is_pure(module: &str, func: &str) -> bool {
         || is_pure_fn_in_impure_module(module, func)
         // A runtime-backed type's declared repr (#4204), derived from its row.
         || almide_lang::stdlib_info::is_runtime_backed_repr(module, func)
+        // Its declared equality (#4749), derived from the same row.
+        || almide_lang::stdlib_info::is_runtime_backed_eq(module, func)
 }
 
 /// Whether bundled `module` declares a public (non-`local`) fn named `func`,
