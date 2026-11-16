@@ -459,6 +459,24 @@ fn with_env_overlay<R>(f: impl FnOnce(&mut std::collections::HashMap<String, Str
     OVERLAY.with(|o| f(&mut o.borrow_mut()))
 }
 
+/// The variables the launcher exports to the program it runs (#4774):
+/// `almide run` hands the native child `ALMIDE_CWD` through its environment,
+/// and the embedded host is the wasm guest's environment, so the launcher
+/// gives it the same entries here. They sit between the run's `env.set`
+/// overlay and the process environment, as an exported variable overrides an
+/// inherited one in the native child.
+static LAUNCHER_ENV: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+
+/// Export `vars` to every program this process runs on the embedded host
+/// (`almide run --target wasm`). The first call wins.
+pub fn export_launcher_env(vars: Vec<(String, String)>) {
+    let _ = LAUNCHER_ENV.set(vars);
+}
+
+fn launcher_env(name: &str) -> Option<String> {
+    LAUNCHER_ENV.get()?.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+}
+
 /// fs_dispatch_meta for the complexity budget.
 fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
@@ -555,7 +573,7 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         26 => match with_env_overlay(|o| o.get(a).cloned()) {
             Some(v) if v == "\0" => (pack(2, 0), Vec::new()),
             Some(v) => ok_text(v),
-            None => match std::env::var(a) {
+            None => match launcher_env(a).map_or_else(|| std::env::var(a), Ok) {
                 Ok(v) => ok_text(v),
                 Err(_) => (pack(2, 0), Vec::new()),
             },
@@ -584,6 +602,7 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
             let mut entries: Vec<String> = std::env::vars_os()
                 .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
                 .collect();
+            entries.extend(LAUNCHER_ENV.get().into_iter().flatten().map(|(k, v)| format!("{k}={v}")));
             let mut overlay: Vec<String> = with_env_overlay(|o| o.iter().map(|(k, v)| format!("{k}={v}")).collect());
             overlay.sort();
             entries.extend(overlay);

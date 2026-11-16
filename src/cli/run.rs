@@ -753,6 +753,8 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
         err(&no_host_for_import(file, &module, &name, "`almide run --target wasm`"));
         return 1;
     }
+    // The environment `binary_command` gives the native child (#4774).
+    almide_wasm_run::export_launcher_env(almide_cwd().map(|cwd| ("ALMIDE_CWD".to_string(), cwd)).into_iter().collect());
     match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
         Ok(r) => {
             print!("{}", r.stdout);
