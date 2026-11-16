@@ -291,11 +291,15 @@ local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_f
   [],
 )
 
+// The quotient limbs are appended most significant first and reversed once
+// at the end: prepending each one copied the quotient per limb (#4783).
 local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
-  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
-  else {
+  if i < 0 then {
+    let q = list.reverse(acc)
+    (list.take(q, top_nonzero(q, list.len(q))), rem)
+  } else {
     let cur = rem * limb_base() + limb(a, i)
-    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+    divmod_small_from(a, d, i - 1, cur % d, acc + [cur / d])
   }
 
 // Schoolbook long division, one limb of quotient per step: each quotient limb is

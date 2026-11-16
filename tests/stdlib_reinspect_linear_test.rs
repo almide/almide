@@ -19,6 +19,9 @@
 //!   reference, so its first swap copied the whole slot list on every push
 //!   (and `heap.from_list`, n pushes, was quadratic). The sifts now swap in
 //!   the heap's own list; `from_list` heapifies bottom-up. n log n overall.
+//! - `bigdiv` (#4783): dividing by a one-limb BigInt prepended each quotient
+//!   limb, copying the quotient per limb (`bigint.floor_div` / `modulo` and
+//!   every division that takes the single-limb path).
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -27,7 +30,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const SOURCE: &str = r#"import env
+const SOURCE: &str = r#"import bigint
+import env
 
 effect fn main() -> Unit = {
   let args = env.args()
@@ -52,6 +56,11 @@ effect fn main() -> Unit = {
       }
       println("${acc} ${heap.len(h)}")
     },
+    "bigdiv" => {
+      let x = bigint.bshl(bigint.from(1), n)
+      let d = bigint.from(1234567)
+      println("${bigint.bit_length(bigint.floor_div(x, d))} ${bigint.to_string(bigint.modulo(x, d))}")
+    },
     _ => println("usage"),
   }
 }
@@ -68,6 +77,7 @@ struct Case {
 const CASES: &[Case] = &[
     Case { mode: "parse_radix", native_n: 2_000_000, wasm_n: 100_000, expected: |_| "127 127\n".to_string() },
     Case { mode: "heap", native_n: 200_000, wasm_n: 5_000, expected: heap_expected },
+    Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 
 /// The `heap` mode's line: every pushed value popped in ascending order.
@@ -76,6 +86,13 @@ fn heap_expected(n: u64) -> String {
     all.sort_unstable();
     let acc = all.iter().fold(0, |acc, v| (acc + v) % 1000003);
     format!("{acc} 0\n")
+}
+
+/// The `bigdiv` mode's line: 2^n / 1234567 has n - 20 bits (the divisor is
+/// between 2^20 and 2^21), and 2^n mod 1234567.
+fn bigdiv_expected(n: u64) -> String {
+    let rem = (0..n).fold(1u64, |r, _| r * 2 % 1234567);
+    format!("{} {rem}\n", n - 20)
 }
 
 /// The scratch dir holding the program, its native binary and its stock wasm.
