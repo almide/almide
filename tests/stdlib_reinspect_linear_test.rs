@@ -25,6 +25,9 @@
 //! - `bytes_join` (#4785): wasm links the self-hosted `bytes.__join` for a
 //!   `list.join` over `List[Bytes]`; it folded `__concat`, copying the
 //!   accumulator per element. It now sizes the result once and fills it.
+//! - `concat_rows` (#4770), `zip_with` (#4786), `f16` (#4775): the matrix
+//!   self-hosts (and native concat_rows) built their result by appending to
+//!   an accumulator that each step copied; one pass each now.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -69,6 +72,16 @@ effect fn main() -> Unit = {
       let j = list.join(parts, bytes.from_list([0]))
       println("${bytes.len(j)} ${bytes.get(j, bytes.len(j) - 1) ?? -1}")
     },
+    "concat_rows" => {
+      let ms = list.range(0, n) |> list.map((i) => matrix.from_lists([[1.5, 2.0], [0.5, 3.0]]))
+      println("${matrix.rows(matrix.concat_rows(ms))}")
+    },
+    "zip_with" => {
+      let a = matrix.zeros(n, 2)
+      let c = matrix.zip_with(a, matrix.zeros(n, 2), (x, y) => x + y + 1.0)
+      println("${matrix.rows(c)} ${matrix.get(c, n - 1, 1) == some(1.0)}")
+    },
+    "f16" => println("${bytes.len(matrix.to_bytes_f16_le(matrix.zeros(n, 2)))}"),
     _ => println("usage"),
   }
 }
@@ -86,6 +99,9 @@ const CASES: &[Case] = &[
     Case { mode: "parse_radix", native_n: 2_000_000, wasm_n: 100_000, expected: |_| "127 127\n".to_string() },
     Case { mode: "heap", native_n: 200_000, wasm_n: 5_000, expected: heap_expected },
     Case { mode: "bytes_join", native_n: 2_000_000, wasm_n: 100_000, expected: |n| format!("{} 7\n", 3 * n - 1) },
+    Case { mode: "concat_rows", native_n: 400_000, wasm_n: 10_000, expected: |n| format!("{}\n", 2 * n) },
+    Case { mode: "zip_with", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{n} true\n") },
+    Case { mode: "f16", native_n: 2_000_000, wasm_n: 20_000, expected: |n| format!("{}\n", 4 * n) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 
