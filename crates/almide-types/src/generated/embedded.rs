@@ -592,24 +592,21 @@ local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]
   }
 
 
-local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
-  a,
-  d,
-  list.len(a) - 1,
-  0,
-  [],
-)
 
 
-
-local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
-  if i < 0 then {
-    let q = list.reverse(acc)
-    (list.take(q, top_nonzero(q, list.len(q))), rem)
-  } else {
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = {
+  let n = list.len(a)
+  var q = list.repeat(0, n)
+  var rem = 0
+  var i = n - 1
+  while i >= 0 {
     let cur = rem * limb_base() + limb(a, i)
-    divmod_small_from(a, d, i - 1, cur % d, acc + [cur / d])
+    q = list.set(q, i, cur / d)
+    rem = cur % d
+    i = i - 1
   }
+  (list.take(q, top_nonzero(q, n)), rem)
+}
 
 
 
@@ -5043,19 +5040,51 @@ fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
-fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
+
+
+
+
+  let k = int.max(n, 0)
+  let f = list.len(d.front)
+  if k > f then {
+    let rest = list.drop(d.back, k - f)
+    let keep = (list.len(rest) + 1) / 2
+    { front: list.reverse(list.take(rest, keep)), back: list.drop(rest, keep) }
+  } else { ...d, front: list.drop_end(d.front, k) }
+}
 
 /// Last n elements, as list.take_end.
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
-fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
+  let k = int.max(n, 0)
+  let b = list.len(d.back)
+  if k > b then {
+
+    let xs = list.reverse(list.drop(d.front, k - b))
+    let keep = list.len(xs) / 2
+    { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else { ...d, back: list.drop_end(d.back, k) }
+}
 
 /// Indices start..<end, as list.slice.
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
-fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
+
+
+  let f = list.len(d.front)
+  if i >= f then __set_back(d, i - f, x)
+  else __set_front(d, f - 1 - i, x)
+}
+
+
+fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.set(d.front, j, x) }
+
+fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
@@ -12039,24 +12068,31 @@ local fn prefix_radix(b: Int) -> Int = match b {
 
 local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
   [] => err("invalid digit found in string"),
-  _ => accumulate_digits(digits, 0, radix, acc, negative),
+  _ => accumulate_digits(digits, radix, acc, negative),
 }
 
 
 
-local fn accumulate_digits(digits: List[Int], i: Int, radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match list.get(
-  digits,
-  i,
-) {
-  none => if negative then ok(acc)
+
+local fn accumulate_digits(digits: List[Int], radix: Int, start: Int, negative: Bool) -> Result[Int, String] = {
+  var acc = start
+  var refused = ""
+  for b in digits {
+    if refused == "" then {
+      let d = digit_value(b)
+      if d >= radix then {
+        refused = "invalid digit found in string"
+      } else if acc < (int.min_value() + d) / radix then {
+        refused = if negative then "number too small to fit in target type" else "number too large to fit in target type"
+      } else {
+        acc = acc * radix - d
+      }
+    } else ()
+  }
+  if refused != "" then err(refused)
+  else if negative then ok(acc)
   else if acc == int.min_value() then err("number too large to fit in target type")
-  else ok(0 - acc),
-  some(b) => {
-    let d = digit_value(b)
-    if d >= radix then err("invalid digit found in string")
-    else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
-    else accumulate_digits(digits, i + 1, radix, acc * radix - d, negative)
-  },
+  else ok(0 - acc)
 }
 
 
@@ -28757,45 +28793,54 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 
 
 
-fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
-  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.__append_rows(acc, m)),
-  none => acc,
-}
+
+
 
 @implements("matrix.concat_rows")
-fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = __matrix_concat_rows_go(
-  xs,
-  0,
-  matrix.from_lists([]),
-)
+fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = {
+  var out = matrix.from_lists([])
+  var rows: List[List[Float]] = []
+  var cols = 0
+  var started = false
+  for m in xs {
+    if matrix.rows(m) == 0 then {
+      if started then ()
+      else {
+        out = m
+      }
+    } else if started then {
+      if matrix.cols(m) != cols then {
+        let probe = matrix.__append_rows(matrix.zeros(1, cols), matrix.zeros(1, matrix.cols(m)))
+        cols = matrix.cols(probe)
+      } else ()
+      if list.is_empty(rows) then {
+        rows = matrix.to_lists(out)
+      } else ()
+      for r in matrix.to_lists(m) {
+        list.push(rows, r)
+      }
+    } else {
+      started = true
+      out = m
+      cols = matrix.cols(m)
+    }
+  }
 
-fn __matrix_zip_row(ra: List[Float], rb: List[Float], f: (Float, Float) -> Float, i: Int, acc: List[Float]) -> List[Float] = match (list.get(
-  ra,
-  i,
-), list.get(rb, i)) {
-  (some(x), some(y)) => __matrix_zip_row(ra, rb, f, i + 1, acc + [f(x, y)]),
-  _ => acc,
+  if list.is_empty(rows) then out else matrix.from_lists(rows)
 }
 
-fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float, i: Int, acc: List[List[Float]]) -> List[List[Float]] = match (list.get(
-  la,
-  i,
-), list.get(lb, i)) {
-  (some(ra), some(rb)) => __matrix_zip_rows(
-    la,
-    lb,
-    f,
-    i + 1,
-    acc + [
-      __matrix_zip_row(ra, rb, f, 0, [])
-    ],
-  ),
-  _ => acc,
+
+
+fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float) -> List[List[Float]] = {
+  var out: List[List[Float]] = []
+  for i in 0..<list.len(la) {
+    match (list.get(la, i), list.get(lb, i)) {
+      (some(ra), some(rb)) => list.push(out, list.zip_with(ra, rb, f)),
+      _ => (),
+    }
+  }
+  out
 }
-
-
-
-
 
 @implements("matrix.zip_with")
 fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = {
@@ -28808,7 +28853,7 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
     matrix.zeros(1, matrix.cols(b)),
   )
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
-  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
+  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f))
 }
 
 
@@ -28817,24 +28862,22 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
 
 fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
 
-fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
-  some(x) => {
-    let h = __matrix_f16_bits(x)
-    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
-  },
-  none => acc,
-}
 
-fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
-  rows,
-  i,
-) {
-  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
-  none => acc,
+
+fn __matrix_f16_codes(rows: List[List[Float]]) -> List[Int] = {
+  var out: List[Int] = []
+  for row in rows {
+    for x in row {
+      let h = __matrix_f16_bits(x)
+      list.push(out, int.band(h, 255))
+      list.push(out, int.bshr(h, 8))
+    }
+  }
+  out
 }
 
 @implements("matrix.to_bytes_f16_le")
-fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_codes(matrix.to_lists(m)))
 "#;
 pub const SRC_NET: &str = r#"
 

@@ -31,7 +31,7 @@
 28	10	332	28	spec/wasm_cross/bang_in_record_literal_field.almd
 145	129	3433	145	spec/wasm_cross/base64_decode_canonical.almd
 191	163	1557	191	spec/wasm_cross/base64_encode.almd
-2844399	2834425	76120666	2844399	spec/wasm_cross/bigint_text_and_pow_limits.almd
+2832985	2823011	70066826	2832985	spec/wasm_cross/bigint_text_and_pow_limits.almd
 4	0	52	4	spec/wasm_cross/binary_operators.almd
 85	72	1138	85	spec/wasm_cross/binary_search_duplicate_keys.almd
 0	0	0	0	spec/wasm_cross/binding_stmts.almd
@@ -158,7 +158,7 @@
 30	16	538	30	spec/wasm_cross/early_return_control_flow.almd
 25	7	245	25	spec/wasm_cross/edge_closure_matrix.almd
 27	9	19503	27	spec/wasm_cross/edge_float_formatting.almd
-101	70	1826	101	spec/wasm_cross/edge_int_boundaries.almd
+83	54	858	83	spec/wasm_cross/edge_int_boundaries.almd
 51	42	466	51	spec/wasm_cross/edge_map_order.almd
 30	13	453	30	spec/wasm_cross/edge_string_unicode.almd
 23	10	247	23	spec/wasm_cross/effect_assign_unwrap.almd
@@ -366,7 +366,7 @@
 15	6	116	15	spec/wasm_cross/heap_result_if_bind.almd
 33	24	317	33	spec/wasm_cross/heap_result_if_bind_chain.almd
 28	23	115	28	spec/wasm_cross/heap_result_if_eq_cond.almd
-15	7	118	15	spec/wasm_cross/heap_result_if_match_arm_frame.almd
+13	5	110	13	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 12	1	98	12	spec/wasm_cross/heap_result_if_option_aggregate.almd
 10	1	68	10	spec/wasm_cross/heap_result_if_record_arm.almd
 12	2	70	12	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
@@ -403,7 +403,7 @@
 6	2	296	6	spec/wasm_cross/int_div_pow2_nonneg_induction.almd
 0	0	0	0	spec/wasm_cross/int_div_pow2_signed_induction.almd
 5	2	42	5	spec/wasm_cross/int_float_ops.almd
-486	458	7692	486	spec/wasm_cross/int_from_hex.almd
+405	378	4500	405	spec/wasm_cross/int_from_hex.almd
 0	0	0	0	spec/wasm_cross/int_mod_by_zero.almd
 0	0	0	0	spec/wasm_cross/int_mod_overflow.almd
 55	50	985	55	spec/wasm_cross/int_parse_overflow.almd
@@ -563,7 +563,7 @@
 113	102	1879	113	spec/wasm_cross/math_log_gamma_negative.almd
 29	26	795	29	spec/wasm_cross/math_pow.almd
 0	0	0	0	spec/wasm_cross/math_transcendental_bits.almd
-249	216	3578	249	spec/wasm_cross/matrix_composition_family.almd
+245	212	3542	245	spec/wasm_cross/matrix_composition_family.almd
 28	3	288	28	spec/wasm_cross/matrix_dims_guard.almd
 8	0	210	1	spec/wasm_cross/matrix_dims_guard_overflow.almd
 3	0	106	0	spec/wasm_cross/matrix_dims_guard_product.almd
@@ -577,7 +577,7 @@
 222	171	8605	222	spec/wasm_cross/matrix_mul_no_fma.almd
 42	27	637	42	spec/wasm_cross/matrix_neg_signed_zero.almd
 50	34	1704	50	spec/wasm_cross/matrix_pow_libm.almd
-533	501	7444	533	spec/wasm_cross/matrix_producers_uniform_rows.almd
+530	498	7416	530	spec/wasm_cross/matrix_producers_uniform_rows.almd
 48	33	757	48	spec/wasm_cross/matrix_product_family.almd
 17	7	316	17	spec/wasm_cross/matrix_select_rows.almd
 11	2	175	8	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
@@ -659,7 +659,7 @@
 64	35	370	64	spec/wasm_cross/nested_list_list_string.almd
 23	4	238	23	spec/wasm_cross/nested_list_option_result.almd
 14	9	104	14	spec/wasm_cross/nested_map_list_values.almd
-39	27	346	39	spec/wasm_cross/nested_match_heap_arm.almd
+36	25	306	36	spec/wasm_cross/nested_match_heap_arm.almd
 9	3	83	9	spec/wasm_cross/nested_match_two_scrutinees.almd
 2	0	24	2	spec/wasm_cross/nested_payload_guard.almd
 75	35	1190	75	spec/wasm_cross/nested_place_assign.almd
@@ -687,7 +687,7 @@
 2	0	11	0	spec/wasm_cross/option_none_unwrap_term.almd
 15	5	128	15	spec/wasm_cross/option_payload_recursive_variant.almd
 15	2	64	15	spec/wasm_cross/option_result.almd
-88	47	854	88	spec/wasm_cross/option_result_ctors.almd
+85	45	870	85	spec/wasm_cross/option_result_ctors.almd
 40	28	368	40	spec/wasm_cross/option_tuple_payload_matrix.almd
 19	9	209	19	spec/wasm_cross/option_unwrap_or_else_heap.almd
 29	20	172	29	spec/wasm_cross/optional_chain_heap_field.almd
@@ -1052,7 +1052,7 @@
 18108	18064	1026953	18089	spec/wasm_cross/zlib_output_bound.almd
 4275	4208	342160	4275	spec/wasm_cross/zlib_selfhost.almd
 9	3	103	7	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
-574931	574408	15498186	574928	spec/wasm_fail/bigint_to_string_limit_aborts.almd
+572078	571555	13984866	572075	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 2	0	52	0	spec/wasm_fail/effect_err_aborts_both_legs.almd
 2	0	52	0	spec/wasm_fail/int_parse_err_propagates.almd
 9	3	112	5	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
