@@ -285,6 +285,10 @@ pub(super) const ALT_RECIPES: &[(&str, Recipe)] = &[
     ("Fd", Recipe { func: "io.write", size: "data", args: &[("h", "unix.connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!"), ("data", "bytes.from_string(string.repeat(\"aé\", 4 * {n}))")] }),
     // A shared-memory descriptor of its own per step.
     ("Fd", Recipe { func: "io.close", size: "", args: &[("h", "{ let _step = {i}\n  unix.shm_create(8)! }")] }),
+    // A shared-memory descriptor of n bytes of its own per step, read from
+    // its start: a file's reads end where it does, as stdin's do at EOF.
+    ("Fd", Recipe { func: "io.read_to_end", size: "h", args: &[("h", "{ let _step = {i}\n  unix.shm_create({n})! }")] }),
+    ("Fd", Recipe { func: "io.read_exact", size: "n", args: &[("h", "{ let _step = {i}\n  unix.shm_create({n})! }"), ("n", "{n}")] }),
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
