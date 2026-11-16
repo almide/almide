@@ -65,7 +65,7 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     let lambda = origin.map(|(name, _)| name.as_str());
     // A lambda borrows its env; a user param it takes over (a move param,
     // `native_move_params`) gets the value the runtime hands the adapter.
-    let moved: Vec<bool> = match lambda {
+    let mut moved: Vec<bool> = match lambda {
         Some(lambda) => {
             let l = cx.user_fns.get(lambda)?;
             if l.params.first().is_some_and(|p| l.owned_params.contains(&p.value)) { return None; }
@@ -128,7 +128,13 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
             None if lent_one => { side.lent = false; tuple_callback_adapter(env, lambda, &name, (dps, dret), (&ps, &moved), (ret, false))? }
             None => return None,
         }
-    } else { adapter(lambda, &name, (&ps, &moved, &lent, &strs), &bits, (ret?, ret_lane))? };
+    } else {
+        // #4762: through a dispatch table (no lambda named here), every heap
+        // value the runtime hands the adapter owned is handed on, so a lambda
+        // that takes it over (a fold's accumulator) gets it without a copy.
+        if lambda.is_none() { moved = handed_positions(&ps, &bits, &lent, &strs); }
+        adapter(lambda, &name, (&ps, &moved, &lent, &strs), &bits, (ret?, ret_lane))?
+    };
     let keyed = cx.key.is_some_and(|b| matches!(dret, DTy::Var(v) if v == b));
     let closure = match ret.map(clo::owned_nty) {
         Some(NTy::Rec(i)) if keyed => tuple_key(&closure, i).unwrap_or(closure),
@@ -136,6 +142,16 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     };
     bind_env(side, &name, (*blk, t), slots, lambda.is_none())?;
     Some(closure)
+}
+
+/// The params a table-dispatched callback hands on owned: each heap value
+/// the runtime gives the adapter by value (not lent, not a lent `&str`).
+fn handed_positions(ps: &[NativeSigKind], bits: &[Lane], lent: &[bool], strs: &[bool]) -> Vec<bool> {
+    let flag = |v: &[bool], i: usize| v.get(i).copied().unwrap_or(false);
+    ps.iter().zip(bits).enumerate()
+        .map(|(i, (k, b))| *b == Lane::Same && !flag(lent, i) && !flag(strs, i)
+            && matches!(k, NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_)))
+        .collect()
 }
 
 /// The lane a callback's declared return travels in.
@@ -193,8 +209,9 @@ fn bind_env(side: &mut FnArgOut, name: &str, (blk, t): (ValueId, NTy), slots: Op
 
 /// One call expression prefix; the dynamic index is read and checked once
 /// in the call's prelude, before the runtime invokes the callback.
-fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], ret: Option<NativeSigKind>) -> String {
+fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> String {
     if let Some(lambda) = lambda { return format!("{}(&{env}", crate::render_native::mangle(lambda)); }
-    let key = clo::sig_key(ps, &[], ret).unwrap_or_else(|| ps.len().to_string());
+    let key = if handed.contains(&true) { clo::demand_handed_dispatch(ps, handed, ret) }
+        else { clo::sig_key(ps, &[], ret).unwrap_or_else(|| ps.len().to_string()) };
     format!("__almd_ci_{key}({env}_index, &{env}")
 }

@@ -443,7 +443,8 @@ fn adapter(lambda: Option<&str>, env: &str, (ps, moved, lent, strs): (&[NativeSi
             _ => format!(", __p{i}"),
         })
         .collect();
-    let call = format!("{}{args})", callback_head(lambda, env, ps, Some(ret)));
+    let handed: Vec<bool> = if lambda.is_none() { moved.to_vec() } else { Vec::new() };
+    let call = format!("{}{args})", callback_head(lambda, env, ps, &handed, Some(ret)));
     let (call, ret_ty) = match ret_lane {
         Lane::F64 => (format!("AlmdLaneF64::lane_f64({call})"), "f64".to_string()),
         Lane::Bool => (format!("({call}) != 0"), "bool".to_string()),

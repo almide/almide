@@ -157,7 +157,7 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps,
             _ => format!("{}__a{i}", if borrow { "&" } else { "" }),
         });
     }
-    let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
+    let call = format!("{}{})", callback_head(lambda, captured, ps, &[], ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
     let call = if ret == Some(NativeSigKind::F64) { format!("AlmdLaneF64::lane_f64({call})") } else { call };
     let result = match ret {

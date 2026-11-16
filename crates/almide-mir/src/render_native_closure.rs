@@ -113,6 +113,14 @@ pub(crate) fn demand_borrowed_dispatch(params: &[NTy], ret: Option<NTy>) -> Stri
     key
 }
 
+/// A typed host adapter that hands the callback the owned values it was
+/// given (`handed[i]`) dispatches through that handing-over table.
+pub(crate) fn demand_handed_dispatch(ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> String {
+    let key = sig_key(ps, handed, ret).unwrap_or_else(|| ps.len().to_string());
+    DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (ps.to_vec(), handed.to_vec(), ret)));
+    key
+}
+
 /// Which of a lifted lambda's user params (the env param dropped) are move
 /// params.
 pub(crate) fn lambda_moves(f: &MirFunction) -> Vec<bool> {
@@ -177,8 +185,13 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
         // The lending table of its kinds, and the handing-over one of its modes.
         for m in [vec![false; ps.len()], moved.clone()] {
             let Some(key) = sig_key(&ps, &m, ret) else { continue };
-            let fns = &mut tables.entry(key).or_insert_with(|| (ps.clone(), m, ret, Vec::new())).3;
-            if !fns.contains(&(idx, name)) {
+            tables.entry(key).or_insert_with(|| (ps.clone(), m, ret, Vec::new()));
+        }
+        // Every table of its kinds, whatever it hands over: a call through
+        // one may reach any lambda of the signature, and each arm adapts
+        // (#4762) — a handed arg the lambda only reads is lent to it.
+        for (tps, _, tret, fns) in tables.values_mut() {
+            if *tps == ps && *tret == ret && !fns.contains(&(idx, name)) {
                 fns.push((idx, name));
             }
         }
@@ -204,6 +217,8 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
                 .map(|(i, k)| match (handed[i], takes.get(i).copied().unwrap_or(false)) {
                     // A param passed by value is already the lambda's own.
                     (false, true) if param_spelling(*k).starts_with('&') => format!(", {}", owned_copy(*k, &format!("a{i}"))),
+                    // A handed value the lambda only reads: lent for the call.
+                    (true, false) if param_spelling(*k).starts_with('&') => format!(", &a{i}"),
                     _ => format!(", a{i}"),
                 })
                 .collect();
