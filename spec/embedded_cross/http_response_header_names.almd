@@ -21,14 +21,20 @@ effect fn read_head(s: net.TcpStream, acc: String) -> Result[String, String] = {
 }
 
 effect fn exchange(l: net.TcpListener, port: Int, tag: String, reply: String) -> Unit = {
-  match http.start(http.new_request("GET", "http://127.0.0.1:${port}/h", "", []), { total_ms: 0, idle_ms: 0 }) {
+  match http.start(
+    http.new_request("GET", "http://127.0.0.1:${port}/h", "", []),
+    { total_ms: 0, idle_ms: 0 },
+  ) {
     err(e) => println("${tag}: start err ${e}"),
     ok(call) => {
       let s = net.tcp_accept(l)!
       let _ = read_head(s, "")!
       io.write(s, bytes.from_string(reply))!
       let answer = match http.wait(call) {
-        ok(r) => "${http.status(r)} ${http.headers(r)} ${http.header(r, "X-Custom-Name") ?? "-"} ${http.header_values(r, "SET-COOKIE")} ${http.body(r)}",
+        ok(r) => "${http.status(r)} ${http.headers(r)} ${http.header(r, "X-Custom-Name") ?? "-"} ${http.header_values(
+          r,
+          "SET-COOKIE",
+        )} ${http.body(r)}",
         err(e) => "err ${e}",
       }
       let _ = io.close(s)

@@ -86,7 +86,10 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(
+  d.back,
+  x,
+)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {

@@ -2,10 +2,15 @@
 // place (@reuse) and copy a shared one; bytes.pop and string.pop ride on them.
 // These tests pin the value semantics every leg must keep while doing so: a
 // binding or a caller that still holds the source never sees it shrink.
+fn trim_bytes(b: Bytes, k: Int) -> Bytes = if k <= 0 then b else trim_bytes(
+  bytes.drop_end(b, 1),
+  k - 1,
+)
 
-fn trim_bytes(b: Bytes, k: Int) -> Bytes = if k <= 0 then b else trim_bytes(bytes.drop_end(b, 1), k - 1)
-
-fn trim_string(s: String, k: Int) -> String = if k <= 0 then s else trim_string(string.drop_end(s, 1), k - 1)
+fn trim_string(s: String, k: Int) -> String = if k <= 0 then s else trim_string(
+  string.drop_end(s, 1),
+  k - 1,
+)
 
 fn pop_all(mut s: String, acc: List[String]) -> List[String] = match string.pop(s) {
   some(c) => pop_all(s, acc + [c]),
