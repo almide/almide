@@ -974,7 +974,7 @@ fn pop(mut b: Bytes) -> Int? = {
   let n = bytes.len(b)
   let last = bytes.get(b, n - 1)
   if n > 0 then {
-    b = bytes.slice(b, 0, n - 1)
+    b = bytes.drop_end(b, 1)
   } else ()
   last
 }
@@ -994,10 +994,9 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 }
 
 /// b without its last n bytes; empty past its length; all of b if n < 0.
-fn drop_end(b: Bytes, n: Int) -> Bytes = {
-  let k = int.min(int.max(n, 0), bytes.len(b))
-  bytes.slice(b, 0, bytes.len(b) - k)
-}
+@intrinsic("almide_rt_bytes_drop_end")
+@reuse(b)
+fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {

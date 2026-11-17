@@ -411,6 +411,7 @@ __selfhost_.bytes_concat
 __selfhost_.bytes_contains
 __selfhost_.bytes_copy_from
 __selfhost_.bytes_copy_within
+__selfhost_.bytes_drop_end
 __selfhost_.bytes_ends_with
 __selfhost_.bytes_eof
 __selfhost_.bytes_eq
@@ -995,7 +996,6 @@ bytes.count
 bytes.count_matches
 bytes.dedup
 bytes.drop
-bytes.drop_end
 bytes.drop_while
 bytes.enumerate
 bytes.f16_be_at

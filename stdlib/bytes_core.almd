@@ -133,6 +133,15 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
 
 // bytes.slice(b, start, end) -> the [start, end) byte range (each index clamps to
 // [0, len], a negative one being 0, #4147; a start >= end yields an empty Bytes).
+// bytes.drop_end (#4756): the copying form; a negative n is 0.
+@implements("bytes.drop_end")
+fn bytes_drop_end(b: Bytes, n: Int) -> Bytes = {
+  let len = prim.load32(prim.handle(b) + 4)
+  let k = if n < 0 then 0
+  else (if n > len then len else n)
+  bytes_slice(b, 0, len - k)
+}
+
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
   let s = if start < 0 then 0

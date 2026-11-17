@@ -26,6 +26,11 @@ impl Emitter<'_> {
         if module.as_str() != "string" {
             return Ok(None);
         }
+        // A dying source truncates in place; a live one keeps the linked
+        // copying body (`Ok(None)` from the arm: not lowered here).
+        if let ("drop_end", [s, n]) = (func.as_str(), args) {
+            return Ok(self.lower_string_drop_end(s, n)?.map(Some));
+        }
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
             ("push", [v, x]) => self.lower_string_push(v, x),
@@ -52,6 +57,65 @@ impl Emitter<'_> {
             _ => return self.lower_string_ext_b(func.as_str(), args),
         }
         .map(Some)
+    }
+
+    /// `string.drop_end(s, n)` (#4761), `@reuse(s)`: the last n codepoints
+    /// go by walking back from the end over UTF-8 continuation bytes, O(n)
+    /// not O(len), and a dying source is truncated in place by rewriting
+    /// its length (a static one has its kept prefix copied to a fresh block);
+    /// a live source is not lowered here (`Ok(None)`): it keeps the linked
+    /// copying body. A negative n is 0.
+    fn lower_string_drop_end(&mut self, s: &IrExpr, n: &IrExpr) -> ArmResult {
+        if self.owned_reuse_source(s, &[n], Some(STR))?.is_none() {
+            return Ok(None);
+        }
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
+        let hn = self.hold_i64()?;
+        let hp = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hn);
+        i.local_get(hb).i32_load(len_memarg()).local_set(hp);
+        // while n > 0 && p > 0: step back one codepoint
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hn).i64_const(0).i64_le_s().br_if(1);
+        i.local_get(hp).i32_eqz().br_if(1);
+        i.local_get(hp).i32_const(1).i32_sub().local_set(hp);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hp).i32_eqz().br_if(1);
+        i.local_get(hb).local_get(hp).i32_add().i32_load8_u(str_byte());
+        i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
+        i.local_get(hp).i32_const(1).i32_sub().local_set(hp);
+        i.br(0);
+        i.end().end();
+        i.local_get(hn).i64_const(1).i64_sub().local_set(hn);
+        i.br(0);
+        i.end().end();
+        // `$cow` hands a static block (a literal's data) back as it is: the
+        // kept prefix goes to a fresh block of its own length, as the linked
+        // copying body would build; a heap block loses its tail in place.
+        let _ = i;
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(hb).global_get(G_LINE_END).i32_lt_u();
+        i.if_(BlockType::Result(ValType::I32));
+        i.local_get(hp).call(F_ALLOC).local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(hp);
+        i.memory_copy(0, 0);
+        i.local_get(ho);
+        i.else_();
+        i.local_get(hb).local_get(hp).i32_store(len_memarg());
+        i.local_get(hb);
+        i.end();
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(Lowered::owned(STR)))
     }
 
     /// First n CHARS; a NEGATIVE n is 0 (#4147 — it used to take the

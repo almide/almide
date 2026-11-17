@@ -122,6 +122,9 @@ fn converted_list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
 fn twin_takes(param: Option<&FloorParam>, (code, got): &(String, NTy)) -> bool {
     match (param, got) {
         (_, NTy::Vec | NTy::VecStr) => true,
+        // A dying owned String (`string.drop_end(s, 1)` at s's last use,
+        // #4761): its buffer moves into the twin, which edits it in place.
+        (Some(FloorParam::Str), NTy::Str) => true,
         (Some(FloorParam::List(elem)), NTy::Rec(_)) => list_arg(*elem, code, *got).is_some_and(|r| r == format!("&{code}")),
         // A dying owned Value (`as_array(v)` at v's last use): its items move.
         (Some(FloorParam::Value(_)), NTy::Rec(_)) => crate::render_native_rec::is_value(*got),

@@ -50,6 +50,11 @@ pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b
 // the raw buffer: the wrapper hands its buffer over (moved when it is the
 // only holder, copied when shared), a raw `Vec<u8>` is itself.
 pub fn almide_rt_bytes_set_owned(b: impl Into<Vec<u8>>, i: i64, val: i64) -> Vec<u8> { let mut b = b.into(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
+// `bytes.drop_end` (#4756): b without its last n bytes, a negative n is 0.
+// The owned twin (`@reuse(b)`) truncates a sole owner in place, so a rebind
+// loop that trims one byte per step is O(1) per step, as list.drop_end.
+pub fn almide_rt_bytes_drop_end(b: &Vec<u8>, n: i64) -> Vec<u8> { let k = (n.max(0) as u64).min(b.len() as u64) as usize; b[..b.len() - k].to_vec() }
+pub fn almide_rt_bytes_drop_end_owned(b: impl Into<Vec<u8>>, n: i64) -> Vec<u8> { let mut b = b.into(); let k = (n.max(0) as u64).min(b.len() as u64) as usize; let end = b.len() - k; b.truncate(end); b }
 pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
     // Range bounds clamp into [0, len]; a negative bound is 0 (#4147).
     let s = (start.max(0) as usize).min(b.len());

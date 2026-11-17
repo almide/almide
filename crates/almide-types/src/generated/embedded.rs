@@ -1881,7 +1881,7 @@ fn pop(mut b: Bytes) -> Int? = {
   let n = bytes.len(b)
   let last = bytes.get(b, n - 1)
   if n > 0 then {
-    b = bytes.slice(b, 0, n - 1)
+    b = bytes.drop_end(b, 1)
   } else ()
   last
 }
@@ -1901,10 +1901,9 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 }
 
 /// b without its last n bytes; empty past its length; all of b if n < 0.
-fn drop_end(b: Bytes, n: Int) -> Bytes = {
-  let k = int.min(int.max(n, 0), bytes.len(b))
-  bytes.slice(b, 0, bytes.len(b) - k)
-}
+@intrinsic("almide_rt_bytes_drop_end")
+@reuse(b)
+fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
@@ -2603,6 +2602,15 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
 }
 
 
+
+
+@implements("bytes.drop_end")
+fn bytes_drop_end(b: Bytes, n: Int) -> Bytes = {
+  let len = prim.load32(prim.handle(b) + 4)
+  let k = if n < 0 then 0
+  else (if n > len then len else n)
+  bytes_slice(b, 0, len - k)
+}
 
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
@@ -37725,6 +37733,7 @@ fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
+@reuse(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 
@@ -37735,7 +37744,7 @@ fn push(mut s: String, x: String) -> Unit = _
 /// Removes and returns the last character; none if s is empty.
 fn pop(mut s: String) -> String? = {
   let popped = string.last(s)
-  if string.len(s) > 0 then {
+  if not string.is_empty(s) then {
     s = string.drop_end(s, 1)
   } else ()
   popped

@@ -211,6 +211,7 @@ fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
+@reuse(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 // ── Mutable string operations ──
@@ -221,7 +222,7 @@ fn push(mut s: String, x: String) -> Unit = _
 /// Removes and returns the last character; none if s is empty.
 fn pop(mut s: String) -> String? = {
   let popped = string.last(s)
-  if string.len(s) > 0 then {
+  if not string.is_empty(s) then {
     s = string.drop_end(s, 1)
   } else ()
   popped
