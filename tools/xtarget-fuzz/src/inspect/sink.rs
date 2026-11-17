@@ -28,6 +28,16 @@ pub(super) const SINKS: &[&str] = &["http.decode_json"];
 /// The measured input type: n list elements and a fixed string.
 const IN_TYPE: &str = "type In: Decode = { k: List[Int], s: String }";
 
+/// A per-instantiation verdict labelled with the input type it measured and
+/// that type's declaration, as the ledger's user-only rule reads them
+/// (`[vars=In] [decl type In: Decode = { … }]`, owner ruling 2026-11-17).
+fn labelled(v: String) -> String {
+    match v.split_once(": ") {
+        Some((head, rest)) => format!("{head}: [vars=In] [decl {IN_TYPE}] {rest}"),
+        None => v,
+    }
+}
+
 /// A JSON body for `In` whose `k` holds n one-digit Ints.
 fn sized_body(n: u64) -> String {
     format!("\"{{\\\"k\\\": [\" + (list.range(0, {n}) |> list.map((i) => \"${{i % 10}}\") |> list.join(\", \")) + \"], \\\"s\\\": \\\"aé\\\"}}\"")
@@ -241,9 +251,9 @@ pub(super) fn inspect(ctx: &mut Ctx, name: &str, args: &[String]) {
     let order = super::super::flag_value(args, "--order");
     let verdicts = [
         ("parity", parity(ctx, args)),
-        ("complexity", complexity(ctx, n, order)),
-        ("alloc", alloc(ctx)),
-        ("diamond", diamond(ctx)),
+        ("complexity", labelled(complexity(ctx, n, order))),
+        ("alloc", labelled(alloc(ctx))),
+        ("diamond", labelled(diamond(ctx))),
     ];
     let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
     println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
@@ -273,6 +283,14 @@ mod tests {
 
     /// The diamond prints each path's lines in turn, the order the shared
     /// verdict compares in thirds.
+    #[test]
+    fn a_verdict_names_the_measured_input_type_and_its_declaration() {
+        assert_eq!(
+            labelled("PASS: call live=0".into()),
+            "PASS: [vars=In] [decl type In: Decode = { k: List[Int], s: String }] call live=0"
+        );
+    }
+
     #[test]
     fn the_diamond_prints_each_path_in_turn() {
         let main = &diamond_project().files[4].1;
