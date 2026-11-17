@@ -1,10 +1,7 @@
-//! Bytes — the byte-packed buffer surface (String's layout twin). The
-//! oracle allows in-place `set_*` (a `mut`/buffer API); under the
-//! bind-deep-copy doctrine a local's block is uniquely its own, so the
-//! stores are unobservable through aliases. `bytes.zeros` zero-fills its
-//! payload itself: a block may come off a free list, so nothing may
-//! assume fresh memory (the bump path's zero pages were never a
-//! guarantee once frees became real, #2004).
+//! Bytes — the byte-packed buffer surface (String's layout twin). The oracle allows in-place `set_*` (a `mut`/buffer
+//! API); under the bind-deep-copy doctrine a local's block is uniquely its own, so the stores are unobservable through
+//! aliases. `bytes.zeros` zero-fills its payload itself: a block may come off a free list, so nothing may assume fresh
+//! memory (the bump path's zero pages were never a guarantee once frees became real, #2004).
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, MemArg, ValType};
@@ -93,7 +90,6 @@ pub(crate) fn emit_widened_byte(i: &mut wasm_encoder::InstructionSink<'_>, base:
 }
 
 impl Emitter<'_> {
-
     fn lower_bytes_new(&mut self, n: &IrExpr) -> ArmResult {
         self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         // native `len.max(0)` — a NEGATIVE size is the empty buffer,
@@ -210,6 +206,45 @@ impl Emitter<'_> {
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
         i.local_get(hv).i64_store8(byte_k(0));
         i.end();
+        i.local_get(bh);
+        let _ = i;
+        self.release_i64();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(Lowered::owned(BYTES)))
+    }
+
+    /// `bytes.drop_end(b, n)` (#4756), `@reuse(b)`: a dying source is
+    /// truncated in place by rewriting its length (as `list.drop_end`'s
+    /// in-place arm), so a trim-one-byte rebind loop is O(1) per step; a live
+    /// source is copied first. A negative n is 0, an n past the end empties.
+    fn lower_bytes_drop_end(&mut self, b: &IrExpr, n: &IrExpr) -> ArmResult {
+        if self.owned_reuse_source(b, &[n], Some(BYTES))?.is_none() {
+            self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+            self.f.instructions().call(F_BLOCK_COPY);
+        }
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        // `$cow` hands a static block back as it is (a literal's data):
+        // the truncate writes its length, so a static is copied first.
+        let mut i = self.f.instructions();
+        i.local_get(bh).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+        i.local_get(bh).call(F_BLOCK_COPY).local_set(bh);
+        i.end();
+        let _ = i;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
+        let hn = self.hold_i64()?;
+        let hl = self.hold_i64()?;
+        let mut i = self.f.instructions();
+        i.local_set(hn);
+        i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
+        i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u().local_set(hl);
+        // len' = len - min(n, len)
+        i.local_get(bh);
+        i.local_get(hl);
+        i.local_get(hn).local_get(hl).local_get(hn).local_get(hl).i64_lt_s().select();
+        i.i64_sub().i32_wrap_i64();
+        i.i32_store(len_memarg());
         i.local_get(bh);
         let _ = i;
         self.release_i64();
@@ -746,9 +781,7 @@ impl Emitter<'_> {
             _ => self.lower_linked_call("bytes", func, args, tail),
         }
     }
-}
 
-impl Emitter<'_> {
     /// MUT push (native b.push): the `$bytes_push` helper — cap fast
     /// path, geometric growth, outgrown block released (#1689) —
     /// then write back, exactly the `list.push` convention.
