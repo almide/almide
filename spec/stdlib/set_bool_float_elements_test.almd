@@ -19,6 +19,15 @@ test "a Set[Bool] counts, filters, maps and prints its real elements" {
   assert_eq(set.len(pick(set.new(), "t")), 1)
 }
 
+fn any_true(s: Set[Bool]) -> Bool = set.any(s, (v) => v)
+
+test "a Set[Bool] predicate takes the real element (#4797)" {
+  assert(any_true(set.from_list([false, true])))
+  assert(not any_true(set.from_list([false])))
+  assert(set.all(set.from_list([true, true]), (n) => n))
+  assert(not set.all(set.from_list([true, false]), (n) => n))
+}
+
 test "a Set[Float] keeps IEEE equality and its float repr" {
   let s: Set[Float] = set.from_list([1.5, 2.25, 1.5])
   assert_eq(set.len(s), 2)
