@@ -383,7 +383,7 @@ fn branch_with_rest(s: &IrExpr, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty)
 /// Every arm must yield a value (a block with a tail, or a bare expression)
 /// for the bind to move into it.
 pub(super) fn bound_branch_exits(value: &IrExpr) -> bool {
-    let exits = super::nested_exit::spine_exits;
+    let exits = almide_ir::exit_anf::spine_exits;
     let yields = |a: &IrExpr| !matches!(&a.kind, IrExprKind::Block { expr: None, .. });
     match &value.kind {
         IrExprKind::If { then, else_, .. } => (exits(then) || exits(else_)) && yields(then) && yields(else_),

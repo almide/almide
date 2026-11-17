@@ -8,9 +8,10 @@
 //! <unreachable> }`. The MIR has no mid-function return, so that guard was
 //! refused there.
 //!
-//! [`hoist_nested_exit`] moves such a value out of its expression into a bind
-//! ahead of the statement, with every operand evaluated before it bound first,
-//! in order:
+//! The shared IR pass `almide_ir::exit_anf` has already bound such a value
+//! ahead of its statement on every leg. [`hoist_nested_exit`] does the same
+//! for any exit (a plain `guard` included) on the fn's tail chain, with every
+//! operand evaluated before it bound first, in order:
 //!
 //! ```text
 //! { pre; let k = f(a(), { …; match s { ok(v) => v, _ => { guard false else E; ⊥ } } }); rest }
@@ -33,124 +34,9 @@
 //! while C { body }  ≡  var go = true; while go { let c = C; if c then { body } else { go = false } }
 //! ```
 
-use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, IrStringPart, Mutability, VarTable};
+use almide_ir::exit_anf::{flatten_bind, hoist_in, spine_exits, stmt_value};
+use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
 use almide_lang::types::Ty;
-
-/// Does an exit from the fn stand on `e`'s value spine: a `Guard` statement
-/// of a block, a block's tail, or an arm of an `if` / `match`?
-pub(super) fn spine_exits(e: &IrExpr) -> bool {
-    match &e.kind {
-        IrExprKind::Block { stmts, expr } => {
-            stmts.iter().any(|s| matches!(s.kind, IrStmtKind::Guard { .. })) || expr.as_deref().is_some_and(spine_exits)
-        }
-        IrExprKind::If { then, else_, .. } => spine_exits(then) || spine_exits(else_),
-        IrExprKind::Match { arms, .. } => arms.iter().any(|a| spine_exits(&a.body)),
-        _ => false,
-    }
-}
-
-/// The operands of `e` that are evaluated unconditionally, in evaluation
-/// order. A kind not listed has none walked.
-fn strict_operands(e: &mut IrExpr) -> Vec<&mut IrExpr> {
-    use almide_ir::BinOp;
-    match &mut e.kind {
-        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-            args.iter_mut().collect()
-        }
-        IrExprKind::BinOp { op: BinOp::And | BinOp::Or, left, .. } => vec![&mut **left],
-        IrExprKind::BinOp { left, right, .. } => vec![&mut **left, &mut **right],
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter_mut().collect(),
-        IrExprKind::Record { fields, .. } => fields.iter_mut().map(|(_, v)| v).collect(),
-        IrExprKind::SpreadRecord { base, fields } => {
-            std::iter::once(&mut **base).chain(fields.iter_mut().map(|(_, v)| v)).collect()
-        }
-        IrExprKind::Range { start, end, .. } => vec![&mut **start, &mut **end],
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            vec![&mut **object, &mut **index]
-        }
-        IrExprKind::StringInterp { parts } => parts
-            .iter_mut()
-            .filter_map(|p| match p {
-                IrStringPart::Expr { expr } => Some(expr),
-                IrStringPart::Lit { .. } => None,
-            })
-            .collect(),
-        IrExprKind::If { cond: x, .. }
-        | IrExprKind::Match { subject: x, .. }
-        | IrExprKind::ForIn { iterable: x, .. }
-        | IrExprKind::UnOp { operand: x, .. }
-        | IrExprKind::Member { object: x, .. }
-        | IrExprKind::TupleIndex { object: x, .. }
-        | IrExprKind::ResultOk { expr: x }
-        | IrExprKind::ResultErr { expr: x }
-        | IrExprKind::OptionSome { expr: x }
-        | IrExprKind::UnwrapOr { expr: x, .. }
-        | IrExprKind::Unwrap { expr: x }
-        | IrExprKind::Try { expr: x }
-        | IrExprKind::ToOption { expr: x } => vec![&mut **x],
-        _ => Vec::new(),
-    }
-}
-
-/// Is `e` a value whose evaluation the hoisted value cannot change or observe:
-/// a literal, or a variable that is never reassigned?
-fn is_stable(e: &IrExpr, vt: &VarTable) -> bool {
-    match &e.kind {
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } => true,
-        IrExprKind::Unit | IrExprKind::OptionNone | IrExprKind::FnRef { .. } => true,
-        IrExprKind::Var { id } => vt.get(*id).mutability == Mutability::Let,
-        _ => false,
-    }
-}
-
-/// `let <fresh> = <e>` ahead of the statement; `e` becomes the fresh variable.
-fn bind_out(e: &mut IrExpr, out: &mut Vec<IrStmt>, vt: &mut VarTable) {
-    let ty = e.ty.clone();
-    let var = vt.alloc(almide_base::intern::sym("__exit_v"), ty.clone(), Mutability::Let, e.span);
-    let read = IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: e.span, def_id: None };
-    let value = std::mem::replace(e, read);
-    flatten_bind(var, ty, value, out);
-}
-
-/// `let var = value`, a block value's statements first.
-fn flatten_bind(var: almide_ir::VarId, ty: Ty, value: IrExpr, out: &mut Vec<IrStmt>) {
-    let span = value.span;
-    match value.kind {
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            out.extend(stmts);
-            flatten_bind(var, ty, *tail, out);
-        }
-        kind => {
-            let value = IrExpr { kind, ty: ty.clone(), span, def_id: value.def_id };
-            out.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
-        }
-    }
-}
-
-/// Hoist the first exiting value among `e`'s unconditional operands (or
-/// deeper in them) into `out`, the operands before it bound first. `true`
-/// when one was hoisted.
-fn hoist_in(e: &mut IrExpr, out: &mut Vec<IrStmt>, vt: &mut VarTable) -> bool {
-    let mut ops = strict_operands(e);
-    let Some(at) = ops.iter().position(|o| spine_exits(o) || contains_nested(o)) else { return false };
-    for o in ops.iter_mut().take(at) {
-        if !is_stable(o, vt) {
-            bind_out(o, out, vt);
-        }
-    }
-    let target = &mut *ops[at];
-    if spine_exits(target) {
-        bind_out(target, out, vt);
-        return true;
-    }
-    hoist_in(target, out, vt)
-}
-
-/// Does an exiting value stand among `e`'s unconditional operands, at any depth?
-fn contains_nested(e: &IrExpr) -> bool {
-    let mut copy = e.clone();
-    strict_operands(&mut copy).iter().any(|o| spine_exits(o) || contains_nested(o))
-}
 
 /// Does a `Guard` statement stand anywhere in `s` / `e`?
 struct GuardScan(bool);
@@ -200,17 +86,6 @@ fn flatten_bound_blocks(stmts: &[IrStmt]) -> Option<Vec<IrStmt>> {
     Some(out)
 }
 
-/// The value expression of a statement the hoist may rewrite.
-fn stmt_value(s: &mut IrStmt) -> Option<&mut IrExpr> {
-    match &mut s.kind {
-        IrStmtKind::Bind { value, .. }
-        | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. }
-        | IrStmtKind::Expr { expr: value } => Some(value),
-        _ => None,
-    }
-}
-
 /// `while C { body }` whose condition `C` holds an exit on its value spine,
 /// as the two statements of the module doc. The condition's bind is lifted
 /// in the loop body the way a bound branch is on the tail chain, its exiting
@@ -250,28 +125,7 @@ fn while_exit(s: &IrStmt, vt: &mut VarTable) -> Option<Vec<IrStmt>> {
     ])
 }
 
-/// Does `body` hold the exit the front end gives a `guard let` whose block's
-/// value an enclosing expression uses: a block `{ guard false else E; <a
-/// Never value> }`?
-pub(super) fn holds_value_exit(body: &IrExpr) -> bool {
-    struct Scan(bool);
-    impl almide_ir::visit::IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Block { stmts, expr: Some(tail) } = &e.kind {
-                let exit = |s: &IrStmt| {
-                    matches!(&s.kind, IrStmtKind::Guard { cond, .. } if matches!(cond.kind, IrExprKind::LitBool { value: false }))
-                };
-                self.0 |= tail.ty == Ty::Never && stmts.last().is_some_and(exit);
-            }
-            if !self.0 {
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-    }
-    let mut scan = Scan(false);
-    almide_ir::visit::IrVisitor::visit_expr(&mut scan, body);
-    scan.0
-}
+pub(super) use almide_ir::exit_anf::holds_value_exit;
 
 /// Rewrite the first statement (or the tail) of a tail-chain block whose
 /// value holds an exit nested in an operand. `None` when there is none.
@@ -291,7 +145,7 @@ pub(super) fn hoist_nested_exit(stmts: &[IrStmt], tail: Option<&IrExpr>, vt: &mu
         }
         let mut s = s.clone();
         let mut out = Vec::new();
-        if stmt_value(&mut s).is_some_and(|v| hoist_in(v, &mut out, vt)) {
+        if stmt_value(&mut s).is_some_and(|v| hoist_in(v, &mut out, vt, spine_exits)) {
             let mut all = stmts[..i].to_vec();
             all.extend(out);
             all.push(s);
@@ -301,7 +155,7 @@ pub(super) fn hoist_nested_exit(stmts: &[IrStmt], tail: Option<&IrExpr>, vt: &mu
     }
     let mut t = tail?.clone();
     let mut out = Vec::new();
-    if !hoist_in(&mut t, &mut out, vt) {
+    if !hoist_in(&mut t, &mut out, vt, spine_exits) {
         return None;
     }
     let mut all = stmts.to_vec();
