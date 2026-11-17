@@ -210,3 +210,9 @@ initialize the rc cell or be a named raw-scratch site (the modelled-and-proven
 out of the `.v` file so the constant cannot drift. Emitter-level rc operations
 (stored-field dups, in-runtime incs) also remain invisible to the IR verifier by
 construction.
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4236 Detect affine-shaped functions after Perceus (zero RcInc, no writer annotation) as the counter-free / GPU-eligible subset; measure how many functions qualify first

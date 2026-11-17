@@ -189,3 +189,10 @@ R-L0-05 との関係: regex の関数はすべて値を返す純粋な関数で�
 
 - 「1 引数の関数で値を作る」接尾辞: R-L0-10 で `_with` を「値の代わりに関数を受け取る版」と定めたので、`regex.replace_with` にしました（R-regex-05）。
 - パイプの取り違えを宣言の印で止める仕組み: 足しません。型を分けて止めます（R-regex-02・R-regex-03）。
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4422 regex named groups returned as a compile-time-checked record type (needs an ADR and a contract first)
+- #4423 regex.set / set_matches: multi-pattern match in one pass, sharing the #4421 literal prefilter

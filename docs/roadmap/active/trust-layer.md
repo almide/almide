@@ -105,3 +105,9 @@ manifest の比較は運用者の判断を助けるが、ホスト・native depe
 | データ逆風 (LLM は Python/TS の海で訓練) | 本プロジェクト全体の賭け | dojo で賭けの成否が数字で見える。in-context (CHEATSHEET + skill) が事前学習の慣れに勝つかを測定し続ける |
 | カテゴリ不成立 (無監督運用の市場が来ない) | タイミングリスク | エージェント基盤の現在の軌道では「いつ」の問題。受領書を先に積む時間競争と捉える |
 | ラボ製 agent 言語の登場 | 最大の競合シナリオ | 機能は模倣可能だが方法論 (oracle pairing / ratchet / daily MSR / Lean) の retrofit は高くつく。先行の受領書がそのまま防御 |
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4395 Discharge the String UTF-8 trusted-base row with a minting certificate (part of #4005); the utf8-producers ledger gate holds it meanwhile

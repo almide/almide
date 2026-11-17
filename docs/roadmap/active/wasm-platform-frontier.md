@@ -166,3 +166,9 @@ wasm 単スレッド制約が `fan.*` の cross-target 意味論差の根本原�
 - [WASI roadmap](https://wasi.dev/roadmap)
 - [WebAssembly proposals tracking](https://github.com/WebAssembly/proposals)
 - [wasmtime-wasi-http](https://docs.wasmtime.dev/api/wasmtime_wasi_http/index.html)
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #2702 Stock wasi:keyvalue binding for kv in components (CAS-loop update), enabled per host once it passes the conformance fixture; after #2699
