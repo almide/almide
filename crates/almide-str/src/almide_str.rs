@@ -279,10 +279,15 @@ impl AlmideStr {
         }
         let mut u = self.unique();
         let len = range.end - range.start;
-        // SAFETY: slicing above checked bounds and both UTF-8 boundaries.
-        // The unique view owns the initialized source and destination, which
-        // may overlap. The kept bytes form a complete UTF-8 string.
-        unsafe { std::ptr::copy(u.data.add(range.start), u.data, len) };
+        // A prefix is already in place: only the length moves, so a truncate
+        // (string.drop_end / string.pop on a sole owner) is O(1), not a
+        // memmove of every kept byte onto itself (#4761).
+        if range.start != 0 {
+            // SAFETY: slicing above checked bounds and both UTF-8 boundaries.
+            // The unique view owns the initialized source and destination, which
+            // may overlap. The kept bytes form a complete UTF-8 string.
+            unsafe { std::ptr::copy(u.data.add(range.start), u.data, len) };
+        }
         u.len = len;
     }
 
