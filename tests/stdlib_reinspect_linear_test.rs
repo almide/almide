@@ -34,6 +34,9 @@
 //!   the `mut` deque copied that list per pop on wasm.
 //! - `regex_replace` (#4779): the wasm self-host appended each match to a
 //!   String accumulator, copying the result per match.
+//! - `value_get` (#4757): wasm's `$vfield` scanned an Object's pairs on every
+//!   `value.get` / `get_*` read, so reading each of n keys once was
+//!   quadratic; it now asks the box's key index, as native reads its own.
 #[path = "support/cpu_time.rs"]
 mod cpu_time;
 use cpu_time::reap_cpu_time;
@@ -111,6 +114,11 @@ effect fn main() -> Unit = {
       let r = regex.replace(regex.new("(é)"), string.repeat("aé", n), "x")
       println("${string.len(r)} ${string.slice(r, 0, 4)}")
     },
+    "value_get" => {
+      let v = value.object(list.range(0, n) |> list.map((i) => ("k${i}", value.int(i))))
+      let hits = list.range(0, n) |> list.fold(0, (acc, i) => acc + (value.get_int(v, "k${i}") ?? 0) + (if option.is_some(value.get(v, "k${n - 1 - i}")) then 1 else 0))
+      println("${hits} ${option.is_none(value.get(v, "absent"))}")
+    },
     _ => println("usage"),
   }
 }
@@ -134,6 +142,7 @@ const CASES: &[Case] = &[
     Case { mode: "deque", native_n: 400_000, wasm_n: 40_000, expected: |n| format!("{} {}\n", n + 1 - 2 * (n / 4), n / 4 - 1) },
     Case { mode: "deque_pop", native_n: 2_000_000, wasm_n: 100_000, expected: |n| format!("{} {}\n", (n / 4) * (n - n / 4), n - 2 * (n / 4)) },
     Case { mode: "regex_replace", native_n: 1_000_000, wasm_n: 20_000, expected: |n| format!("{} axax\n", 2 * n) },
+    Case { mode: "value_get", native_n: 400_000, wasm_n: 20_000, expected: |n| format!("{} true\n", n * (n - 1) / 2 + n) },
     Case { mode: "bigdiv", native_n: 32_000_000, wasm_n: 200_000, expected: bigdiv_expected },
 ];
 

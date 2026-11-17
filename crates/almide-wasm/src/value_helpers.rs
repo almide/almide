@@ -102,7 +102,15 @@ pub(crate) fn emit_value_eq_helper(self_idx: u32, key_off: u32, val_off: u32) ->
 }
 
 /// `$vfield(v, key) -> i32`: 0 not-object / 1 missing / value address.
-pub(crate) fn emit_value_field_helper() -> Function {
+///
+/// A heap box of 16+ pairs asks `find` (`$vset_find`): the box's key index,
+/// built on the first such lookup and kept in the box's index word, which
+/// the Value drop glue releases with the box (#4757: the scan made every
+/// field read O(keys) where native's indexed object is O(1)). The pairs
+/// stay the only order and the index answers a key's first slot, as the
+/// scan did. A pool static (below `G_LINE_END`) is never freed, so it
+/// keeps the scan rather than carry an index nobody releases.
+pub(crate) fn emit_value_field_helper(find: u32, key_off: u32, val_off: u32) -> Function {
     let (v, key, p, end, pair) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
@@ -113,14 +121,23 @@ pub(crate) fn emit_value_field_helper() -> Function {
     i.i32_const(0).return_();
     i.end();
     i.local_get(v).i32_load(m_pay).local_set(pair); // pairs list (reuse local)
+    i.local_get(v).global_get(G_LINE_END).i32_ge_u();
+    i.local_get(pair).i32_load(len_memarg()).i32_const(crate::value_set_path::SCAN_BYTES).i32_ge_u();
+    i.i32_and().if_(BlockType::Empty);
+    i.local_get(v).local_get(key).call(find).local_tee(p).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.i32_const(1).return_();
+    i.end();
+    i.local_get(v).i32_load(m_pay).local_get(p).i32_add().i32_load(slot_memarg(0));
+    i.i32_load(slot_memarg(val_off)).return_();
+    i.end();
     i.local_get(pair).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
     i.local_get(p).local_get(pair).i32_load(len_memarg()).i32_add().local_set(end);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(end).i32_ge_u().br_if(1);
     i.local_get(p).i32_load(raw8()).local_set(pair);
-    i.local_get(pair).i32_load(slot_memarg(0)).local_get(key).call(F_STR_EQ);
+    i.local_get(pair).i32_load(slot_memarg(key_off)).local_get(key).call(F_STR_EQ);
     i.if_(BlockType::Empty);
-    i.local_get(pair).i32_load(slot_memarg(4)).return_();
+    i.local_get(pair).i32_load(slot_memarg(val_off)).return_();
     i.end();
     i.local_get(p).i32_const(4).i32_add().local_set(p);
     i.br(0);
