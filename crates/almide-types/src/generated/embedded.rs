@@ -1970,7 +1970,7 @@ fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partit
 )
 
 /// Bytes grouped by f's key, each group in order.
-fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
 
 /// The bytes in ascending order.
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
@@ -2093,7 +2093,7 @@ fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(b
 fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 
 /// The first byte of each key f gives, in order.
-fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+fn unique_by[K: Eq](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 
 
@@ -5016,7 +5016,7 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {
@@ -5142,7 +5142,7 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 )
 
 /// Key f(x) -> elements; keys in first-seen order.
-fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+fn group_by[A, B: Eq](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
@@ -5193,16 +5193,16 @@ fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
 }
 
 /// Adjacent equal runs collapsed, as list.dedup.
-fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+fn dedup[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
 
 /// sep between adjacent elements.
 fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
 
 /// Duplicates removed; the occurrence nearest the front kept.
-fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+fn unique[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
-fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+fn unique_by[A, K: Eq](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
 
 
 /// Sum of the elements; 0 when empty; integers wrap on overflow.
@@ -21448,7 +21448,7 @@ fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
-fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
+fn group_by[K, V, B: Eq](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
   map.to_list(m),
   f,
 )
@@ -21711,7 +21711,7 @@ fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -
   (p) => f(p)!,
 )
 
-fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
+fn __fallible_group_by[K, V, B: Eq, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -36121,7 +36121,7 @@ fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_
 fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
 
 /// Key f(x) -> members; keys in first-seen order.
-fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+fn group_by[A, B: Eq](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
@@ -36310,7 +36310,7 @@ fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(L
   (x) => f(x)!,
 )
 
-fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+fn __fallible_group_by[A, B: Eq, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -37876,7 +37876,7 @@ fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = l
 )
 
 /// Characters grouped by f's key, each group in order.
-fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+fn group_by[B: Eq](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
   string.to_list(s),
   f,
 )
@@ -38016,7 +38016,7 @@ fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), 
 fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+fn unique_by[K: Eq](s: String, f: (String) -> K) -> String = list.join(
   list.unique_by(string.to_list(s), f),
   "",
 )

@@ -354,7 +354,7 @@ fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = l
 )
 
 /// Characters grouped by f's key, each group in order.
-fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+fn group_by[B: Eq](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
   string.to_list(s),
   f,
 )
@@ -494,7 +494,7 @@ fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), 
 fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+fn unique_by[K: Eq](s: String, f: (String) -> K) -> String = list.join(
   list.unique_by(string.to_list(s), f),
   "",
 )

@@ -86,7 +86,7 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {
@@ -212,7 +212,7 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 )
 
 /// Key f(x) -> elements; keys in first-seen order.
-fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+fn group_by[A, B: Eq](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
@@ -263,16 +263,16 @@ fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
 }
 
 /// Adjacent equal runs collapsed, as list.dedup.
-fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+fn dedup[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
 
 /// sep between adjacent elements.
 fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
 
 /// Duplicates removed; the occurrence nearest the front kept.
-fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+fn unique[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
-fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+fn unique_by[A, K: Eq](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
 
 // ── Numeric folds (R-L0-42): the element type's own sum and product ──
 /// Sum of the elements; 0 when empty; integers wrap on overflow.

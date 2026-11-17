@@ -1063,7 +1063,7 @@ fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partit
 )
 
 /// Bytes grouped by f's key, each group in order.
-fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
 
 /// The bytes in ascending order.
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
@@ -1186,7 +1186,7 @@ fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(b
 fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 
 /// The first byte of each key f gives, in order.
-fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+fn unique_by[K: Eq](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 // The searches below go through bytes.index_of and bytes.split, the one
 // linear-time substring search each target has (#4206): they used to compare

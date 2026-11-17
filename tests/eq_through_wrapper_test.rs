@@ -62,3 +62,65 @@ effect fn main() -> Unit = {
     );
     assert!(ok, "check refused it:\n{text}");
 }
+
+// The stdlib half (#4796, owner ruling 2026-11-17, option B): the
+// self-hosted wrappers declare `[A: Eq]` and the built-in Eq is admitted by
+// structure, as `[A: Ord]` is (#4758).
+
+#[test]
+fn deque_unique_over_a_function_holding_record_is_e016() {
+    let (ok, text) = check(
+        "dq_fn",
+        r#"import http
+effect fn main() -> Unit = {
+  let rs = deque.unique(deque.from_list([http.route("GET /p", (req) => http.response(200, "x"))]))
+  println("${deque.len(rs)}")
+}
+"#,
+    );
+    assert!(!ok, "check accepted it:\n{text}");
+    assert!(text.contains("E016"), "expected E016:\n{text}");
+}
+
+#[test]
+fn deque_unique_over_a_secret_is_refused_as_list_unique_is() {
+    let (ok, text) = check(
+        "dq_secret",
+        r#"import secret
+effect fn main() -> Unit = {
+  let d = deque.unique(deque.from_list([secret.new(1), secret.new(2)]))
+  println("${deque.len(d)}")
+}
+"#,
+    );
+    let (lok, ltext) = check(
+        "ls_secret",
+        r#"import secret
+effect fn main() -> Unit = {
+  let d = list.unique([secret.new(1), secret.new(2)])
+  println("${list.len(d)}")
+}
+"#,
+    );
+    assert!(!ok, "check accepted deque.unique over a Secret:\n{text}");
+    assert!(!lok, "list.unique over a Secret was accepted:\n{ltext}");
+    assert!(text.contains("E103") && ltext.contains("E103"), "expected E103 on both:\n{text}\n{ltext}");
+}
+
+#[test]
+fn the_eq_bound_wrappers_still_check_at_eq_types() {
+    let (ok, text) = check(
+        "dq_int",
+        r#"effect fn main() -> Unit = {
+  let d = deque.unique(deque.from_list([1, 2, 2, 3]))
+  let e = deque.unique_by(deque.from_list(["a", "bb"]), (s) => string.len(s))
+  let f = deque.dedup(deque.from_list([[1], [1], [2]]))
+  let g = bytes.unique_by(bytes.from_list([1, 2, 3]), (b) => b % 2)
+  let h = string.group_by("abc", (c) => c == "a")
+  let i = set.group_by(set.from_list([1, 2, 3]), (x) => x % 2)
+  println("${deque.len(d)} ${deque.len(e)} ${deque.len(f)} ${bytes.len(g)} ${map.len(h)} ${map.len(i)} ${deque.contains(d, 2)}")
+}
+"#,
+    );
+    assert!(ok, "check refused it:\n{text}");
+}

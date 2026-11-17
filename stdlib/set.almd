@@ -131,7 +131,7 @@ fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_
 fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
 
 /// Key f(x) -> members; keys in first-seen order.
-fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+fn group_by[A, B: Eq](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
@@ -320,7 +320,7 @@ fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(L
   (x) => f(x)!,
 )
 
-fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+fn __fallible_group_by[A, B: Eq, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
   set.to_list(s),
   (x) => f(x)!,
 )
