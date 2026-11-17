@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "14"
+# uninspected_ceiling = "12"
 
 [[fn]]
 name = "args.option"
@@ -15277,8 +15277,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "bytes.pop"
 sig = "(b: Bytes) -> Option[Int]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:2004d9f89a640919"
+stamp = "almide 0.70.0 (dev, a0b1346a6) at inspect-allclear a0b1346a6ea491da471a2faaac717b348572cc63 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 0b10baa169effd1f431039162fe650bafb1d1c3a (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-northeast1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-17; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "1; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 164 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=262144..524288 2.123e7/2.123e7/2.123e7/2.123e7/2.123e7 fit 1 (rms 0.0%) moved 1.000e0/1.000e0/1.000e0/1.000e0/1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.000s wasm k=65536..131072 5.529e7/5.530e7/5.530e7/5.529e7/5.529e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.005s (order 1 ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
 name = "bytes.product"
@@ -16087,8 +16093,14 @@ diamond = "PASS: [vars=HttpRequest] direct = via left = via right on both legs (
 name = "http.header"
 sig = "(m: M, name: String) -> Option[String]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:c7aca633cfc757ba"
+stamp = "almide 0.70.0 (dev, a0b1346a6) at inspect-allclear a0b1346a6ea491da471a2faaac717b348572cc63 (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 0b10baa169effd1f431039162fe650bafb1d1c3a (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n from n=5000, XF_SUBTRACT_FIXED=1; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-northeast1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-17; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 154 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=HttpRequest] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..80000 native fixed(n=0) 1.763e5 instr 5.130e2B subtracted; native k=256..512 6.784e7/1.357e8/2.714e8/5.427e8/1.085e9 fit n (rms 0.0%) moved -1.000e0/-1.000e0/-1.000e0/-1.000e0/-1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.035/0.076s wasm fixed(n=0) 2.601e4 instr 1.820e2B subtracted; wasm k=1..2 5.351e7/1.070e8/2.140e8/4.281e8/8.562e8 fit n (rms 0.0%) moved 2.998e5/5.998e5/1.200e6/2.400e6/4.800e6B fit n (rms 0.0%) wall 0.000/0.010/0.015/0.030/0.066s (order n ok) || [vars=HttpRequest] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..80000 native fixed(n=0) 1.753e5 instr 5.130e2B subtracted; native k=256..512 6.784e7/1.357e8/2.714e8/5.427e8/1.085e9 fit n (rms 0.0%) moved -1.000e0/-1.000e0/-1.000e0/-1.000e0/-1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.041/0.076s wasm fixed(n=0) 2.662e4 instr 2.780e2B subtracted; wasm k=1..2 5.351e7/1.070e8/2.140e8/4.281e8/8.562e8 fit n (rms 0.0%) moved 3.002e5/6.002e5/1.200e6/2.400e6/4.800e6B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.025/0.061s (order n ok) || [vars=HttpResponse] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..80000 native fixed(n=0) 1.754e5 instr 5.130e2B subtracted; native k=256..512 6.774e7/1.358e8/2.711e8/5.433e8/1.086e9 fit n (rms 0.1%) moved -1.000e0/-1.000e0/-1.000e0/-1.000e0/-1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.046/0.091s wasm fixed(n=0) 2.963e4 instr 0.000e0B subtracted; wasm k=1..2 5.353e7/1.071e8/2.141e8/4.282e8/8.565e8 fit n (rms 0.0%) moved 2.999e5/6.002e5/1.201e6/2.400e6/4.800e6B fit n (rms 0.1%) wall 0.005/0.010/0.015/0.025/0.066s (order n ok) || [vars=HttpResponse] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=5000..80000 native fixed(n=0) 1.770e5 instr 5.130e2B subtracted; native k=256..512 6.768e7/1.357e8/2.710e8/5.428e8/1.085e9 fit n (rms 0.1%) moved -1.000e0/-1.000e0/-1.000e0/-1.000e0/-1.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.040/0.086s wasm fixed(n=0) 3.224e4 instr 3.000e0B subtracted; wasm k=1..2 5.353e7/1.071e8/2.141e8/4.282e8/8.565e8 fit n (rms 0.0%) moved 3.004e5/5.997e5/1.200e6/2.400e6/4.800e6B fit n (rms 0.1%) wall 0.000/0.010/0.015/0.035/0.061s (order n ok)"
+alloc = "PASS: [vars=HttpRequest] call live=0 || [vars=HttpRequest] call live=0 || [vars=HttpResponse] call live=0 || [vars=HttpResponse] call live=0"
+diamond = "PASS: [vars=HttpRequest] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpRequest] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpResponse] direct = via left = via right on both legs (1 line(s) each) || [vars=HttpResponse] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "http.method"
