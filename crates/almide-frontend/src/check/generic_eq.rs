@@ -88,6 +88,7 @@ impl Checker {
     fn validate_eq_instantiations(&mut self) {
         propagate_reqs(&self.generic_calls, &mut self.eq_reqs);
         let mut found: Vec<(GenericCall, InterpReq, Ty)> = Vec::new();
+        let mut no_eq: Vec<(GenericCall, InterpReq, Ty)> = Vec::new();
         for call in &self.generic_calls {
             let Some(reqs) = self.eq_reqs.get(&call.callee) else { continue };
             for req in reqs {
@@ -95,7 +96,9 @@ impl Checker {
                 if mentions_rigid_generic(&t) || mentions_unresolved(&t) {
                     continue;
                 }
-                if crate::secret_type::holds_secret(&self.env, &t) {
+                if !self.env.is_eq(&t) {
+                    no_eq.push((call.clone(), req.clone(), t));
+                } else if crate::secret_type::holds_secret(&self.env, &t) {
                     found.push((call.clone(), req.clone(), t));
                 }
             }
@@ -103,6 +106,48 @@ impl Checker {
         for (call, req, concrete) in found {
             self.report_eq_instantiation(&call, &req, &concrete);
         }
+        for (call, req, concrete) in no_eq {
+            self.report_no_eq_instantiation(&call, &req, &concrete);
+        }
+    }
+
+    /// E016 (#4796) for a generic fn whose body compares its parameter
+    /// (`deque.unique` forwarding to `list.unique`) instantiated at a type
+    /// with no equality: the requirement the body recorded, judged at the
+    /// concrete call, as the direct `list.unique(xs)` call is judged.
+    fn report_no_eq_instantiation(&mut self, call: &GenericCall, req: &InterpReq, concrete: &Ty) {
+        let key = (
+            call.site.file.clone().unwrap_or_default(),
+            call.site.span.map_or(0, |s| s.line),
+            call.site.span.map_or(0, |s| s.col),
+            String::from("E016"),
+            0,
+            0,
+        );
+        if !self.eq_reported.insert(key) {
+            return;
+        }
+        let mut diag = err(
+            format!(
+                "type '{}' has no equality — {} compares it (it contains a function)",
+                concrete.display(),
+                call.site.label,
+            ),
+            concat!(
+                "Function values have no equality, so neither does a Result, Option, list, tuple, ",
+                "record or variant that holds one. Compare what you can observe instead, or use a ",
+                "`_by` form with a key that has equality.",
+            )
+            .to_string(),
+            format!("call to {}", call.site.label),
+        ).with_code("E016");
+        let _ = req;
+        diag.file = call.site.file.clone();
+        if let Some(s) = call.site.span {
+            diag.line = Some(s.line);
+            diag.col = Some(s.col);
+        }
+        self.diagnostics.push(diag);
     }
 
     /// One E103 for a (call, requirement) pair, anchored like E089's
