@@ -31,6 +31,7 @@ use crate::oracle::sandbox::{self, World};
 
 mod aborts;
 mod serve;
+mod sink;
 
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
@@ -99,6 +100,11 @@ pub fn cmd_inspect(args: &[String]) {
     }
     if serve::SERVED.contains(&name.as_str()) {
         return serve::inspect(&mut ctx, &engine, &name, args);
+    }
+    // An `@input_sink` takes a user-declared input type the catalogue does
+    // not hold: its probes declare one (`inspect/sink.rs`).
+    if sink::SINKS.contains(&name.as_str()) {
+        return sink::inspect(&mut ctx, &name, args);
     }
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
