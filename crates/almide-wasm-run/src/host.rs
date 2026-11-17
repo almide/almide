@@ -1179,10 +1179,7 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
             // releases it (#4769: dropped here, it stayed live at exit).
             Ok(()) => {
                 put_back(caller.data(), held);
-                return Ok(match results.first() {
-                    Some(wasmtime::Val::I32(h)) => i64::from(*h as u32),
-                    _ => 0,
-                });
+                return Ok(step_result(&results));
             }
             Err(e) => e,
         };
@@ -1212,6 +1209,15 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
         for (g, v) in &globals {
             g.set(&mut *caller, *v)?;
         }
+    }
+}
+
+/// The step closure's own Result block, as op 75's ok answer (low word,
+/// high word 0) for the guest to release (#4769); 0 when it returned none.
+fn step_result(results: &[wasmtime::Val]) -> i64 {
+    match results.first() {
+        Some(wasmtime::Val::I32(h)) => i64::from(*h as u32),
+        _ => 0,
     }
 }
 
