@@ -462,8 +462,8 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "net.parse_ip", size: "", args: &[("s", "\"2001:db8::ff00:42:8329\"")] },
     // The header the sized message holds last (`k<100000000 + i>`), so the
     // lookup walks every header and hits.
-    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${100000000 + {n}}\"")] },
-    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${100000000 + {n}}\"")] },
+    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${900000000 + {n}}\"")] },
+    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${900000000 + {n}}\"")] },
 ];
 
 /// n zeros then `7f`: valid in radix 16, 127 in every fixed width.
@@ -947,6 +947,21 @@ impl Target {
 
     /// Parameter `i`'s recipe names the loop counter `{i}`: the direct
     /// program binds it inside the loop, every other program at `{i}` = 0.
+    /// The O(1) statement that puts one element back into the in-domain
+    /// `mut` size operand `x` after a call that took one out (an Option
+    /// answer), or None for every other shape.
+    fn refill(&self, i: usize) -> Option<String> {
+        if Some(i) != self.mut_param || !self.in_domain() || !matches!(self.ret, GenType::Option(_)) {
+            return None;
+        }
+        match self.ty(i)? {
+            GenType::Bytes => Some("bytes.push(x, i % 251)".into()),
+            GenType::String => Some("string.push(x, \"é\")".into()),
+            GenType::List(e) => Some(format!("list.push(x, {})", elem(&e))),
+            _ => None,
+        }
+    }
+
     fn per_step(&self, i: usize) -> bool {
         self.recipe_arg(i).is_some_and(|e| e.contains("{i}"))
     }
@@ -1176,6 +1191,13 @@ impl Target {
                     s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
                 }
             }
+        }
+        // A call that takes one element out of its in-domain `mut` operand
+        // (an Option answer: `none` only when empty) would empty it once the
+        // calibrated k passed n — bytes.pop refused at k=16384, n=20000. One
+        // element goes back after each call, so every call sees size n.
+        if let Some(r) = slot.and_then(|(i, _)| self.refill(i)).filter(|_| with_call) {
+            let _ = writeln!(s, "    {r}");
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
@@ -2289,6 +2311,20 @@ pub(crate) mod tests {
                 r.func
             );
         }
+    }
+
+    /// An in-domain call that takes one element out of its `mut` operand gets
+    /// one back after each call, so a k past n never empties it; a mutator
+    /// that answers Unit gets nothing extra.
+    #[test]
+    fn a_taking_mut_call_puts_one_element_back_each_step() {
+        let direct = target("bytes.pop").direct_program(1000, 4, true);
+        assert!(
+            direct.contains("bytes.pop(x)") && direct.contains("    bytes.push(x, i % 251)\n"),
+            "{direct}"
+        );
+        assert!(!target("bytes.pop").direct_program(1000, 4, false).contains("bytes.push(x"));
+        assert!(!target("bytes.push").direct_program(1000, 4, true).contains("bytes.push(x, i % 251)"));
     }
 
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
