@@ -104,6 +104,7 @@ impl Emitter<'_> {
                 i.call(F_FS_CALL);
                 let _ = i;
                 self.release_i32();
+                self.release_serve_step_result()?;
                 self.fs_result_unit()?
             }
             // The http call handle's leaves (#2633), then the tcp family's
@@ -116,6 +117,30 @@ impl Emitter<'_> {
             }
         };
         Ok(Some(t))
+    }
+
+    /// The contained loop's answer (#4769): a served run hands back the step
+    /// closure's own `Result[Unit, String]` block in the low word (high word
+    /// 0), which is released here, and leaves `0` (ok) for `fs_result_unit`;
+    /// a not-served answer (high word 1) is left as it is.
+    fn release_serve_step_result(&mut self) -> Result<(), EmitError> {
+        let uh = self.types.intern(SliceTy::Unit);
+        let sh = self.types.intern(STR);
+        let dec = self.dec_fn_of(SliceTy::Result(uh, sh));
+        let hret = self.hold_i64()?;
+        let hr = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_tee(hret).i64_const(32).i64_shr_u().i64_eqz().if_(BlockType::Empty);
+        i.local_get(hret).i32_wrap_i64().local_tee(hr).if_(BlockType::Empty);
+        i.local_get(hr).call(dec);
+        i.end();
+        i.i64_const(0).local_set(hret);
+        i.end();
+        i.local_get(hret);
+        let _ = i;
+        self.release_i32();
+        self.release_i64();
+        Ok(())
     }
 
     /// The `HttpCall` slice type and its id slot's payload offset.

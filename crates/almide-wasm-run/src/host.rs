@@ -1175,9 +1175,14 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
             None => {}
         };
         let e = match ran {
+            // The step's own Result block goes back to the guest, which
+            // releases it (#4769: dropped here, it stayed live at exit).
             Ok(()) => {
                 put_back(caller.data(), held);
-                return Ok(0);
+                return Ok(match results.first() {
+                    Some(wasmtime::Val::I32(h)) => i64::from(*h as u32),
+                    _ => 0,
+                });
             }
             Err(e) => e,
         };
