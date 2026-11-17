@@ -19,6 +19,11 @@ fn guard_else_ends_its_path(else_: &IrExpr) -> bool {
 struct GuardPos {
     /// It is a STATEMENT: its value is dropped and control carries on after it.
     stmt: bool,
+    /// Its value is what the fn (or the lambda) returns: the body, a block's
+    /// tail or a branch of it. A value anywhere else — a bind's value, an
+    /// operand, an argument, a condition — is used by code that runs after it,
+    /// so a guard's value else there is not that value (#4678).
+    ret: bool,
     /// Dropping its value leads straight to the enclosing block yielding this
     /// variable: it is the last statement of a block whose tail is the bare
     /// `Var`. The move-mode rewrite builds exactly this (`{ <body>; buf }`, a
@@ -27,16 +32,18 @@ struct GuardPos {
     falls_to: Option<VarId>,
 }
 
-const VALUE_POS: GuardPos = GuardPos { stmt: false, falls_to: None };
-const STMT_POS: GuardPos = GuardPos { stmt: true, falls_to: None };
+const RET_POS: GuardPos = GuardPos { stmt: false, ret: true, falls_to: None };
+const VALUE_POS: GuardPos = GuardPos { stmt: false, ret: false, falls_to: None };
+const STMT_POS: GuardPos = GuardPos { stmt: true, ret: false, falls_to: None };
 
 impl GuardPos {
     /// May `guard c else <else_>` at this position become `if c then { rest }
-    /// else <else_>`? Always where the block's value is used; in a statement
-    /// only when the else ends its own path, or names the variable the block
-    /// yields right after.
+    /// else <else_>`? Always where the block's value is what returns;
+    /// elsewhere only when the else ends its own path, or (in a statement)
+    /// names the variable the block yields right after. A value else left as
+    /// a `Guard` is refused by the lowering, never made the block's value.
     fn restructures(self, else_: &IrExpr) -> bool {
-        !self.stmt
+        self.ret
             || guard_else_ends_its_path(else_)
             || matches!(else_.kind, IrExprKind::Var { id } if self.falls_to == Some(id))
     }
@@ -82,7 +89,7 @@ fn map_guard_positions(e: IrExpr, at: GuardPos, f: &mut impl FnMut(IrExpr, Guard
         IrExprKind::Block { stmts, expr } => {
             let last = match expr.as_deref().map(|t| &t.kind) {
                 None => at,
-                Some(IrExprKind::Var { id }) if !at.stmt => GuardPos { stmt: true, falls_to: Some(*id) },
+                Some(IrExprKind::Var { id }) if !at.stmt => GuardPos { stmt: true, ret: false, falls_to: Some(*id) },
                 Some(_) => STMT_POS,
             };
             let stmts = map_stmt_positions(stmts, last, f);
@@ -112,6 +119,9 @@ fn map_guard_positions(e: IrExpr, at: GuardPos, f: &mut impl FnMut(IrExpr, Guard
         },
         IrExprKind::While { cond, body } => {
             IrExprKind::While { cond: Box::new(f(*cond, VALUE_POS)), body: map_stmt_positions(body, STMT_POS, f) }
+        }
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            IrExprKind::Lambda { params, body: Box::new(f(*body, RET_POS)), lambda_id }
         }
         other => {
             return IrExpr { kind: other, ty, span, def_id }.map_children(&mut |c| f(c, VALUE_POS));

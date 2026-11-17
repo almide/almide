@@ -73,13 +73,13 @@ pub struct LowerCtx<'a> {
     /// the ALS-T18 abort form OUTSIDE tests only — test blocks keep the
     /// harness assertion forms (cargo / the wasm test runner report them).
     pub in_test: bool,
-    /// The expression about to be lowered is a STATEMENT: its value is dropped
-    /// and the enclosing fn carries on after it. `lower_stmt` sets it for an
-    /// expression statement, `lower_expr` consumes it, and an `if` / `match` /
-    /// `if let` / block hands it on to its branches — so a `guard let` in a
-    /// branch arm knows its else cannot leave the fn as the arm's value
-    /// (#4655, `lower_block_body_in`).
+    /// Where the expression about to be lowered stands: a STATEMENT (its value
+    /// is dropped, #4655) or a BODY's value (what returns, #4678). `lower_stmt`
+    /// and `lower_body` set them, `lower_expr` consumes them, and an `if` /
+    /// `match` / `if let` / block hands them on to its branches — so a `guard
+    /// let` knows how its else leaves the fn (`lower_block_body_in`).
     stmt_pos: bool,
+    tail_pos: bool,
     /// Vars whose binding carried an EXPLICIT `Result[..]` annotation
     /// (`let r: Result[Int, String] = step()`). auto_try keeps these as
     /// Result instead of inserting `?`. Only the annotation distinguishes
@@ -126,6 +126,7 @@ impl<'a> LowerCtx<'a> {
             test_file: false,
             in_test: false,
             stmt_pos: false,
+            tail_pos: false,
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
             declared_repr_pending: Vec::new(),
@@ -598,7 +599,7 @@ fn lower_decls(
             ast::Decl::TopLet { name, ty: _, value, mutable, .. } => {
                 let var = ctx.lookup_var(name).expect("top-level let pre-registered");
                 let val_ty = ctx.var_table.get(var).ty.clone();
-                let mut ir_value = lower_expr(ctx, value);
+                let mut ir_value = expressions::lower_body(ctx, value);
                 // `let K: Int8 = 3` declares the width its literal takes (#3161).
                 statements::coerce_literal_to_sized(&mut ir_value, &val_ty, ctx.env);
                 let kind = classify_top_let_kind(&ir_value);

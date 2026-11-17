@@ -125,7 +125,7 @@ fn outline_metered_arm_with(
     // A `{ single_call() }` body parses as a one-expr Block — unwrap it so the
     // single-call shape keeps the args-as-params path below.
     let body_ir = {
-        let b = lower_expr(ctx, body);
+        let b = lower_body(ctx, body);
         match b.kind {
             IrExprKind::Block { stmts, expr: Some(e) } if stmts.is_empty() => *e,
             kind => IrExpr { kind, ty: b.ty, span: b.span, def_id: b.def_id },
@@ -630,7 +630,7 @@ fn lower_fan_race_map_fold(
     };
     ctx.push_scope();
     let px = ctx.define_var(&params[0].name, elem_ty.clone(), Mutability::Let, span);
-    let region_body = lower_expr(ctx, body);
+    let region_body = lower_body(ctx, body);
     ctx.pop_scope();
     let mapper_ret_ty = region_body.ty.clone();
     let region_call = outline_metered_arm_ir(

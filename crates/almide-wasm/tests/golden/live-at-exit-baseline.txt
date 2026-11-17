@@ -3,3 +3,4 @@
 # an unlisted fixture must exit with 0 live blocks; a row may only go down, and must
 # be lowered when it does. Every row names the issue that owns its leak mechanism.
 # live<TAB>issue<TAB>fixture
+3	#?	spec/wasm_cross/guard_let_in_expression_positions.almd
