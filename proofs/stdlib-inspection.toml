@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "10"
+# uninspected_ceiling = "9"
 
 [[fn]]
 name = "args.option"
@@ -16215,8 +16215,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "io.read"
 sig = "effect (h: H, max: Int) -> Bytes ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:fc47686a753800af"
+stamp = "almide 0.70.0 (dev, cc1e41de3) at inspect-allclear cc1e41de3044c1f475aa9d2444bc35f8d6927edc (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 02da5b19cc43802cd7ae7d030e588deabe537ab2 (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n from n=4000; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-northeast1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-17; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 programs; 200 program(s) call it, 155 of them clean on every leg; unique findings 0"
+complexity = "PASS: [vars=Stdin] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 5.169e6/1.029e7/2.058e7/4.108e7/8.207e7 fit n (rms 0.1%) moved 1.280e6/2.560e6/5.120e6/1.024e7/2.048e7B fit n (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.005s wasm k=64..128 1.571e7/3.118e7/6.211e7/1.240e8/2.480e8 fit n (rms 0.1%) moved 3.840e6/7.680e6/1.536e7/3.072e7/6.144e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.020/0.041s (order n ok) || [vars=Stdin] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 5.168e6/1.029e7/2.058e7/4.108e7/8.207e7 fit n (rms 0.1%) moved 1.280e6/2.560e6/5.120e6/1.024e7/2.048e7B fit n (rms 0.0%) wall 0.000/0.000/0.000/0.005/0.005s wasm k=64..128 1.571e7/3.117e7/6.211e7/1.240e8/2.480e8 fit n (rms 0.1%) moved 3.840e6/7.680e6/1.536e7/3.072e7/6.144e7B fit n (rms 0.0%) wall 0.005/0.010/0.010/0.020/0.040s (order n ok) || [vars=Fd] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=4000..64000 native k=64..128 4.789e6/7.888e6/1.401e7/2.630e7/5.088e7 fit n (rms 0.1%) moved 8.530e5/1.621e6/3.157e6/6.229e6/1.237e7B fit n (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=64..128 1.961e7/3.673e7/7.063e7/1.378e8/2.733e8 fit n (rms 0.4%) moved 1.066e6/2.090e6/4.137e6/8.234e6/1.643e7B fit n (rms 0.0%) wall 0.010/0.010/0.015/0.007/0.020s (order n ok) || [vars=Fd] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=4000..64000 native k=64..128 4.790e6/7.886e6/1.401e7/2.630e7/5.088e7 fit n (rms 0.1%) moved 8.530e5/1.621e6/3.157e6/6.229e6/1.237e7B fit n (rms 0.0%) wall 0.000/0.000/0.000/0.000/0.005s wasm k=64..128 1.977e7/3.674e7/7.061e7/1.380e8/2.734e8 fit n (rms 0.1%) moved 1.066e6/2.089e6/4.138e6/8.234e6/1.643e7B fit n (rms 0.0%) wall 0.015/0.015/0.015/0.015/0.030s (order n ok)"
+alloc = "PASS: [vars=Stdin] call live=0 || [vars=Stdin] call live=0 || [vars=Fd] call live=0 || [vars=Fd] call live=0"
+diamond = "PASS: [vars=Stdin] direct = via left = via right on both legs (1 line(s) each) || [vars=Stdin] direct = via left = via right on both legs (1 line(s) each) || [vars=Fd] direct = via left = via right on both legs (1 line(s) each) || [vars=Fd] direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "io.read_exact"
