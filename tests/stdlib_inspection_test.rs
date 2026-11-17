@@ -207,8 +207,11 @@ fn bounds_of(name: &str) -> Vec<VarBound> {
     let Some(program) = almide::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached) else {
         return vec![None];
     };
-    let Some(generics) = program.decls.iter().find_map(|d| match d {
-        almide::ast::Decl::Fn { name, generics, .. } if name.as_str() == f => Some(generics.clone().unwrap_or_default()),
+    let Some((generics, sink)) = program.decls.iter().find_map(|d| match d {
+        almide::ast::Decl::Fn { name, generics, attrs, .. } if name.as_str() == f => Some((
+            generics.clone().unwrap_or_default(),
+            attrs.iter().any(|a| a.name.as_str() == almide_frontend::request_flow::INPUT_SINK_ATTR),
+        )),
         _ => None,
     }) else {
         return vec![None];
@@ -225,9 +228,95 @@ fn bounds_of(name: &str) -> Vec<VarBound> {
                 let more = conformers(b.as_str());
                 admitted.retain(|(n, _)| more.iter().any(|(m, _)| m == n));
             }
+            // At an `@input_sink` the checker admits a `Decode`-bounded
+            // variable only an INPUT type: one that is not also sent out
+            // (`: Encode`, by protocol closure; E110, check/input_sink.rs).
+            if sink && bs.iter().any(|b| protocol_closure(b.as_str()).contains(&DECODE_PROTOCOL)) {
+                let sent_out = sent_out_conformers();
+                admitted.retain(|(n, _)| !sent_out.contains(n));
+            }
             Some(admitted)
         })
         .collect()
+}
+
+use almide_frontend::canonicalize::protocols::{protocol_closure, DECODE_PROTOCOL, ENCODE_PROTOCOL};
+
+/// Every bundled or built-in type the checker counts as sent out: a
+/// conformer of a protocol whose closure holds `Encode` (`Encode`, `Codec`).
+fn sent_out_conformers() -> Vec<String> {
+    ["Encode", "Codec"]
+        .iter()
+        .filter(|p| protocol_closure(p).contains(&ENCODE_PROTOCOL))
+        .flat_map(|p| conformers(p))
+        .map(|(n, _)| n)
+        .collect()
+}
+
+/// The bound protocols of `module.fn` when every type variable is bounded and
+/// no stdlib type is admissible for any of them, so only a user-declared type
+/// can conform (an `@input_sink`'s input type: owner ruling 2026-11-17).
+/// Decided from the checker's conformance data, never from the fn's name.
+fn user_only_bounds(name: &str) -> Option<Vec<String>> {
+    let vars = bounds_of(name);
+    if vars.is_empty() || !vars.iter().all(|v| v.as_ref().is_some_and(|c| c.is_empty())) {
+        return None;
+    }
+    let (m, f) = name.split_once('.')?;
+    let program = almide::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached)?;
+    program.decls.iter().find_map(|d| match d {
+        almide::ast::Decl::Fn { name, generics, .. } if name.as_str() == f => Some(
+            generics.iter().flatten().flat_map(|g| g.bounds.iter().flatten().map(|b| b.as_str().to_string())).collect(),
+        ),
+        _ => None,
+    })
+}
+
+/// What a user-only row's per-instantiation `field` lacks (owner ruling
+/// 2026-11-17): every `[vars=X]` tag names a type the harness fixture
+/// declares in the evidence as `[decl type X: … = { … }]`, whose declared
+/// protocols reach every bound, none reaching `Encode` (an input type, not
+/// sent out), and which holds a heap-backed field.
+fn user_conformer_problem(field: &str, protos: &[String]) -> Option<String> {
+    let tags: Vec<&str> = field.split("[vars=").skip(1).filter_map(|s| s.split_once(']').map(|(t, _)| t)).collect();
+    if tags.is_empty() {
+        return Some("has no [vars=…] measurement".into());
+    }
+    for tag in tags {
+        // A declaration's record body holds `]` (`List[Int]`): it ends at `}]`.
+        let Some(decl) = field.split("[decl ").skip(1).filter_map(|s| s.split_once("}]").map(|(d, _)| format!("{d}}}"))).find(|d| d.starts_with(&format!("type {tag}:"))) else {
+            return Some(format!("[vars={tag}] names no fixture declaration ([decl type {tag}: … ])"));
+        };
+        let source: &'static str = Box::leak(format!("{decl}\n").into_boxed_str());
+        let Some(program) = almide_lang::parse_cached(source) else {
+            return Some(format!("[decl {decl}] does not parse"));
+        };
+        let Some((derived, ty)) = program.decls.iter().find_map(|d| match d {
+            almide::ast::Decl::Type { name, ty, deriving, .. } if name.as_str() == tag => {
+                Some((deriving.iter().flatten().map(|p| p.as_str().to_string()).collect::<Vec<_>>(), ty.clone()))
+            }
+            _ => None,
+        }) else {
+            return Some(format!("[decl {decl}] does not declare {tag}"));
+        };
+        let reaches = |want: &str| derived.iter().any(|p| protocol_closure(p).contains(&want));
+        if let Some(missing) = protos.iter().find(|b| !reaches(b)) {
+            return Some(format!("[vars={tag}] does not conform to {missing}"));
+        }
+        if reaches(ENCODE_PROTOCOL) {
+            return Some(format!("[vars={tag}] is sent out (Encode), not an input type"));
+        }
+        let heap = match &ty {
+            almide::ast::TypeExpr::Record { fields } => fields.iter().any(|f| {
+                almide::types::is_heap_ty(&almide::canonicalize::resolve::resolve_type_expr(&f.ty, None))
+            }),
+            _ => false,
+        };
+        if !heap {
+            return Some(format!("[vars={tag}] holds no heap-backed field"));
+        }
+    }
+    None
 }
 
 /// What a generic row's per-instantiation `field` lacks under its variables'
@@ -319,6 +408,35 @@ fn the_bounded_instantiation_rule_refuses_its_negative_controls() {
     assert!(bounds_of("list.map").iter().any(|v| v.is_none()));
 }
 
+/// The user-only extension (owner ruling 2026-11-17) and its controls.
+#[test]
+fn the_user_only_conformer_rule_refuses_its_negative_controls() {
+    const DECL: &str = "[decl type In: Decode = { k: List[Int], s: String }]";
+    // Read off checker data: the sink's Decode variable admits no stdlib
+    // type; a Numeric conversion's variable does.
+    assert_eq!(user_only_bounds("http.decode_json"), Some(vec!["Decode".to_string()]));
+    assert_eq!(user_only_bounds("int.from"), None);
+    assert_eq!(user_only_bounds("list.map"), None);
+    // Refused where a stdlib conformer exists: the ordinary rule applies,
+    // and a fixture type is not among its conformers.
+    let numeric = vec![Some(conformers("Numeric"))];
+    assert!(instantiation_problem(&format!("PASS: [vars=Int] {DECL} call … || [vars=In] {DECL} call …"), &numeric).is_some());
+    // Refused when the type is not a real conformer.
+    let decode = ["Decode".to_string()];
+    for (why, field) in [
+        ("no tag", format!("PASS: {DECL} call …")),
+        ("no declaration", "PASS: [vars=In] call …".to_string()),
+        ("another type declared", "PASS: [vars=In] [decl type Out: Decode = { k: List[Int] }] call …".to_string()),
+        ("not Decode", "PASS: [vars=In] [decl type In: Eq = { k: List[Int] }] call …".to_string()),
+        ("sent out", "PASS: [vars=In] [decl type In: Codec = { k: List[Int] }] call …".to_string()),
+        ("no heap field", "PASS: [vars=In] [decl type In: Decode = { a: Int, b: Bool }] call …".to_string()),
+    ] {
+        assert!(user_conformer_problem(&field, &decode).is_some(), "{why}: {field}");
+    }
+    // Accepted.
+    assert_eq!(user_conformer_problem(&format!("PASS: [vars=In] {DECL} call … || [vars=In] {DECL} call …"), &decode), None);
+}
+
 #[test]
 fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
     let path = root().join(LEDGER);
@@ -377,9 +495,14 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
                 // instantiation; the named type must really conform.
                 if want.get(&name).is_some_and(|w| w.2) {
                     let vars = bounds_of(&name);
+                    let user_only = user_only_bounds(&name);
                     for k in HEAP_EVIDENCE {
                         let field = r.get(*k).and_then(|v| v.as_str()).unwrap_or("");
-                        if let Some(p) = instantiation_problem(field, &vars) {
+                        let problem = match &user_only {
+                            Some(protos) => user_conformer_problem(field, protos),
+                            None => instantiation_problem(field, &vars),
+                        };
+                        if let Some(p) = problem {
                             problems.push(format!("{name}: generic, but `{k}` {p}"));
                         }
                     }
