@@ -122,8 +122,12 @@ pub const NOMINALS: &[Nominal] = &[
         module: "http",
         small: "http.with_headers(200, \"aé\", [(\"k\", \"v\")])",
         // One header past n: a header looked up by name (`http.header`'s last
-        // key) is present at n = 0 too, the fixed-cost probe's size.
-        sized: "http.with_headers(200, \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        // key) is present at n = 0 too, the fixed-cost probe's size. Its name
+        // differs from every other in its first digit, so each miss compares
+        // the same 2 characters at every n: with "k${100000000 + i}" for all,
+        // the shared prefix with the looked-up name grew and shrank as n
+        // crossed digit boundaries, and http.header's steps read 1.74 / 1.82.
+        sized: "http.with_headers(200, \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${(if i == {n} then 900000000 else 100000000) + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
             "http.with_headers(404, \"aé\", [(\"x-kind\", \"text/plain\")])",
@@ -142,7 +146,7 @@ pub const NOMINALS: &[Nominal] = &[
         name: "HttpRequest",
         module: "http",
         small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [(\"k\", \"v\")])",
-        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${(if i == {n} then 900000000 else 100000000) + i}\", \"v\"))))",
         leaves: &[
             "http.new_request(\"GET\", \"/\", \"\", [])",
             "http.new_request(\"POST\", \"/users/42\", \"aé\", [(\"content-type\", \"text/plain\")])",
