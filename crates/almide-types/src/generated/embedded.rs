@@ -1970,7 +1970,10 @@ fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partit
 )
 
 /// Bytes grouped by f's key, each group in order.
-fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(
+  bytes.to_list(b),
+  f,
+)
 
 /// The bytes in ascending order.
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
@@ -5016,7 +5019,10 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(
+  d.back,
+  x,
+)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {
