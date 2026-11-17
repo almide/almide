@@ -289,6 +289,14 @@ pub(super) const ALT_RECIPES: &[(&str, Recipe)] = &[
     // answers the n it is asked for and closes: the read ends where it does.
     ("Fd", Recipe { func: "io.read_to_end", size: "h", args: &[("h", "{ let _step = {i}\n  let s = unix.connect(env.get(\"XF_UNIX_SOURCE\") ?? \"\")!\n  io.write(s, bytes.from_string(int.to_string({n}) + \"\\n\"))!\n  s }")] }),
     ("Fd", Recipe { func: "io.read_exact", size: "n", args: &[("h", "{ let _step = {i}\n  let s = unix.connect(env.get(\"XF_UNIX_SOURCE\") ?? \"\")!\n  io.write(s, bytes.from_string(int.to_string(2 * {n} + 16) + \"\\n\"))!\n  s }"), ("n", "{n}")] }),
+    // One read of a descriptor of its own per step, whose whole payload is
+    // queued before the read: a Unix connection to itself (listen, connect,
+    // accept), the n bytes written on the client end, read on the accepted
+    // end. A read from the sized source raced its write (one recv answers
+    // what has arrived); a self-connection has nothing in flight. The n
+    // bytes sit in the socket buffer unread, so run it at a size whose 16n
+    // fits there (`--n 4000`: 64 kB).
+    ("Fd", Recipe { func: "io.read", size: "max", args: &[("h", "{ let _step = {i}\n  let _ = fs.remove(\"r${{i}}.sock\")\n  let l = unix.listen(\"r${{i}}.sock\")!\n  let c = unix.connect(\"r${{i}}.sock\")!\n  let s = unix.accept(l)!\n  io.write(c, bytes.from_string(string.repeat(\"a\", {n})))!\n  s }"), ("max", "{n}")] }),
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
@@ -344,7 +352,7 @@ pub fn max_k(func: &str, effect: bool) -> Option<u64> {
         // A stream (or a child) per call.
         Some(("io", "close")) => Some(64),
         // A reader's Fd conformer is a connection of its own per call.
-        Some(("io", "read_to_end" | "read_exact")) => Some(64),
+        Some(("io", "read" | "read_to_end" | "read_exact")) => Some(64),
         Some(("process", f))
             if matches!(f, "start" | "wait" | "poll" | "stop" | "read_new_stdout" | "read_new_stderr" | "child_pid") =>
         {
