@@ -7,7 +7,8 @@
 //! the lambda kept its bare `HttpResponse` return: native failed with E0308
 //! and the wasm lane with E082 `ty-mismatch`. The effect-slot sweep now
 //! adapts a value at the effect slot a generic call's type variable names,
-//! reading the variable from the call's own slot or from its other arguments.
+//! reading the variable from the call's own slot or from its other arguments,
+//! and brings the arms of an `if` / `match` back to one adapted type.
 //! Found by the stdlib re-inspection's parity campaign for `http.mount`.
 
 use std::io::Write;
@@ -25,7 +26,8 @@ fn almide_bin() -> String {
     "almide".to_string()
 }
 
-const PROGRAM: &str = r#"import http
+const PROGRAM: &str = r#"import env
+import http
 import secret
 
 effect fn call(h: HttpHandler, target: String) -> String = {
@@ -51,10 +53,15 @@ effect fn main() -> Unit = {
   }
   let r = http.router([http.mount("/m", secret.reveal(v))])!
   println(call(r, "/m/q")!)
+  let pick = list.len(env.args()) > 99
+  let h3 = secret.reveal(if pick then result.unwrap_or_else(v0, (e) => secret.new((req) => http.response(500, e))) else secret.new((req) => http.response(206, "if")))
+  println(call(h3, "/i")!)
+  let h4 = secret.reveal(match e0 { ok(s) => s, err(m) => secret.new((req) => http.response(207, m)) })
+  println(call(h4, "/m")!)
 }
 "#;
 
-const EXPECTED: &str = "201 a:/x\n202 b\n203 fallback\n204 d\n205 o\n201 a:/q\n";
+const EXPECTED: &str = "201 a:/x\n202 b\n203 fallback\n204 d\n205 o\n201 a:/q\n206 if\n207 fallback\n";
 
 fn run(target: &str) {
     let dir = std::env::temp_dir().join(format!("almd_4768_{}_{}", target, std::process::id()));

@@ -74,12 +74,67 @@ impl Sweep<'_, '_> {
             val.ty = Ty::Applied(crate::types::TypeConstructorId::List, vec![elements[0].ty.clone()].into());
             return;
         }
-        if !self.is_effect_slot(slot) {
-            self.adapt_through(val, slot);
+        let slot = match self.carrier_slot(slot, &val.ty) {
+            Some(eff) => eff,
+            None if !self.is_effect_slot(slot) => {
+                self.adapt_through(val, slot);
+                return;
+            }
+            None => slot.clone(),
+        };
+        let owned = std::mem::replace(val, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+        *val = super::expressions::adapt_fn_value_to_effect_slot(self.ctx, owned, &slot);
+    }
+
+    /// A slot already in the adapted shape — a pure fn returning the
+    /// `Result` carrier, the type an adapted sibling (an `if` arm) has — met
+    /// by a pure fn value of the same arity that returns the bare value: the
+    /// value takes the same adapter, as at the effect slot it stands for.
+    /// The checker never lets a bare-return fn fill a pure carrier-return
+    /// slot, so this shape only arises from an effect slot.
+    fn carrier_slot(&self, slot: &Ty, val_ty: &Ty) -> Option<Ty> {
+        let Ty::Fn { params, ret, is_effect: false } = self.ctx.env.resolve_named(slot) else { return None };
+        let Ty::Fn { params: vp, ret: vr, is_effect: false } = val_ty else { return None };
+        (ret.is_result() && !vr.is_result() && vp.len() == params.len())
+            .then(|| Ty::Fn { params: vp.clone(), ret: vr.clone(), is_effect: true })
+    }
+
+    /// The arms of an `if` / `match` agree on one type again after the sweep
+    /// adapted some of them (#4768: `if c then unwrap_or_else(v, …) else
+    /// secret.new(f)`, where only the first arm met the handler slot).
+    fn reconcile_arms(&mut self, expr: &mut IrExpr) {
+        let split = match &expr.kind {
+            IrExprKind::If { then, else_, .. } => then.ty != else_.ty,
+            IrExprKind::Match { arms, .. } => arms.windows(2).any(|w| w[0].body.ty != w[1].body.ty),
+            _ => false,
+        };
+        if !split || !holds_fn_value(expr) {
             return;
         }
-        let owned = std::mem::replace(val, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        *val = super::expressions::adapt_fn_value_to_effect_slot(self.ctx, owned, slot);
+        match &mut expr.kind {
+            IrExprKind::If { then, else_, .. } if then.ty != else_.ty => {
+                let (t, e) = (then.ty.clone(), else_.ty.clone());
+                self.adapt_in_place(else_, &t);
+                self.adapt_in_place(then, &e);
+                if then.ty == else_.ty {
+                    expr.ty = then.ty.clone();
+                }
+            }
+            IrExprKind::Match { arms, .. } if arms.windows(2).any(|w| w[0].body.ty != w[1].body.ty) => {
+                let tys: Vec<Ty> = arms.iter().map(|a| a.body.ty.clone()).collect();
+                for arm in arms.iter_mut() {
+                    for t in &tys {
+                        if arm.body.ty != *t {
+                            self.adapt_in_place(&mut arm.body, t);
+                        }
+                    }
+                }
+                if arms.windows(2).all(|w| w[0].body.ty == w[1].body.ty) && let Some(a) = arms.first() {
+                    expr.ty = a.body.ty.clone();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// #4768: a slot that is not itself an effect fn type can still hold one
@@ -127,7 +182,7 @@ impl Sweep<'_, '_> {
                 if !crate::types::unify(&sig.ret, slot, &mut want) {
                     return;
                 }
-                self.adapt_generic_args(&sig, args, &want, &mut val.ty, type_args);
+                self.adapt_generic_args(&sig, args, &want, &mut val.ty, type_args, None);
             }
             _ => {}
         }
@@ -139,8 +194,11 @@ impl Sweep<'_, '_> {
     /// Result[Secret[HttpHandler], E]` gives `f` the handler slot). When an
     /// argument's type changes, the call's type and type args are re-derived
     /// from the adapted arguments.
-    fn adapt_generic_args(&mut self, sig: &crate::types::FnSig, args: &mut [IrExpr], seed: &HashMap<Sym, Ty>, ty: &mut Ty, type_args: &mut Vec<Ty>) {
-        let before: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
+    /// `before` is the argument types to compare against: the visitor passes
+    /// them as they were before it walked the arguments, so a call whose
+    /// argument an inner step adapted is re-derived too.
+    fn adapt_generic_args(&mut self, sig: &crate::types::FnSig, args: &mut [IrExpr], seed: &HashMap<Sym, Ty>, ty: &mut Ty, type_args: &mut Vec<Ty>, before: Option<Vec<Ty>>) {
+        let before: Vec<Ty> = before.unwrap_or_else(|| args.iter().map(|a| a.ty.clone()).collect());
         for i in 0..args.len().min(sig.params.len()) {
             let mut b = seed.clone();
             for (j, (arg, (_, pty))) in args.iter().zip(sig.params.iter()).enumerate() {
@@ -239,7 +297,12 @@ impl Sweep<'_, '_> {
 
 impl IrMutVisitor for Sweep<'_, '_> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        let pre: Option<Vec<Ty>> = match &expr.kind {
+            IrExprKind::Call { args, .. } => Some(args.iter().map(|a| a.ty.clone()).collect()),
+            _ => None,
+        };
         visit_mut::walk_expr_mut(self, expr);
+        self.reconcile_arms(expr);
         let ty = expr.ty.clone();
         match &mut expr.kind {
             IrExprKind::Call { target, args, type_args } => {
@@ -251,7 +314,7 @@ impl IrMutVisitor for Sweep<'_, '_> {
                 if args.iter().any(holds_fn_value)
                     && let Some(sig) = self.generic_sig(target)
                 {
-                    self.adapt_generic_args(&sig, args, &HashMap::new(), &mut expr.ty, type_args);
+                    self.adapt_generic_args(&sig, args, &HashMap::new(), &mut expr.ty, type_args, pre);
                 }
             }
             IrExprKind::Record { name, fields } => {
