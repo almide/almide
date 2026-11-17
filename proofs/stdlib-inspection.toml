@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "2"
+# uninspected_ceiling = "1"
 
 [[fn]]
 name = "args.option"
@@ -5951,8 +5951,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "testing.assert_aborts"
 sig = "(expected: String, f: () -> A) -> Unit"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:fa12ba299b7cb109"
+stamp = "almide 0.70.0 (dev, c1e599de3) at inspect-allclear c1e599de3bc2b0227b3c15b224860ebdd4b7b6af (the last stretch of the re-inspection: orders declared before measurement in 6fde80c07, corrections committed on inspect-allclear); xtarget-fuzz inspect from inspect-catalogue-238 d623e6af1eb7b89c9126286c3e7f19b496319a8f (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC), seed 1115001, 200 programs per fn; every type variable measured at Int AND at String (a second conformer where String cannot bind); GCE c4-standard-8 Spot (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU, PMU architectural, one fn at a time, asia-northeast1-b), Ubuntu 24.04, rustc 1.97.0, wasmtime 50.0.1; 2026-11-17; codopsy: the crate changes on inspect-allclear are held to CI's codopsy gate"
 order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1115001, 200 generated test files; legs native, embedded; 81 passed alike, 82 failed alike with the same failure block; 0 skipped at a host resource limit (C-196/C-197); 37 generator rejects (first: error[E101]: raw hidden character U+200D FORMAT CHARACTER (invisible) at line 8, column 72); unique findings 0"
+complexity = "PASS: [vars=Int] assert_aborts(n=child stderr bytes before the abort, k=calls) meter=instructions:u+bytes-moved alloc=canonical(wasm) n=16384..262144 native k=256..512 2.816e8/4.022e8/6.430e8/1.125e9/2.088e9 fit n (rms 0.0%) moved 1.499e7/2.757e7/5.273e7/1.031e8/2.037e8B fit n (rms 0.0%) wall 0.192/0.208/0.233/0.289/0.385s wasm k=256..512 6.628e8/1.268e9/2.476e9/4.892e9/9.724e9 fit n (rms 0.0%) moved 4.490e7/8.692e7/1.708e8/3.386e8/6.741e8B fit n (rms 0.0%) wall 0.066/0.097/0.152/0.279/0.511s (order n ok) || [vars=String] assert_aborts(n=child stderr bytes before the abort, k=calls) meter=instructions:u+bytes-moved alloc=canonical(wasm) n=16384..262144 native k=256..512 2.823e8/4.028e8/6.437e8/1.125e9/2.089e9 fit n (rms 0.0%) moved 1.499e7/2.757e7/5.273e7/1.031e8/2.037e8B fit n (rms 0.0%) wall 0.188/0.203/0.238/0.284/0.391s wasm k=256..512 6.635e8/1.268e9/2.476e9/4.892e9/9.724e9 fit n (rms 0.0%) moved 4.490e7/8.693e7/1.708e8/3.386e8/6.741e8B fit n (rms 0.1%) wall 0.064/0.096/0.157/0.289/0.513s (order n ok)"
+alloc = "PASS: [vars=Int] [embedded] parent live=0 after 5 sites (each abort) and 8 calls of one site || [vars=String] [embedded] parent live=0 after 5 sites (each abort) and 8 calls of one site"
+diamond = "PASS: [vars=Int] direct = via left = via right on both legs (the passing call passes, the failing one reports found: abort \"PANIC: xf-diamond t\") || [vars=String] direct = via left = via right on both legs (the passing call passes, the failing one reports found: abort \"PANIC: xf-diamond t\")"
 [[fn]]
 name = "testing.assert_approx"
 sig = "(a: Float, b: Float, tolerance: Float) -> Unit"
