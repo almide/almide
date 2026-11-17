@@ -136,11 +136,16 @@ fn diamond_project() -> Project {
     let mut main = String::from("import http\nimport self.base\nimport self.left\nimport self.right\n\n");
     main.push_str("fn outcome(r: Result[base.In, HttpResponse]) -> String = match r {\n  ok(x) => \"ok ${list.len(x.k)} ${x.s}\",\n  err(e) => \"err ${http.status(e)} ${http.body(e)}\",\n}\n\n");
     main.push_str("effect fn main() -> Unit = {\n");
-    for (b, body) in ["{\\\"k\\\": [1, 2, 3], \\\"s\\\": \\\"aé\\\"}", "{\\\"k\\\": [], \\\"s\\\": \\\"x\\\", \\\"zz\\\": 0}", "{\\\"k\\\": 1}"].iter().enumerate() {
+    let bodies = ["{\\\"k\\\": [1, 2, 3], \\\"s\\\": \\\"aé\\\"}", "{\\\"k\\\": [], \\\"s\\\": \\\"x\\\", \\\"zz\\\": 0}", "{\\\"k\\\": 1}"];
+    for (b, body) in bodies.iter().enumerate() {
         let _ = writeln!(main, "  let q{b}: HttpRequest = http.new_request(\"POST\", \"/d\", \"{body}\", [])");
-        let _ = writeln!(main, "  println(\"d = \" + outcome(http.decode_json[base.In](q{b})))");
-        let _ = writeln!(main, "  println(\"l = \" + outcome(left.call(q{b})))");
-        let _ = writeln!(main, "  println(\"r = \" + outcome(right.call(q{b})))");
+    }
+    // Each path's lines in turn (direct, left, right), as the shared
+    // diamond verdict compares thirds.
+    for (v, call) in [("d", "http.decode_json[base.In]"), ("l", "left.call"), ("r", "right.call")] {
+        for b in 0..bodies.len() {
+            let _ = writeln!(main, "  println(\"{v} = \" + outcome({call}(q{b})))");
+        }
     }
     main.push_str("}\n");
     Project {
@@ -155,12 +160,6 @@ fn diamond_project() -> Project {
     }
 }
 
-/// Each path's lines agree with the direct call's (`d = x`, `l = x`, `r = x`).
-fn paths_agree(out: &str) -> bool {
-    let lines: Vec<&str> = out.lines().collect();
-    lines.chunks(3).all(|c| c.len() == 3 && c.iter().map(|l| l.get(4..)).all(|v| v == c[0].get(4..)))
-}
-
 fn diamond(ctx: &Ctx) -> String {
     let root = ctx.dir.join("diamond-sink");
     let Ok(entry) = diamond_project().write_to(&root) else {
@@ -169,11 +168,7 @@ fn diamond(ctx: &Ctx) -> String {
     let (Ok(nat), Ok(was)) = (run_diamond(ctx, &root, &entry, false), run_diamond(ctx, &root, &entry, true)) else {
         return "SKIP: could not run almide".into();
     };
-    let v = diamond_verdict_exiting(&nat, &was, 0);
-    if v.starts_with("PASS") && !paths_agree(&String::from_utf8_lossy(&nat.stdout)) {
-        return format!("FAIL: a path disagrees with the direct call: {}", String::from_utf8_lossy(&nat.stdout));
-    }
-    v
+    diamond_verdict_exiting(&nat, &was, 0)
 }
 
 fn complexity(ctx: &Ctx, n: u64, order: Option<&str>) -> String {
@@ -276,9 +271,12 @@ mod tests {
         assert_ne!(p, parity_program(1115001, 4));
     }
 
+    /// The diamond prints each path's lines in turn, the order the shared
+    /// verdict compares in thirds.
     #[test]
-    fn the_paths_agree_only_when_each_line_matches_the_direct_one() {
-        assert!(paths_agree("d = ok 3\nl = ok 3\nr = ok 3\n"));
-        assert!(!paths_agree("d = ok 3\nl = ok 3\nr = err 400\n"));
+    fn the_diamond_prints_each_path_in_turn() {
+        let main = &diamond_project().files[4].1;
+        let (d, l, r) = (main.find("println(\"d = "), main.find("println(\"l = "), main.find("println(\"r = "));
+        assert!(d < l && l < r && main.rfind("println(\"d = ") < l, "{main}");
     }
 }
