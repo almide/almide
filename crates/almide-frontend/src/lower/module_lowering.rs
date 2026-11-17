@@ -466,7 +466,7 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
 
     let ret_ty = resolve_fn_ret_ty(ctx, name, module_prefix, body);
 
-    let mut ir_body = lower_expr(ctx, body);
+    let mut ir_body = expressions::lower_body(ctx, body);
     coerce_fn_tail_literals(ctx, &mut ir_body, &ret_ty, effect.unwrap_or(false));
     ctx.protocol_bounds = saved_pb;
     ctx.const_param_vars = saved_cp;

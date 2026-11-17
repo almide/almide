@@ -78,6 +78,10 @@ pub fn optimize_half(ir: &mut IrProgram) {
     // replacement is itself a diverging block an operand may hold.
     almide_ir::diverge::cut_diverging_operands(ir);
     almide_optimize::optimize::optimize_program(ir);
+    // A `guard let` exit nested in an operand binds ahead of its statement
+    // (#4678), after the optimizer so nothing sinks it back: no leg then
+    // holds a half-built literal or argument list across the return.
+    almide_ir::exit_anf::hoist_value_exits(ir);
     // The address-hold rule (C-376, #4153): a let-bound address of a `var`
     // holds the block it points into for the binding's scope, on every leg.
     // After the optimizer, so DCE never sees the hold (it is read once, by

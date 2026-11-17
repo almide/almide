@@ -458,6 +458,7 @@ spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd
 spec/wasm_cross/guard_let_forms.almd
 spec/wasm_cross/guard_let_forms_typed_err.almd
 spec/wasm_cross/guard_let_in_bound_block.almd
+spec/wasm_cross/guard_let_in_expression_positions.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_only_use_liveness.almd
 spec/wasm_cross/guard_statement.almd

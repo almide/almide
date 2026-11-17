@@ -25,7 +25,7 @@
 /// rewritten by the recursive call on the constructed then-block).
 pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
     let mut changed = false;
-    let rewritten = desugar_guard_rec(body.clone(), VALUE_POS, &mut changed);
+    let rewritten = desugar_guard_rec(body.clone(), RET_POS, &mut changed);
     changed.then_some(rewritten)
 }
 

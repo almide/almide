@@ -35,6 +35,7 @@ use std::collections::{HashMap, HashSet};
 
 pub mod registry_sig;
 mod arm_exit;
+mod nested_exit;
 mod crossmod_toplets;
 mod list_rest;
 mod literal_elems;

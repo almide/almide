@@ -354,6 +354,7 @@
 14398	spec/wasm_cross/guard_let_forms.almd
 10063	spec/wasm_cross/guard_let_forms_typed_err.almd
 3566	spec/wasm_cross/guard_let_in_bound_block.almd
+6598	spec/wasm_cross/guard_let_in_expression_positions.almd
 3534	spec/wasm_cross/guard_let_statement.almd
 3027	spec/wasm_cross/guard_only_use_liveness.almd
 2230	spec/wasm_cross/guard_statement.almd

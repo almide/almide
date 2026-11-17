@@ -49,16 +49,17 @@ use almide_lang::types::Ty;
 /// every continuing arm, so a chain of N exiting branches is 2^N copies.
 const MAX_LIFTED_NODES: usize = 200_000;
 
-/// Run the lift over every fn of the program (the certified native render
-/// only: the other render's lowering and its ledgers are unchanged).
+/// Run the lift over every fn of the program (the certified native render;
+/// the other render's lowering and its ledgers are unchanged, but for a fn
+/// that holds a `guard let` exit nested in a value, #4678, which every render
+/// must leave the fn from — [`super::nested_exit::holds_value_exit`]).
 pub fn lift_stmt_arm_exits(program: &mut almide_ir::IrProgram) {
-    if !super::owned_tco_slots() {
-        return;
-    }
+    let every = super::owned_tco_slots();
+    let vt = &mut program.var_table;
     let fns = program.functions.iter_mut().chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()));
-    for func in fns {
+    for func in fns.filter(|f| every || super::nested_exit::holds_value_exit(&f.body)) {
         LoopRaises.visit_expr_mut(&mut func.body);
-        if let Some(body) = lift_tail(&func.body).filter(|b| node_count(b) <= MAX_LIFTED_NODES) {
+        if let Some(body) = lift_tail(&func.body, vt).filter(|b| node_count(b) <= MAX_LIFTED_NODES) {
             func.body = body;
         }
     }
@@ -374,18 +375,15 @@ fn branch_with_rest(s: &IrExpr, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty)
     IrExpr { kind, ty: ty.clone(), span: s.span, def_id: s.def_id }
 }
 
-/// Is `value` a bound `if` / `match` (`let r = match s { … }`) with a plain
-/// `guard c else E` standing in one of its arm blocks? A failing guard there
-/// returns `E` from the fn, as the other legs run it: it is not the bound
-/// value. Only a guard over a real condition counts: the `guard false` the
-/// front end gives a `guard let` is left to the shape every leg already shares
-/// (#4678). Every arm must yield a value (a block with a tail, or a bare
-/// expression) for the bind to move into it.
-fn bound_branch_exits(value: &IrExpr) -> bool {
-    let plain_guard = |s: &IrStmt| {
-        matches!(&s.kind, IrStmtKind::Guard { cond, .. } if !matches!(cond.kind, IrExprKind::LitBool { .. }))
-    };
-    let exits = |a: &IrExpr| matches!(&a.kind, IrExprKind::Block { stmts, .. } if stmts.iter().any(plain_guard));
+/// Is `value` a bound `if` / `match` (`let r = match s { … }`) with a
+/// `guard c else E` on the value spine of one of its arms? A failing guard
+/// there returns `E` from the fn, as the other legs run it: it is not the
+/// bound value (#4678 — the `guard false` the front end gives a `guard let`
+/// whose block a bound branch's arm, or a hoisted operand, holds, included).
+/// Every arm must yield a value (a block with a tail, or a bare expression)
+/// for the bind to move into it.
+pub(super) fn bound_branch_exits(value: &IrExpr) -> bool {
+    let exits = almide_ir::exit_anf::spine_exits;
     let yields = |a: &IrExpr| !matches!(&a.kind, IrExprKind::Block { expr: None, .. });
     match &value.kind {
         IrExprKind::If { then, else_, .. } => (exits(then) || exits(else_)) && yields(then) && yields(else_),
@@ -397,9 +395,19 @@ fn bound_branch_exits(value: &IrExpr) -> bool {
 }
 
 /// One arm of a lifted bound branch: the arm's own statements, the bind of
-/// the value the arm yields, then the rest of the enclosing block.
+/// the value the arm yields, then the rest of the enclosing block. An arm
+/// that reaches `guard false else E` ends there with `E`.
 fn bound_arm_with_rest(arm: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty) -> Option<IrExpr> {
     let IrStmtKind::Bind { var, mutability, ty: bound_ty, .. } = &bind.kind else { return None };
+    if let IrExprKind::Block { stmts: own, .. } = &arm.kind {
+        let exit = own.iter().position(|s| {
+            matches!(&s.kind, IrStmtKind::Guard { cond, .. } if matches!(cond.kind, IrExprKind::LitBool { value: false }))
+        });
+        if let Some(i) = exit {
+            let IrStmtKind::Guard { else_, .. } = &own[i].kind else { return None };
+            return Some(exit_arm(own[..i].to_vec(), &own[i], else_, ty, arm));
+        }
+    }
     let (mut stmts, value) = match &arm.kind {
         IrExprKind::Block { stmts: own, expr } => (own.clone(), expr.as_deref()?.clone()),
         _ => (Vec::new(), arm.clone()),
@@ -417,7 +425,7 @@ fn bound_arm_with_rest(arm: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Optio
 /// { pre; let r = match s { A => a, B => { guard g else E; b } }; rest; tail }
 ///   ≡  { pre; match s { A => { let r = a; rest; tail }, B => { guard g else E; let r = b; rest; tail } } }
 /// ```
-fn bound_branch_with_rest(value: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty) -> Option<IrExpr> {
+pub(super) fn bound_branch_with_rest(value: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: Option<&IrExpr>, ty: &Ty) -> Option<IrExpr> {
     let kind = match &value.kind {
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: cond.clone(),
@@ -441,7 +449,9 @@ fn bound_branch_with_rest(value: &IrExpr, bind: &IrStmt, rest: &[IrStmt], tail: 
 
 /// Lift every exiting branch statement on `e`'s tail chain; `e` stands where
 /// its value is the fn's value. `None` when nothing on the chain exits.
-fn lift_tail(e: &IrExpr) -> Option<IrExpr> {
+/// An exit nested in an operand is hoisted into a bind first
+/// ([`super::nested_exit`]).
+fn lift_tail(e: &IrExpr, vt: &mut almide_ir::VarTable) -> Option<IrExpr> {
     let rebuilt = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span, def_id: e.def_id };
     match &e.kind {
         IrExprKind::Block { stmts, expr } => {
@@ -450,6 +460,14 @@ fn lift_tail(e: &IrExpr) -> Option<IrExpr> {
                 IrStmtKind::Bind { value, .. } => bound_branch_exits(value),
                 _ => false,
             });
+            let upto = exiting.unwrap_or(stmts.len());
+            let hoist_tail = if exiting.is_none() { expr.as_deref() } else { None };
+            if let Some((mut hoisted, new_tail)) = super::nested_exit::hoist_nested_exit(&stmts[..upto], hoist_tail, vt) {
+                hoisted.extend(stmts[upto..].iter().cloned());
+                let tail = if exiting.is_none() { new_tail } else { expr.as_deref().cloned() };
+                let b = rebuilt(IrExprKind::Block { stmts: hoisted, expr: tail.map(Box::new) });
+                return Some(lift_tail(&b, vt).unwrap_or(b));
+            }
             if let Some(i) = exiting {
                 let (rest, tail) = (&stmts[i + 1..], expr.as_deref());
                 let lifted = match &stmts[i].kind {
@@ -457,14 +475,14 @@ fn lift_tail(e: &IrExpr) -> Option<IrExpr> {
                     IrStmtKind::Bind { value, .. } => bound_branch_with_rest(value, &stmts[i], rest, tail, &e.ty)?,
                     _ => return None,
                 };
-                let lifted = lift_tail(&lifted).unwrap_or(lifted);
+                let lifted = lift_tail(&lifted, vt).unwrap_or(lifted);
                 return Some(rebuilt(IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(lifted)) }));
             }
-            let tail = lift_tail(expr.as_deref()?)?;
+            let tail = lift_tail(expr.as_deref()?, vt)?;
             Some(rebuilt(IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(tail)) }))
         }
         IrExprKind::If { cond, then, else_ } => {
-            let (t, f) = (lift_tail(then), lift_tail(else_));
+            let (t, f) = (lift_tail(then, vt), lift_tail(else_, vt));
             if t.is_none() && f.is_none() {
                 return None;
             }
@@ -475,7 +493,7 @@ fn lift_tail(e: &IrExpr) -> Option<IrExpr> {
             }))
         }
         IrExprKind::Match { subject, arms } => {
-            let bodies: Vec<Option<IrExpr>> = arms.iter().map(|a| lift_tail(&a.body)).collect();
+            let bodies: Vec<Option<IrExpr>> = arms.iter().map(|a| lift_tail(&a.body, vt)).collect();
             if bodies.iter().all(Option::is_none) {
                 return None;
             }

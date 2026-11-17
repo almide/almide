@@ -35,7 +35,7 @@ fn lower_assert_aborts(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr
     let expected = lower_expr(ctx, &args[0]);
     ctx.in_test = false;
     ctx.push_scope();
-    let site_body = lower_expr(ctx, body);
+    let site_body = super::expressions::lower_body(ctx, body);
     ctx.pop_scope();
     ctx.in_test = true;
     let site = ctx.abort_sites.len();
