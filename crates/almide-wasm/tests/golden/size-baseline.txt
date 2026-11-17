@@ -293,7 +293,7 @@
 8179	spec/wasm_cross/fs_read_non_regular.almd
 8993	spec/wasm_cross/fs_read_text_utf8.almd
 2680	spec/wasm_cross/fs_relative_path.almd
-9680	spec/wasm_cross/fs_root_escape.almd
+9450	spec/wasm_cross/fs_root_escape.almd
 8418	spec/wasm_cross/fs_write_errno.almd
 3017	spec/wasm_cross/fuel_bare_result.almd
 2414	spec/wasm_cross/fuel_block_body.almd
@@ -647,7 +647,7 @@
 17116	spec/wasm_cross/native_same_binding_twice_arg.almd
 874	spec/wasm_cross/native_unused_map_binding.almd
 5336	spec/wasm_cross/native_wall_shapes.almd
-10857	spec/wasm_cross/negative_count_rule.almd
+11221	spec/wasm_cross/negative_count_rule.almd
 5231	spec/wasm_cross/negative_float_literal_sized.almd
 8925	spec/wasm_cross/negative_offset_and_width_totality.almd
 3879	spec/wasm_cross/nested_box_guard_binder.almd
@@ -855,7 +855,7 @@
 25220	spec/wasm_cross/string_case_unicode.almd
 9708	spec/wasm_cross/string_codepoint.almd
 5457	spec/wasm_cross/string_codepoint_index.almd
-8164	spec/wasm_cross/string_count_truncation.almd
+8778	spec/wasm_cross/string_count_truncation.almd
 4199	spec/wasm_cross/string_empty_pattern.almd
 4355	spec/wasm_cross/string_float_stable.almd
 4433	spec/wasm_cross/string_from_bytes.almd
