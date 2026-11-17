@@ -49,15 +49,15 @@ use almide_lang::types::Ty;
 /// every continuing arm, so a chain of N exiting branches is 2^N copies.
 const MAX_LIFTED_NODES: usize = 200_000;
 
-/// Run the lift over every fn of the program (the certified native render
-/// only: the other render's lowering and its ledgers are unchanged).
+/// Run the lift over every fn of the program (the certified native render;
+/// the other render's lowering and its ledgers are unchanged, but for a fn
+/// that holds a `guard let` exit nested in a value, #4678, which every render
+/// must leave the fn from — [`super::nested_exit::holds_value_exit`]).
 pub fn lift_stmt_arm_exits(program: &mut almide_ir::IrProgram) {
-    if !super::owned_tco_slots() {
-        return;
-    }
+    let every = super::owned_tco_slots();
     let vt = &mut program.var_table;
     let fns = program.functions.iter_mut().chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()));
-    for func in fns {
+    for func in fns.filter(|f| every || super::nested_exit::holds_value_exit(&f.body)) {
         LoopRaises.visit_expr_mut(&mut func.body);
         if let Some(body) = lift_tail(&func.body, vt).filter(|b| node_count(b) <= MAX_LIFTED_NODES) {
             func.body = body;

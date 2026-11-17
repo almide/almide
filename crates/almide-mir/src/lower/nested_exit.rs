@@ -250,6 +250,29 @@ fn while_exit(s: &IrStmt, vt: &mut VarTable) -> Option<Vec<IrStmt>> {
     ])
 }
 
+/// Does `body` hold the exit the front end gives a `guard let` whose block's
+/// value an enclosing expression uses: a block `{ guard false else E; <a
+/// Never value> }`?
+pub(super) fn holds_value_exit(body: &IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Block { stmts, expr: Some(tail) } = &e.kind {
+                let exit = |s: &IrStmt| {
+                    matches!(&s.kind, IrStmtKind::Guard { cond, .. } if matches!(cond.kind, IrExprKind::LitBool { value: false }))
+                };
+                self.0 |= tail.ty == Ty::Never && stmts.last().is_some_and(exit);
+            }
+            if !self.0 {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+    }
+    let mut scan = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut scan, body);
+    scan.0
+}
+
 /// Rewrite the first statement (or the tail) of a tail-chain block whose
 /// value holds an exit nested in an operand. `None` when there is none.
 pub(super) fn hoist_nested_exit(stmts: &[IrStmt], tail: Option<&IrExpr>, vt: &mut VarTable) -> Option<(Vec<IrStmt>, Option<IrExpr>)> {
