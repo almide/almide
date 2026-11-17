@@ -9,7 +9,7 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
     if let Some(code) = crate::native_value_repr::scalar_recode(code, got, want) { return Some(code); }
     Some(match (want, got) {
-        (NTy::F32, NTy::F32) => code.to_string(),
+        (NTy::F32, NTy::F32) | (NTy::Bool, NTy::Bool) => code.to_string(),
         (NTy::I64, NTy::I64) => code.to_string(),
         (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
         (NTy::Str, NTy::Str) => format!("{code}.clone()"),

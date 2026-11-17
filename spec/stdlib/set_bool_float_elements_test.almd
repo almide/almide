@@ -1,0 +1,46 @@
+// #4795: a Set of Bool or Float elements through monomorphised set fns,
+// closures that take or return the set, and a Secret holding one — the same
+// answers on every leg, the native test render included (it refused
+// `Set[Bool]` params as outside its rung subset).
+import secret
+import testing
+
+fn flip_all(s: Set[Bool]) -> Set[Bool] = set.map(s, (b) => not b)
+
+test "a Set[Bool] counts, filters, maps and prints its real elements" {
+  let s: Set[Bool] = set.from_list([true, false, true])
+  assert_eq(set.len(s), 2)
+  assert_eq(set.count(s, (b) => b), 1)
+  assert(set.contains(s, false))
+  assert_eq(set.filter_map(s, (b) => if b then some(1) else none), [1])
+  assert_eq(set.to_list(flip_all(set.from_list([true]))), [false])
+  assert_eq("${set.from_list([false, false])}", "set.from_list([false])")
+  let pick = (t: Set[Bool], k: String) => if k == "t" then set.insert(t, true) else t
+  assert_eq(set.len(pick(set.new(), "t")), 1)
+}
+
+test "a Set[Float] keeps IEEE equality and its float repr" {
+  let s: Set[Float] = set.from_list([1.5, 2.25, 1.5])
+  assert_eq(set.len(s), 2)
+  assert_eq(set.count(s, (x) => x > 2.0), 1)
+  assert(set.contains(s, 1.5))
+  assert_eq(set.to_list(set.map(s, (x) => x * 2.0)), [3.0, 4.5])
+  assert_eq("${s}", "set.from_list([1.5, 2.25])")
+  assert_eq(set.len(set.union(s, set.from_list([0.5]))), 3)
+}
+
+test "a closure over a Set[Bool] aborts at the same point on every leg" {
+  testing.assert_aborts(
+    "index out of bounds",
+    () => {
+      let n: Set[Bool] = set.from_list([true, false])
+      let k = set.count(n, (b) => b)
+      [1][k + 5]
+    },
+  )
+}
+
+test "a Secret holds a Set[Bool]" {
+  let s: Secret[Set[Bool]] = secret.new(set.from_list([true]))
+  assert_eq(set.len(secret.reveal(s)), 1)
+}

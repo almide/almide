@@ -94,13 +94,12 @@ fn fn_arg_with_values(cx: &FnArgCx<'_>, env: &mut Env, (dps, dret): (&[DTy], &DT
     } else { dps
         .iter()
         .zip(&ps)
-        .map(|(dp, k)| match bind_lambda(env, dp, *k)? {
-            true => Some(Lane::F64),
-            false if *dp == DTy::Bool => Some(Lane::Bool),
-            false => Some(Lane::Same),
+        .map(|(dp, k)| {
+            let f64_lane = bind_lambda(env, dp, *k)?;
+            Some(param_lane(env, dp, f64_lane))
         })
         .collect::<Option<_>>()? };
-    let ret_lane = ret_lane_of(dret);
+    let ret_lane = ret_lane_in(env, dret);
     if !tuples && ret_lane == Lane::F64 {
         side.shims.push(LANE_F64);
     } else if !tuples && bind_lambda(env, dret, ret?) != Some(false) {
@@ -152,6 +151,25 @@ fn handed_positions(ps: &[NativeSigKind], bits: &[Lane], lent: &[bool], strs: &[
         .map(|(i, (k, b))| *b == Lane::Same && !flag(lent, i) && !flag(strs, i)
             && matches!(k, NativeSigKind::Str | NativeSigKind::ListI64 | NativeSigKind::ListStr | NativeSigKind::Rec(_)))
         .collect()
+}
+
+/// The lane a callback param travels in: f64 bits, a Bool's i64 lane (a
+/// declared Bool, or a variable bound to a `Set[Bool]`'s `bool`, #4795), or
+/// the value as it is.
+fn param_lane(env: &Env, dp: &DTy, f64_lane: bool) -> Lane {
+    if f64_lane {
+        Lane::F64
+    } else if *dp == DTy::Bool || kind_of(env, dp) == Some(NTy::Bool) {
+        Lane::Bool
+    } else {
+        Lane::Same
+    }
+}
+
+/// [`ret_lane_of`], with a variable bound to a `Set[Bool]`'s `bool` (#4795)
+/// travelling in the Bool lane.
+fn ret_lane_in(env: &Env, dret: &DTy) -> Lane {
+    if kind_of(env, dret) == Some(NTy::Bool) { Lane::Bool } else { ret_lane_of(dret) }
 }
 
 /// The lane a callback's declared return travels in.

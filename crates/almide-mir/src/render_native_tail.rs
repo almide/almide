@@ -80,6 +80,7 @@ fn finish_native_fn(
             None => "return;",
             Some(NTy::I64) => "return 0;",
             Some(NTy::F64 | NTy::F32) => "return 0.0;",
+            Some(NTy::Bool) => "return false;",
             Some(NTy::Str | NTy::StrRef) => "return AlmideString::new();",
             Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
             Some(NTy::Res) => "return Ok(0);",
@@ -140,7 +141,7 @@ fn narrow_abi_wrapper(func: &MirFunction, sigs: &NativeSigs, rendered: String) -
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
         NTy::Never => format!("match {} {{}}", var(v)),
-        NTy::I64 | NTy::F32 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
+        NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
         NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
@@ -755,7 +756,7 @@ pub(crate) fn render_dup(
         .get(src)
         .ok_or_else(|| wall("native: Dup of untyped value"))?;
     match t {
-        NTy::Never | NTy::F32 => return Err(wall("native: no inhabited scalar value for this metadata kind")),
+        NTy::Never | NTy::F32 | NTy::Bool => return Err(wall("native: no inhabited scalar value for this metadata kind")),
         // A scalar lane copies itself.
         NTy::I64 | NTy::F64 | NTy::Opt => {
             tys.insert(*dst, t);

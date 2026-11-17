@@ -70,7 +70,7 @@ pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
 pub(crate) fn arg_kind(t: NTy) -> NativeSigKind {
     match t {
         NTy::Never => NativeSigKind::Never,
-        NTy::I64 | NTy::F32 => NativeSigKind::I64,
+        NTy::I64 | NTy::F32 | NTy::Bool => NativeSigKind::I64,
         NTy::F64 => NativeSigKind::F64,
         NTy::Str | NTy::StrRef => NativeSigKind::Str,
         NTy::Vec | NTy::VecRef => NativeSigKind::ListI64,

@@ -159,7 +159,8 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             },
         },
         FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
-            NTy::F32 => (format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
+            NTy::F32 | NTy::F64 => (format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
+            NTy::Bool => (format!("({call}).into_iter().map(|x| x as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
             NTy::I64 => (call, Some(NTy::Vec)),
             NTy::Str => (call, Some(NTy::VecStr)),
             e if crate::render_native_rec::native_set_element_kind(e) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(e)))),
