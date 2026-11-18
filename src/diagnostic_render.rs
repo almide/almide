@@ -22,19 +22,10 @@ pub fn init_color() {
 /// line — and hands invisible text to the agent reading the diagnostic. Every
 /// echoed source line shows it as its escape `\u{202E}` instead, as rustc does
 /// for the bidi controls.
+/// #4819: the same escape for the message, hint, notes and context — a parse
+/// error quoting the character it stopped at carried it raw.
 fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.chars().any(almide_lang::lexer::is_hidden_source_char) {
-        return std::borrow::Cow::Borrowed(text);
-    }
-    let mut out = String::with_capacity(text.len() + 16);
-    for c in text.chars() {
-        if almide_lang::lexer::is_hidden_source_char(c) {
-            out.push_str(&format!("\\u{{{:04X}}}", c as u32));
-        } else {
-            out.push(c);
-        }
-    }
-    std::borrow::Cow::Owned(out)
+    almide_base::err_text::escape_hidden(text)
 }
 
 /// The rendered width of `line`'s first `n` characters once `escape_bidi` has
@@ -67,9 +58,9 @@ fn build_diagnostic_header(d: &Diagnostic, color: bool) -> String {
     };
     let code_str = d.code.map(|c| format!("[{}]", c)).unwrap_or_default();
     if color {
-        format!("{}{}{}{}: {}{}{}", prefix_color, prefix, code_str, RESET, BOLD, d.message, RESET)
+        format!("{}{}{}{}: {}{}{}", prefix_color, prefix, code_str, RESET, BOLD, escape_bidi(&d.message), RESET)
     } else {
-        format!("{}{}: {}", prefix, code_str, d.message)
+        format!("{}{}: {}", prefix, code_str, escape_bidi(&d.message))
     }
 }
 
@@ -98,6 +89,7 @@ fn append_location_line(out: &mut String, d: &Diagnostic, color: bool) {
 /// `display`'s `= <note>` fact rows (`Diagnostic::notes`), before the `in` row.
 fn append_note_lines(out: &mut String, d: &Diagnostic, color: bool) {
     for note in &d.notes {
+        let note = escape_bidi(note);
         let line = if color { format!("{}={}  {}", DIM, RESET, note) } else { format!("= {}", note) };
         out.push_str(&format!("\n  {}", line));
     }
@@ -106,7 +98,8 @@ fn append_note_lines(out: &mut String, d: &Diagnostic, color: bool) {
 /// `display`'s `in <context>` line appender. Extracted verbatim.
 fn append_context_line(out: &mut String, d: &Diagnostic, color: bool) {
     if !d.context.is_empty() {
-        let line = if color { format!("{}in {}{}", DIM, d.context, RESET) } else { format!("in {}", d.context) };
+        let context = escape_bidi(&d.context);
+        let line = if color { format!("{}in {}{}", DIM, context, RESET) } else { format!("in {}", context) };
         out.push_str(&format!("\n  {}", line));
     }
 }
@@ -125,7 +118,8 @@ fn append_here_line(out: &mut String, d: &Diagnostic, color: bool) {
 /// `display`'s `hint: <text>` line appender. Extracted verbatim.
 fn append_hint_line(out: &mut String, d: &Diagnostic, color: bool) {
     if !d.hint.is_empty() {
-        let line = if color { format!("{}hint:{} {}", CYAN, RESET, d.hint) } else { format!("hint: {}", d.hint) };
+        let hint = escape_bidi(&d.hint);
+        let line = if color { format!("{}hint:{} {}", CYAN, RESET, hint) } else { format!("hint: {}", hint) };
         out.push_str(&format!("\n  {}", line));
     }
 }

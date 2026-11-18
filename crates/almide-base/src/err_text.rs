@@ -92,3 +92,23 @@ pub fn almide_rt_errtext_escape(s: &str) -> String {
 pub fn almide_rt_errtext_quote(s: &str) -> String {
     format!("\"{}\"", almide_rt_errtext_escape(s))
 }
+
+/// `s` with every C-418 character but a line break or tab written as its
+/// escape `\u{202E}` (#4819): for compiler-side text that spans lines — a
+/// diagnostic's message, hint and notes, a test name in a report — where a
+/// raw hidden character would reorder or hide what the reader sees.
+pub fn escape_hidden(s: &str) -> std::borrow::Cow<'_, str> {
+    let hidden = |c: char| !matches!(c, '\t' | '\n' | '\r') && almide_rt_errtext_is_escaped(c);
+    if !s.chars().any(hidden) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 16);
+    for c in s.chars() {
+        if hidden(c) {
+            out.push_str(&format!("\\u{{{:04X}}}", c as u32));
+        } else {
+            out.push(c);
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
