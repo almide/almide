@@ -9,7 +9,7 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
     if let Some(code) = crate::native_value_repr::scalar_recode(code, got, want) { return Some(code); }
     Some(match (want, got) {
-        (NTy::F32, NTy::F32) => code.to_string(),
+        (NTy::F32, NTy::F32) | (NTy::Bool, NTy::Bool) => code.to_string(),
         (NTy::I64, NTy::I64) => code.to_string(),
         (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
         (NTy::Str, NTy::Str) => format!("{code}.clone()"),
@@ -122,6 +122,9 @@ fn converted_list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
 fn twin_takes(param: Option<&FloorParam>, (code, got): &(String, NTy)) -> bool {
     match (param, got) {
         (_, NTy::Vec | NTy::VecStr) => true,
+        // A dying owned String (`string.drop_end(s, 1)` at s's last use,
+        // #4761): its buffer moves into the twin, which edits it in place.
+        (Some(FloorParam::Str), NTy::Str) => true,
         (Some(FloorParam::List(elem)), NTy::Rec(_)) => list_arg(*elem, code, *got).is_some_and(|r| r == format!("&{code}")),
         // A dying owned Value (`as_array(v)` at v's last use): its items move.
         (Some(FloorParam::Value(_)), NTy::Rec(_)) => crate::render_native_rec::is_value(*got),

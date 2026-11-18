@@ -369,7 +369,7 @@ fn declared_kinds(t: &TypeExpr, ctor: &str) -> Option<Vec<NTy>> {
 fn set_list_agrees(params: &[FloorParam], args: &[(String, NTy)], e: NTy) -> bool {
     params.iter().zip(args).all(|(p, (_, got))| match p {
         FloorParam::List(ListElem::Any) | FloorParam::ListOwned(ListElem::Any) => match e {
-            NTy::I64 | NTy::F32 => matches!(got, NTy::Vec | NTy::VecRef),
+            NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 => matches!(got, NTy::Vec | NTy::VecRef),
             NTy::Str => matches!(got, NTy::VecStr | NTy::VecStrRef),
             e => matches!(got, NTy::Rec(i) | NTy::RecRef(i) if crate::render_native_rec::list_elem(*i).is_some_and(|got| crate::native_value_repr::same_owned(got, e))),
         },

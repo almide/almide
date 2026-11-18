@@ -37,23 +37,69 @@ fn lower_loop_body_stmts(ctx: &mut LowerCtx, body: &[ast::Stmt]) -> Vec<IrStmt> 
     out
 }
 
-/// Lower `e`, a branch of a control-flow form that sits at `stmt_pos`: the
-/// branch of a statement is itself a statement ([`LowerCtx::stmt_pos`]).
-fn lower_branch(ctx: &mut LowerCtx, e: &ast::Expr, stmt_pos: bool) -> IrExpr {
-    ctx.stmt_pos = stmt_pos;
+/// Where a control-flow form stands, which its branches inherit: a statement
+/// ([`LowerCtx::stmt_pos`]), a body's value ([`LowerCtx::tail_pos`]), or
+/// neither — a value an enclosing expression goes on to use.
+#[derive(Clone, Copy)]
+pub(super) struct At {
+    pub(super) stmt: bool,
+    pub(super) tail: bool,
+}
+
+/// Lower `e`, a branch of a control-flow form that stands `at`: the branch of
+/// a statement is itself a statement, and the branch of a body's value is
+/// itself what the body returns.
+fn lower_branch(ctx: &mut LowerCtx, e: &ast::Expr, at: At) -> IrExpr {
+    ctx.stmt_pos = at.stmt;
+    ctx.tail_pos = at.tail;
     lower_expr(ctx, e)
 }
 
 /// Where a block stands, which decides how a `guard let` else in it leaves.
 #[derive(Clone, Copy, PartialEq)]
 enum BlockPos {
-    /// The block's value is used: the fn's tail, a lambda body, a `let` value.
+    /// The block's value is what a body returns: the fn's tail (or a
+    /// lambda's), or a branch of it.
     Value,
+    /// The block's value is used by an enclosing expression that the fn
+    /// goes on to run: an operand, a call argument, a condition, an element,
+    /// an arm of a bound branch (#4678).
+    Nested,
     /// The block is a statement, or a branch of one: its value is dropped and
     /// the fn carries on after it ([`LowerCtx::stmt_pos`]).
     Stmt,
     /// The block is the rest of a loop body.
     LoopBody,
+}
+
+impl BlockPos {
+    /// The position of a block that stands `at`.
+    fn of(at: At) -> BlockPos {
+        match at {
+            At { stmt: true, .. } => BlockPos::Stmt,
+            At { tail: true, .. } => BlockPos::Value,
+            _ => BlockPos::Nested,
+        }
+    }
+
+    /// Where the tail of a block at this position stands.
+    fn tail_at(self) -> At {
+        At { stmt: matches!(self, BlockPos::Stmt | BlockPos::LoopBody), tail: self == BlockPos::Value }
+    }
+
+    /// Does a failing guard's lowered else `alt` leave through the Guard
+    /// statement's return channel ([`guard_channel_arm`]) in a block of type
+    /// `ty` at this position, rather than stand as the failing arm?
+    fn leaves_by_channel(self, alt: &IrExpr, ty: &Ty, loop_control: bool) -> bool {
+        let raise_leaf = matches!(alt.kind, IrExprKind::ResultErr { .. });
+        let by_guard = match self {
+            BlockPos::LoopBody => true,
+            BlockPos::Stmt => !raise_leaf,
+            BlockPos::Value => !raise_leaf && alt.ty != Ty::Unit && !yields_only_ok(alt),
+            BlockPos::Nested => alt.ty != Ty::Never,
+        };
+        by_guard && !loop_control && (*ty == Ty::Unit || self == BlockPos::Nested)
+    }
 }
 
 /// Where an opened block's value goes: a `let` / `var` (with its annotation),
@@ -161,7 +207,7 @@ fn lower_block_body_in(
     let Some(i) = stmts.iter().position(leaves_by_guard_let) else {
         let mut ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
         let Some(c) = cont else {
-            let ir_expr = tail.map(|e| Box::new(lower_branch(ctx, e, pos != BlockPos::Value)));
+            let ir_expr = tail.map(|e| Box::new(lower_branch(ctx, e, pos.tail_at())));
             return ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span);
         };
         // The opened block's tail is the bind's value; the block's own names
@@ -270,36 +316,34 @@ fn lower_block_body_in(
                 }
             }
         }
-        let raise_leaf = matches!(alt.kind, IrExprKind::ResultErr { .. });
-        let by_guard = match pos {
-            BlockPos::LoopBody => true,
-            BlockPos::Stmt => !raise_leaf,
-            BlockPos::Value => !raise_leaf && alt.ty != Ty::Unit && !yields_only_ok(&alt),
-        };
-        if by_guard && *ty == Ty::Unit && !alt_is_loop_control(&alt) {
-            // See the doc comment: the else rides the Guard statement's return
-            // channel; the arm's own value becomes Unit so the match types.
-            let guard_stmt = IrStmt {
-                kind: IrStmtKind::Guard {
-                    cond: ctx.mk(IrExprKind::LitBool { value: false }, Ty::Bool, None),
-                    else_: alt,
-                },
-                span: None,
-            };
-            alt = ctx.mk(
-                IrExprKind::Block {
-                    stmts: vec![guard_stmt],
-                    expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, None))),
-                },
-                Ty::Unit,
-                None,
-            );
+        if pos.leaves_by_channel(&alt, ty, alt_is_loop_control(&alt)) {
+            alt = guard_channel_arm(ctx, alt, ty);
         }
         let arm2 = IrMatchArm { pattern: pat2, guard: None, body: alt };
         let match_expr =
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty.clone(), span);
         ctx.mk(IrExprKind::Block { stmts: pre, expr: Some(Box::new(match_expr)) }, ty.clone(), span)
     }
+}
+
+/// The failing arm whose else leaves the fn through the Guard statement's
+/// return channel: `{ guard false else <alt>; <the arm's value> }`. A Unit
+/// arm's value is `()`. Any other arm's value is never reached — the guard has
+/// returned — so it is the typed `panic` the impossible branch of an
+/// exhaustive match already lowers to on every leg, which types as the arm.
+fn guard_channel_arm(ctx: &mut LowerCtx, alt: IrExpr, ty: &Ty) -> IrExpr {
+    let guard_stmt = IrStmt {
+        kind: IrStmtKind::Guard { cond: ctx.mk(IrExprKind::LitBool { value: false }, Ty::Bool, None), else_: alt },
+        span: None,
+    };
+    let value = if *ty == Ty::Unit {
+        ctx.mk(IrExprKind::Unit, Ty::Unit, None)
+    } else {
+        let message = ctx.mk(IrExprKind::LitStr { value: "internal: a guard let else returned".into() }, Ty::String, None);
+        let target = CallTarget::Named { name: sym("panic") };
+        ctx.mk(IrExprKind::Call { target, args: vec![message], type_args: Vec::new() }, Ty::Never, None)
+    };
+    ctx.mk(IrExprKind::Block { stmts: vec![guard_stmt], expr: Some(Box::new(value)) }, ty.clone(), None)
 }
 
 /// Does `e`'s value come only from spelled `ok(..)` constructors — through a
@@ -427,7 +471,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
                 .unwrap_or_else(|| ctx.expr_ty(left));
             ctx.push_scope();
             let bind = lower_pipe_lambda_bind(ctx, p, param_ty, ir_left, span);
-            let ir_body = lower_expr(ctx, body);
+            let ir_body = lower_body(ctx, body);
             ctx.pop_scope();
             ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(ir_body)) }, ty, span)
         }

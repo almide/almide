@@ -71,6 +71,8 @@ pub(crate) fn scalar_recode(code: &str, from: NTy, to: NTy) -> Option<String> {
     match (from, to) {
         (NTy::I64, NTy::F32) => Some(format!("f32::from_bits({code} as u32)")),
         (NTy::F32, NTy::I64) => Some(format!("({code}).to_bits() as i64")),
+        (NTy::I64, NTy::Bool) => Some(format!("({code}) != 0")),
+        (NTy::Bool, NTy::I64) => Some(format!("({code}) as i64")),
         (NTy::I64, NTy::F64) => Some(format!("f64::from_bits({code} as u64)")),
         (NTy::F64, NTy::I64) => Some(format!("{code}.to_bits() as i64")),
         _ => None,

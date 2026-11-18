@@ -592,20 +592,21 @@ local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]
   }
 
 
-local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
-  a,
-  d,
-  list.len(a) - 1,
-  0,
-  [],
-)
 
-local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
-  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
-  else {
+
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = {
+  let n = list.len(a)
+  var q = list.repeat(0, n)
+  var rem = 0
+  var i = n - 1
+  while i >= 0 {
     let cur = rem * limb_base() + limb(a, i)
-    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+    q = list.set(q, i, cur / d)
+    rem = cur % d
+    i = i - 1
   }
+  (list.take(q, top_nonzero(q, n)), rem)
+}
 
 
 
@@ -1880,7 +1881,7 @@ fn pop(mut b: Bytes) -> Int? = {
   let n = bytes.len(b)
   let last = bytes.get(b, n - 1)
   if n > 0 then {
-    b = bytes.slice(b, 0, n - 1)
+    b = bytes.drop_end(b, 1)
   } else ()
   last
 }
@@ -1900,10 +1901,9 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 }
 
 /// b without its last n bytes; empty past its length; all of b if n < 0.
-fn drop_end(b: Bytes, n: Int) -> Bytes = {
-  let k = int.min(int.max(n, 0), bytes.len(b))
-  bytes.slice(b, 0, bytes.len(b) - k)
-}
+@intrinsic("almide_rt_bytes_drop_end")
+@reuse(b)
+fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
@@ -1970,7 +1970,10 @@ fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partit
 )
 
 /// Bytes grouped by f's key, each group in order.
-fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(
+  bytes.to_list(b),
+  f,
+)
 
 /// The bytes in ascending order.
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
@@ -2029,10 +2032,18 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.min_by(bytes.to_list(b), f)
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = {
+
+
+  let xs = bytes.to_list(b)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,
@@ -2085,7 +2096,7 @@ fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(b
 fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 
 /// The first byte of each key f gives, in order.
-fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+fn unique_by[K: Eq](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 
 
@@ -2594,6 +2605,15 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
 }
 
 
+
+
+@implements("bytes.drop_end")
+fn bytes_drop_end(b: Bytes, n: Int) -> Bytes = {
+  let len = prim.load32(prim.handle(b) + 4)
+  let k = if n < 0 then 0
+  else (if n > len then len else n)
+  bytes_slice(b, 0, len - k)
+}
 
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
@@ -4961,7 +4981,7 @@ fn pop[A](mut d: Deque[A]) -> A? = {
     let keep = list.len(xs) / 2
     d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
   } else ()
-  list.pop(d.back)
+  __pop_last(d.back)
 }
 
 /// Removes and yields the first element; none when empty.
@@ -4970,8 +4990,13 @@ fn pop_front[A](mut d: Deque[A]) -> A? = {
     let keep = (list.len(d.back) + 1) / 2
     d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
   } else ()
-  list.pop(d.front)
+  __pop_last(d.front)
 }
+
+
+
+
+fn __pop_last[A](mut xs: List[A]) -> A? = list.pop(xs)
 
 /// The first element, or none when empty.
 fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
@@ -4994,7 +5019,10 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(
+  d.back,
+  x,
+)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {
@@ -5031,19 +5059,51 @@ fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
-fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
+
+
+
+
+  let k = int.max(n, 0)
+  let f = list.len(d.front)
+  if k > f then {
+    let rest = list.drop(d.back, k - f)
+    let keep = (list.len(rest) + 1) / 2
+    { front: list.reverse(list.take(rest, keep)), back: list.drop(rest, keep) }
+  } else { ...d, front: list.drop_end(d.front, k) }
+}
 
 /// Last n elements, as list.take_end.
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
-fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
+  let k = int.max(n, 0)
+  let b = list.len(d.back)
+  if k > b then {
+
+    let xs = list.reverse(list.drop(d.front, k - b))
+    let keep = list.len(xs) / 2
+    { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else { ...d, back: list.drop_end(d.back, k) }
+}
 
 /// Indices start..<end, as list.slice.
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
-fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
+
+
+  let f = list.len(d.front)
+  if i >= f then __set_back(d, i - f, x)
+  else __set_front(d, f - 1 - i, x)
+}
+
+
+fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.set(d.front, j, x) }
+
+fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
@@ -5088,7 +5148,7 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 )
 
 /// Key f(x) -> elements; keys in first-seen order.
-fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+fn group_by[A, B: Eq](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
@@ -5139,16 +5199,16 @@ fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
 }
 
 /// Adjacent equal runs collapsed, as list.dedup.
-fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+fn dedup[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
 
 /// sep between adjacent elements.
 fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
 
 /// Duplicates removed; the occurrence nearest the front kept.
-fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+fn unique[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
-fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+fn unique_by[A, K: Eq](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
 
 
 /// Sum of the elements; 0 when empty; integers wrap on overflow.
@@ -9691,35 +9751,36 @@ fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
 fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
-  var h: Heap[A] = new()
-  for x in xs {
-    push(h, x)
-  }
+
+  let empty: Heap[A] = new()
+  let n = list.len(xs)
+  let cmp = empty.cmp
+  var h: Heap[A] = { slots: list.zip(xs, list.range(0, n)), next: n, cmp: cmp }
+  __heapify(h.slots, cmp)
   h
 }
 
 
-fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
-  let c = (h.cmp)(a.0, b.0)
+fn __before[A](cmp: (A, A) -> Int, a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = cmp(a.0, b.0)
   c < 0 or (c == 0 and a.1 < b.1)
 }
 
 
-fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
 
 
-/// Adds x in place.
-fn push[A](mut h: Heap[A], x: A) -> Unit = {
-  var slots = h.slots
-  list.push(slots, (x, h.next))
-  var i = list.len(slots) - 1
+
+
+
+fn __sift_up[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  var j = i
   var moving = true
-  while moving and i > 0 {
-    let parent = (i - 1) / 2
-    match (list.get(slots, i), list.get(slots, parent)) {
-      (some(child), some(up)) => if __before(h, child, up) then {
-        slots = __swap(slots, i, parent)
-        i = parent
+  while moving and j > 0 {
+    let parent = (j - 1) / 2
+    match (list.get(slots, j), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(cmp, child, up) then {
+        slots = list.swap(slots, j, parent)
+        j = parent
       } else {
         moving = false
       },
@@ -9728,48 +9789,77 @@ fn push[A](mut h: Heap[A], x: A) -> Unit = {
       },
     }
   }
-  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+
+fn __sift_down[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  let size = list.len(slots)
+  var j = i
+  var moving = true
+  while moving {
+    let l = 2 * j + 1
+    let r = l + 1
+    var best = j
+    match (list.get(slots, l), list.get(slots, best)) {
+      (some(a), some(b)) => if l < size and __before(cmp, a, b) then {
+        best = l
+      } else (),
+      _ => (),
+    }
+    match (list.get(slots, r), list.get(slots, best)) {
+      (some(a), some(b)) => if r < size and __before(cmp, a, b) then {
+        best = r
+      } else (),
+      _ => (),
+    }
+    if best == j then {
+      moving = false
+    } else {
+      slots = list.swap(slots, j, best)
+      j = best
+    }
+  }
+}
+
+
+fn __heapify[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  var i = list.len(slots) / 2 - 1
+  while i >= 0 {
+    __sift_down(slots, cmp, i)
+    i = i - 1
+  }
+}
+
+
+
+fn __drop_root[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  let n = list.len(slots)
+  if n > 0 then {
+    slots = list.swap(slots, 0, n - 1)
+    let _ = list.pop(slots)
+    __sift_down(slots, cmp, 0)
+  } else ()
+}
+
+
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  let k = h.next
+  let i = list.len(h.slots)
+  list.push(h.slots, (x, k))
+  let cmp = h.cmp
+  __sift_up(h.slots, cmp, i)
+  h = { ...h, next: k + 1 }
 }
 
 /// Removes and yields the first element out; none when empty.
 fn pop[A](mut h: Heap[A]) -> A? = {
-  let n = list.len(h.slots)
-  if n == 0 then none
-  else {
-    let top = list.get(h.slots, 0)
-    var slots = __swap(h.slots, 0, n - 1)
-    let _ = list.pop(slots)
-    let size = n - 1
-    var i = 0
-    var moving = true
-    while moving {
-      let l = 2 * i + 1
-      let r = l + 1
-      var best = i
-      match (list.get(slots, l), list.get(slots, best)) {
-        (some(a), some(b)) => if l < size and __before(h, a, b) then {
-          best = l
-        } else (),
-        _ => (),
-      }
-      match (list.get(slots, r), list.get(slots, best)) {
-        (some(a), some(b)) => if r < size and __before(h, a, b) then {
-          best = r
-        } else (),
-        _ => (),
-      }
-      if best == i then {
-        moving = false
-      } else {
-        slots = __swap(slots, i, best)
-        i = best
-      }
-    }
-    h = { slots: slots, next: h.next, cmp: h.cmp }
-    match top {
-      some((x, _)) => some(x),
-      none => none,
-    }
+  let top = list.get(h.slots, 0)
+  let cmp = h.cmp
+  __drop_root(h.slots, cmp)
+  match top {
+    some((x, _)) => some(x),
+    none => none,
   }
 }
 
@@ -9831,11 +9921,13 @@ fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
 /// The elements where f holds, in a heap of the same order; equal elements
 /// keep the order they went in.
 fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
-  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
-  for x in to_list(h) {
-    if f(x) then push(out, x) else ()
-  }
-  out
+
+
+
+
+  let kept = list.filter(to_list(h), f)
+  let n = list.len(kept)
+  { slots: list.zip(kept, list.range(0, n)), next: n, cmp: h.cmp }
 }
 "#;
 pub const SRC_HEX: &str = r#"
@@ -10228,7 +10320,8 @@ fn header[M: HttpMessage](m: M, name: String) -> String? = m.__self_header(name)
 /// Every value of header name, any case, in wire order; [] if absent.
 fn header_values[M: HttpMessage](m: M, name: String) -> List[String] = m.__self_header_values(name)
 
-/// Every header as (name, value), wire spelling and order, repeats kept.
+/// Every header as (name, value) in order, repeats kept; a fetched response
+/// names each in lowercase and omits the fields the client manages.
 fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 
 /// Body text; a fetched body is decoded as lossy UTF-8.
@@ -12000,16 +12093,28 @@ local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: 
   _ => accumulate_digits(digits, radix, acc, negative),
 }
 
-local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
-  [] => if negative then ok(acc)
+
+
+
+local fn accumulate_digits(digits: List[Int], radix: Int, start: Int, negative: Bool) -> Result[Int, String] = {
+  var acc = start
+  var refused = ""
+  for b in digits {
+    if refused == "" then {
+      let d = digit_value(b)
+      if d >= radix then {
+        refused = "invalid digit found in string"
+      } else if acc < (int.min_value() + d) / radix then {
+        refused = if negative then "number too small to fit in target type" else "number too large to fit in target type"
+      } else {
+        acc = acc * radix - d
+      }
+    } else ()
+  }
+  if refused != "" then err(refused)
+  else if negative then ok(acc)
   else if acc == int.min_value() then err("number too large to fit in target type")
-  else ok(0 - acc),
-  [b, ..rest] => {
-    let d = digit_value(b)
-    if d >= radix then err("invalid digit found in string")
-    else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
-    else accumulate_digits(rest, radix, acc * radix - d, negative)
-  },
+  else ok(0 - acc)
 }
 
 
@@ -21349,7 +21454,7 @@ fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
-fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
+fn group_by[K, V, B: Eq](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
   map.to_list(m),
   f,
 )
@@ -21612,7 +21717,7 @@ fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -
   (p) => f(p)!,
 )
 
-fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
+fn __fallible_group_by[K, V, B: Eq, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
   map.to_list(m),
   (p) => f(p)!,
 )
@@ -28710,41 +28815,35 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 
 
 
-fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
-  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.__append_rows(acc, m)),
-  none => acc,
-}
+
+
+
+
+
 
 @implements("matrix.concat_rows")
-fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = __matrix_concat_rows_go(
-  xs,
-  0,
-  matrix.from_lists([]),
-)
-
-fn __matrix_zip_row(ra: List[Float], rb: List[Float], f: (Float, Float) -> Float, i: Int, acc: List[Float]) -> List[Float] = match (list.get(
-  ra,
-  i,
-), list.get(rb, i)) {
-  (some(x), some(y)) => __matrix_zip_row(ra, rb, f, i + 1, acc + [f(x, y)]),
-  _ => acc,
+fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = {
+  let full = xs |> list.filter((m) => matrix.rows(m) > 0)
+  match list.first(full) {
+    none => list.last(xs) ?? matrix.from_lists([]),
+    some(first) => if list.len(full) == 1 then first
+    else {
+      let cols = matrix.cols(first)
+      let widths = full |> list.map((m) => if matrix.cols(m) == cols then cols
+      else matrix.cols(matrix.__append_rows(matrix.zeros(1, cols), matrix.zeros(1, matrix.cols(m)))))
+      if list.fold(widths, 0, (acc, w) => acc + w) < 0 then first
+      else matrix.from_lists(full |> list.flat_map((m) => matrix.to_lists(m) |> list.map((r) => r)))
+    },
+  }
 }
 
-fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float, i: Int, acc: List[List[Float]]) -> List[List[Float]] = match (list.get(
+
+
+fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float) -> List[List[Float]] = list.zip_with(
   la,
-  i,
-), list.get(lb, i)) {
-  (some(ra), some(rb)) => __matrix_zip_rows(
-    la,
-    lb,
-    f,
-    i + 1,
-    acc + [
-      __matrix_zip_row(ra, rb, f, 0, [])
-    ],
-  ),
-  _ => acc,
-}
+  lb,
+  (ra, rb) => list.zip_with(ra, rb, f),
+)
 
 
 
@@ -28761,7 +28860,7 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
     matrix.zeros(1, matrix.cols(b)),
   )
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
-  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
+  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f))
 }
 
 
@@ -28770,24 +28869,15 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
 
 fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
 
-fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
-  some(x) => {
-    let h = __matrix_f16_bits(x)
-    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
-  },
-  none => acc,
-}
 
-fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
-  rows,
-  i,
-) {
-  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
-  none => acc,
-}
+
+fn __matrix_f16_codes(rows: List[List[Float]]) -> List[Int] = rows |> list.flat_map((row) => row |> list.flat_map((x) => {
+  let h = __matrix_f16_bits(x)
+  [0, 8] |> list.map((sh) => int.band(int.bshr(h, sh), 255))
+}))
 
 @implements("matrix.to_bytes_f16_le")
-fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_codes(matrix.to_lists(m)))
 "#;
 pub const SRC_NET: &str = r#"
 
@@ -29813,10 +29903,26 @@ fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 @implements("bytes.__join")
 fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
   [] => bytes.zeros(0),
-  [first, ..rest] => rest |> list.fold(
-    first,
-    (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b),
-  ),
+  _ => {
+
+
+    let k = bytes.len(sep)
+    let total = list.fold(xs, 0 - k, (t, b) => t + k + bytes.len(b))
+    var out = bytes.zeros(total)
+    var at = 0
+    var first = true
+    for b in xs {
+      if first then {
+        first = false
+      } else {
+        bytes.copy_from(out, sep, at, 0, k)
+        at = at + k
+      }
+      bytes.copy_from(out, b, at, 0, bytes.len(b))
+      at = at + bytes.len(b)
+    }
+    out
+  },
 }
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
@@ -34283,8 +34389,8 @@ fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> S
   let prog = __rx_program(p0, pe)
   let work = __rx_work(prim.handle(prog), 0, t0, te, p0, pe, 0)
   let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
-  let acc = ""
-  __rx_replace_go(p0, pe, t0, m, rep, acc)
+  let acc: List[String] = []
+  list.join(__rx_replace_go(p0, pe, t0, m, rep, acc), "")
 }
 
 fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
@@ -34349,29 +34455,38 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
 
 
 
-fn __rx_replace_go(p: Int, pe: Int, pos: Int, m: Int, rep: String, acc: String) -> String = {
-  let te = __rx_te(m)
-  if pos > te then acc
-  else {
-    let st = __rx_find_start(p, pe, pos, m)
-    if st < 0 then acc + __rx_sub(pos, te)
-    else {
-      let en = __rx_end(m)
-      let acc2 = acc + __rx_sub(pos, st) + rep
-      if en > st then __rx_replace_go(p, pe, en, m, rep, acc2)
-      else {
-        if en < te then __rx_replace_go(
-          p,
-          pe,
-          en + __rx_w(en),
-          m,
-          rep,
-          acc2 + __rx_sub(en, en + __rx_w(en)),
-        )
-        else acc2
+
+
+
+fn __rx_replace_go(p: Int, pe: Int, pos0: Int, m: Int, rep: String, acc: List[String]) -> List[String] = {
+  var parts = acc
+  var pos = pos0
+  var going = true
+  while going {
+    let te = __rx_te(m)
+    if pos > te then {
+      going = false
+    } else {
+      let st = __rx_find_start(p, pe, pos, m)
+      if st < 0 then {
+        list.push(parts, __rx_sub(pos, te))
+        going = false
+      } else {
+        let en = __rx_end(m)
+        list.push(parts, __rx_sub(pos, st))
+        list.push(parts, rep)
+        if en > st then {
+          pos = en
+        } else if en < te then {
+          list.push(parts, __rx_sub(en, en + __rx_w(en)))
+          pos = en + __rx_w(en)
+        } else {
+          going = false
+        }
       }
     }
   }
+  parts
 }
 
 fn regex_replace(pat: String, s: String, rep: String) -> String = {
@@ -34383,8 +34498,8 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let te = t0 + prim.load32(sh + 4)
   let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
-  let acc = ""
-  let r = __rx_replace_go(p0, pe, t0, m, rep, acc)
+  let acc: List[String] = []
+  let r = list.join(__rx_replace_go(p0, pe, t0, m, rep, acc), "")
   if __rx_gave_up(m) then __rx_vm_replace(p0, pe, t0, te, m, rep)
   else r
 }
@@ -36012,7 +36127,7 @@ fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_
 fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
 
 /// Key f(x) -> members; keys in first-seen order.
-fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+fn group_by[A, B: Eq](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
 
 /// Members in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
@@ -36201,7 +36316,7 @@ fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(L
   (x) => f(x)!,
 )
 
-fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+fn __fallible_group_by[A, B: Eq, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
   set.to_list(s),
   (x) => f(x)!,
 )
@@ -37624,6 +37739,7 @@ fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
+@reuse(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 
@@ -37634,7 +37750,7 @@ fn push(mut s: String, x: String) -> Unit = _
 /// Removes and returns the last character; none if s is empty.
 fn pop(mut s: String) -> String? = {
   let popped = string.last(s)
-  if string.len(s) > 0 then {
+  if not string.is_empty(s) then {
     s = string.drop_end(s, 1)
   } else ()
   popped
@@ -37766,7 +37882,7 @@ fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = l
 )
 
 /// Characters grouped by f's key, each group in order.
-fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+fn group_by[B: Eq](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
   string.to_list(s),
   f,
 )
@@ -37831,10 +37947,18 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.min_by(string.to_list(s), f)
 
 /// The last character with the largest key; none if empty.
-fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = {
+
+
+  let xs = string.to_list(s)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -37898,7 +38022,7 @@ fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), 
 fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+fn unique_by[K: Eq](s: String, f: (String) -> K) -> String = list.join(
   list.unique_by(string.to_list(s), f),
   "",
 )

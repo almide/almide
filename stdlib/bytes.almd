@@ -974,7 +974,7 @@ fn pop(mut b: Bytes) -> Int? = {
   let n = bytes.len(b)
   let last = bytes.get(b, n - 1)
   if n > 0 then {
-    b = bytes.slice(b, 0, n - 1)
+    b = bytes.drop_end(b, 1)
   } else ()
   last
 }
@@ -994,10 +994,9 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 }
 
 /// b without its last n bytes; empty past its length; all of b if n < 0.
-fn drop_end(b: Bytes, n: Int) -> Bytes = {
-  let k = int.min(int.max(n, 0), bytes.len(b))
-  bytes.slice(b, 0, bytes.len(b) - k)
-}
+@intrinsic("almide_rt_bytes_drop_end")
+@reuse(b)
+fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
@@ -1064,7 +1063,10 @@ fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partit
 )
 
 /// Bytes grouped by f's key, each group in order.
-fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+fn group_by[B: Eq](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(
+  bytes.to_list(b),
+  f,
+)
 
 /// The bytes in ascending order.
 fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
@@ -1123,10 +1125,18 @@ fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
 fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
 
 /// The first byte with the smallest key; none if empty.
-fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+fn min_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.min_by(bytes.to_list(b), f)
 
 /// The last byte with the largest key; none if empty.
-fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+fn max_by[K: Ord](b: Bytes, f: (Int) -> K) -> Int? = {
+  // One pass, not a sort (#4755): f runs once per byte, front to back; the
+  // walk from the back keeps the last of equal largest keys.
+  let xs = bytes.to_list(b)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
   xs,
@@ -1179,7 +1189,7 @@ fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(b
 fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 
 /// The first byte of each key f gives, in order.
-fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+fn unique_by[K: Eq](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 // The searches below go through bytes.index_of and bytes.split, the one
 // linear-time substring search each target has (#4206): they used to compare

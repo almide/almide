@@ -260,6 +260,8 @@ fn greet(name: Option[String]) -> String = {
 `else err(e) => E` is the only failure arm a guard takes (an Option's is `else none => E`,
 the same as `else E`); to split errors into cases, write a `match`. `guard let x else E`
 rebinds a local or parameter `x`; a field path (`guard let a.b`) is refused.
+The fn returns `E` wherever the block stands (a call argument, an operand, an element, a
+condition, an arm of a bound `if` / `match`); inside a lambda, `E` is the lambda's result.
 
 ### `??` / `?` / `!`
 

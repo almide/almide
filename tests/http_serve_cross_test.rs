@@ -750,6 +750,40 @@ fn shutdown_binary() -> PathBuf {
     .clone()
 }
 
+/// #4769: on the embedded lane `http.serve` returned on SIGTERM with one
+/// block still live — the step closure's own `Result` block, which the
+/// host's contained loop (op 75) dropped. Served zero requests and one, the
+/// wasm allocation count at exit is `live=0`.
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn http_serve_returns_on_sigterm_with_nothing_live_on_the_embedded_lane() {
+    for requests in [0usize, 1] {
+        let port = free_port();
+        let err_file = scratch(&format!("live{requests}")).join("wasm.err");
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(shutdown_fixture()).args(["--target", "wasm", "--"]).arg(port.to_string());
+        c.env("ALMIDE_WASM_ALLOC_COUNT", "1").process_group(0).stdin(Stdio::null()).stdout(Stdio::null());
+        c.stderr(std::fs::File::create(&err_file).expect("stderr file"));
+        let mut child = c.spawn().expect("the server starts");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !std::fs::read_to_string(&err_file).unwrap_or_default().contains("ready\n") {
+            assert!(Instant::now() < deadline, "no ready line");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        for _ in 0..requests {
+            assert!(ask(port, b"GET /hello HTTP/1.1\r\nHost: a\r\n\r\n").ends_with(b"ok /hello"));
+        }
+        sigterm(&child);
+        let mut served = Served { child, out: err_file.clone(), port };
+        assert_eq!(exit_code_within(&mut served, 20), Some(0), "{requests} request(s)");
+        child = served.child;
+        let _ = child.wait();
+        let err = std::fs::read_to_string(&err_file).expect("stderr");
+        let line = err.lines().find(|l| l.contains("__ALMD_WASM_ALLOC")).unwrap_or_else(|| panic!("no count line: {err}"));
+        assert!(line.contains(" live=0"), "{requests} request(s): {line}");
+    }
+}
+
 /// A shutdown run: the server, its stdout file, its port.
 struct Served {
     child: Child,

@@ -47,7 +47,7 @@ pub(crate) fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &
             *pfrags,
         )
     }
-    Helper::ValueField => value_helpers::emit_value_field_helper(),
+    Helper::ValueField { find, key_off, val_off } => value_helpers::emit_value_field_helper(*find, *key_off, *val_off),
     Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
     Helper::ErrText => utf8_helpers::emit_err_text_helper(),
     Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(

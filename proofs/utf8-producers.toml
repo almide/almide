@@ -211,6 +211,11 @@ string = true
 why = "the bound String satisfies (list.max[T: Ord] can return a String)"
 
 [[leaf]]
+name = "Eq"
+string = true
+why = "the bound String satisfies (deque.unique[A: Eq] can return Strings, string.group_by[B: Eq] keys its map by the callback's Strings)"
+
+[[leaf]]
 name = "Numeric"
 string = false
 why = "the numeric types; none holds a String"
@@ -236,6 +241,36 @@ string = false
 why = "the closable handles, all Int handles"
 
 # ── fn rows: every public stdlib function that hands out a String ──
+
+[[fn]]
+id = "bytes.group_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "deque.dedup"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "deque.group_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "deque.unique"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "map.group_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
+
+[[fn]]
+id = "set.group_by"
+how = "construction"
+evidence = "spec/stdlib/utf8_string_producers_test.almd::equality-keyed containers hand back the caller's valid Strings"
 
 [[fn]]
 id = "deque.max"

@@ -392,3 +392,21 @@ fn unique_ascii_case_edits_preserve_unicode_capacity_and_shared_handles() {
     empty.unique().make_ascii_lowercase();
     assert!(empty.is_empty());
 }
+
+/// #4761: a unique block keeps a retained prefix where it is (only the
+/// length changes) and moves an inner range to its start; a shared block
+/// is left to its other owner either way.
+#[test]
+fn retain_range_truncates_a_unique_prefix_in_place_and_moves_an_inner_range() {
+    let mut s = AlmideStr::from("aé東🦀z");
+    let base = s.as_str().as_ptr();
+    s.retain_range(0.."aé東".len());
+    assert_eq!(s.as_str(), "aé東");
+    assert_eq!(s.as_str().as_ptr(), base);
+    s.retain_range("a".len().."aé東".len());
+    assert_eq!(s.as_str(), "é東");
+    assert_eq!(s.as_str().as_ptr(), base);
+    let other = s.clone();
+    s.retain_range(0.."é".len());
+    assert_eq!((s.as_str(), other.as_str()), ("é", "é東"));
+}

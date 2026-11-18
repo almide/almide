@@ -510,6 +510,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("pub struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
     s.push_str("impl<T: Clone> Clone for AlmideRcCow<T> { fn clone(&self) -> Self { AlmideRcCow(std::rc::Rc::clone(&self.0)) } }\n");
+    // `std::mem::take` of a `mut` COW param into an `@reuse` owned twin
+    // (`b = bytes.drop_end(b, 1)` in `bytes.pop`, #4756) leaves an empty value behind.
+    s.push_str("impl<T: Default> Default for AlmideRcCow<T> { fn default() -> Self { AlmideRcCow(std::rc::Rc::new(T::default())) } }\n");
     s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
     s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
     s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");

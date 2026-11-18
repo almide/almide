@@ -282,21 +282,22 @@ local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]
     mul_small_from(a, m, i + 1, p / limb_base(), acc + [int.band(p, limb_mask())])
   }
 
-// (a / d, a % d) for 1 <= d <= 2^30, walking from the top limb down.
-local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
-  a,
-  d,
-  list.len(a) - 1,
-  0,
-  [],
-)
-
-local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
-  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
-  else {
+// (a / d, a % d) for 1 <= d <= 2^30, walking from the top limb down. The
+// quotient limbs are written in place into one list (#4783): prepending each
+// one copied the quotient per limb.
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = {
+  let n = list.len(a)
+  var q = list.repeat(0, n)
+  var rem = 0
+  var i = n - 1
+  while i >= 0 {
     let cur = rem * limb_base() + limb(a, i)
-    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+    q = list.set(q, i, cur / d)
+    rem = cur % d
+    i = i - 1
   }
+  (list.take(q, top_nonzero(q, n)), rem)
+}
 
 // Schoolbook long division, one limb of quotient per step: each quotient limb is
 // searched between two bounds read from the top limbs of the running remainder.

@@ -39,6 +39,7 @@ pub mod exit_code;
 pub mod entry_split;
 pub mod addr_hold;
 pub mod diverge;
+pub mod exit_anf;
 pub mod fusion;
 pub mod speculation;
 pub mod mut_args;

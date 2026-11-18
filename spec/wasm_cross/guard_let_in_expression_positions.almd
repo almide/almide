@@ -1,0 +1,223 @@
+// @contract: C-266
+// ALS-ST6 in every expression position: the else of a failing `guard let`
+// returns from the enclosing FUNCTION wherever its block stands — an arm of a
+// bound `if` / `match`, an `if` condition, a call argument, a binary operand, a
+// list / tuple / record element, an interpolation, a `for` range head and a
+// `while` condition — exactly as it does in a `let`-bound block or at the fn's
+// tail. A lambda body is the one boundary: there the else returns from the
+// lambda. The position of a block never changes what its guard means.
+fn mk(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg")
+
+fn opt(n: Int) -> Int? = if n > 0 then some(n) else none
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn id(a: Int) -> Int = a
+
+type Pt = { x: Int, y: Int }
+
+fn if_then_arm(n: Int) -> Int = {
+  let k = if n < 100 then {
+    guard let v = mk(n) else -1
+    v + 1
+  } else 0
+  println("after if_then_arm")
+  k * 10
+}
+
+fn if_else_arm(n: Int) -> Int = {
+  let k = if n > 100 then 0
+  else {
+    guard let v = mk(n) else -1
+    v + 1
+  }
+  println("after if_else_arm")
+  k * 10
+}
+
+fn match_arm(n: Int) -> Int = {
+  let k = match n {
+    100 => 0,
+    _ => {
+      guard let v = mk(n) else -1
+      v + 1
+    },
+  }
+  println("after match_arm")
+  k * 10
+}
+
+fn if_cond(n: Int) -> Int = {
+  let k = if {
+    guard let v = mk(n) else -1
+    v > 3
+  } then 1 else 2
+  println("after if_cond")
+  k * 10
+}
+
+fn call_single(n: Int) -> Int = {
+  let k = id({
+    guard let v = mk(n) else -1
+    v + 1
+  })
+  println("after call_single")
+  k * 10
+}
+
+fn call_second(n: Int) -> Int = {
+  let k = add(1, {
+    guard let v = mk(n) else -1
+    v + 1
+  })
+  println("after call_second")
+  k * 10
+}
+
+fn call_nested(n: Int) -> Int = {
+  let k = id(add(1, {
+    guard let v = mk(n) else -1
+    v + 1
+  }))
+  println("after call_nested")
+  k * 10
+}
+
+fn bin_left(n: Int) -> Int = {
+  let k = {
+    guard let v = mk(n) else -1
+    v + 1
+  } + 1
+  println("after bin_left")
+  k * 10
+}
+
+fn bin_right(n: Int) -> Int = {
+  let k = 1 + {
+    guard let v = mk(n) else -1
+    v + 1
+  }
+  println("after bin_right")
+  k * 10
+}
+
+fn list_elem(n: Int) -> Int = {
+  let xs = [
+    1,
+    {
+      guard let v = mk(n) else -1
+      v + 1
+    }
+  ]
+  println("after list_elem")
+  list.len(xs)
+}
+
+fn tuple_elem(n: Int) -> Int = {
+  let t = (1, {
+    guard let v = mk(n) else -1
+    v + 1
+  })
+  println("after tuple_elem")
+  t.1
+}
+
+fn record_field(n: Int) -> Int = {
+  let p = Pt { x: 1, y: {
+    guard let v = mk(n) else -1
+    v + 1
+  } }
+  println("after record_field")
+  p.y
+}
+
+fn interp(n: Int) -> String = {
+  let s = "v=${{
+    guard let v = mk(n) else "none"
+    int.to_string(v)
+  }}"
+  println("after interp")
+  s
+}
+
+fn for_head(n: Int) -> Int = {
+  var t = 0
+  for i in 0..<{
+    guard let v = mk(n) else -1
+    v
+  } {
+    t = t + i
+  }
+  println("after for_head")
+  t
+}
+
+fn while_cond(n: Int) -> Int = {
+  var i = 0
+  while {
+    guard let v = mk(n) else -1
+    i < v
+  } {
+    i = i + 1
+  }
+  println("after while_cond")
+  i
+}
+
+// an Option scrutinee, as an argument
+fn opt_arg(n: Int) -> Int = {
+  let k = id({
+    guard let v = opt(n) else -1
+    v
+  })
+  println("after opt_arg")
+  k
+}
+
+// a raising else in an argument propagates to the caller
+fn raise_arg(n: Int) -> Result[Int, String] = {
+  let k = add(1, {
+    guard let v = mk(n) else err("raised")
+    v
+  })
+  println("after raise_arg")
+  ok(k)
+}
+
+// the one boundary: a lambda body's else returns from the lambda
+fn lambda_body(n: Int) -> Int = {
+  let f = (x: Int) => {
+    guard let v = mk(x) else -1
+    v + 1
+  }
+  let k = f(n)
+  println("after lambda_body")
+  k * 10
+}
+
+effect fn main() -> Unit = {
+  for n in [5, -5] {
+    println("-- ${int.to_string(n)}")
+    println(int.to_string(if_then_arm(n)))
+    println(int.to_string(if_else_arm(n)))
+    println(int.to_string(match_arm(n)))
+    println(int.to_string(if_cond(n)))
+    println(int.to_string(call_single(n)))
+    println(int.to_string(call_second(n)))
+    println(int.to_string(call_nested(n)))
+    println(int.to_string(bin_left(n)))
+    println(int.to_string(bin_right(n)))
+    println(int.to_string(list_elem(n)))
+    println(int.to_string(tuple_elem(n)))
+    println(int.to_string(record_field(n)))
+    println(interp(n))
+    println(int.to_string(for_head(n)))
+    println(int.to_string(while_cond(n)))
+    println(int.to_string(opt_arg(n)))
+    println(match raise_arg(n) {
+      ok(v) => "ok ${int.to_string(v)}",
+      err(e) => "err ${e}",
+    })
+    println(int.to_string(lambda_body(n)))
+  }
+}

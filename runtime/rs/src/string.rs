@@ -346,6 +346,13 @@ fn almide_string_tail_start(s: &str, n: i64) -> usize {
 pub fn almide_rt_string_take_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[almide_string_tail_start(s, n)..].to_string(); __almide_out.into() }
 pub fn almide_rt_string_drop(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().skip(n.max(0) as usize).collect(); __almide_out.into() }
 pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[..almide_string_tail_start(s, n)].to_string(); __almide_out.into() }
+/// The owned twin (`@reuse(s)`, #4761): a sole owner keeps its buffer and
+/// loses its last n codepoints in place, so `string.pop` is O(1) per call.
+pub fn almide_rt_string_drop_end_owned(mut s: AlmideString, n: i64) -> AlmideString {
+    let end = almide_string_tail_start(&s, n);
+    s.retain_range(0..end);
+    s
+}
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 

@@ -13,43 +13,37 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 // concat_rows / zip_with (R-matrix-11, R-matrix-09), prim-free like the rest of
 // this file: compositions of public matrix.* calls, all served cross-file.
 //
-// concat_rows: native folds append_rows over the list from the 0 x 0 matrix.
-// The same fold, by recursion (no capturing lambda in a bundled module, #892).
-fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
-  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.__append_rows(acc, m)),
-  none => acc,
-}
-
+// concat_rows: native's one pass (#4770: a fold of append_rows copied the
+// accumulator per member). With no member that has rows the answer is the
+// last member (the empty matrix for none); with one, that member. Otherwise
+// each member whose width differs from the first's is checked by append_rows
+// on two one-row probes (its abort line), and the rows are gathered once.
+// List combinators, not `var` + `for`: the interpreter oracle runs this body
+// from the self-host pool, where a heap value is its address and only a
+// combinator reads it back (so a closure's list comes out of one, too).
 @implements("matrix.concat_rows")
-fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = __matrix_concat_rows_go(
-  xs,
-  0,
-  matrix.from_lists([]),
-)
-
-fn __matrix_zip_row(ra: List[Float], rb: List[Float], f: (Float, Float) -> Float, i: Int, acc: List[Float]) -> List[Float] = match (list.get(
-  ra,
-  i,
-), list.get(rb, i)) {
-  (some(x), some(y)) => __matrix_zip_row(ra, rb, f, i + 1, acc + [f(x, y)]),
-  _ => acc,
+fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = {
+  let full = xs |> list.filter((m) => matrix.rows(m) > 0)
+  match list.first(full) {
+    none => list.last(xs) ?? matrix.from_lists([]),
+    some(first) => if list.len(full) == 1 then first
+    else {
+      let cols = matrix.cols(first)
+      let widths = full |> list.map((m) => if matrix.cols(m) == cols then cols
+      else matrix.cols(matrix.__append_rows(matrix.zeros(1, cols), matrix.zeros(1, matrix.cols(m)))))
+      if list.fold(widths, 0, (acc, w) => acc + w) < 0 then first
+      else matrix.from_lists(full |> list.flat_map((m) => matrix.to_lists(m) |> list.map((r) => r)))
+    },
+  }
 }
 
-fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float, i: Int, acc: List[List[Float]]) -> List[List[Float]] = match (list.get(
+// zip_with's rows, one pass: `acc + [row]` on a recursion param copied the
+// accumulator per row (#4786).
+fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float) -> List[List[Float]] = list.zip_with(
   la,
-  i,
-), list.get(lb, i)) {
-  (some(ra), some(rb)) => __matrix_zip_rows(
-    la,
-    lb,
-    f,
-    i + 1,
-    acc + [
-      __matrix_zip_row(ra, rb, f, 0, [])
-    ],
-  ),
-  _ => acc,
-}
+  lb,
+  (ra, rb) => list.zip_with(ra, rb, f),
+)
 
 // The extent check aborts with the family's own line (native's shape_eq),
 // prim-free: append_rows aborts on two one-row operands of different widths,
@@ -66,7 +60,7 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
     matrix.zeros(1, matrix.cols(b)),
   )
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
-  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
+  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f))
 }
 
 // to_bytes_f16_le: native (matrix_p2.rs almide_f64_to_f16_bits) rounds each
@@ -75,21 +69,12 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
 // bytes f16 writer shares, prim-free.
 fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
 
-fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
-  some(x) => {
-    let h = __matrix_f16_bits(x)
-    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
-  },
-  none => acc,
-}
-
-fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
-  rows,
-  i,
-) {
-  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
-  none => acc,
-}
+// One pass into one list (#4775): an `acc + [..]` recursion param copied the
+// accumulator per element.
+fn __matrix_f16_codes(rows: List[List[Float]]) -> List[Int] = rows |> list.flat_map((row) => row |> list.flat_map((x) => {
+  let h = __matrix_f16_bits(x)
+  [0, 8] |> list.map((sh) => int.band(int.bshr(h, sh), 255))
+}))
 
 @implements("matrix.to_bytes_f16_le")
-fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_codes(matrix.to_lists(m)))

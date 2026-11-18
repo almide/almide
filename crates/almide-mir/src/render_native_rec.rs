@@ -114,12 +114,14 @@ pub(crate) fn set_elem(i: u16) -> Option<NTy> {
 }
 
 /// A set whose elements retain the runtime's exact value representation.
-/// Bool and Float lanes cannot substitute their bits for the runtime values.
+/// Bool and Float lanes cannot substitute their bits for the runtime values:
+/// a top-level Bool / Float / Float32 element is a real `bool` / `f64` /
+/// `f32` in the set (#4795), converted from and to the lane at the boundary.
 /// The recursive type guard covers lists and sets without erasing their elements.
 pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (a[0] == Ty::Float32 || native_set_element_type(&a[0])))
+    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (matches!(a[0], Ty::Float32 | Ty::Float | Ty::Bool) || native_set_element_type(&a[0])))
 }
 
 /// The generated type `decl` declares: the first one `same` matches, or
@@ -634,6 +636,7 @@ pub(crate) fn owned_ty(t: NTy) -> String {
         NTy::I64 => "i64".into(),
         NTy::F64 => "f64".into(),
         NTy::F32 => "f32".into(),
+        NTy::Bool => "bool".into(),
         NTy::Str | NTy::StrRef => "AlmideString".into(),
         NTy::Vec | NTy::VecRef => "Vec<i64>".into(),
         NTy::VecStr | NTy::VecStrRef => "Vec<AlmideString>".into(),

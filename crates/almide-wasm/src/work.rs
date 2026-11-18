@@ -45,8 +45,10 @@ pub(crate) enum Helper {
     JsonValuePretty { float_to_string: u32, frags: JsonFrags, pfrags: PrettyFrags },
     /// `$vfield(value, key) -> i32`: 0 = not an Object, 1 = missing key,
     /// else the found Value's address (real addresses never collide with
-    /// the sentinels — the heap starts past the null guard).
-    ValueField,
+    /// the sentinels — the heap starts past the null guard). A heap Object
+    /// of 16+ pairs answers through its key index (`find`, the
+    /// `$vset_find` of value_set_path.rs), O(1) as native's (#4757).
+    ValueField { find: u32, key_off: u32, val_off: u32 },
     /// `$vkeys(value) -> i32`: the object's keys as a List[String]
     /// (addresses shared — strings are immutable).
     ValueKeys,

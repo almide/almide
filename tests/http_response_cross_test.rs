@@ -6,8 +6,10 @@
 //! an unfollowed 302, and the same err text for a closed port. A body that is
 //! not UTF-8 reads back byte for byte through `body_bytes`, and `body` is its
 //! lossy decoding, on every lane. That is C-328's
-//! p3 comparison: the header SET, lowercased, since wasi:http fields need not
-//! keep the wire spelling or the order across names. The set leaves out the
+//! p3 comparison: the header SET, since wasi:http fields need not keep the
+//! order across names. The names are read as `headers` hands them over, not
+//! lowercased by the program: every lane names a fetched field in lowercase
+//! (C-455, #4766), where native used to keep the server's spelling. The set leaves out the
 //! fields the client manages (C-370's nine): a stock wasi:http host withholds
 //! them from a response from wasmtime 49 on, so every lane drops them, and the
 //! `/ok` reply carries `Keep-Alive` beside `Connection` to show it.
@@ -106,7 +108,7 @@ fn show(tag: String, r: Result[http.HttpResponse, String]) -> String = match r {
     let cookies = http.header_values(resp, "SET-COOKIE") |> list.join(",")
     let a = http.header(resp, "x-a") ?? "-"
     let loc = http.header(resp, "location") ?? "-"
-    let keys = http.headers(resp) |> list.map(((k, _)) => string.to_lower(k)) |> list.fold([], (acc, k) => if list.contains(acc, k) then acc else acc + [k]) |> list.sort |> list.join(",")
+    let keys = http.headers(resp) |> list.map(((k, _)) => k) |> list.fold([], (acc, k) => if list.contains(acc, k) then acc else acc + [k]) |> list.sort |> list.join(",")
     "${{tag}} ${{int.to_string(http.status(resp))}} a=${{a}} loc=${{loc}} cookies=${{cookies}} keys=${{keys}} body=[${{http.body(resp)}}]"
   }},
   err(e) => "${{tag}} err: ${{e}}",

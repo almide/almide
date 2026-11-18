@@ -10,6 +10,13 @@ use super::statements::lower_stmt;
 use super::statements::lower_pattern;
 use super::types::resolve_type_expr_env;
 
+/// Lower `body`, whose value is what a fn, a lambda or an outlined region
+/// returns ([`LowerCtx::tail_pos`]).
+pub(super) fn lower_body(ctx: &mut LowerCtx, body: &ast::Expr) -> IrExpr {
+    ctx.tail_pos = true;
+    lower_expr(ctx, body)
+}
+
 pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let mut e = lower_expr_dispatch(ctx, expr);
     // #880: the PEER-JOIN shapes — a list literal and the arms of an `if` /
@@ -35,11 +42,13 @@ fn lower_expr_dispatch(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     // Consumed here, so it never reaches an operand: only the branches of a
     // control-flow form inherit the statement position.
     let stmt_pos = std::mem::take(&mut ctx.stmt_pos);
+    let tail_pos = std::mem::take(&mut ctx.tail_pos);
+    let at = At { stmt: stmt_pos, tail: tail_pos };
 
     if let Some(e) = lower_expr_literal(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_collection(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_operator(ctx, expr, ty.clone(), span) { return e; }
-    if let Some(e) = lower_expr_control(ctx, expr, ty.clone(), span, stmt_pos) { return e; }
+    if let Some(e) = lower_expr_control(ctx, expr, ty.clone(), span, at) { return e; }
     if let Some(e) = lower_expr_call(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_lambda(ctx, expr, ty.clone(), span) { return e; }
     if let Some(e) = lower_expr_access(ctx, expr, ty.clone(), span) { return e; }
@@ -142,20 +151,20 @@ fn lower_expr_operator(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Optio
 /// reads types from the checker's `TypeMap` and never re-infers, so a split here
 /// cannot change inference — but a DROPPED arm would silently lower an expression
 /// to nothing, which is why the router aborts loudly instead of falling through.
-fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>, stmt_pos: bool) -> Option<IrExpr> {
+fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<ast::Span>, at: At) -> Option<IrExpr> {
     Some(match &expr.kind {
         // ── Control flow ──
         ast::ExprKind::If { cond, then, else_, .. } => {
             let c = lower_expr(ctx, cond);
-            let t = lower_branch(ctx, then, stmt_pos);
-            let e = lower_branch(ctx, else_, stmt_pos);
+            let t = lower_branch(ctx, then, at);
+            let e = lower_branch(ctx, else_, at);
             ctx.mk(IrExprKind::If { cond: Box::new(c), then: Box::new(t), else_: Box::new(e) }, ty, span)
         }
-        ast::ExprKind::Match { subject: _, arms: _, .. } => lower_expr_match_arm(ctx, expr, ty, span, stmt_pos),
-        ast::ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => lower_expr_if_let(ctx, expr, ty, span, stmt_pos),
+        ast::ExprKind::Match { subject: _, arms: _, .. } => lower_expr_match_arm(ctx, expr, ty, span, at),
+        ast::ExprKind::IfLet { name: _, scrutinee: _, then: _, else_: _ } => lower_expr_if_let(ctx, expr, ty, span, at),
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
-            let pos = if stmt_pos { BlockPos::Stmt } else { BlockPos::Value };
+            let pos = BlockPos::of(at);
             let body = lower_block_body_in(ctx, stmts, expr.as_deref(), &ty, span, pos, None);
             ctx.pop_scope();
             body
@@ -168,7 +177,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         // boundary — outlining changes no observable behaviour. The call is
         // the region boundary each leg honours (docs/specs/scoped.md).
         ast::ExprKind::Scoped { body, .. } => {
-            let body_ir = lower_expr(ctx, body);
+            let body_ir = lower_body(ctx, body);
             let call = outline_ir_as_fn(ctx, body_ir, "__almd_scoped", span);
             if let Some(f) = ctx.synthesized_fns.last_mut() {
                 f.attrs.push(almide_ir::IrFunction::scoped_marker(almide_ir::SCOPED_BLOCK_ATTR));
@@ -178,7 +187,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
 
         ast::ExprKind::Fan { exprs, names } => {
             let ir_exprs: Vec<IrExpr> = exprs.iter()
-                .map(|e| { let arm = lower_expr(ctx, e); fan_arm_scope(ctx, arm) })
+                .map(|e| { let arm = lower_body(ctx, e); fan_arm_scope(ctx, arm) })
                 .collect();
             if names.is_empty() {
                 ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
@@ -436,7 +445,7 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                     }
                 }
             }).collect();
-            let mut ir_body = lower_expr(ctx, body);
+            let mut ir_body = lower_body(ctx, body);
             if !destructure.is_empty() {
                 let body_ty = ir_body.ty.clone();
                 ir_body = ctx.mk(IrExprKind::Block {

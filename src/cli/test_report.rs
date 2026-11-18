@@ -742,8 +742,13 @@ fn fill_t18_fields(f: &mut TestFailure, rest: &[&str]) {
         return;
     }
     // `found` ends at a trailing `  at: line N` (the harness form puts the
-    // site last); the operands are C-418-escaped, so no value spans lines.
-    let found_end = body[v..].iter().position(|l| l.starts_with("  at: line ")).map_or(body.len(), |k| v + k);
+    // site last). Only the block's LAST line is that site: an
+    // `assert_aborts` found carries the nested abort's own message, whose
+    // `at: line N` is part of the value (#4798: the report cut it there).
+    let found_end = match body.last() {
+        Some(l) if body.len() > v + 1 && l.starts_with("  at: line ") => body.len() - 1,
+        _ => body.len(),
+    };
     f.expected = Some(join_field(&body[e..v], "  expected: "));
     f.found = Some(join_field(&body[v..found_end], "  found: "));
     if f.expected.as_deref().is_some_and(|s| s.starts_with("!= ")) {
@@ -1063,6 +1068,19 @@ mod tests {
         let fs = parse("m.almd", "", out);
         assert_eq!(fs[0].expected.as_deref(), Some("one\nTWO"));
         assert_eq!(fs[0].found.as_deref(), Some("one\ntwo"));
+    }
+
+    /// #4798: an assert_aborts found holds the nested abort's message, its
+    /// own `at: line` included; only a trailing site line ends the value.
+    #[test]
+    fn t18_found_keeps_a_nested_aborts_site_line() {
+        let out = "Error: assertion failed\n  at: line 7\n  expected: abort containing \"x\"\n  found: abort \"Error: assertion failed\n  at: line 9\n  expected: hello!\n  found: hello\n\"\n";
+        let fs = parse("m.almd", "", out);
+        assert_eq!(fs[0].line, Some(7));
+        let found = fs[0].found.as_deref().unwrap_or("");
+        assert!(found.contains("at: line 9") && found.contains("found: hello"), "{found:?}");
+        let trailing = "Error: assertion failed\n  expected: 3\n  found: 4\n  at: line 5\n";
+        assert_eq!(parse("m.almd", "", trailing)[0].found.as_deref(), Some("4"));
     }
 
     #[test]

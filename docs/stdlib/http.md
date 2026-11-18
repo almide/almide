@@ -950,10 +950,11 @@ What the response holds:
 - **Redirects are never followed.** A 3xx arrives as-is with its `Location`
   header, so the response is always to the URL you passed — there is no
   separate "final URL".
-- Headers keep their wire spelling and a repeated field keeps **every**
-  occurrence: `http.header(resp, k)` answers the first,
-  `http.header_values(resp, k)` all of them, `http.headers(resp)` every
-  `(name, value)` pair in wire order.
+- Header names arrive in **lowercase** on every target (C-455), the fields
+  the client manages (`connection`, `transfer-encoding`, …) are left out,
+  and a repeated field keeps **every** occurrence: `http.header(resp, k)`
+  answers the first (any case of `k`), `http.header_values(resp, k)` all of
+  them, `http.headers(resp)` every `(name, value)` pair in wire order.
 - `http.body(resp)` — the transfer-decoded body text, lossy UTF-8.
 
 On wasm, `almide run --target wasm` serves the whole-response client, and so
@@ -1193,7 +1194,8 @@ http.header(m: M, name: String) -> Option[String]
 // @since 0.62.0
 http.header_values(m: M, name: String) -> List[String]
 
-// Every header as (name, value), wire spelling and order, repeats kept.
+// Every header as (name, value) in order, repeats kept; a fetched response
+// names each in lowercase and omits the fields the client manages.
 // @since 0.62.0
 http.headers(m: M) -> List[(String, String)]
 

@@ -1,0 +1,80 @@
+// #4756 / #4761: bytes.drop_end and string.drop_end truncate a sole owner in
+// place (@reuse) and copy a shared one; bytes.pop and string.pop ride on them.
+// These tests pin the value semantics every leg must keep while doing so: a
+// binding or a caller that still holds the source never sees it shrink.
+fn trim_bytes(b: Bytes, k: Int) -> Bytes = if k <= 0 then b else trim_bytes(
+  bytes.drop_end(b, 1),
+  k - 1,
+)
+
+fn trim_string(s: String, k: Int) -> String = if k <= 0 then s else trim_string(
+  string.drop_end(s, 1),
+  k - 1,
+)
+
+fn pop_all(mut s: String, acc: List[String]) -> List[String] = match string.pop(s) {
+  some(c) => pop_all(s, acc + [c]),
+  none => acc,
+}
+
+test "bytes.drop_end clamps n and leaves a shared source whole" {
+  let a = bytes.from_list([1, 2, 3, 4])
+  let b = bytes.drop_end(a, 1)
+  assert_eq(bytes.to_list(a), [1, 2, 3, 4])
+  assert_eq(bytes.to_list(b), [1, 2, 3])
+  assert_eq(bytes.to_list(bytes.drop_end(a, 0)), [1, 2, 3, 4])
+  assert_eq(bytes.to_list(bytes.drop_end(a, -3)), [1, 2, 3, 4])
+  assert_eq(bytes.to_list(bytes.drop_end(a, 4)), [])
+  assert_eq(bytes.to_list(bytes.drop_end(a, 99)), [])
+  assert_eq(bytes.to_list(a), [1, 2, 3, 4])
+}
+
+test "bytes.drop_end in a rebind loop and a tail call" {
+  var x = bytes.from_list([9, 8, 7, 6, 5])
+  let held = x
+  var i = 0
+  while i < 3 {
+    x = bytes.drop_end(x, 1)
+    i = i + 1
+  }
+  assert_eq(bytes.to_list(x), [9, 8])
+  assert_eq(bytes.to_list(held), [9, 8, 7, 6, 5])
+  assert_eq(bytes.to_list(trim_bytes(bytes.from_list([1, 2, 3]), 2)), [1])
+}
+
+test "bytes.pop removes the last byte and leaves an alias whole" {
+  var b = bytes.from_list([1, 2, 3])
+  let keep = b
+  assert_eq(bytes.pop(b), some(3))
+  assert_eq(bytes.to_list(b), [1, 2])
+  assert_eq(bytes.to_list(keep), [1, 2, 3])
+  var e = bytes.new()
+  assert_eq(bytes.pop(e), none)
+  assert_eq(bytes.len(e), 0)
+}
+
+test "string.drop_end walks back whole codepoints" {
+  let s = "aé日𝄞"
+  assert_eq(string.drop_end(s, 1), "aé日")
+  assert_eq(string.drop_end(s, 2), "aé")
+  assert_eq(string.drop_end(s, 3), "a")
+  assert_eq(string.drop_end(s, 4), "")
+  assert_eq(string.drop_end(s, 9), "")
+  assert_eq(string.drop_end(s, 0), s)
+  assert_eq(string.drop_end(s, -1), s)
+  assert_eq(s, "aé日𝄞")
+  assert_eq(trim_string("xyzé", 2), "xy")
+}
+
+test "string.pop drains codepoints from the end and leaves an alias whole" {
+  var s = "hé𝄞"
+  let keep = s
+  assert_eq(string.pop(s), some("𝄞"))
+  assert_eq(s, "hé")
+  assert_eq(keep, "hé𝄞")
+  var abc = "abc"
+  assert_eq(pop_all(abc, []), ["c", "b", "a"])
+  var e = ""
+  assert_eq(string.pop(e), none)
+  assert_eq(e, "")
+}

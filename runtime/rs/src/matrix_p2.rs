@@ -126,8 +126,25 @@ pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> Almid
 // member is skipped and two non-empty members of different widths abort.
 // Generic over the element so a list of shared (AlmideRcCow) matrices passes
 // as it is, with no per-call-site element unwrapping.
+// One pass into one buffer (#4770): folding append_rows copied the whole
+// accumulator per member. The fold's answer is kept exactly: before the
+// first non-empty member the accumulator is the last member seen; after it,
+// each non-empty member's width is checked against it and its rows appended.
 pub fn almide_rt_matrix_concat_rows<M: std::ops::Deref<Target = AlmideMatrix>>(xs: &[M]) -> AlmideMatrix {
-    xs.iter().fold(mk(0, 0, Vec::new()), |acc, m| almide_rt_matrix_append_rows(&acc, m))
+    let Some(first) = xs.iter().position(|m| !m.is_empty()) else {
+        return xs.last().map_or_else(|| mk(0, 0, Vec::new()), |m| (**m).clone());
+    };
+    let cols = xs[first].cols;
+    let rest = || xs[first + 1..].iter().filter(|m| !m.is_empty());
+    let mut data = Vec::with_capacity(xs[first].data.len() + rest().map(|m| m.data.len()).sum::<usize>());
+    data.extend_from_slice(&xs[first].data);
+    let mut rows = xs[first].rows;
+    for m in rest() {
+        almide_rt_matrix_shape_eq(m.cols, cols);
+        data.extend_from_slice(&m.data);
+        rows += m.rows;
+    }
+    mk(rows, cols, data)
 }
 
 // zip_with (R-matrix-09): f over same-position elements; any shape mismatch

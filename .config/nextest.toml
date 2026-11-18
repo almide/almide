@@ -41,3 +41,13 @@ test-group = "shared-fixture-serial"
 [[profile.default.overrides]]
 filter = 'binary(~_linear)'
 retries = 2
+
+# The shared-target-dir test runs `almide test` over 12 zlib files at once,
+# which starts 12 cargo builds and takes every core for its whole run. Left
+# at one thread, nextest started other tests beside it, and a wall-clock
+# bounded neighbour starved: native_walls_b22's deep-chain render (4.3 s
+# alone) read 10.02 s next to it on 4 cores, on develop and on PR #4800 alike.
+# Declaring the cores it really uses keeps other tests off them while it runs.
+[[profile.default.overrides]]
+filter = 'binary_id(almide::native_test_shared_target_dir_test)'
+threads-required = "num-cpus"

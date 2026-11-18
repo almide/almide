@@ -178,3 +178,9 @@ DER との折衝、LTS ポリシー、最初の実運用配備、サービス履
 以前は issue #577–#585 として queue に並んでいたが、いずれも本文で
 「エンジニアリング項目ではない」と自称しており、着手可能な作業の列に混ざると
 queue が嘘をつく。umbrella issue #586 のチェックリストが引き続き進捗を持つ。
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #3282 Keep emitted wasm inside the feature set a machine-checked wasm soundness proof covers (feature inventory, validator envelope gate, optional cross-check)

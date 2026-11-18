@@ -351,3 +351,20 @@ test "ordered containers hand back the caller's valid Strings" {
     assert(utf8_ok(t))
   }
 }
+
+test "equality-keyed containers hand back the caller's valid Strings" {
+  let all = adversary()
+  let n = list.len(all)
+  let d = deque.from_list(all + all)
+  let by_byte = bytes.group_by(bytes.from_list(list.range(0, n)), (i) => list.get(all, i % n) ?? "")
+  let by_deque = deque.group_by(d, (t) => t)
+  let by_set = set.group_by(set.from_list(all), (t) => t)
+  let by_map = map.group_by(map.from_list(list.enumerate(all)), ((_, t)) => t)
+  let keyed = map.keys(by_byte) + map.keys(by_deque) + map.keys(by_set) + map.keys(by_map)
+  let unique = deque.to_list(deque.unique(d))
+  assert(list.len(keyed) > 0)
+  assert(list.len(unique) <= n)
+  for t in keyed + deque.to_list(deque.dedup(d)) + unique {
+    assert(utf8_ok(t))
+  }
+}
