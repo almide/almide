@@ -387,8 +387,28 @@ impl LowerCtx {
             return Some(Some(self.emit_eq_helper_call(name, lv, rv)));
         }
 
-        // `List[Option[<record>]]`: the loop runs over the option-element helper —
-        // tag eq per element, with the record compare guarded to both-Some.
+        if let Some(done) = self.list_opt_record_eq(lv, rv, elem) {
+            return Some(done);
+        }
+        // The native render types every element: a list of options, results or lists
+        // over heap payloads (`List[Result[String, String]]`, `List[List[Option[String]]]`,
+        // #4806) loops over a helper whose body is the same typed slot eq, per element.
+        let heap_ctor_elem = matches!(elem, Ty::Applied(TC::Option | TC::Result | TC::List, a)
+            if a.iter().any(is_heap_ty));
+        if !(crate::lower::owned_tco_slots() && heap_ctor_elem) {
+            return None;
+        }
+        if !self.ensure_list_typed_eq_helper(elem) {
+            return Some(None);
+        }
+        let name = self.list_typed_eq_helper_name(elem);
+        Some(Some(self.emit_eq_helper_call(name, lv, rv)))
+    }
+
+    /// `List[Option[<record>]]`: the loop runs over the option-element helper —
+    /// tag eq per element, with the record compare guarded to both-Some.
+    fn list_opt_record_eq(&mut self, lv: ValueId, rv: ValueId, elem: &Ty) -> Option<Option<ValueId>> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
         let Ty::Applied(TC::Option, oa) = elem else { return None };
         let [Ty::Named(n, args)] = &oa[..] else { return None };
         if !args.is_empty() || self.custom_variant_type_name(&oa[0]).is_some() {

@@ -348,6 +348,86 @@ impl LowerCtx {
         true
     }
 
+    fn typed_eq_helper_name(&self, ty: &Ty) -> String {
+        format!("__eq_ty_{}__{}", sanitize_ty_ident(&format!("{ty:?}")), sanitize_ty_ident(&self.fn_name))
+    }
+
+    pub(crate) fn list_typed_eq_helper_name(&self, elem: &Ty) -> String {
+        format!("__eq_list_ty_{}__{}", sanitize_ty_ident(&format!("{elem:?}")), sanitize_ty_ident(&self.fn_name))
+    }
+
+    /// Generate (once per parent fn) the eq helper for an element type the native
+    /// render types exactly (#4806): the body is [`Self::typed_slot_eq`] over the two
+    /// borrowed params, the same engine an inline `==` of that type runs. Returns
+    /// `false` when the engine walls the type (the eq site then walls too).
+    fn ensure_typed_eq_helper(&mut self, ty: &Ty) -> bool {
+        let name = self.typed_eq_helper_name(ty);
+        let guard = format!("ty:{ty:?}");
+        if self.synth_eq_fns.iter().any(|f| f.name == name) || self.synth_eq_types.contains(&guard) {
+            return true;
+        }
+        self.synth_eq_types.insert(guard.clone());
+        let mut sub = LowerCtx {
+            variant_layouts: self.variant_layouts.clone(),
+            record_layouts: self.record_layouts.clone(),
+            fn_name: self.fn_name.clone(),
+            next_value: 2,
+            synth_eq_types: self.synth_eq_types.clone(),
+            ..Default::default()
+        };
+        sub.param_values.insert(ValueId(0));
+        sub.param_values.insert(ValueId(1));
+        let ha = sub.handle_of(ValueId(0));
+        let hb = sub.handle_of(ValueId(1));
+        let res = sub.typed_slot_eq(ha, hb, ty, 0);
+        for f in std::mem::take(&mut sub.synth_eq_fns) {
+            if !self.synth_eq_fns.iter().any(|g| g.name == f.name) {
+                self.synth_eq_fns.push(f);
+            }
+        }
+        for t in sub.synth_eq_types {
+            self.synth_eq_types.insert(t);
+        }
+        let Some(r) = res else {
+            self.synth_eq_types.remove(&guard);
+            return false;
+        };
+        let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+        self.synth_eq_fns.push(MirFunction {
+            name,
+            params: vec![
+                MirParam { value: ValueId(0), repr: ptr },
+                MirParam { value: ValueId(1), repr: ptr },
+            ],
+            ops: sub.ops,
+            ret: Some(r),
+            declared_caps: Vec::new(),
+            heap_slot_masks: Default::default(),
+            owned_params: Default::default(),
+            call_moves: Default::default(), inout_params: Default::default(),
+            aggregate_blocks: eq_helper_types(sub.aggregate_blocks.take_inner(), ty), slot_origins: Default::default(),
+        });
+        true
+    }
+
+    /// The `List[T]` loop helper over [`Self::ensure_typed_eq_helper`] (#4806).
+    pub(crate) fn ensure_list_typed_eq_helper(&mut self, elem: &Ty) -> bool {
+        let name = self.list_typed_eq_helper_name(elem);
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        if !self.ensure_typed_eq_helper(elem) {
+            return false;
+        }
+        if self.synth_eq_fns.iter().any(|f| f.name == name) {
+            return true;
+        }
+        let elem_call = self.typed_eq_helper_name(elem);
+        let f = synth_list_eq_loop_fn(name, elem_call, &Ty::list(elem.clone()));
+        self.synth_eq_fns.push(f);
+        true
+    }
+
     /// Generate (once per parent fn) the `List[<record>]` eq helper — the record
     /// twin of [`Self::ensure_list_eq_helper`]: the identical branchless
     /// length+fold loop, its per-element call routed to the record helper.
