@@ -1,5 +1,6 @@
 /// CLI command implementations.
 
+mod proc_spawn;
 mod run;
 mod build_dir;
 pub(crate) mod build;
@@ -179,19 +180,20 @@ pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> 
 /// it used to run. The embedded host applies the same rule at run time
 /// (host_process.rs, ops 87 / 88).
 const PROC_SIGNAL_COMMAND: &str = "kill";
-/// The subprocess fns that START a child, and how each call names its
-/// command (#2589, R-process-02), are read off their declarations (#4817:
-/// a name list missed the `__os_*` leaves): `stdlib_info::spawning_stdlib_fn`.
-use almide_types::stdlib_info::SpawnCommand as ProcCommandAt;
+/// The subprocess fns that START a child, and which argument of a call names
+/// its command (#2589, R-process-02), are read off what each stdlib fn
+/// reaches (#4817: a name list missed the `__os_*` leaves): `proc_spawn`.
+use proc_spawn::CommandAt as ProcCommandAt;
 
 /// The command literal a spawning call names, if it names one.
-fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
+fn proc_command_literal<'a>(at: &ProcCommandAt, args: &'a [almide::ir::IrExpr]) -> Option<&'a str> {
     use almide::ir::IrExprKind;
-    let first = &args.first()?.kind;
-    let cmd = match (at, first) {
-        (ProcCommandAt::Arg, k) => k,
-        (ProcCommandAt::RecordCmd, IrExprKind::Record { fields, .. }) => &fields.iter().find(|(n, _)| n.as_str() == "cmd")?.1.kind,
-        (ProcCommandAt::RecordCmd, _) => return None,
+    let cmd = match at {
+        ProcCommandAt::Arg(i) => &args.get(*i)?.kind,
+        ProcCommandAt::Field(i, f) => match &args.get(*i)?.kind {
+            IrExprKind::Record { fields, .. } => &fields.iter().find(|(n, _)| n.as_str() == f)?.1.kind,
+            _ => return None,
+        },
     };
     match cmd {
         IrExprKind::LitStr { value } => Some(value.as_str()),
@@ -214,35 +216,33 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
-                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                    if module.as_str() == "process" =>
-                {
-                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                    if almide_types::stdlib_info::is_signals_process_stdlib_fn(module.as_str(), func.as_str())
                         && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
                     {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
                         self.bad.push(format!(
-                            "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                            "{module}.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
                         ));
                     }
-                    if let Some(at) = almide_types::stdlib_info::spawning_stdlib_fn("process", func.as_str()) {
+                    if let Some(at) = proc_spawn::spawning().get(&(module.to_string(), func.to_string())) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
-                        match proc_command_literal(at, args) {
+                        match at.as_ref().and_then(|at| proc_command_literal(at, args)) {
                             Some(value) if self.allow.iter().any(|c| c == value) => {}
                             Some(value) => {
-                                self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
+                                self.bad.push(format!("{module}.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
                             }
                             None => self.bad.push(format!(
-                                "process.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
-                                if matches!(at, ProcCommandAt::RecordCmd) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
+                                "{module}.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
+                                if matches!(at, Some(ProcCommandAt::Field(..))) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
                             )),
                         }
                     }
                 }
                 IrExprKind::FnRef { name } => {
                     let n = name.as_str();
-                    if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::spawning_stdlib_fn("process", f).is_some()) {
-                        self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    if let Some((m, f)) = n.split_once('.').filter(|(m, f)| proc_spawn::spawning().contains_key(&(m.to_string(), f.to_string()))) {
+                        self.bad.push(format!("{m}.{f} passed as a value: [permissions] proc cannot check its command"));
                     }
                     if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
                         if !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
