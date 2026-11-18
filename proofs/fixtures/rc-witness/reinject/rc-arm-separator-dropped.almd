@@ -1,0 +1,13 @@
+// #4631 drill: a statement `if` whose else-arm separator the recorder drops
+// (the emitter still ships both arms). Each arm builds and releases its own
+// temporary, so the witness balances either way and is accepted; only the
+// anchored arms show the else arm's release is in the bytes of the other arm.
+fn width(c: Bool, x: Int) -> Int = {
+  var n = 0
+  if c then { n = string.len(int.to_string(x) + "a") } else { n = string.len(int.to_string(x) + "bb") }
+  n
+}
+
+effect fn main() -> Unit = {
+  println("${width(true, 12)} ${width(false, 345)}")
+}
