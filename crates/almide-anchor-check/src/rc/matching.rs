@@ -238,10 +238,25 @@ impl Frame<'_, '_> {
     /// (arm i of the recorder's site is the shipped arm i — the anchor
     /// holds it, never trusted), logged at the site's own level (on every
     /// path through that arm).
+    ///
+    /// A call such a pair could take may already be held by a temporary's
+    /// unnamed event (`a-` / `d-`), which fits any call of its kind in its
+    /// window: when that event also fits a call still left over, it moves
+    /// there and the arm pair takes this call — each call is still one
+    /// event's (or the pair's) and each event one call's (#4788: the temporary
+    /// took the `+1` past a select's join, leaving its own call over).
     fn pair_arms(&self, owner: &mut [Option<usize>], got: &mut [bool], co: &mut [Vec<usize>]) {
         for c in 0..self.live {
-            if owner[c].is_some() || !co[c].is_empty() || !matches!(self.calls[c].1, 'a' | 'd') {
+            if !co[c].is_empty() || !matches!(self.calls[c].1, 'a' | 'd') {
                 continue;
+            }
+            if let Some(e) = owner[c] {
+                if self.ev.evs[e].1.is_some() || self.arm_pair(c, got).is_none() {
+                    continue;
+                }
+                let Some(free) = (0..self.live).find(|&x| x != c && owner[x].is_none() && co[x].is_empty() && self.fits(e, x)) else { continue };
+                owner[free] = Some(e);
+                owner[c] = None;
             }
             let Some((e0, e1)) = self.arm_pair(c, got) else { continue };
             owner[c] = Some(e0);

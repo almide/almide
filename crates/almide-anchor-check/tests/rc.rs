@@ -467,6 +467,25 @@ fn an_anchored_if_pairs_each_arm_event_with_its_arm_value() -> Result<(), String
     Ok(())
 }
 
+/// A temporary's unnamed event fits the call past the join too: the matching
+/// may hand it that call first. It moves to the call left over that it also
+/// fits, and the arm pair takes the call on the value the arms chose (#4788,
+/// a select over two heap values ahead of a loaded element's `+1`).
+#[test]
+fn an_arm_pair_takes_the_join_call_from_a_temporary_that_fits_elsewhere() -> Result<(), String> {
+    let body = "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) local.set 3 local.get 3 call $alloc drop local.get 4 call $alloc drop";
+    let bytes = module("(local i32 i32 i32 i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 d0 |@1-3 d1 ) d-")?;
+    run("d- (@1-3 d0 |@1-3 d1 )")?;
+    assert!(run("(@1-3 d0 |@1-3 d1 )").is_err(), "the temporary's call has no event");
+    assert!(run("(@1-3 d1 |@1-3 d0 ) d-").is_err(), "arms swapped");
+    assert!(run("( d0 | d1 ) d-").is_err(), "no anchor");
+    Ok(())
+}
+
 /// Two recorder sites anchored to one `if` (its arms' own, then a select
 /// site over it): the pairing reads the one whose arms carry the events.
 #[test]
