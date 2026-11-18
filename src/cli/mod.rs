@@ -174,28 +174,15 @@ pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> 
     Ok(())
 }
 
-/// The subprocess fns that START a child, with how the call names its
-/// command (#2589): `exec`'s first argument, or the `cmd` field of the
-/// `ProcessCommand` record `output` / `run` / `start` take (R-process-02).
-const PROC_SPAWNING: &[(&str, ProcCommandAt)] = &[
-    ("exec", ProcCommandAt::Arg),
-    ("output", ProcCommandAt::RecordCmd),
-    ("run", ProcCommandAt::RecordCmd),
-    ("start", ProcCommandAt::RecordCmd),
-];
-
 /// The command a `@signals_process` stdlib fn (#4125: it starts no child but
 /// signals or probes a pid) is bounded as by `[permissions] proc` — the one
 /// it used to run. The embedded host applies the same rule at run time
 /// (host_process.rs, ops 87 / 88).
 const PROC_SIGNAL_COMMAND: &str = "kill";
-#[derive(Clone, Copy)]
-enum ProcCommandAt {
-    /// The first argument is the command.
-    Arg,
-    /// The first argument is a `ProcessCommand`; its `cmd` field is the command.
-    RecordCmd,
-}
+/// The subprocess fns that START a child, and how each call names its
+/// command (#2589, R-process-02), are read off their declarations (#4817:
+/// a name list missed the `__os_*` leaves): `stdlib_info::spawning_stdlib_fn`.
+use almide_types::stdlib_info::SpawnCommand as ProcCommandAt;
 
 /// The command literal a spawning call names, if it names one.
 fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
@@ -238,7 +225,7 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                             "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
                         ));
                     }
-                    if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
+                    if let Some(at) = almide_types::stdlib_info::spawning_stdlib_fn("process", func.as_str()) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
                         match proc_command_literal(at, args) {
                             Some(value) if self.allow.iter().any(|c| c == value) => {}
@@ -254,7 +241,7 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                 }
                 IrExprKind::FnRef { name } => {
                     let n = name.as_str();
-                    if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::spawning_stdlib_fn("process", f).is_some()) {
                         self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
                     }
                     if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
@@ -271,7 +258,10 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
         }
     }
     let mut scan = Scan { allow, bad: Vec::new() };
-    for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+    // The bundled stdlib's own bodies (a wrapper handing its record's `cmd`
+    // to its leaf) are judged at the program's calls into them, not here.
+    let user_modules = ir.modules.iter().filter(|m| !almide_types::stdlib_info::BUNDLED_MODULES.contains(&m.name.as_str()));
+    for f in ir.functions.iter().chain(user_modules.flat_map(|m| m.functions.iter())) {
         scan.visit_expr(&f.body);
     }
     if scan.bad.is_empty() {

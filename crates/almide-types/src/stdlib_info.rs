@@ -686,6 +686,51 @@ pub fn is_signals_process_stdlib_fn(module: &str, func: &str) -> bool {
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
 /// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
+/// How a bundled stdlib fn that STARTS a child names its command (#4817):
+/// its first parameter is `cmd: String` (the command itself), or a
+/// `ProcessCommand` record (its `cmd` field). Read off each declaration's
+/// first parameter, so a leaf declared with a command is charged by
+/// `[permissions] proc` however it is named — public or not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpawnCommand {
+    Arg,
+    RecordCmd,
+}
+
+/// Every bundled stdlib fn whose declaration names a command to start,
+/// with how (see [`SpawnCommand`]).
+pub fn spawning_stdlib_fns() -> &'static [(&'static str, String, SpawnCommand)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, SpawnCommand)>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = Vec::new();
+        for &module in BUNDLED_MODULES {
+            let Some(src) = bundled_source(module) else { continue };
+            for line in src.lines() {
+                let line = line.trim_start();
+                let decl = line.strip_prefix("local ").or_else(|| line.strip_prefix("mod ")).unwrap_or(line);
+                let decl = decl.strip_prefix("effect ").unwrap_or(decl);
+                let Some(rest) = decl.strip_prefix("fn ") else { continue };
+                let Some((name, params)) = rest.split_once('(') else { continue };
+                let first = params.split([',', ')']).next().unwrap_or("");
+                let Some((pname, pty)) = first.split_once(':') else { continue };
+                let at = match (pname.trim(), pty.trim()) {
+                    ("cmd", "String") => SpawnCommand::Arg,
+                    (_, "ProcessCommand") => SpawnCommand::RecordCmd,
+                    _ => continue,
+                };
+                out.push((module, name.trim().to_string(), at));
+            }
+        }
+        out
+    })
+}
+
+/// How `module.func` names the command it starts, if it starts one (#4817).
+pub fn spawning_stdlib_fn(module: &str, func: &str) -> Option<SpawnCommand> {
+    spawning_stdlib_fns().iter().find(|(m, f, _)| *m == module && f == func).map(|(_, _, at)| *at)
+}
+
 fn marked_stdlib_fns(mark: &str) -> Vec<(&'static str, String, Option<String>)> {
     let mut out = Vec::new();
     for &module in BUNDLED_MODULES {
