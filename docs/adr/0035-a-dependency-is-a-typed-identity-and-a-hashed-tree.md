@@ -1,6 +1,6 @@
 # ADR-0035: A dependency is a typed identity and a hashed tree of regular files — fetching runs no subprocess, trust is judged on the value that is fetched, and the lock holds only hashes
 
-- **Status**: Proposed (draft, 2026-11-18). Waits on the [Owner decisions](#owner-decisions-). Implementation comes after v0.70.0. The minimal fixes for the audit findings land before v0.70.0 and are not this ADR.
+- **Status**: Accepted (design; not implemented), 2026-11-18. The owner answered ○ to all six [Owner decisions](#owner-decisions-) as recommended. Implementation comes after v0.70.0. The minimal fixes for the audit findings land before v0.70.0 and are not this ADR.
 - **Date**: 2026-11-18
 - **Scope**: how a dependency is named (`almide.toml`), found, fetched, unpacked, cached, locked (`almide.lock`) and walked; `src/project.rs`, `src/project_fetch.rs`, `src/trust.rs`, `src/resolve.rs`; security-table rows 14–16 and 25.
 - **Related**:
@@ -138,6 +138,8 @@ Almide already holds this. The ADR states it as a contract so it has a gate: the
 - The cache moves to `pkg/sha256/<sum>`. The old `.sources` tree is left alone, and `almide clean` removes it.
 
 ## Owner decisions (○/×)
+
+Answered 2026-11-18: all six ○ as recommended. D2 is (A) now; (C) is a later ADR together with the registry.
 
 1. **D1: identities only, no URLs in the manifest or lock.** A non-https scheme, a port and userinfo are refused. Recommended ○.
 2. **D2: how to fetch without a subprocess.** Recommended (A), the in-process git client, now; (C), the Almide proxy, as a later ADR with the registry.
