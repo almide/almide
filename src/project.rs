@@ -1118,6 +1118,12 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".almide").join("cache")
 }
 
+/// A git commit hash as a lock or a remote names it: 1 to 64 hex digits
+/// (#4812) — never a path or an option.
+pub fn is_commit_hash(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// A locked dependency entry for almide.lock
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedDep {
@@ -1186,6 +1192,17 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
         };
         let git = required("git")?;
         let commit = required("commit")?;
+        // #4812: the commit names a cache directory and is handed to `git
+        // checkout`, so it is a hex hash and nothing else (an absolute path
+        // was joined in as the package directory).
+        if !is_commit_hash(&commit) {
+            return Err(format!(
+                "{}: lock entry '{}' has a `commit` that is not a hex commit hash\n  \
+                 hint: almide.lock is generated; delete the entry and the next `almide check` rewrites it",
+                path.display(),
+                name
+            ));
+        }
         let ref_name =
             entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let subdir = entry

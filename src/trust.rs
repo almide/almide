@@ -30,13 +30,70 @@ pub const DEFAULT_TRUSTED_OWNER: &str = "github.com/almide";
 /// removal hints send a model to `almide-graphics/nn` (module `nn.kernels`).
 pub const ALMIDE_PROJECT_OWNERS: &[&str] = &["github.com/almide-graphics"];
 
+/// A git source as written, refused unless git can only read it the way
+/// [`source_owner`] does (#4810, #4811): it may not begin with `-` (git reads
+/// that as an option — `--upload-pack=…` runs a command), may hold no
+/// whitespace or control character, no `?` or `#` (a query or fragment ahead
+/// of an `@` made the owner check read the host after it while git contacts
+/// the one before it), and a userinfo part, where there is one, is a plain
+/// user name. Every git invocation is handed only a source that passed here.
+pub fn git_source(url: &str) -> Result<&str, String> {
+    let refuse = |why: &str| {
+        Err(format!(
+            "the git source `{}` {why}\n  hint: write the URL as https://host/owner/repo",
+            url.escape_debug()
+        ))
+    };
+    if url.is_empty() {
+        return refuse("is empty");
+    }
+    if url.starts_with('-') {
+        return refuse("begins with `-`, which git reads as an option");
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return refuse("holds whitespace or a control character");
+    }
+    if url.contains(['?', '#']) {
+        return refuse("holds a `?` or `#`, so the host git contacts cannot be read from its text");
+    }
+    let user_ok = |u: &str| !u.is_empty() && u.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '~'));
+    let host_ok = |h: &str| !h.is_empty() && !h.starts_with('-') && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'));
+    let authority = if let Some((scheme, rest)) = url.split_once("://") {
+        if scheme.eq_ignore_ascii_case("file") {
+            return Ok(url);
+        }
+        Some(rest.split_once('/').map_or(rest, |(a, _)| a))
+    } else {
+        url.split_once(':').filter(|(b, _)| !b.contains('/') && !b.is_empty()).map(|(b, _)| b)
+    };
+    let Some(authority) = authority else { return Ok(url) };
+    let (user, hostport) = match authority.rsplit_once('@') {
+        Some((u, h)) => (Some(u), h),
+        None => (None, authority),
+    };
+    if user.is_some_and(|u| !user_ok(u)) {
+        return refuse("has a user part that is not a plain user name");
+    }
+    let host = match hostport.split_once(':') {
+        Some((h, port)) if url.contains("://") && (port.is_empty() || port.chars().all(|c| c.is_ascii_digit())) => h,
+        Some(_) => return refuse("has a host that is not `host` or `host:port`"),
+        None => hostport,
+    };
+    if !host_ok(host) {
+        return refuse("has a host that is not a plain host name");
+    }
+    Ok(url)
+}
+
 /// The `host/owner` a git source belongs to, lowercased.
 ///
 /// `Ok(None)` for a source on the local filesystem (`file://…` or a path),
-/// which needs no trust. `Err` for a URL whose owner cannot be read safely:
-/// a `.` or `..` path segment or a percent escape could make the URL fetch
-/// from another owner than the one its text names.
+/// which needs no trust. `Err` for a source [`git_source`] refuses, or a URL
+/// whose owner cannot be read safely: a `.` or `..` path segment or a
+/// percent escape could make the URL fetch from another owner than the one
+/// its text names.
 pub fn source_owner(url: &str) -> Result<Option<String>, String> {
+    git_source(url)?;
     let (host, path) = if let Some((scheme, rest)) = url.split_once("://") {
         if scheme.eq_ignore_ascii_case("file") {
             return Ok(None);
@@ -276,6 +333,26 @@ mod tests {
         assert_eq!(source_owner("/srv/git/x").unwrap(), None);
         assert!(source_owner("https://github.com/almide/../evil/x").is_err());
         assert!(source_owner("https://github.com/almide/%2e%2e/evil/x").is_err());
+    }
+
+    /// #4810 / #4811: a source git could read as an option, or whose host git
+    /// reads differently from the owner check, is refused before any git runs.
+    #[test]
+    fn option_shaped_and_ambiguous_sources_are_refused() {
+        for bad in [
+            "--upload-pack=touch M;true",
+            "-u",
+            "https://other.invalid?@github.com/almide/json",
+            "https://other.invalid#@github.com/almide/json",
+            "https://a:b@github.com/almide/json",
+            "https://github.com /almide/json",
+            "ssh://-oProxyCommand=x/almide/json",
+            "git@-oProxyCommand=x:almide/json",
+        ] {
+            assert!(source_owner(bad).is_err(), "{bad} was not refused");
+        }
+        assert_eq!(source_owner("https://github.com:443/almide/json").unwrap().as_deref(), Some("github.com/almide"));
+        assert_eq!(source_owner("../local/repo").unwrap(), None);
     }
 
     #[test]

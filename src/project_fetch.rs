@@ -382,6 +382,9 @@ enum CloneHow<'a> {
 /// and checkout the exact commit — for a commit a lock pins, and for the
 /// commit a floating ref resolved to on its remote (#4527).
 fn fetch_dep_at_commit(dep: &Dependency, commit: &str, how: CloneHow) -> Result<PathBuf, String> {
+    if !crate::project::is_commit_hash(commit) {
+        return Err(format!("dependency `{}`: `{}` is not a commit hash", dep.name, commit.escape_debug()));
+    }
     let dir = dep_cache_root(dep).join(&commit[..12.min(commit.len())]);
     if dir.exists() {
         return Ok(dir);
@@ -402,20 +405,21 @@ fn fetch_dep_at_commit(dep: &Dependency, commit: &str, how: CloneHow) -> Result<
             CloneHow::Locked => err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())])),
             CloneHow::Head(_) => err(&format!("Fetching {} from {} ({} → {short})", dep.name, dep.git, dep_ref_name(dep))),
         }
+        let url = crate::trust::git_source(&dep.git)?;
         if let CloneHow::Head(branch) = how {
             let mut cmd = Command::new("git");
             cmd.arg("clone").arg("--depth").arg("1");
             if let Some(b) = branch {
                 cmd.arg("--branch").arg(b);
             }
-            let shallow = cmd.arg(&dep.git).arg(tmp).env("GIT_TERMINAL_PROMPT", "0").output();
+            let shallow = cmd.arg("--").arg(url).arg(tmp).env("GIT_TERMINAL_PROMPT", "0").output();
             if shallow.is_ok_and(|o| o.status.success()) && git_head_hash(tmp).ok().as_deref() == Some(commit) {
                 return Ok(());
             }
             let _ = std::fs::remove_dir_all(tmp);
         }
         let output = Command::new("git")
-            .arg("clone").arg(&dep.git).arg(tmp)
+            .arg("clone").arg("--").arg(url).arg(tmp)
             .output()
             .map_err(|e| format!("Failed to run git: {}", e))?;
         if !output.status.success() {
@@ -447,17 +451,15 @@ fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str, chain: &[String]) -> Resul
 
     populate_cache_dir(&dep_dir, |tmp| {
         err(&format!("Fetching {} from {} ({})", dep.name, dep.git, ref_name));
+        let url = crate::trust::git_source(&dep.git)?;
         let mut cmd = Command::new("git");
-        cmd.arg("clone")
-            .arg("--depth").arg("1")
-            .arg(&dep.git)
-            .arg(tmp);
-
+        cmd.arg("clone").arg("--depth").arg("1");
         if let Some(ref tag) = dep.tag {
             cmd.arg("--branch").arg(tag);
         } else if let Some(ref branch) = dep.branch {
             cmd.arg("--branch").arg(branch);
         }
+        cmd.arg("--").arg(url).arg(tmp);
 
         let output = cmd.output()
             .map_err(|e| format!("Failed to run git: {}", e))?;
@@ -635,8 +637,9 @@ impl RemoteRefs {
 
 /// `git ls-remote --heads --tags <url>`, with git's terminal prompts off.
 pub fn remote_refs(url: &str) -> Result<RemoteRefs, String> {
+    let url = crate::trust::git_source(url)?;
     let out = Command::new("git")
-        .args(["ls-remote", "--heads", "--tags", url])
+        .args(["ls-remote", "--heads", "--tags", "--", url])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
@@ -698,8 +701,9 @@ fn remote_head_once(url: &str, branch: Option<&str>) -> Result<Option<String>, S
 /// ref is exactly `refs/heads/<branch>` (or `HEAD`).
 fn remote_head(url: &str, branch: Option<&str>) -> Result<Option<String>, String> {
     let want = branch.map(|b| format!("refs/heads/{b}")).unwrap_or_else(|| "HEAD".to_string());
+    let url = crate::trust::git_source(url)?;
     let out = Command::new("git")
-        .args(["ls-remote", url, &want])
+        .args(["ls-remote", "--", url, &want])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
@@ -1368,8 +1372,9 @@ pub enum ProbeFailure {
 /// interactive git would turn into a password prompt (#4093). The listing
 /// lets `almide add` refuse a tag the repository does not have (#4528).
 pub fn probe_source(url: &str) -> Result<RemoteRefs, ProbeFailure> {
+    let url = crate::trust::git_source(url).map_err(ProbeFailure::NotFound)?;
     let out = Command::new("git")
-        .args(["ls-remote", "--heads", "--tags", url])
+        .args(["ls-remote", "--heads", "--tags", "--", url])
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|e| ProbeFailure::Unreachable(format!("failed to run git: {e}")))?;
@@ -1396,8 +1401,9 @@ pub fn probe_source(url: &str) -> Result<RemoteRefs, ProbeFailure> {
 /// The remote's current commit for `ref_name` — read WITHOUT cloning
 /// (`git ls-remote`), so `update` costs one network round-trip per dep.
 pub fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> {
+    let git_url = crate::trust::git_source(git_url)?;
     let out = std::process::Command::new("git")
-        .args(["ls-remote", git_url, ref_name])
+        .args(["ls-remote", "--", git_url, ref_name])
         .output()
         .map_err(|e| format!("git ls-remote failed: {}", e))?;
     if !out.status.success() {
