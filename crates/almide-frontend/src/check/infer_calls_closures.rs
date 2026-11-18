@@ -351,10 +351,14 @@ impl Checker {
                     format!("{surface} budget")));
             }
             other => {
+                // The example builds the clock this surface declares, so a
+                // wall-clock surface is never sent to the compute constructor
+                // it refuses (#4742).
+                let ctor = almide_lang::time_units::module_of_clock_type(clock).unwrap_or("compute");
                 self.emit(super::err(
                     format!("expected {clock}, found {}", other.display()),
                     format!(
-                        "Budgets carry a unit and a clock: {surface}(compute.ms(100)) {{ ... }}"
+                        "Budgets carry a unit and a clock: {surface}({ctor}.ms(100)) {{ ... }}"
                     ),
                     format!("{surface} budget")));
             }

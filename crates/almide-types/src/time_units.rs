@@ -50,6 +50,11 @@ pub fn clock_type_of_module(module: &str) -> Option<&'static str> {
     TIME_MODULES.iter().find(|(m, _)| *m == module).map(|(_, t)| *t)
 }
 
+/// Constructor module for a checker clock type (`Duration` → `duration`).
+pub fn module_of_clock_type(clock: &str) -> Option<&'static str> {
+    TIME_MODULES.iter().find(|(_, t)| *t == clock).map(|(m, _)| *m)
+}
+
 /// The declared clock a surface reads (`fan.bounded` → `Compute`).
 pub fn surface_clock(surface: &str) -> Option<&'static str> {
     TIME_CONSUMING_SURFACES.iter().find(|(s, _)| *s == surface).map(|(_, c)| *c)
