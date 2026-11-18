@@ -56,6 +56,10 @@ fn routes(root: &Path) -> Vec<(std::path::PathBuf, Vec<&'static str>)> {
         (elsewhere, vec!["../proj/src/main.almd", "--target", "rust"]),
         // `check` judges the module's function.
         (proj.clone(), vec!["check", "src/main.almd"]),
+        // #4815: `check --json` (the MCP `almide_check`) and `check --effects`
+        // judge it too.
+        (proj.clone(), vec!["check", "src/main.almd", "--json"]),
+        (proj.clone(), vec!["check", "src/main.almd", "--effects"]),
         // Both test lanes.
         (proj.clone(), vec!["test", "src/reads_test.almd"]),
         (proj, vec!["test", "src/reads_test.almd", "--target", "wasm"]),
@@ -84,7 +88,7 @@ fn granting_fs_admits_every_route() {
     for (dir, args) in routes(td.path()) {
         let o = almide(&dir, &args);
         let t = text(&o);
-        assert!(!t.contains("[permissions].allow"), "`almide {}` refused a granted read:\n{t}", args.join(" "));
+        assert!(!t.contains("is not in [permissions].allow"), "`almide {}` refused a granted read:\n{t}", args.join(" "));
         if args[0] == "test" {
             assert!(t.contains(SECRET), "`almide {}` did not run the read:\n{t}", args.join(" "));
         } else {

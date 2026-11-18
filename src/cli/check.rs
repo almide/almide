@@ -391,6 +391,15 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
+        // #4815: the `[permissions]` gate `check` runs (rows 17/18, 26), on
+        // the same whole-program IR — `check --json` is the MCP `almide_check`.
+        if let Some(proj) = project::permissions_project_for(file) {
+            if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+                clean = false;
+            } else if proj.permissions.is_some() || proj.proc_allow.is_some() {
+                clean &= super::enforce_project_permissions(whole.as_ref().unwrap_or(&ir), &proj).is_ok();
+            }
+        }
     }
     // The same predicate that gates the unused-variable pass IS the verdict:
     // one expression, so the status cannot drift from what was emitted.
@@ -492,12 +501,20 @@ pub fn cmd_check_effects(file: &str) {
     let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
     err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
 
-    // Check permissions from the entry file's almide.toml
-    {
-        if let Some(proj) = project::permissions_project_for(file) {
-            if proj.permissions.is_some() {
-                enforce_effect_permissions(&proj, &entries);
+    // Check permissions from the entry file's almide.toml: the per-fn
+    // report above, then (#4815) the gate `check` runs over the WHOLE
+    // program — a capability reached through an imported module, and the
+    // `proc` list.
+    if let Some(proj) = project::permissions_project_for(file) {
+        if proj.permissions.is_some() || proj.proc_allow.is_some() {
+            let whole = crate::compile_driver::whole_program_ir(file)
+                .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+            if super::enforce_project_permissions(&whole, &proj).is_err() {
+                std::process::exit(1);
             }
+        }
+        if proj.permissions.is_some() {
+            enforce_effect_permissions(&proj, &entries);
         }
     }
 }
