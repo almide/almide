@@ -490,6 +490,12 @@ impl WitnessRecorder {
         self.branches.arm_at(&mut self.log, Some(anchor));
     }
 
+    /// #4631: the current arm of the innermost open site is the shipped
+    /// arm the instruction `anchor` names (`Emitter::arm_anchor_here`).
+    pub fn branch_anchor(&mut self, anchor: u64) {
+        self.branches.anchor(anchor);
+    }
+
     /// The innermost open site joins.
     pub fn branch_close(&mut self) {
         self.branches.close(&mut self.log);

@@ -175,6 +175,16 @@ impl Branches {
         }
     }
 
+    /// #4631: the current arm is the shipped arm the instruction window
+    /// `anchor` names (an `if`: its then-arm; an `else`: its else-arm; the
+    /// `end` of an `if` with no `else`: the empty arm through it), so the
+    /// RC check holds the arm's events to the bytes of that arm (`^`).
+    pub(crate) fn anchor(&mut self, anchor: u64) {
+        if self.stack.last().is_some_and(|s| s.logged) {
+            crate::witness::rc::mark_at('^', Some(anchor));
+        }
+    }
+
     /// The join. A site whose EVERY arm left leaves the enclosing arm, loop
     /// body or frame too.
     pub(crate) fn close(&mut self, log: &mut Vec<Ev>) {

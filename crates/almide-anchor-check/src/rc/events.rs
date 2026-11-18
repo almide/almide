@@ -24,6 +24,11 @@ pub(super) struct Events {
     /// A site the recorder anchored (`(@<if>-<else>`, an `if` lowered with
     /// its arms in source order): the shipped `if` and `else` it is.
     pub(super) site_at: HashMap<usize, (usize, usize)>,
+    /// #4631: an arm the recorder anchored (`^@<x>-<x>` inside it): the
+    /// shipped instruction `x` whose arm it is — an `if` (its then-arm), an
+    /// `else` (its else-arm) or the `end` of an `if` with no `else` (the
+    /// empty arm through it). Keyed by `(site, arm)`.
+    pub(super) arm_op: HashMap<(usize, usize), usize>,
 }
 
 /// A branch-site token's anchor (`(@<if>-<else>` / `|@<if>-<else>`).
@@ -50,6 +55,7 @@ pub(super) fn parse(events: &str) -> Events {
     let mut next_site = 0usize;
     let mut site_at: HashMap<usize, (usize, usize)> = HashMap::new();
     let mut tokens: Vec<&str> = Vec::new();
+    let mut arm_op: HashMap<(usize, usize), usize> = HashMap::new();
     for t in events.split_whitespace() {
         match t {
             t if t.starts_with('(') => {
@@ -71,6 +77,13 @@ pub(super) fn parse(events: &str) -> Events {
             ")" => {
                 open_sites.pop();
             }
+            // An arm anchor (`^@<x>-<x>`); one whose instruction did not
+            // ship is dropped by the producer, so a bare `^` names nothing.
+            t if t.starts_with('^') => {
+                if let (Some(&s), Some((x, _))) = (open_sites.last(), anchor(t)) {
+                    arm_op.insert(s, x);
+                }
+            }
             _ => {
                 evdepth.push(open_sites.len());
                 evpath.push(open_sites.clone());
@@ -79,5 +92,5 @@ pub(super) fn parse(events: &str) -> Events {
         }
     }
     let (evs, evwin) = tokens.into_iter().map(event).unzip();
-    Events { evs, evwin, evdepth, evpath, site_at }
+    Events { evs, evwin, evdepth, evpath, site_at, arm_op }
 }

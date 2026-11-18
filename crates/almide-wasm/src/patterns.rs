@@ -106,12 +106,19 @@ impl Emitter<'_> {
             Some(g) => {
                 self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
+                let verdict_at = self.arm_anchor_here();
                 self.witness_verdict_open(split);
+                if split {
+                    self.witness_branch_anchor(verdict_at);
+                }
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
                 self.witness_pattern_views(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
-                self.witness_verdict_close(split);
-                self.f.instructions().else_().i32_const(0).end();
+                let failed_at = self.arm_anchor();
+                self.witness_verdict_close(split, failed_at);
+                self.f.instructions().else_();
+                self.arm_anchor_bind(failed_at);
+                self.f.instructions().i32_const(0).end();
             }
         }
         let bt = match result {
@@ -119,7 +126,14 @@ impl Emitter<'_> {
             None => BlockType::Empty,
         };
         self.f.instructions().if_(bt);
+        let body_at = self.arm_anchor_here();
         self.witness_select_open(split);
+        // #4631: the body's arm is this `if`'s then-arm — the whole recorder
+        // arm when no guard ran before the `if` (a split guard ran in the
+        // verdict site, so the select site's arm is the body alone).
+        if arm.guard.is_none() || split {
+            self.witness_branch_anchor(body_at);
+        }
         // A statement-position chain keeps the loop context (#2745): the
         // arm's if_ is one more label between a `break` / `continue` in
         // the body and its target. (Value position suspends it in
@@ -136,12 +150,14 @@ impl Emitter<'_> {
                 self.release_arm_rests(&arm.pattern);
             }
             self.f.instructions().else_();
+            let else_at = self.arm_anchor_here();
             if arms.len() == 2 && arm.guard.is_none() && arms[1].guard.is_none() && result_halves(&arm.pattern, &arms[1].pattern) {
                 // `ok(..) => a, err(..) => b` with irrefutable payloads: a
                 // Result tag is 0 or 1, so the second arm is the else — no
                 // second tag test, no trap after it.
                 let last = &arms[1];
                 self.witness_branch_arm();
+                self.witness_branch_anchor(else_at);
                 self.emit_pattern_binds(&last.pattern, subj_ty, scr)?;
                 self.witness_pattern_views(&last.pattern);
                 self.lower_arm_body(&last.body, result, tail)
