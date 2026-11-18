@@ -15,8 +15,9 @@ pub(super) fn read_after(f: &MirFunction, at: usize, source: ValueId) -> bool {
     }
     if addresses.is_empty() { return false; }
     let mut reads = Vec::new();
-    for op in &f.ops[at + 1..] {
-        if super::bookkeeping(op) { continue; }
+    let skip = super::else_arm_after(f, at);
+    for (j, op) in f.ops.iter().enumerate().skip(at + 1) {
+        if super::bookkeeping(op) || skip.as_ref().is_some_and(|r| r.contains(&j)) { continue; }
         reads.clear();
         crate::mir_ops::op_reads(op, &mut reads);
         if reads.iter().any(|v| addresses.contains(v)) { return true; }

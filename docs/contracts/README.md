@@ -301,7 +301,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-263 | Recovery nodes never appear in accepted programs; a broken file still reports past its first error | 0.57.1 | active | fixture | 1 |
 | C-264 | Scalar-field optional chains yield some/none identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-265 | The guard statement's pass and raise paths behave identically on both targets | 0.57.1 | active | fixture | 3 |
-| C-266 | guard let binds the success payload and raises on the failing polarity, identically on both targets | 0.57.1 | active | fixture | 5 |
+| C-266 | guard let binds the success payload and raises on the failing polarity, identically on both targets | 0.57.1 | active | fixture | 6 |
 | C-267 | The binary operator surface evaluates identically on both targets, including the signed division rulings | 0.57.1 | active | fixture | 1 |
 | C-268 | A `_` in call-argument position is a check-time E046, identically on both targets | 0.57.1 | active | fixture | 0 |
 | C-269 | A nested variant match bound to a let executes identically on both targets; a constructor pattern the subject lacks is a check-time E048 on both | 0.57.1 | active | fixture | 1 |
@@ -490,4 +490,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-452 | An @export(c) fn crosses C at the C ABI table's widths, Int as int64_t; an effect fn answers its ok value, and an err writes its message to stderr and exits 1 | 0.69.0 | active | fixture | 0 |
 | C-453 | A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width | 0.69.1 | active | fixture | 0 |
 | C-454 | An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory | 0.69.1 | active | fixture | 0 |
+| C-455 | A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane | 0.70.0 | active | fixture | 0 |
 

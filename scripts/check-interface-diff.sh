@@ -22,6 +22,18 @@
 # TREES alone carry the surface, and the diff is deterministic, build-free,
 # and derivable at any pair of refs forever.
 #
+# WHAT THE INDEX DOES NOT SHOW: a generic's protocol bound. The index renders
+# `deque.unique(d: Deque[A]) -> Deque[A]` with or without `[A: Eq]`, so a
+# bound added to an existing fn classifies `identical`. Such a change is
+# recorded here instead. 0.70.0 (#4796, owner ruling 2026-11-17): the
+# self-hosted equality wrappers deque.contains / dedup / unique / unique_by /
+# group_by, bytes.unique_by / group_by, string.unique_by / group_by and
+# map.group_by / set.group_by declare `Eq` on the compared parameter (as
+# #4758 declared `Ord` on the ordering wrappers). E016 now refuses at check
+# a function-holding element that no leg could build before; E103 refuses a
+# Secret element, which compared structurally before, exactly as the direct
+# `list.unique` call already did (#4239).
+#
 # Usage:
 #   check-interface-diff.sh <prev-ref> <ref> [--allow-breaking]
 #

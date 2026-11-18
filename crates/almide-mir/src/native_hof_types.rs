@@ -76,6 +76,10 @@ fn bind_param(env: &mut Env, d: &DTy, t: NTy) -> Option<()> {
             let inner = rec::set_elem(t.rec()?)?;
             // Preserve the recursively declared element representation.
             rec::native_set_element_kind(inner).then_some(())?;
+            // A Bool element binds as its lane, as F32 binds its metadata kind.
+            if inner == NTy::Bool && matches!(e.as_ref(), DTy::Bool) {
+                return Some(());
+            }
             bind_inner(env, e, inner)
         }
         DTy::Map(k, v) => {
@@ -113,7 +117,11 @@ fn kind_of(env: &Env, d: &DTy) -> Option<NTy> {
         DTy::Bytes => NTy::Rec(rec::bytes_index()),
         DTy::Runtime(runtime) => runtime.kind(),
         DTy::Set(e) => {
-            let inner = kind_of(env, e)?;
+            // A Bool / Float element is the set's real bool / f64 (#4795).
+            let inner = match e.as_ref() {
+                DTy::Bool => NTy::Bool,
+                _ => kind_of(env, e)?,
+            };
             rec::native_set_element_kind(inner).then_some(())?;
             NTy::Rec(rec::set_type_of(inner))
         }
@@ -149,6 +157,11 @@ fn bind_lambda(env: &mut Env, d: &DTy, k: NativeSigKind) -> Option<bool> {
         return Some(true);
     }
     if let Some(t) = kind_of(env, d) {
+        // A Set[Bool]'s element (#4795): the runtime's `bool`, the lambda's
+        // i64 lane — the Bool lane adapter converts, as for a declared Bool.
+        if t == NTy::Bool && k == NativeSigKind::I64 {
+            return Some(false);
+        }
         return crate::native_value_repr::same_owned(t, clo::owned_nty(k)).then_some(false);
     }
     let t = clo::owned_nty(k);
@@ -199,9 +212,11 @@ mod type_tests {
             assert_eq!(kind_of(&binding, &declared), Some(set));
             assert_eq!(bind_param(&mut binding, &declared, value), None);
         }
-        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Float))), None);
+        // A Set of Float / Bool is the runtime's set of real f64 / bool (#4795).
+        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Float))), Some(NTy::Rec(rec::set_type_of(NTy::F64))));
+        assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Bool))), Some(NTy::Rec(rec::set_type_of(NTy::Bool))));
         // Value's runtime equality is the language's `==` (#4687), so a Set of
-        // Values is the runtime's own set of them; Float members still refuse.
+        // Values is the runtime's own set of them.
         assert_eq!(kind_of(&env, &DTy::Set(Box::new(DTy::Value))), Some(NTy::Rec(rec::set_type_of(value))));
     }
 

@@ -190,6 +190,7 @@ fn render_first_join_value(
         let (decl, join_t, rhs) = match t {
             NTy::Never => return Err(wall("native: an uninhabited value cannot choose a join type")),
             NTy::F32 => (format!("let mut {}: f32;", var(*d)), t, var(v)),
+            NTy::Bool => (format!("let mut {}: bool;", var(*d)), t, var(v)),
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
                 format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
@@ -392,7 +393,7 @@ fn hoist_arm_slot(out: &mut String, d: ValueId, v: ValueId, i: u16) -> bool {
 fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
     match t {
         NTy::Never => format!("match {} {{}}", var(v)),
-        NTy::I64 | NTy::F32 | NTy::F64 => var(v),
+        NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 => var(v),
         NTy::Str => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::Vec => format!("{}.clone()", var(v)),

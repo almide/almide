@@ -332,7 +332,7 @@ impl Derive<'_> {
             let before = set.len();
             set = set.iter().filter(|n| self.fields_of(n).iter().all(|t| self.kind(t, &set).is_some()) && self.res_free(n, &set)
                 && (!self.maps.contains(*n) || matches!(self.decls[*n].1[0].1[0], almide_lang::types::Ty::Float32) || self.exact_eq_type(&self.decls[*n].1[0].1[0], &mut Default::default()))
-                && (!self.sets.contains(*n) || self.decls[*n].1[0].1[0] == almide_lang::types::Ty::Float32 || self.set_element_type(&self.decls[*n].1[0].1[0]))).cloned().collect();
+                && (!self.sets.contains(*n) || set_element_kind(&self.decls[*n].1[0].1[0]).is_some() || self.set_element_type(&self.decls[*n].1[0].1[0]))).cloned().collect();
             if set.len() == before {
                 break;
             }
@@ -453,7 +453,7 @@ impl Derive<'_> {
             return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if self.sets.contains(n) {
-            return RecDecl { name: n.to_string(), set_of: Some(if cases[0].1[0] == almide_lang::types::Ty::Float32 { NTy::F32 } else { spell(&cases[0].1[0]) }), ..RecDecl::default() };
+            return RecDecl { name: n.to_string(), set_of: Some(set_element_kind(&cases[0].1[0]).unwrap_or_else(|| spell(&cases[0].1[0]))), ..RecDecl::default() };
         }
         if self.options.contains(n) {
             let p = spell(&cases[0].1[0]);
@@ -564,6 +564,18 @@ pub(crate) fn scalar_carrier_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
 #[path = "render_native_carrier_types_test.rs"]
 mod carrier_types_test;
 
+/// The runtime kind of a scalar Set element whose lane is not its value: a
+/// Float32 / Float / Bool element is a real `f32` / `f64` / `bool` (#4795).
+pub(crate) fn set_element_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
+    use almide_lang::types::Ty;
+    match t {
+        Ty::Float32 => Some(NTy::F32),
+        Ty::Float => Some(NTy::F64),
+        Ty::Bool => Some(NTy::Bool),
+        _ => None,
+    }
+}
+
 /// Exact runtime representations admitted as a Set element, recursively.
 fn native_set_element_type(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::{Ty, constructor::TypeConstructorId};
@@ -579,7 +591,7 @@ fn native_set_element_type(t: &almide_lang::types::Ty) -> bool {
 /// Native counterpart used after declaration types have been bound at a call.
 pub(crate) fn native_set_element_kind(t: NTy) -> bool {
     match t {
-        NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr => true,
+        NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr | NTy::Bool | NTy::F64 => true,
         NTy::Rec(i) => is_bytes(t) || RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.eq_safe))
             || list_elem(i).or_else(|| set_elem(i)).is_some_and(native_set_element_kind),
         _ => false,
@@ -593,11 +605,16 @@ mod set_element_tests {
 
     #[test]
     fn set_elements_preserve_runtime_types_recursively() {
-        for e in [Ty::Float32, Ty::Int8, Ty::UInt64, Ty::Int, Ty::String, Ty::Bytes, Ty::list(Ty::Int), Ty::list(Ty::String), Ty::list(Ty::list(Ty::Int)), Ty::set_of(Ty::String)] {
+        for e in [Ty::Float32, Ty::Bool, Ty::Float, Ty::Int8, Ty::UInt64, Ty::Int, Ty::String, Ty::Bytes, Ty::list(Ty::Int), Ty::list(Ty::String), Ty::list(Ty::list(Ty::Int)), Ty::set_of(Ty::String)] {
             assert!(is_native_set(&Ty::set_of(e.clone())), "{e:?}");
         }
-        // A Bool or Float bit lane must not silently acquire Int equality or repr.
-        for e in [Ty::Bool, Ty::Float, Ty::list(Ty::Float32), Ty::set_of(Ty::Float32), Ty::list(Ty::Bool), Ty::list(Ty::Float), Ty::set_of(Ty::Bool)] {
+        // A top-level Bool / Float element is a real bool / f64 in the set
+        // (#4795), never the i64 lane with Int's equality and repr.
+        assert_eq!(set_element_kind(&Ty::Bool), Some(NTy::Bool));
+        assert_eq!(set_element_kind(&Ty::Float), Some(NTy::F64));
+        // A Bool or Float bit lane nested in an element must not silently
+        // acquire Int equality or repr.
+        for e in [Ty::list(Ty::Float32), Ty::set_of(Ty::Float32), Ty::list(Ty::Bool), Ty::list(Ty::Float), Ty::set_of(Ty::Bool)] {
             assert!(!is_native_set(&Ty::set_of(e.clone())), "{e:?}");
         }
     }

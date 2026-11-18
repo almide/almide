@@ -30,6 +30,9 @@ fn bind_callback_shape(env: &mut Env, d: &DTy, got: NTy) -> Option<()> {
         if has_runtime_tuple(d) { return None; }
         let runtime = kind_of(env, d);
         if got == NTy::I64 && runtime == Some(NTy::F64) { return Some(()); }
+        // A Set[Bool]'s element is the runtime's `bool`; the lambda takes its
+        // i64 lane, converted at the boundary (#4797).
+        if got == NTy::I64 && runtime == Some(NTy::Bool) { return Some(()); }
         // Generic containers retain MIR's Float bits, while a checked lambda
         // takes a Float as f64. Concrete Int declarations never use this arm.
         if matches!(d, DTy::Var(_)) && got == NTy::F64 && runtime == Some(NTy::I64) { return Some(()); }
@@ -157,7 +160,7 @@ fn tuple_callback_adapter(env: &Env, lambda: Option<&str>, captured: &str, (dps,
             _ => format!("{}__a{i}", if borrow { "&" } else { "" }),
         });
     }
-    let call = format!("{}{})", callback_head(lambda, captured, ps, ret),
+    let call = format!("{}{})", callback_head(lambda, captured, ps, &[], ret),
         args.iter().map(|a| format!(", {a}")).collect::<String>());
     let call = if ret == Some(NativeSigKind::F64) { format!("AlmdLaneF64::lane_f64({call})") } else { call };
     let result = match ret {

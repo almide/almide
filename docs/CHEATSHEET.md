@@ -739,6 +739,26 @@ else as a match arm: `else err(e) => E` (`e` has the Result's error type; an
 Option's arm is `else none => E`, the same as `else E`). One failure arm only:
 to split errors into cases, write a `match`.
 
+The function returns `E` wherever the block stands: a block bound by `let`, an
+arm of a bound `if` / `match`, a call argument, an operand, a list, tuple or
+record element, an `if` / `while` condition, a `for` range. Inside a lambda,
+`E` is what the lambda returns.
+
+```almide check
+fn mk(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg")
+
+fn work(n: Int) -> Int = {
+  let k = int.abs({
+    guard let v = mk(n) else -1   // work(-5) returns -1; the lines below do not run
+    v + 1
+  })
+  println("after")
+  k * 10
+}
+
+fn main() -> Unit = println(int.to_string(work(-5)))
+```
+
 ```almide check
 type ConfigError = | Missing(String) | BadPort(Int)
 

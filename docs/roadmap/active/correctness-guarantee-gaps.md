@@ -294,3 +294,9 @@ Quick wins first (small effort, high leverage):
   **推奨順（価値×着手容易さ）**: **E（セキュリティ）→ B（parse）→ A（文字列）→ D（等価）→
   C（float）→ H（div/mod）→ F（closure）→ G（fan、契約決定後）**。各クラスタ = 1 PR。
   [determinism-belt.md](determinism-belt.md) の枠と接続。
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4632 Re-derive the ownership witness path classes from the recorder's rc event log in the anchor check, so the path-class partition is no longer trusted

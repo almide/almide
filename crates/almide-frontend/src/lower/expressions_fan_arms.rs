@@ -15,7 +15,7 @@ fn lower_fan_settle(ctx: &mut LowerCtx, arms: &[ast::Expr], ty: Ty, span: Option
         .iter()
         .enumerate()
         .map(|(i, arm)| {
-            let a = lower_expr(ctx, arm);
+            let a = lower_body(ctx, arm);
             let a = settle_arm_scope(ctx, a, slots.get(i));
             if a.ty.result_err_ty().is_some() {
                 return a;

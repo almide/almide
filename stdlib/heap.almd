@@ -43,35 +43,36 @@ fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
 fn from_list[A: Ord](xs: List[A]) -> Heap[A] = {
-  var h: Heap[A] = new()
-  for x in xs {
-    push(h, x)
-  }
+  // Built bottom-up in O(n) (#4777): n pushes were n sifts.
+  let empty: Heap[A] = new()
+  let n = list.len(xs)
+  let cmp = empty.cmp
+  var h: Heap[A] = { slots: list.zip(xs, list.range(0, n)), next: n, cmp: cmp }
+  __heapify(h.slots, cmp)
   h
 }
 
 // Does slot a leave before slot b: cmp first, push order on a tie.
-fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
-  let c = (h.cmp)(a.0, b.0)
+fn __before[A](cmp: (A, A) -> Int, a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = cmp(a.0, b.0)
   c < 0 or (c == 0 and a.1 < b.1)
 }
 
-// Swap slots i and j of a list.
-fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
-
-// ── the in-place add and take ──
-/// Adds x in place.
-fn push[A](mut h: Heap[A], x: A) -> Unit = {
-  var slots = h.slots
-  list.push(slots, (x, h.next))
-  var i = list.len(slots) - 1
+// The in-place sifts take the slot list as a `mut` place and swap within it,
+// so a sole-owned heap is never copied (#4777: `var slots = h.slots` was a
+// second reference, and the first swap copied the whole list on every push).
+// Callers pass `cmp` from a local: an argument reading `h` beside `h.slots`
+// keeps the list shared into the call.
+// Moves slot i up past every parent it leaves before.
+fn __sift_up[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  var j = i
   var moving = true
-  while moving and i > 0 {
-    let parent = (i - 1) / 2
-    match (list.get(slots, i), list.get(slots, parent)) {
-      (some(child), some(up)) => if __before(h, child, up) then {
-        slots = __swap(slots, i, parent)
-        i = parent
+  while moving and j > 0 {
+    let parent = (j - 1) / 2
+    match (list.get(slots, j), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(cmp, child, up) then {
+        slots = list.swap(slots, j, parent)
+        j = parent
       } else {
         moving = false
       },
@@ -80,48 +81,77 @@ fn push[A](mut h: Heap[A], x: A) -> Unit = {
       },
     }
   }
-  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+// Moves slot i down past every child that leaves before it.
+fn __sift_down[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int, i: Int) -> Unit = {
+  let size = list.len(slots)
+  var j = i
+  var moving = true
+  while moving {
+    let l = 2 * j + 1
+    let r = l + 1
+    var best = j
+    match (list.get(slots, l), list.get(slots, best)) {
+      (some(a), some(b)) => if l < size and __before(cmp, a, b) then {
+        best = l
+      } else (),
+      _ => (),
+    }
+    match (list.get(slots, r), list.get(slots, best)) {
+      (some(a), some(b)) => if r < size and __before(cmp, a, b) then {
+        best = r
+      } else (),
+      _ => (),
+    }
+    if best == j then {
+      moving = false
+    } else {
+      slots = list.swap(slots, j, best)
+      j = best
+    }
+  }
+}
+
+// Restores the heap order over the whole list, from the last parent up.
+fn __heapify[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  var i = list.len(slots) / 2 - 1
+  while i >= 0 {
+    __sift_down(slots, cmp, i)
+    i = i - 1
+  }
+}
+
+// Takes the root out: the last slot moves to the root and sifts down. No-op
+// on an empty list.
+fn __drop_root[A](mut slots: List[(A, Int)], cmp: (A, A) -> Int) -> Unit = {
+  let n = list.len(slots)
+  if n > 0 then {
+    slots = list.swap(slots, 0, n - 1)
+    let _ = list.pop(slots)
+    __sift_down(slots, cmp, 0)
+  } else ()
+}
+
+// ── the in-place add and take ──
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  let k = h.next
+  let i = list.len(h.slots)
+  list.push(h.slots, (x, k))
+  let cmp = h.cmp
+  __sift_up(h.slots, cmp, i)
+  h = { ...h, next: k + 1 }
 }
 
 /// Removes and yields the first element out; none when empty.
 fn pop[A](mut h: Heap[A]) -> A? = {
-  let n = list.len(h.slots)
-  if n == 0 then none
-  else {
-    let top = list.get(h.slots, 0)
-    var slots = __swap(h.slots, 0, n - 1)
-    let _ = list.pop(slots)
-    let size = n - 1
-    var i = 0
-    var moving = true
-    while moving {
-      let l = 2 * i + 1
-      let r = l + 1
-      var best = i
-      match (list.get(slots, l), list.get(slots, best)) {
-        (some(a), some(b)) => if l < size and __before(h, a, b) then {
-          best = l
-        } else (),
-        _ => (),
-      }
-      match (list.get(slots, r), list.get(slots, best)) {
-        (some(a), some(b)) => if r < size and __before(h, a, b) then {
-          best = r
-        } else (),
-        _ => (),
-      }
-      if best == i then {
-        moving = false
-      } else {
-        slots = __swap(slots, i, best)
-        i = best
-      }
-    }
-    h = { slots: slots, next: h.next, cmp: h.cmp }
-    match top {
-      some((x, _)) => some(x),
-      none => none,
-    }
+  let top = list.get(h.slots, 0)
+  let cmp = h.cmp
+  __drop_root(h.slots, cmp)
+  match top {
+    some((x, _)) => some(x),
+    none => none,
   }
 }
 
@@ -183,9 +213,11 @@ fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
 /// The elements where f holds, in a heap of the same order; equal elements
 /// keep the order they went in.
 fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
-  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
-  for x in to_list(h) {
-    if f(x) then push(out, x) else ()
-  }
-  out
+  // The kept elements come out in pop order, which is ascending, and an
+  // ascending list is already a heap: they are numbered in that order, so
+  // equal elements keep it. (Pushing them one by one inside the callback's
+  // branch copied the heap per push on the native render.)
+  let kept = list.filter(to_list(h), f)
+  let n = list.len(kept)
+  { slots: list.zip(kept, list.range(0, n)), next: n, cmp: h.cmp }
 }

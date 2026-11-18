@@ -24,6 +24,14 @@
 //! A rebind cell runs once more with the call inside a user fn
 //! `step(x, n)` (`x = step(x, n)`): the caller hands `x` over to `step`'s
 //! param, which reaches the `@consume` param at its last use.
+//!
+//! And once more as a self tail call, `go(x, n) = if n >= 3 then x else
+//! go(f(x, ..), n + 1)`, the re-inspection's `tail` shape: the loop the
+//! tail call becomes rebinds the RETURNED param on every step, which the
+//! liveness check had kept from moving (`http.set_status` copied the whole
+//! response per step on the native render, 4.0 s against v0.69.1's 0.02 s
+//! for 20,000 steps over 4,000 headers). Its control reads `x` after the
+//! call inside the same argument.
 
 use std::collections::BTreeSet;
 use std::process::Command;
@@ -169,6 +177,26 @@ fn program_through(c: &Cell, shared: bool) -> Option<String> {
     ))
 }
 
+/// The cells whose tail-shape control maps the still-shared list through a
+/// borrow (`x.iter().map(..)`), which copies no list: a move is not what
+/// keeps their positive copy-free, so the control is not asked to copy.
+const TAIL_LENDS: &[&str] = &["list.map"];
+
+/// The self-tail-call variant of a rebind cell: `go` rebinds its returned
+/// param `x` through the tail call; `shared` reads `x` after the call.
+fn program_tail(c: &Cell, shared: bool) -> Option<String> {
+    if !c.rebind || c.call.contains('!') {
+        return None;
+    }
+    let ty = ty_of(c.build);
+    let import = if c.import.is_empty() { String::new() } else { format!("import {}\n", c.import) };
+    let arg = if shared { format!("{{\n    let y = {}\n    println(\"${{x}}\")\n    y\n  }}", c.call) } else { c.call.to_string() };
+    Some(format!(
+        "{import}fn go(x: {ty}, n: Int) -> {ty} = if n >= 3 then x else go({arg}, n + 1)\n\neffect fn main() -> Unit = {{\n  let n = 0\n  var x{build}\n  let y: {ty} = go(x, n)\n  println(\"${{y}}\")\n}}\n",
+        build = typed(c.build),
+    ))
+}
+
 /// The cell's program; `shared`: the consumed value is read again after the
 /// call (the negative control).
 fn program(c: &Cell, shared: bool) -> String {
@@ -222,10 +250,15 @@ fn main_body(rust: &str) -> &str {
 
 /// The rendered body of the user fn `step` (v1 spells it `almd_step`).
 fn step_body(rust: &str) -> &str {
-    let at = ["\nfn almd_step(", "\npub fn almd_step(", "\npub fn step(", "\nfn step("]
+    fn_body(rust, "step")
+}
+
+/// The rendered body of the user fn `name` (v1 spells it `almd_<name>`).
+fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
+    let at = [format!("\nfn almd_{name}("), format!("\npub fn almd_{name}("), format!("\npub fn {name}("), format!("\nfn {name}(")]
         .iter()
-        .find_map(|h| rust.find(h))
-        .expect("the render has fn step");
+        .find_map(|h| rust.find(h.as_str()))
+        .unwrap_or_else(|| panic!("the render has fn {name}"));
     let rest = &rust[at..];
     &rest[..rest.find("\n}\n").map_or(rest.len(), |e| e + 2)]
 }
@@ -284,6 +317,29 @@ fn a_dying_consume_argument_handed_through_a_param_moves() {
         }
         if nc.is_empty() {
             failures.push(format!("{} [{neg_route}]: the shared control copies nothing:\n{neg_src}", c.decl));
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));
+}
+
+#[test]
+fn a_dying_consume_argument_moves_through_a_self_tail_call() {
+    let mut failures = Vec::new();
+    for c in cells() {
+        let (Some(pos_src), Some(neg_src)) = (program_tail(&c, false), program_tail(&c, true)) else { continue };
+        let (pos, route) = shipped_rust(c.decl, &pos_src);
+        let (neg, neg_route) = shipped_rust(c.decl, &neg_src);
+        let (pc, nc) = (copies(fn_body(&pos, "go")), copies(fn_body(&neg, "go")));
+        eprintln!("== {} tail [{route}/{neg_route}] positive copies {:?}\n   negative copies {:?}", c.decl, pc, nc);
+        if !pc.is_empty() {
+            failures.push(format!("{} [{route}]: the self tail call copies its dying accumulator:\n  {}\n{pos_src}", c.decl, pc.join("\n  ")));
+        }
+        let lends = LENDS.contains(&c.decl) || TAIL_LENDS.contains(&c.decl);
+        if nc.is_empty() && !lends {
+            failures.push(format!("{} [{neg_route}]: the shared control copies nothing:\n{neg_src}", c.decl));
+        }
+        if !nc.is_empty() && TAIL_LENDS.contains(&c.decl) {
+            failures.push(format!("{} [{neg_route}]: listed in TAIL_LENDS, but the shared control copies — take it out:\n  {}", c.decl, nc.join("\n  ")));
         }
     }
     assert!(failures.is_empty(), "{} cell(s) failed:\n\n{}", failures.len(), failures.join("\n\n"));

@@ -34,6 +34,9 @@ pub(crate) enum NTy {
     I64,
     /// A real f32 only at a typed collection runtime boundary.
     F32,
+    /// A real `bool` only at a typed collection runtime boundary (a
+    /// `Set[Bool]`'s element, #4795); MIR carries Bool as an i64 lane.
+    Bool,
     /// An OWNED `String` local (fresh from a literal alloc, a heap-returning
     /// call, or a clone).
     Str,
@@ -183,7 +186,7 @@ pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
         NTy::Str => format!("&{code}"),
         NTy::StrRef => code.to_string(),
         NTy::Vec | NTy::VecRef => unreachable!("as_str_arg on vec"),
-        NTy::Never | NTy::I64 | NTy::F32 | NTy::F64 => unreachable!("as_str_arg on scalar"),
+        NTy::Never | NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 => unreachable!("as_str_arg on scalar"),
         NTy::Res => unreachable!("as_str_arg on a Result carrier"),
         NTy::VecStr | NTy::VecStrRef => unreachable!("as_str_arg on a string list"),
         NTy::Rec(_) | NTy::RecRef(_) => unreachable!("as_str_arg on a record"),

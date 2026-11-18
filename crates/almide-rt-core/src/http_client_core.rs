@@ -345,14 +345,12 @@ fn http_request_raw(
 }
 
 /// The full-response client (#1791): `(status_code, headers, body)` for ANY
-/// complete response — a 404 or a 3xx is `Ok`, with its `Location` in the
+/// complete response — a 404 or a 3xx is `Ok`, with its `location` in the
 /// header list. Redirects are NEVER followed: the 3xx and its `Location` are
 /// the answer, so the final URL is always the URL the caller passed. `Err`
 /// is a refused request (URL, method, header) or a transport failure
 /// (connection / proxy / TLS / timeout / size cap / framing). The header list
-/// leaves out the fields the client manages (`HTTP_FORBIDDEN_HEADERS`, C-370):
-/// a stock wasi:http host withholds them from a response, so no lane shows
-/// them (C-328).
+/// is [`http_response_fields`]' form (C-455).
 pub fn request_response(
     method: &str,
     url: &str,
@@ -373,10 +371,18 @@ pub fn request_response_bytes(
     body: impl AsRef<[u8]>,
     headers: &[(String, String)],
 ) -> Result<HttpRawResponse, String> {
-    http_request_raw(method, url, body.as_ref(), headers).map(|(c, mut h, b)| {
-        h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
-        (c, h, b)
-    })
+    http_request_raw(method, url, body.as_ref(), headers).map(|(c, h, b)| (c, http_response_fields(h), b))
+}
+
+/// A fetched response's header list as every lane hands it to a program
+/// (C-455, almide/almide#4766): each name in ASCII lowercase, wire order and
+/// repeats kept, values as sent, and the fields the client manages
+/// (`HTTP_FORBIDDEN_HEADERS`, C-370) left out — the form a stock wasi:http
+/// host's `fields` hand a guest.
+pub fn http_response_fields(mut h: Vec<(String, String)>) -> Vec<(String, String)> {
+    h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
+    h.iter_mut().for_each(|(k, _)| k.make_ascii_lowercase());
+    h
 }
 
 /// The String client: `Ok(body)` for any complete response, `Err` for

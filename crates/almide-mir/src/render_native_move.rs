@@ -309,6 +309,28 @@ thread_local! {
 /// The forward scan of [`dying_after`] over the ops after the copy at
 /// `ops[at]`: `Some(true)` = released first, `Some(false)` = read or rebound
 /// first, `None` = neither before the end of the function.
+/// The ops of the else-arm that follows the then-arm `ops[at]` is in, when
+/// `at` is in a then-arm outside every loop (inside one, a later round may
+/// run either arm): the else-arm never runs on `at`'s path. `None` when there
+/// is no such arm.
+pub(crate) fn else_arm_after(func: &MirFunction, at: usize) -> Option<std::ops::Range<usize>> {
+    if crate::mir_liveness::per_function(func, "loops", || loop_of(func))[at].is_some() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut else_at = None;
+    for (k, op) in func.ops.iter().enumerate().skip(at + 1) {
+        match op {
+            Op::IfThen { .. } => depth += 1,
+            Op::EndIf { .. } if depth > 0 => depth -= 1,
+            Op::EndIf { .. } => return else_at.map(|e| e..k),
+            Op::Else { .. } if depth == 0 => else_at = Some(k + 1),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: bool) -> Option<bool> {
     let skip = SKIP_READS.with(|m| m.borrow().clone());
     // An address into the block computed before the copy and read after it
@@ -321,8 +343,12 @@ fn scan_after_copy(func: &MirFunction, at: usize, src: ValueId, owned_param: boo
     let mut depth = 0i32;
     let mut straight = true;
     let mut reads = Vec::new();
+    // The copy's own then-arm ends at its `Else`: the else-arm never runs on
+    // this path, so its reads are skipped (a record rebuilt in the then-arm
+    // otherwise copied every field the else-arm also names).
+    let else_arm = else_arm_after(func, at);
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
-        if skip.contains(&j) {
+        if skip.contains(&j) || else_arm.as_ref().is_some_and(|r| r.contains(&j)) {
             continue;
         }
         if straight {
@@ -394,44 +420,7 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
 }
 
-thread_local! {
-    static STATIC_STRS: std::cell::RefCell<std::collections::BTreeMap<ValueId, String>> =
-        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
-}
-
-/// The string literals of the function being rendered: values an
-/// `Alloc { init: Str }` defines, rendered as immortal static blocks, whose
-/// buffer is never unique (an edit copies it first).
-pub(crate) fn set_static_strs(func: &MirFunction) {
-    let lits = func
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::Alloc { dst, init: crate::Init::Str(s), .. } => Some((*dst, s.clone())),
-            _ => None,
-        })
-        .collect();
-    STATIC_STRS.with(|m| *m.borrow_mut() = lits);
-}
-
-/// A slot that starts at a literal and is rebound holds owned strings
-/// later: an edit of it copies only the literal, once.
-pub(crate) fn is_static_str(v: ValueId) -> bool {
-    !REBOUND.with(|m| m.borrow().contains(&v)) && STATIC_STRS.with(|m| m.borrow().contains_key(&v))
-}
-
-/// A string literal read as a `&str` operand (#4006, no-perf-loss): the
-/// literal itself, as the standard codegen passes it, instead of the static
-/// block's view (a load of its header, its length and its bytes' address).
-///
-/// Only for a binding the literal is all it ever holds: a slot that starts
-/// at a literal and is rebound (`acc = acc + s`) holds other strings later.
-pub(crate) fn static_str_operand(v: ValueId) -> Option<String> {
-    if REBOUND.with(|m| m.borrow().contains(&v)) {
-        return None;
-    }
-    STATIC_STRS.with(|m| m.borrow().get(&v).map(|s| format!("\"{}\"", almide_base::rust_lit::escape_rust_str(s))))
-}
+pub(crate) use static_strs::{is_static_str, set_static_strs, static_str_operand};
 
 thread_local! {
     static STACK_LITS: std::cell::RefCell<std::collections::BTreeSet<ValueId>> =
@@ -792,3 +781,5 @@ pub(crate) fn take_place(code: &str) -> String {
 mod aliases;
 #[path = "render_native_move_rebind.rs"]
 mod rebind;
+#[path = "render_native_move_static_strs.rs"]
+mod static_strs;

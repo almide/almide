@@ -694,6 +694,22 @@ impl TypeEnv {
         }
     }
 
+    /// Does a bound on protocol `proto` admit `ty` by STRUCTURE rather than by
+    /// the conformance table? `None` when `proto` is a table protocol. The
+    /// built-in `Ord` (#4758) is the order `list.sort` / `max` use: the
+    /// `is_ord` predicate, plus a bare Float, which orders through the
+    /// `_float` twins. The checker's bound check and the stdlib inspection
+    /// gate (which conformers a bounded variable admits) both read this.
+    /// The built-in `Eq` (#4796) is admitted the same way, by `is_eq`.
+    pub fn structural_bound_admits(&self, proto: Sym, ty: &Ty) -> Option<bool> {
+        if proto == sym("Eq") {
+            // #4796: the equality `list.unique` / `list.contains` compare by
+            // (`is_eq`: no function anywhere in the type), as `Ord` is order.
+            return Some(self.is_eq(ty));
+        }
+        (proto == sym("Ord")).then(|| matches!(ty, Ty::Float) || self.is_ord(ty))
+    }
+
     /// Can values of `ty` be ORDERED end-to-end (the native runtime's `T: Ord`
     /// bound on list.sort/min/max and sort_by keys)? Float is rejected HERE —
     /// f64 is not Ord — and the caller special-cases the BARE-Float element,

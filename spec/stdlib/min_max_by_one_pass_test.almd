@@ -1,0 +1,22 @@
+// #4755: bytes / string min_by and max_by pick in one pass instead of
+// sorting the whole input. The ties are the contract the sort gave: min_by
+// keeps the FIRST of equal smallest keys, max_by the LAST of equal largest.
+test "bytes.min_by keeps the first of equal smallest keys" {
+  let b = bytes.from_list([7, 14, 21, 3, 28])
+  assert_eq(bytes.min_by(b, (v) => v % 7), some(7))
+  assert_eq(bytes.min_by(bytes.new(), (v) => v), none)
+}
+
+test "bytes.max_by keeps the last of equal largest keys" {
+  let b = bytes.from_list([6, 13, 1, 20, 2])
+  assert_eq(bytes.max_by(b, (v) => v % 7), some(20))
+  assert_eq(bytes.max_by(bytes.from_list([5]), (v) => v), some(5))
+  assert_eq(bytes.max_by(bytes.new(), (v) => v), none)
+}
+
+test "string.min_by and max_by tie the same way over characters" {
+  assert_eq(string.min_by("bAaB", (c) => string.to_lower(c)), some("A"))
+  assert_eq(string.max_by("bAaB", (c) => string.to_lower(c)), some("B"))
+  assert_eq(string.max_by("héllo", (c) => string.len(c)), some("o"))
+  assert_eq(string.min_by("", (c) => c), none)
+}

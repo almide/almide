@@ -152,8 +152,8 @@ fn a_content_length_response_is_answered_whole() {
     let (status, headers, body) = client::http_call_wait(&sh).expect("answered");
     assert_eq!(status, 201);
     assert_eq!(body, "hello world");
-    let a: Vec<&str> = headers.iter().filter(|(k, _)| k == "X-A").map(|(_, v)| v.as_str()).collect();
-    assert_eq!(a, ["1", "2"], "wire order, repeats kept");
+    let a: Vec<&str> = headers.iter().filter(|(k, _)| k == "x-a").map(|(_, v)| v.as_str()).collect();
+    assert_eq!(a, ["1", "2"], "wire order, repeats kept, names lowercased (C-455)");
     // An ended call polls as its result, and read_new hands the body out once.
     assert!(matches!(client::http_call_poll(&sh), Some(Ok((201, _, _)))));
     assert_eq!(client::http_call_read_new(&sh), "hello world");

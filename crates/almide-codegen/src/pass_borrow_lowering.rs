@@ -247,6 +247,12 @@ fn propagating_rc_cow_value(e: &IrExpr) -> bool {
     let rc_cow = matches!(e.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _));
     rc_cow && match &e.kind {
         IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. } => true,
+        // `(match …)?` / `!`: rustc reads the operand of `?` at the type the
+        // slot asks for too, so a propagating operand propagates through it
+        // (#4784: a `Result[Bytes, _]` match rebuilt per arm, then `!`).
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+            matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. })
+        }
         IrExprKind::InlineRust { template, .. } => template_renders_as_block(template.as_str()),
         _ => false,
     }

@@ -70,7 +70,7 @@ pub(crate) fn owned_nty(k: NativeSigKind) -> NTy {
 pub(crate) fn arg_kind(t: NTy) -> NativeSigKind {
     match t {
         NTy::Never => NativeSigKind::Never,
-        NTy::I64 | NTy::F32 => NativeSigKind::I64,
+        NTy::I64 | NTy::F32 | NTy::Bool => NativeSigKind::I64,
         NTy::F64 => NativeSigKind::F64,
         NTy::Str | NTy::StrRef => NativeSigKind::Str,
         NTy::Vec | NTy::VecRef => NativeSigKind::ListI64,
@@ -110,6 +110,14 @@ pub(crate) fn demand_borrowed_dispatch(params: &[NTy], ret: Option<NTy>) -> Stri
     let modes = vec![false; ps.len()];
     let key = sig_key(&ps, &modes, ret).unwrap_or_else(|| ps.len().to_string());
     DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (ps, modes, ret)));
+    key
+}
+
+/// A typed host adapter that hands the callback the owned values it was
+/// given (`handed[i]`) dispatches through that handing-over table.
+pub(crate) fn demand_handed_dispatch(ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> String {
+    let key = sig_key(ps, handed, ret).unwrap_or_else(|| ps.len().to_string());
+    DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (ps.to_vec(), handed.to_vec(), ret)));
     key
 }
 
@@ -170,15 +178,27 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
             tables.insert(key.clone(), (ps.clone(), modes.clone(), *ret, Vec::new()));
         }
     });
-    let lambdas = user_fns.keys().copied().filter(|n| n.starts_with("__lambda_"));
-    for (idx, name) in lambdas.enumerate() {
-        let Some((ps, ret)) = lambda_sig(sigs, name) else { continue };
-        let moved = lambda_moves(user_fns[name]);
-        // The lending table of its kinds, and the handing-over one of its modes.
-        for m in [vec![false; ps.len()], moved.clone()] {
-            let Some(key) = sig_key(&ps, &m, ret) else { continue };
-            let fns = &mut tables.entry(key).or_insert_with(|| (ps.clone(), m, ret, Vec::new())).3;
-            if !fns.contains(&(idx, name)) {
+    let lambdas: Vec<(usize, &str, Vec<NativeSigKind>, Option<NativeSigKind>)> = user_fns
+        .keys()
+        .copied()
+        .filter(|n| n.starts_with("__lambda_"))
+        .enumerate()
+        .filter_map(|(idx, name)| lambda_sig(sigs, name).map(|(ps, ret)| (idx, name, ps, ret)))
+        .collect();
+    // The lending table of each lambda's kinds, and the handing-over one of
+    // its modes.
+    for (_, name, ps, ret) in &lambdas {
+        for m in [vec![false; ps.len()], lambda_moves(user_fns[name])] {
+            let Some(key) = sig_key(ps, &m, *ret) else { continue };
+            tables.entry(key).or_insert_with(|| (ps.clone(), m, *ret, Vec::new()));
+        }
+    }
+    // Every table of its kinds, whatever it hands over: a call through one
+    // may reach any lambda of the signature, and each arm adapts (#4762) — a
+    // handed arg the lambda only reads is lent to it.
+    for (idx, name, ps, ret) in lambdas {
+        for (tps, _, tret, fns) in tables.values_mut() {
+            if *tps == ps && *tret == ret && !fns.contains(&(idx, name)) {
                 fns.push((idx, name));
             }
         }
@@ -204,6 +224,8 @@ pub(crate) fn push_typed_dispatch_tables(out: &mut String, user_fns: &BTreeMap<&
                 .map(|(i, k)| match (handed[i], takes.get(i).copied().unwrap_or(false)) {
                     // A param passed by value is already the lambda's own.
                     (false, true) if param_spelling(*k).starts_with('&') => format!(", {}", owned_copy(*k, &format!("a{i}"))),
+                    // A handed value the lambda only reads: lent for the call.
+                    (true, false) if param_spelling(*k).starts_with('&') => format!(", &a{i}"),
                     _ => format!(", a{i}"),
                 })
                 .collect();

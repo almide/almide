@@ -290,3 +290,10 @@ This is the research hypothesis to evaluate, not an established uniqueness claim
 Phase 0 (close the gap) → Phase 1b-1c (allocation elimination + semantic DCE) → Phase 1a (inlining) → Phase 2 (LLVM direct) → Phase 3a (deforestation) → Phase 3b (parallelization).
 
 Phase 0 is engineering. Phase 1 is applied research. Phase 2-3 is novel research. Phase 4 is validation.
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #3885 Beyond-Rust Lab: measure generated-Rust levers (proven facts, noalias, multiversioning, PGO, devirtualization) against handwritten Rust under equal flags; research/beyond-rust/ and E1 exist
+- #4610 wasm iter vs Rust: strided-filter rewrite (range → affine map → power-of-two remainder filter); the parity lever shipped in b5e3ae68b

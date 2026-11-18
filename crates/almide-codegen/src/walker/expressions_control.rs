@@ -679,7 +679,12 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
 /// (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
 /// Extracted from `render_expr_borrow` (cog>30 decomposition): `Some`
 /// mirrors the original's early `return`, `None` falls through.
-fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bool) -> Option<String> {
+fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bool, as_str: bool) -> Option<String> {
+    // `as_str` (a `&str` slot — an ordering comparison against a literal, a
+    // runtime `&str` param) derefs once more, past the cell's `AlmideStr`
+    // to `str`: `&a.get() > "q"` compares `&AlmideStr` with `&str`, which
+    // rustc refuses (#4780).
+    let deref = if as_str { "*" } else { "" };
     // #1143 marker: `Borrow(Deref(Var cell))` — SharedCellBorrowPass proved
     // this read can borrow the cell in place (every use in its statement is
     // a shared call-arg read), so skip the `.get()` whole-value clone. The
@@ -694,7 +699,7 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
                 && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
             {
                 let almide_name = source_var_name(ctx, *id);
-                return Some(format!("&*{}.borrow_proven({almide_name:?})", ctx.var_name(*id)));
+                return Some(format!("&*{deref}{}.borrow_proven({almide_name:?})", ctx.var_name(*id)));
             }
         }
     }
@@ -710,7 +715,7 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
         // cell's value). Unlike `&*x.borrow()`, this owned temporary has
         // no lifetime tie to `x`, so it is also safe in tail position
         // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
-        format!("&{}.get()", var_name)
+        format!("&{deref}{}.get()", var_name)
     })
 }
 
@@ -800,7 +805,7 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // Keep a following field projection outside the borrow: (&value).field.
         return format!("(&{})", render_expr(ctx, inner));
     }
-    if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
+    if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable, *as_str) {
         return rendered;
     }
     // A read-only borrow of a heap global place reads it in place (#4562).

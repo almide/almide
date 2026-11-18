@@ -915,14 +915,23 @@ impl Checker {
     /// orders (the `_float` twins); an open slot is E025's business. Returns
     /// the other bounds, for the conformance-table checks.
     fn check_ord_bound(&mut self, name: &str, proto_names: &[Sym], concrete_ty: &Ty) -> Vec<Sym> {
-        let ord = almide_base::intern::sym("Ord");
-        let open_or_float = matches!(concrete_ty, Ty::Unknown | Ty::TypeVar(_) | Ty::Float);
-        if proto_names.contains(&ord) && !open_or_float && !self.env.is_ord(concrete_ty) {
+        let open = matches!(concrete_ty, Ty::Unknown | Ty::TypeVar(_));
+        // #4796: an `Eq` bound is the generic compare `list.unique` makes: it
+        // joins the post-solve equality pass, which judges it as that call's
+        // (E016 for a function inside, E103 for a Secret) and carries it
+        // through a generic caller as a requirement.
+        let eq = sym("Eq");
+        if proto_names.contains(&eq) && !matches!(concrete_ty, Ty::Unknown) {
+            let in_fn = self.generic_fn_key();
+            self.deferred_eq_checks.push(super::EqSite { ty: concrete_ty.clone(), span: self.current_span, what: format!("{name}()"), in_fn, generic_compare: true });
+        }
+        let structural = |p: &Sym| self.env.structural_bound_admits(*p, concrete_ty);
+        if !open && proto_names.iter().any(|p| *p != eq && structural(p) == Some(false)) {
             let ty_name = Self::type_display_name(concrete_ty);
             let diag = Self::unordered_diag(&ty_name, name, self.current_span);
             self.diagnostics.push(diag);
         }
-        proto_names.iter().copied().filter(|p| *p != ord).collect()
+        proto_names.iter().copied().filter(|p| structural(p).is_none()).collect()
     }
 
     /// A container, tuple or function type has no conformance-table name, but

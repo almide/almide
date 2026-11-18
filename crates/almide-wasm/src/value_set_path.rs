@@ -59,7 +59,7 @@ use crate::*;
 /// would build past it is refused at too, with parse's err text.
 const MAX_DEPTH: i32 = almide_base::json_limits::JSON_MAX_DEPTH as i32;
 /// Pairs (in bytes of 4-byte slots) below which a lookup scans.
-const SCAN_BYTES: i32 = 16 * 4;
+pub(crate) const SCAN_BYTES: i32 = 16 * 4;
 /// An index's first slot count.
 const MIN_SLOTS: i32 = 32;
 

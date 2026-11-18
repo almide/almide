@@ -466,6 +466,17 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// `$vfield`, with the Object key index's find over the `(String, Value)`
+    /// pair layout (#4757).
+    fn value_field_helper(&mut self) -> u32 {
+        let pair_ti = self.types.tuple(vec![STR, SliceTy::Value]);
+        let pair = self.types.tuple_def(pair_ti);
+        let (key_off, val_off) = (pair.fields[0].1, pair.fields[1].1);
+        let hash = self.work.helper(Helper::MapIdxHash { key: crate::map_index::IdxKey::Str });
+        let find = self.work.helper(Helper::VsetFind { hash, key_off });
+        self.work.helper(Helper::ValueField { find, key_off, val_off })
+    }
+
     /// `[value block]` -> `[Result block]`: tag match yields ok(payload),
     /// anything else the exact incumbent err line.
     /// The seven `<prefix>, received <Kind>` messages, indexed by the
@@ -628,7 +639,7 @@ impl Emitter<'_> {
                 self.lower_arg(key, Some(STR), ArgMode::Borrow)?;
                 let hk = self.hold_i32()?;
                 self.f.instructions().local_set(hk);
-                let vf = self.work.helper(Helper::ValueField);
+                let vf = self.value_field_helper();
                 let hr = self.hold_i32()?;
                 self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
                 let m_tag = slot_memarg(almide_layout::SUM_TAG);

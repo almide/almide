@@ -142,7 +142,7 @@ fn a_call_answers_state_wait_read_and_step() {
     assert_eq!(status(st), 0);
     let items = unframe(&payload);
     assert_eq!(items[..2], ["200".to_string(), "héll".to_string()]);
-    assert_eq!(items[2..].iter().filter(|s| *s == "X-A").count(), 2);
+    assert_eq!(items[2..].iter().filter(|s| *s == "x-a").count(), 2);
     assert_eq!(text(by_id(&calls, 54, id)), (0, "1".to_string()));
     assert_eq!(text(by_id(&calls, 56, id)), (0, "héll".to_string()));
     // The call is over: one step answers `o` with an empty cell.

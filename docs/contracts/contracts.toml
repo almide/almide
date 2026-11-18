@@ -3552,7 +3552,7 @@ evidence  = [
 id        = "C-266"
 spec      = "ALS-ST6"
 title     = "guard let binds the success payload and raises on the failing polarity, identically on both targets"
-statement = "ALS-ST6: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-ST5 uses."
+statement = "ALS-ST6: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-ST5 uses. The failing else returns from the enclosing FUNCTION in every expression position (#4678): a block bound by `let` / `var` or assigned, an arm of a statement or fn-tail branch, an arm of a bound `if` / `match`, an `if` condition, a call argument (single, second, nested), a binary operand (left, right), a list / tuple / record element, a string interpolation part, a `for` range head and a `while` condition — where a block stands never changes what its guard means. A lambda body is the one boundary: there the else returns from the lambda."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
@@ -3561,6 +3561,7 @@ evidence  = [
   { path = "spec/wasm_cross/guard_let_forms_typed_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_let_early_exit_from_branch_arm.almd", class = "fixture" },
   { path = "spec/wasm_cross/guard_let_in_bound_block.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_let_in_expression_positions.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-267"
@@ -6043,4 +6044,16 @@ evidence  = [
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_only_export_holds_one_lease_that_its_next_call_ends", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_address_handed_out_again_holds_one_share", class = "fixture" },
   { path = "crates/almide-wasm/tests/ffi_host_boundary.rs", name = "an_unreleasing_host_runs_in_bounded_memory", class = "fixture" },
+]
+
+# ── HTTP: A FETCHED RESPONSE'S FIELD NAMES ARE LOWERCASE ON EVERY LANE ─
+[[contract]]
+id        = "C-455"
+spec      = "ALS-R5"
+title     = "A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane"
+statement = "ALS-R5 (almide/almide#4766): every response the http client hands a program — the full-response family (`http.get_response` / `post_response` / `put_response` / `patch_response` / `delete_response` / `request_response`), `http.send` and the call handle's `http.wait` — carries its header fields with each name in ASCII lowercase, in the order the server sent them with repeats kept, and each value exactly as sent (surrounding whitespace trimmed). The fields the client manages (C-370's nine: connection, keep-alive, proxy-authenticate, proxy-authorization, proxy-connection, transfer-encoding, upgrade, host, http2-settings) are left out, so `http.headers`, `http.header` and `http.header_values` never answer them. `http.header` and `http.header_values` still match a name ASCII case-insensitively. This is the form a stock wasi:http host hands a guest (its `fields` store lowercase names and withhold the managed ones), so native, the embedded lane and the stock WASI 0.3 component answer the same list. Before, native and the call handle on both legs kept the server's spelling and the managed fields while the full-response family on the wasm lanes lowercased the names, so a program that printed, compared or forwarded the list saw a different answer per target. A response a program BUILDS (`http.response`, `http.with_headers`, `http.set_header`) keeps the names it was given; this contract covers fetched responses only. Evidence: spec/embedded_cross/http_response_header_names.almd serves itself mixed-case names, a repeated field in two spellings, a chunked body with `Transfer-Encoding`, and `Connection`, through `http.start` / `http.wait` on native and the embedded lane."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/http_response_header_names.almd", class = "fixture" },
 ]

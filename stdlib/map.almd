@@ -165,7 +165,7 @@ fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
-fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
+fn group_by[K, V, B: Eq](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
   map.to_list(m),
   f,
 )
@@ -428,7 +428,7 @@ fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -
   (p) => f(p)!,
 )
 
-fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
+fn __fallible_group_by[K, V, B: Eq, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
   map.to_list(m),
   (p) => f(p)!,
 )

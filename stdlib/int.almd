@@ -455,16 +455,28 @@ local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: 
   _ => accumulate_digits(digits, radix, acc, negative),
 }
 
-local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
-  [] => if negative then ok(acc)
+// One pass over the digits: a `[b, ..rest]` walk copied the rest per digit,
+// which made a parse quadratic in its length (#4765). The first refusal is
+// kept and the rest of the digits are skipped.
+local fn accumulate_digits(digits: List[Int], radix: Int, start: Int, negative: Bool) -> Result[Int, String] = {
+  var acc = start
+  var refused = ""
+  for b in digits {
+    if refused == "" then {
+      let d = digit_value(b)
+      if d >= radix then {
+        refused = "invalid digit found in string"
+      } else if acc < (int.min_value() + d) / radix then {
+        refused = if negative then "number too small to fit in target type" else "number too large to fit in target type"
+      } else {
+        acc = acc * radix - d
+      }
+    } else ()
+  }
+  if refused != "" then err(refused)
+  else if negative then ok(acc)
   else if acc == int.min_value() then err("number too large to fit in target type")
-  else ok(0 - acc),
-  [b, ..rest] => {
-    let d = digit_value(b)
-    if d >= radix then err("invalid digit found in string")
-    else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
-    else accumulate_digits(rest, radix, acc * radix - d, negative)
-  },
+  else ok(0 - acc)
 }
 
 // ── The `from` family (R-L0-40): Int from any number. The source is any

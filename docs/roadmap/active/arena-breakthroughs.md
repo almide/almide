@@ -637,3 +637,9 @@ file:line で残す。星と tip 日付は 2026-09-13 の `gh api`。
 - `cargo fmt --check` はどの workflow にも無い（clippy ラチェットは有）。`.almd` 側は厳格、Rust 側は無ゲート — 主流の逆。
 - `check-pass-isolated.sh` は rustc の `test-mir-pass` を名指しで手本にしつつ、**出力同一性**を選んでいる（意図的、`:23-28`）。MIR golden は持たない。
 - ALL_AXES 軸 E の #1312/#1313/#1314 は全て closed。ROAD_TO_1_0 0.4x 表の #928/#999/#1334/#917 も closed。両文書は本 PR で注記。
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #4539 Native executables without rustc: precompile the wasm module with the embedded engine and ship it with a prebuilt runner (measure build / run / size / startup first)

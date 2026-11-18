@@ -2,6 +2,7 @@
 
 pub const REUSE: &[Reuse] = &[
     Reuse { module: "bytes", func: "__append", param: 0, arity: 2, intrinsic: "almide_rt_bytes_append_fresh", owned_twin: Some("almide_rt_bytes_append_fresh_owned") },
+    Reuse { module: "bytes", func: "drop_end", param: 0, arity: 2, intrinsic: "almide_rt_bytes_drop_end", owned_twin: Some("almide_rt_bytes_drop_end_owned") },
     Reuse { module: "bytes", func: "set", param: 0, arity: 3, intrinsic: "almide_rt_bytes_set", owned_twin: Some("almide_rt_bytes_set_owned") },
     Reuse { module: "list", func: "drop", param: 0, arity: 2, intrinsic: "almide_rt_list_drop", owned_twin: Some("almide_rt_list_drop_owned") },
     Reuse { module: "list", func: "drop_end", param: 0, arity: 2, intrinsic: "almide_rt_list_drop_end", owned_twin: Some("almide_rt_list_drop_end_owned") },
@@ -25,6 +26,7 @@ pub const REUSE: &[Reuse] = &[
     Reuse { module: "map", func: "values", param: 0, arity: 1, intrinsic: "almide_rt_map_values", owned_twin: Some("almide_rt_map_values_owned") },
     Reuse { module: "set", func: "insert", param: 0, arity: 2, intrinsic: "almide_rt_set_insert", owned_twin: Some("almide_rt_set_insert_owned") },
     Reuse { module: "set", func: "remove", param: 0, arity: 2, intrinsic: "almide_rt_set_remove", owned_twin: Some("almide_rt_set_remove_owned") },
+    Reuse { module: "string", func: "drop_end", param: 0, arity: 2, intrinsic: "almide_rt_string_drop_end", owned_twin: Some("almide_rt_string_drop_end_owned") },
     Reuse { module: "string", func: "to_lower", param: 0, arity: 1, intrinsic: "almide_rt_string_to_lower", owned_twin: Some("almide_rt_string_to_lower_owned") },
     Reuse { module: "string", func: "to_upper", param: 0, arity: 1, intrinsic: "almide_rt_string_to_upper", owned_twin: Some("almide_rt_string_to_upper_owned") },
     Reuse { module: "string", func: "trim", param: 0, arity: 1, intrinsic: "almide_rt_string_trim", owned_twin: Some("almide_rt_string_trim_owned") },

@@ -90,3 +90,9 @@ DEFLATE を標準に持つのは 3 言語（● 3・◐ 3）で、R-L1 の「足
 | `decompress_max` | （追加）`fn zlib.decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
 | `inflate_max` | （追加）`fn zlib.inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
 | `gunzip_max` | （追加）`fn zlib.gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
+
+## Backlog (moved from issues, 2026-11-17)
+
+Long-term items with no near-term plan. Reopen the issue when work starts.
+
+- #3892 Measure a self-hosted DEFLATE encoder against host zlib to decide whether compressed bytes can be identical on both targets and the compressors can drop effect (R-zlib-03)

@@ -48,7 +48,7 @@ fn pop[A](mut d: Deque[A]) -> A? = {
     let keep = list.len(xs) / 2
     d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
   } else ()
-  list.pop(d.back)
+  __pop_last(d.back)
 }
 
 /// Removes and yields the first element; none when empty.
@@ -57,8 +57,13 @@ fn pop_front[A](mut d: Deque[A]) -> A? = {
     let keep = (list.len(d.back) + 1) / 2
     d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
   } else ()
-  list.pop(d.front)
+  __pop_last(d.front)
 }
+
+// list.pop through a `mut` list param: called on the deque's field place, it
+// takes the list itself. A value-returning list.pop straight on a field of the
+// `mut` deque copied the list per pop on wasm (#4778).
+fn __pop_last[A](mut xs: List[A]) -> A? = list.pop(xs)
 
 /// The first element, or none when empty.
 fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
@@ -81,7 +86,10 @@ fn get[A](d: Deque[A], i: Int) -> A? = {
 }
 
 /// true if some element == x.
-fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+fn contains[A: Eq](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(
+  d.back,
+  x,
+)
 
 /// Removes every element of d in place.
 fn clear[A](mut d: Deque[A]) -> Unit = {
@@ -118,19 +126,51 @@ fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
-fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
+  // Trimmed on the deque's own lists (#4773): a round trip through a List
+  // copied the whole deque, even for a sole owner's rebind. Past the front
+  // list, what is left of the back is split in two, as pop_front does, so a
+  // run of drops stays O(1) each, amortised.
+  let k = int.max(n, 0)
+  let f = list.len(d.front)
+  if k > f then {
+    let rest = list.drop(d.back, k - f)
+    let keep = (list.len(rest) + 1) / 2
+    { front: list.reverse(list.take(rest, keep)), back: list.drop(rest, keep) }
+  } else { ...d, front: list.drop_end(d.front, k) }
+}
 
 /// Last n elements, as list.take_end.
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
-fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
+  let k = int.max(n, 0)
+  let b = list.len(d.back)
+  if k > b then {
+    // The front list is stored reversed: the deque's last elements are its first.
+    let xs = list.reverse(list.drop(d.front, k - b))
+    let keep = list.len(xs) / 2
+    { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else { ...d, back: list.drop_end(d.back, k) }
+}
 
 /// Indices start..<end, as list.slice.
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
-fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
+  // Slot i of the front list counts from its end (the front is stored
+  // reversed); a negative i lands past it, out of range, as list.set's.
+  let f = list.len(d.front)
+  if i >= f then __set_back(d, i - f, x)
+  else __set_front(d, f - 1 - i, x)
+}
+
+// One list of the pair rewritten, the other moved over as it is.
+fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.set(d.front, j, x) }
+
+fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
@@ -175,7 +215,7 @@ fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partit
 )
 
 /// Key f(x) -> elements; keys in first-seen order.
-fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+fn group_by[A, B: Eq](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
 
 /// Elements in ascending order; Floats in IEEE totalOrder.
 fn sort[A: Ord](d: Deque[A]) -> List[A] = list.sort(to_list(d))
@@ -226,16 +266,16 @@ fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
 }
 
 /// Adjacent equal runs collapsed, as list.dedup.
-fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+fn dedup[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
 
 /// sep between adjacent elements.
 fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
 
 /// Duplicates removed; the occurrence nearest the front kept.
-fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+fn unique[A: Eq](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
-fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+fn unique_by[A, K: Eq](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
 
 // ── Numeric folds (R-L0-42): the element type's own sum and product ──
 /// Sum of the elements; 0 when empty; integers wrap on overflow.

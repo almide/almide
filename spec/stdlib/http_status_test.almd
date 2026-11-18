@@ -103,7 +103,7 @@ test "send keeps status, every header and the body of a 3xx" {
   assert_eq(http.header_values(resp, "set-cookie"), ["a=1; HttpOnly", "b=2; Secure"])
   assert_eq(
     http.headers(resp),
-    [("Location", "/next"), ("Set-Cookie", "a=1; HttpOnly"), ("Set-Cookie", "b=2; Secure"), ("X-Frame-Options", "DENY"), ("Content-Length", "5")],
+    [("location", "/next"), ("set-cookie", "a=1; HttpOnly"), ("set-cookie", "b=2; Secure"), ("x-frame-options", "DENY"), ("content-length", "5")],
   )
 }
 
@@ -117,5 +117,5 @@ test "get_response is the GET cell of the family and a 404 is Ok" {
   }
   assert_eq(http.status(resp), 404)
   assert_eq(http.body(resp), "gone")
-  assert_eq(http.headers(resp), [("Content-Type", "text/plain"), ("Content-Length", "4")])
+  assert_eq(http.headers(resp), [("content-type", "text/plain"), ("content-length", "4")])
 }

@@ -577,7 +577,13 @@ pub fn almide_rt_value_omit(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
     match v {
         AlmideValue::Object(pairs) => {
             let drop: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
-            AlmideValue::Object(pairs.iter().filter(|(k, _)| !drop.contains(k.as_ref())).cloned().collect())
+            // Sized once for every kept pair: a filtered collect grew the
+            // pairs by doubling, a reallocation copy at a few sizes, which
+            // left the cost's growth uneven across sizes (the re-inspection's
+            // 3% fit refused it, rms 6.3%).
+            let mut kept = Vec::with_capacity(pairs.len());
+            kept.extend(pairs.iter().filter(|(k, _)| !drop.contains(k.as_ref())).cloned());
+            AlmideValue::Object(AlmideObject::from_pairs(kept))
         }
         other => other.clone(),
     }

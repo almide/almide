@@ -363,12 +363,22 @@ pub fn almide_cwd() -> Option<String> {
 /// capturing runners so they cannot drift in environment.
 fn binary_command(bin: &std::path::Path, program_args: &[String]) -> Command {
     let mut cmd = Command::new(bin);
-    cmd.env("RUST_MIN_STACK", "8388608");
-    if let Some(cwd) = almide_cwd() {
-        cmd.env("ALMIDE_CWD", cwd);
-    }
+    cmd.envs(launcher_env());
     cmd.args(program_args);
     cmd
+}
+
+/// The variables `almide run` exports to the program on top of its own
+/// environment, the same on both targets (#4774): the native child's thread
+/// stack and the launcher's cwd. The wasm guest's environment is the
+/// embedded host's, which takes the same list (`cmd_run_wasm`), so
+/// `env.vars` lists the same names on both.
+fn launcher_env() -> Vec<(String, String)> {
+    let mut vars = vec![("RUST_MIN_STACK".to_string(), "8388608".to_string())];
+    if let Some(cwd) = almide_cwd() {
+        vars.push(("ALMIDE_CWD".to_string(), cwd));
+    }
+    vars
 }
 
 /// Run `attempt` through the ETXTBSY back-off. Belt for the parallel-test race
@@ -753,6 +763,8 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
         err(&no_host_for_import(file, &module, &name, "`almide run --target wasm`"));
         return 1;
     }
+    // The environment `binary_command` gives the native child (#4774).
+    almide_wasm_run::export_launcher_env(launcher_env());
     match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
         Ok(r) => {
             print!("{}", r.stdout);

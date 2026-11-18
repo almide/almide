@@ -211,6 +211,7 @@ fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
+@reuse(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 // ── Mutable string operations ──
@@ -221,7 +222,7 @@ fn push(mut s: String, x: String) -> Unit = _
 /// Removes and returns the last character; none if s is empty.
 fn pop(mut s: String) -> String? = {
   let popped = string.last(s)
-  if string.len(s) > 0 then {
+  if not string.is_empty(s) then {
     s = string.drop_end(s, 1)
   } else ()
   popped
@@ -353,7 +354,7 @@ fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = l
 )
 
 /// Characters grouped by f's key, each group in order.
-fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+fn group_by[B: Eq](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
   string.to_list(s),
   f,
 )
@@ -418,10 +419,18 @@ fn min(s: String) -> String? = list.min(string.to_list(s))
 fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K: Ord](s: String, f: (String) -> K) -> String? = list.min_by(string.to_list(s), f)
 
 /// The last character with the largest key; none if empty.
-fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K: Ord](s: String, f: (String) -> K) -> String? = {
+  // One pass, not a sort (#4755): f runs once per character, front to back; the
+  // walk from the back keeps the last of equal largest keys.
+  let xs = string.to_list(s)
+  match list.max_by(list.reverse(list.zip(xs, list.map(xs, f))), (p) => p.1) {
+    some((x, _)) => some(x),
+    none => none,
+  }
+}
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -485,7 +494,7 @@ fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), 
 fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+fn unique_by[K: Eq](s: String, f: (String) -> K) -> String = list.join(
   list.unique_by(string.to_list(s), f),
   "",
 )

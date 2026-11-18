@@ -340,7 +340,8 @@ fn force_moves() -> bool {
 /// binding is rebound before any op names it again, so the moved-from
 /// binding is never seen, and the rebind writes into an empty slot instead of
 /// dropping a `take`n default. A release only erases to scope end, where
-/// Rust's drop flag covers a moved binding; the return value never moves.
+/// Rust's drop flag covers a moved binding; the return value counts as
+/// named at every exit.
 /// Rust's own move check rejects any path this misjudges, so a wrong verdict
 /// is a build failure, never a read of an emptied value.
 pub(crate) fn reinit_reads(func: &MirFunction, at: usize) -> BTreeSet<ValueId> {
@@ -356,7 +357,7 @@ pub(crate) fn reinit_reads(func: &MirFunction, at: usize) -> BTreeSet<ValueId> {
             }))
             .collect()
     });
-    let candidates: BTreeSet<ValueId> = reads.into_iter().filter(|v| rebound.contains(v) && func.ret != Some(*v)).collect();
+    let candidates: BTreeSet<ValueId> = reads.into_iter().filter(|v| rebound.contains(v)).collect();
     if candidates.is_empty() {
         return candidates;
     }
@@ -365,9 +366,17 @@ pub(crate) fn reinit_reads(func: &MirFunction, at: usize) -> BTreeSet<ValueId> {
 }
 
 /// Every path from the successors of `ops[at]` rebinds `v` (or defines it
-/// afresh) before an op names it or anything referring to its storage.
+/// afresh) before an op names it or anything referring to its storage. The
+/// function's return value is named at every exit: a path that leaves the
+/// function without rebinding it reads it there. So the accumulator of a
+/// self tail call (`go(set_status(x, ..), i - 1)`, a loop that rebinds the
+/// returned `x` on every iteration) moves at its rebind (#4771's tail shape).
 fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: ValueId) -> bool {
     let refs = referring(func, v);
+    let returned = func.ret == Some(v);
+    if returned && succ[at].is_empty() {
+        return false;
+    }
     let mut seen = vec![false; func.ops.len()];
     let mut work: Vec<usize> = succ[at].clone();
     while let Some(i) = work.pop() {
@@ -406,7 +415,7 @@ fn rebound_before_named(func: &MirFunction, succ: &[Vec<usize>], at: usize, v: V
         }
         let mut reads = Vec::new();
         crate::mir_ops::op_reads(op, &mut reads);
-        if vs.contains(&v) || reads.iter().any(|r| refs.contains(r)) {
+        if vs.contains(&v) || reads.iter().any(|r| refs.contains(r)) || (returned && succ[i].is_empty()) {
             return false;
         }
         work.extend(succ[i].iter().copied());
