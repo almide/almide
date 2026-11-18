@@ -608,8 +608,11 @@
             (if (i32.and (i32.and (i32.ne (call $ftype) (i32.const 3)) (i32.ne (call $ftype) (i32.const 4)))
                          (i32.ne (call $ftype) (i32.const 7)))
               (then (return (i32.const 0) (i32.const 0) (i32.const 1001))))))))
+    ;; Rights: fd_read | fd_seek | fd_filestat_get (1<<1 | 1<<2 | 1<<21). The
+    ;; size stat below needs fd_filestat_get on the opened fd; a host that
+    ;; enforces rights (Node's uvwasi) answered ENOTCAPABLE without it (#4740).
     (local.set $e (call $path_open (local.get $fd) (local.get $follow) (local.get $rp) (local.get $rl)
-                                   (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (global.get $fsp)))
+                                   (i32.const 0) (i64.const 2097158) (i64.const 0) (i32.const 0) (global.get $fsp)))
     (if (local.get $e) (then (return (i32.const 0) (i32.const 0) (local.get $e))))
     (local.set $h (i32.load (global.get $fsp)))
     (local.set $e (call $fd_filestat_get (local.get $h) (i32.add (global.get $fsp) (i32.const 64))))
