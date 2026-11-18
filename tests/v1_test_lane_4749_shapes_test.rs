@@ -258,6 +258,14 @@ fn a_runtime_backed_value_compares_on_the_native_test_lane_and_on_wasm() {
 /// - Shape 6: `some(NOTE)` / `ok(NOTE)` over a module-level heap value the
 ///   function has not read yet. The Option/Result payload builder knew only
 ///   locals and params, so the lambda body refused and the `list.map` walled.
+/// - #4805: the loop over a two- or three-level field (`out.raw.nodes`) of a
+///   var the body rebuilds rendered as a reference through a reference into
+///   the var, which rustc refused (E0506); a read through a borrowed read now
+///   borrows only while every block up the chain stays untouched.
+/// - #4806: `assert_eq` over `List[Result[String, String]]` and over nested heap
+///   literals (`[some(["a"])]`, `[[some("n")]]`, `[some(some("n"))]`) walled in
+///   the test body; the native render now builds those literals and compares
+///   such lists through a per-element helper over the same typed slot eq.
 const WF: &str = r#"type Node = { name: String, kind: String }
 type Raw = { id: String, nodes: List[Node] }
 type Detail = { graph: Raw }
@@ -309,6 +317,34 @@ fn chain_own(raw: Raw) -> Raw = {
   }
   out
 }
+
+type Box = { raw: Raw, tag: String }
+
+fn chain_nested(b: Box) -> Box = {
+  var out = b
+  var prev = ""
+  for node in out.raw.nodes {
+    if prev != "" then { out = Box { raw: add_node(out.raw, prev, "seq"), tag: out.tag } } else ()
+    prev = node.name
+  }
+  out
+}
+
+type Outer = { box: Box, u: String }
+
+fn chain_three(o: Outer) -> Outer = {
+  var out = o
+  for node in out.box.raw.nodes {
+    out = Outer { box: Box { raw: add_node(out.box.raw, node.name + "!", "seq"), tag: out.box.tag }, u: out.u }
+  }
+  out
+}
+
+fn count_nested(b: Box) -> Int = {
+  var n = 0
+  for node in b.raw.nodes { n = n + node.name.len() }
+  n
+}
 "#;
 
 const FX: &str = r#"type R = { note: Option[String], k: Int }
@@ -330,9 +366,14 @@ fn oks(xs: List[Int]) -> Int = {
   let rs: List[Result[String, String]] = list.map(xs, (x) => ok(NOTE))
   rs |> list.filter((r) => result.is_ok(r)) |> list.len
 }
+fn res(xs: List[Int]) -> List[Result[String, String]] = list.map(xs, (x) => ok(NOTE))
+fn opt_lists(xs: List[Int]) -> List[Option[List[String]]] = list.map(xs, (x) => if x > 1 then some(["a", "b"]) else none)
+fn nested(xs: List[List[Int]]) -> List[List[Option[String]]] = list.map(xs, (ys) => list.map(ys, (y) => if y > 0 then some(NOTE) else none))
+fn opt_opts(xs: List[Int]) -> List[Option[Option[String]]] = list.map(xs, (x) => if x == 0 then none else if x == 1 then some(none) else some(some(NOTE)))
+fn res_lists(xs: List[Int]) -> List[Result[List[String], String]] = list.map(xs, (x) => if x > 0 then ok(["a"]) else err("bad"))
 "#;
 
-const SHAPES_56: [(&str, &str); 2] = [
+const SHAPES_56: [(&str, &str); 3] = [
     (
         "w_test.almd",
         r#"import self.wf
@@ -343,6 +384,16 @@ test "record var rebuilt in nested branches" {
   assert_eq(wf.chain_param(two, []).nodes.len(), 3)
   assert_eq(wf.chain_own(wf.Raw { id: "g", nodes: [] }).nodes.len(), 3)
   assert_eq((list.last(wf.chain_own(wf.Raw { id: "g", nodes: [] }).nodes) ?? wf.Node { name: "", kind: "" }).name, "x")
+}
+
+test "loop over a two- or three-level field of a var the body rebuilds (#4805)" {
+  let two = wf.Raw { id: "g", nodes: [wf.Node { name: "x", kind: "task" }, wf.Node { name: "y", kind: "task" }] }
+  let b = wf.chain_nested(wf.Box { raw: two, tag: "t" })
+  assert_eq(b.raw.nodes.len(), 3)
+  assert_eq(b.tag, "t")
+  let o = wf.chain_three(wf.Outer { box: wf.Box { raw: two, tag: "t" }, u: "u" })
+  assert_eq(o.box.raw.nodes |> list.map((n) => n.name), ["x", "y", "x!", "y!"])
+  assert_eq(wf.count_nested(wf.Box { raw: two, tag: "t" }), 2)
 }
 "#,
     ),
@@ -357,6 +408,26 @@ test "closure wraps a module-level String in some" {
   assert_eq(fx.both([1], "p"), [(some("n"), "p")])
   assert_eq(fx.twice(), [some("n"), some("n")])
   assert_eq(fx.oks([1, 2]), 2)
+}
+"#,
+    ),
+    (
+        "h_test.almd",
+        r#"import self.fx
+test "assert_eq over lists of results and nested heap literals (#4806)" {
+  assert_eq(fx.res([1]), [ok("n")])
+  assert(fx.res([1]) != [ok("m")])
+  assert(fx.res([1]) != [err("n")])
+  assert(fx.res([1, 2]) != [ok("n")])
+  assert_eq(fx.opt_lists([1, 2]), [none, some(["a", "b"])])
+  assert(fx.opt_lists([2]) != [some(["a", "c"])])
+  assert(fx.opt_lists([2]) != [some(["a"])])
+  assert_eq(fx.nested([[1, 0], []]), [[some("n"), none], []])
+  assert(fx.nested([[1]]) != [[some("m")]])
+  assert_eq(fx.opt_opts([0, 1, 2]), [none, some(none), some(some("n"))])
+  assert(fx.opt_opts([2]) != [some(none)])
+  assert_eq(fx.res_lists([1, 0]), [ok(["a"]), err("bad")])
+  assert(fx.res_lists([1]) != [ok(["b"])])
 }
 "#,
     ),
