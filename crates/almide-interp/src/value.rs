@@ -430,11 +430,24 @@ fn float_order_key(x: f64) -> i64 {
 
 pub struct TotalOrder<'a> {
     tags: &'a VariantTags,
+    /// How a record whose type defines its order through its protocol's
+    /// `compare` orders (#4788, C-456): `Some(answer)` for such a pair, `None`
+    /// for any other record pair, which then orders by its fields.
+    records: Option<std::cell::RefCell<&'a mut RecordOrder<'a>>>,
 }
+
+/// See [`TotalOrder::with_records`].
+pub type RecordOrder<'a> = dyn FnMut(&Value, &Value) -> Option<Option<std::cmp::Ordering>> + 'a;
 
 impl<'a> TotalOrder<'a> {
     pub fn new(tags: &'a VariantTags) -> Self {
-        TotalOrder { tags }
+        TotalOrder { tags, records: None }
+    }
+
+    /// The same order, asking `records` first for every record pair it meets,
+    /// at the top or nested in a tuple, list, option, result or payload.
+    pub fn with_records(tags: &'a VariantTags, records: &'a mut RecordOrder<'a>) -> Self {
+        TotalOrder { tags, records: Some(std::cell::RefCell::new(records)) }
     }
 
     pub fn cmp(&self, a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
@@ -464,7 +477,14 @@ impl<'a> TotalOrder<'a> {
             // the wasm comparator. A named record's fields are ALWAYS rebuilt in
             // declaration order here (`fill_record_defaults`), so POSITION is
             // declaration order and a permuted literal compares identically.
-            (Record { fields: x, .. }, Record { fields: y, .. }) => self.cmp_fields(x, y),
+            (Record { fields: x, .. }, Record { fields: y, .. }) => {
+                if let Some(records) = &self.records
+                    && let Some(answer) = (records.borrow_mut())(a, b)
+                {
+                    return answer;
+                }
+                self.cmp_fields(x, y)
+            }
             // A variant compares its CASE first and breaks the tie on that
             // case's payload — native's discriminant-then-fields derive, and
             // the wasm legs' tag-then-payload emit.

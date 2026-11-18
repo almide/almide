@@ -204,29 +204,31 @@ impl<'a> Interpreter<'a> {
             "binary_search" if args.len() == 2 => {
                 let items = args.first()?.as_iter_items()?;
                 let target = args.get(1)?;
-                let order = crate::value::TotalOrder::new(&self.variant_tags);
-                let key_order = |e: &Value| -> i64 {
-                    if e == target {
-                        0
-                    } else {
-                        match order.cmp(e, target) {
-                            Some(std::cmp::Ordering::Less) => -1,
-                            _ => 1,
+                // `__key_order`'s order is `list.sort`'s, a protocol-ordered
+                // record's `compare` included (C-456).
+                let found = self.with_total_order(|order| {
+                    let key_order = |e: &Value| -> i64 {
+                        if e == target {
+                            0
+                        } else {
+                            match order.cmp(e, target) {
+                                Some(std::cmp::Ordering::Less) => -1,
+                                _ => 1,
+                            }
                         }
+                    };
+                    let (mut base, mut size) = (0usize, items.len());
+                    while size > 1 {
+                        let half = size / 2;
+                        let mid = base + half;
+                        if key_order(&items[mid]) <= 0 {
+                            base = mid;
+                        }
+                        size -= half;
                     }
-                };
-                let (mut base, mut size) = (0usize, items.len());
-                while size > 1 {
-                    let half = size / 2;
-                    let mid = base + half;
-                    if key_order(&items[mid]) <= 0 {
-                        base = mid;
-                    }
-                    size -= half;
-                }
-                let found = !items.is_empty() && key_order(&items[base]) == 0;
-                let r = found.then(|| Box::new(Value::Int(base as i64)));
-                Some(Flow::val(Value::Option(r)))
+                    (!items.is_empty() && key_order(&items[base]) == 0).then(|| Box::new(Value::Int(base as i64)))
+                });
+                Some(found.map_or_else(|flow| flow, |r| Flow::val(Value::Option(r))))
             }
             _ => None,
         }

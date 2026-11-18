@@ -26,14 +26,14 @@ impl<'a> Interpreter<'a> {
 
     /// `__key_order` of stdlib/list.almd: equal keys are 0, otherwise the
     /// order `list.sort_by` sorts them in.
-    fn key_order(&self, a: &Value, b: &Value) -> i64 {
+    fn key_order(&mut self, a: &Value, b: &Value) -> Result<i64, Flow> {
         if a == b {
-            return 0;
+            return Ok(0);
         }
-        match crate::value::TotalOrder::new(&self.variant_tags).cmp(a, b) {
+        self.with_total_order(|order| match order.cmp(a, b) {
             Some(std::cmp::Ordering::Less) => -1,
             _ => 1,
-        }
+        })
     }
 
     fn eval_try_order(&mut self, hof: &str, a: &[Value]) -> Flow {
@@ -127,7 +127,14 @@ impl<'a> Interpreter<'a> {
         }
         let mut best: Option<usize> = None;
         for (i, k) in keys.iter().enumerate() {
-            if best.is_none_or(|b| self.key_order(k, &keys[b]) == want) {
+            let take = match best {
+                None => true,
+                Some(b) => match self.key_order(k, &keys[b]) {
+                    Ok(c) => c == want,
+                    Err(f) => return f,
+                },
+            };
+            if take {
                 best = Some(i);
             }
         }
@@ -176,7 +183,7 @@ impl<'a> Interpreter<'a> {
         let order = |s: &mut Self, e: &Value| -> Result<i64, Flow> {
             if by_key {
                 let k = s.try_step(&clo, vec![e.clone()])?;
-                Ok(s.key_order(&k, &target))
+                s.key_order(&k, &target)
             } else {
                 s.try_cmp(&clo, e, &target)
             }

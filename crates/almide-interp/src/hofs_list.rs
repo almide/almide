@@ -360,10 +360,11 @@ impl<'a> Interpreter<'a> {
         // IEEE-754 totalOrder so a Float key now sorts byte-identically to the
         // native `_float` variant and the wasm bit-trick — C-055). Genuinely
         // incomparable keys collapse to `Equal` (stable → input order).
-        let order = crate::value::TotalOrder::new(&self.variant_tags);
-        keyed.sort_by(|(ka, _), (kb, _)| {
-            order.cmp(ka, kb).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        if let Err(flow) = self.with_total_order(|order| {
+            keyed.sort_by(|(ka, _), (kb, _)| order.cmp(ka, kb).unwrap_or(std::cmp::Ordering::Equal))
+        }) {
+            return flow;
+        }
         Flow::val(Value::list(keyed.into_iter().map(|(_, item)| item).collect()))
     }
 

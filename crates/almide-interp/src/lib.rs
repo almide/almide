@@ -26,6 +26,7 @@ mod eval;
 mod f32_display;
 mod hofs;
 mod inplace;
+mod protocol_order;
 mod stdlib_pool;
 mod surface;
 mod surface_regex;
@@ -208,7 +209,9 @@ pub struct Interpreter<'a> {
     /// `variant_ctors` — the tag `TotalOrder` compares a variant by, so
     /// `list.sort` / `min` / `max` / `sort_by` order a variant by case order
     /// then payload, exactly as native's derived `Ord` and both wasm legs do.
-    pub(crate) variant_tags: crate::value::VariantTags,
+    /// Shared (`Rc`) so an order that evaluates a protocol `compare` can hold
+    /// it while the interpreter runs (`protocol_order.rs`).
+    pub(crate) variant_tags: Rc<crate::value::VariantTags>,
     /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
     /// Path = Int`) under the identity their ctor call and ctor pattern
     /// carry into the IR — bare for a bundled module's own or the entry
@@ -621,7 +624,7 @@ impl<'a> Interpreter<'a> {
             record_decls,
             named_records,
             variant_ctors,
-            variant_tags,
+            variant_tags: Rc::new(variant_tags),
             newtype_ctors,
             globals: env::Scope::root(),
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
