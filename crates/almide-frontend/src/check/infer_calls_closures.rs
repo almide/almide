@@ -354,7 +354,10 @@ impl Checker {
                 // The example builds the clock this surface declares, so a
                 // wall-clock surface is never sent to the compute constructor
                 // it refuses (#4742).
-                let ctor = almide_lang::time_units::module_of_clock_type(clock).unwrap_or("compute");
+                let ctor = almide_lang::time_units::TIME_MODULES
+                    .iter()
+                    .find(|(_, t)| *t == clock)
+                    .map_or("compute", |(m, _)| *m);
                 self.emit(super::err(
                     format!("expected {clock}, found {}", other.display()),
                     format!(
