@@ -26,6 +26,29 @@ fn main() -> Unit = {
 "#);
 }
 
+/// Results order as native's derived `Ord` and the wasm legs: every `ok`
+/// before every `err`, payloads next (#4760). With no Result arm the interp
+/// read two Results as incomparable, the stable sort kept them in input
+/// order, and a `Heap[Result[..]]` popped `ok(true)` where both targets pop
+/// `ok(false)`. The expected lines are the native and wasm output.
+#[test]
+fn results_order_ok_before_err_then_by_payload() {
+    let src = r#"
+fn main() -> Unit = {
+  let a: Result[Bool, String] = ok(true)
+  let b: Result[Bool, String] = ok(false)
+  let e: Result[Bool, String] = err("x")
+  let f: Result[Bool, String] = err("a")
+  println("sort_by = ${list.sort_by([0, 1, 2, 3], (i) => if i == 0 then a else if i == 1 then e else if i == 2 then b else f)}")
+  println("sort = ${list.sort([a, e, b, f])}")
+  var h = heap.from_list([a, b, a, e])
+  println("pop = ${heap.pop(h)} ${heap.pop(h)}")
+  let r: List[Result[Int, Int]] = [err(3), ok(5), err(1), ok(2)]
+  println("ri = ${list.sort(r)}")
+}"#;
+    expect_out(src, "sort_by = [2, 0, 3, 1]\nsort = [ok(false), ok(true), err(\"a\"), err(\"x\")]\npop = some(ok(false)) some(ok(true))\nri = [ok(2), ok(5), err(1), err(3)]\n");
+}
+
 #[test]
 fn sort_by_negative_int_key() {
     // Negative keys order by signed `i64::cmp` (not unsigned), matching native.

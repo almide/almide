@@ -449,6 +449,16 @@ impl<'a> TotalOrder<'a> {
             // must totalOrder like a bare Float would); the none/some shell
             // ordering itself is shared with `partial_cmp_val`.
             (Option(Some(x)), Option(Some(y))) => self.cmp(x, y),
+            // A Result orders as native's derived `Ord` and the wasm legs'
+            // tag-then-payload compare: every `ok` before every `err`, then the
+            // payloads on this same total order (#4760: with no arm here a
+            // `Heap[Result[..]]` / `sort_by` key of Results compared as
+            // incomparable, which the stable sort read as equal).
+            (Result(x), Result(y)) => match (x, y) {
+                (Ok(x), Ok(y)) | (Err(x), Err(y)) => self.cmp(x, y),
+                (Ok(_), Err(_)) => Some(std::cmp::Ordering::Less),
+                (Err(_), Ok(_)) => Some(std::cmp::Ordering::Greater),
+            },
             // A record orders lexicographically in FIELD DECLARATION order —
             // native's derive, and the order `almide_layout::pack_fields` gives
             // the wasm comparator. A named record's fields are ALWAYS rebuilt in
