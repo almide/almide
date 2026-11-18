@@ -74,8 +74,18 @@ pub fn git_source(url: &str) -> Result<&str, String> {
     if user.is_some_and(|u| !user_ok(u)) {
         return refuse("has a user part that is not a plain user name");
     }
+    let port_ok = |p: &str| p.is_empty() || p.chars().all(|c| c.is_ascii_digit());
+    // A bracketed IPv6 literal (`[::1]`, `[::1]:2222`) is a plain host too.
+    if let Some(rest) = hostport.strip_prefix('[') {
+        let Some((v6, after)) = rest.split_once(']') else { return refuse("has an unclosed `[` in its host") };
+        let port = after.strip_prefix(':');
+        if v6.is_empty() || !v6.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') || !(after.is_empty() || port.is_some_and(port_ok)) {
+            return refuse("has a host that is not a plain host name");
+        }
+        return Ok(url);
+    }
     let host = match hostport.split_once(':') {
-        Some((h, port)) if url.contains("://") && (port.is_empty() || port.chars().all(|c| c.is_ascii_digit())) => h,
+        Some((h, port)) if url.contains("://") && port_ok(port) => h,
         Some(_) => return refuse("has a host that is not `host` or `host:port`"),
         None => hostport,
     };
@@ -353,6 +363,11 @@ mod tests {
         }
         assert_eq!(source_owner("https://github.com:443/almide/json").unwrap().as_deref(), Some("github.com/almide"));
         assert_eq!(source_owner("../local/repo").unwrap(), None);
+        // Any git host's ordinary forms stay usable: subgroups, ports, ssh.
+        assert_eq!(source_owner("https://gitlab.com/group/sub/repo.git").unwrap().as_deref(), Some("gitlab.com/group"));
+        assert_eq!(source_owner("ssh://git@git.example.org:2222/team/repo").unwrap().as_deref(), Some("git.example.org/team"));
+        assert_eq!(source_owner("git@gitlab.com:group/sub/repo.git").unwrap().as_deref(), Some("gitlab.com/group"));
+        assert!(git_source("ssh://git@[::1]:2222/team/repo").is_ok());
     }
 
     #[test]
