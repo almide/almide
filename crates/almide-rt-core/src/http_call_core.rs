@@ -7,8 +7,8 @@
 // observables — the limit and cancel error texts, the close-on-end, the
 // UTF-8-safe `read_new` split — are equal on both lanes by shared code.
 //
-// Headers travel as `&[(String, String)]` and a finished response as the
-// client core's `HttpTextResponse`; the AlmideMap / AlmideHttpResponse
+// Headers travel as `&[(String, String)]` and a finished response as
+// `HttpCallResponse` (its body the exact bytes); the AlmideMap / AlmideHttpResponse
 // wrappers stay in http.rs. No `use` lines: the includer's
 // `std::io::{Read, Write}` and `std::net::TcpStream` are in scope.
 
@@ -183,10 +183,15 @@ pub fn http_call_take_new(st: &mut AlmideHttpCallState) -> String {
     text
 }
 
-fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> Result<HttpTextResponse, String> {
+/// A finished call: status, header fields and the body EXACTLY as the server
+/// sent it (#4746) — `http.body_bytes` of the waited response answers these
+/// bytes on every lane, as it does for `http.send`; `http.body` decodes them.
+pub type HttpCallResponse = (i64, Vec<(String, String)>, Vec<u8>);
+
+fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> Result<HttpCallResponse, String> {
     match (outcome, &st.head) {
         (Err(e), _) => Err(e.clone()),
-        (Ok(()), Some(h)) => Ok((h.status, http_response_fields(h.headers.clone()), String::from_utf8_lossy(&st.body).into_owned())),
+        (Ok(()), Some(h)) => Ok((h.status, http_response_fields(h.headers.clone()), st.body.clone())),
         (Ok(()), None) => Err("connection closed before headers received".to_string()),
     }
 }
@@ -544,7 +549,7 @@ fn http_call_spawn_with(
 }
 
 /// `poll`: never blocks — `None` while the call runs, the result once it ended.
-pub fn http_call_poll(sh: &AlmideHttpCallShared) -> Option<Result<HttpTextResponse, String>> {
+pub fn http_call_poll(sh: &AlmideHttpCallShared) -> Option<Result<HttpCallResponse, String>> {
     sh.check_deadline();
     let st = sh.lock();
     st.outcome.as_ref().map(|o| http_call_result(&st, o))
@@ -552,7 +557,7 @@ pub fn http_call_poll(sh: &AlmideHttpCallShared) -> Option<Result<HttpTextRespon
 
 /// `wait`: block until the call ends (bounded by its limits) and answer it —
 /// ANY complete response is `Ok`, as with `request_response`.
-pub fn http_call_wait(sh: &AlmideHttpCallShared) -> Result<HttpTextResponse, String> {
+pub fn http_call_wait(sh: &AlmideHttpCallShared) -> Result<HttpCallResponse, String> {
     let st = sh.wait_until(|_| false);
     let o = st.outcome.as_ref().expect("wait_until returns an ended call");
     http_call_result(&st, o)

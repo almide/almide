@@ -151,7 +151,7 @@ fn a_content_length_response_is_answered_whole() {
     let sh = start(&url, 0, 0);
     let (status, headers, body) = client::http_call_wait(&sh).expect("answered");
     assert_eq!(status, 201);
-    assert_eq!(body, "hello world");
+    assert_eq!(body, b"hello world");
     let a: Vec<&str> = headers.iter().filter(|(k, _)| k == "x-a").map(|(_, v)| v.as_str()).collect();
     assert_eq!(a, ["1", "2"], "wire order, repeats kept, names lowercased (C-455)");
     // An ended call polls as its result, and read_new hands the body out once.
@@ -174,7 +174,7 @@ fn a_chunked_response_decodes_across_split_reads() {
     ]);
     let sh = start(&url, 0, 0);
     let (status, _, body) = client::http_call_wait(&sh).expect("answered");
-    assert_eq!((status, body.as_str()), (200, "hello world"));
+    assert_eq!((status, body.as_slice()), (200, &b"hello world"[..]));
     join(h);
 }
 
@@ -186,7 +186,7 @@ fn a_chunk_size_line_split_mid_line_waits_for_the_rest() {
         b"\r\nabc\r\n0\r\n\r\n".to_vec(),
     ]);
     let sh = start(&url, 0, 0);
-    assert_eq!(client::http_call_wait(&sh).expect("answered").2, "abc");
+    assert_eq!(client::http_call_wait(&sh).expect("answered").2, b"abc");
     join(h);
 }
 
@@ -312,7 +312,7 @@ fn the_buffered_client_caps_the_response_head() {
 fn a_body_framed_by_the_close_ends_with_the_close() {
     let (url, h) = pieces_peer(vec![b"HTTP/1.1 200 OK\r\n\r\nuntil".to_vec(), b" close".to_vec()]);
     let sh = start(&url, 0, 0);
-    assert_eq!(client::http_call_wait(&sh).expect("answered").2, "until close");
+    assert_eq!(client::http_call_wait(&sh).expect("answered").2, b"until close");
     join(h);
 }
 
@@ -424,7 +424,7 @@ fn signalled_call_child() {
         let _ = std::process::Command::new("/no/such/command").current_dir(".").output();
     }
     let (status, _, body) = client::http_call_wait(&sh).expect("answered");
-    println!("answered {status} {body}");
+    println!("answered {status} {}", String::from_utf8_lossy(&body));
 }
 
 // ── streaming ──

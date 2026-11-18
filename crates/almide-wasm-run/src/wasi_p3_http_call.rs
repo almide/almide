@@ -29,8 +29,9 @@
 // The texts are native's (http_call_core.rs `http_call_total_msg`,
 // `http_call_idle_msg`, `HTTP_CALL_CANCELLED`, `http_call_spawn`'s limits
 // refusal); tests/p3_http_call_test.rs pins them against the core's answers.
-// A body is decoded as `String::from_utf8_lossy` decodes it, and `read_new`
-// holds an incomplete UTF-8 tail back as `http_call_take_new` does.
+// The waited response's body is the bytes as sent (#4746); `read_new` decodes
+// as `String::from_utf8_lossy` does and holds an incomplete UTF-8 tail back
+// as `http_call_take_new` does.
 
 const OP_HC_OPEN: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_CALL, 0);
 const OP_HC_STATE: i32 = almide_wasm::host_ops::nth(almide_wasm::host_ops::HTTP_CALL, 1);
@@ -1112,10 +1113,12 @@ fn shim_http_call(cx: HcCx<'_>) -> Function {
     // status
     i.local_get(buf).i32_const(4).i32_add().local_get(blk).i32_load(mem(HC_STATUS)).i64_extend_i32_u().call(cx.fns.dec).local_set(k);
     i.local_get(buf).local_get(k).local_get(buf).i32_sub().i32_const(4).i32_sub().i32_store(mem(0));
-    // body
+    // body: the bytes as the server sent them (#4746) — the guest's
+    // `body_bytes` copies the cell, `body` decodes it
     i.local_get(k).i32_const(4).i32_add();
     i.local_get(blk).i32_load(mem(HC_BUF)).local_get(blk).i32_load(mem(HC_TOTAL));
-    i.call(cx.fns.lossy).local_set(dst);
+    i.memory_copy(0, 0);
+    i.local_get(k).i32_const(4).i32_add().local_get(blk).i32_load(mem(HC_TOTAL)).i32_add().local_set(dst);
     i.local_get(k).local_get(dst).local_get(k).i32_sub().i32_const(4).i32_sub().i32_store(mem(0));
     // the fields
     i.local_get(dst).local_get(blk).i32_load(mem(HC_HDR_PTR)).local_get(blk).i32_load(mem(HC_HDR_LEN)).memory_copy(0, 0);

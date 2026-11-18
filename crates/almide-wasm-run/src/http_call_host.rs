@@ -137,11 +137,12 @@ fn parse_start_frame(frame: &[u8]) -> Result<StartFrame, String> {
 }
 
 /// Length-prefixed frames (u32 LE + bytes), the list-of-strings encoding.
-fn frames(items: &[String]) -> Vec<u8> {
+fn frames<S: AsRef<[u8]>>(items: &[S]) -> Vec<u8> {
     let mut b = Vec::new();
     for s in items {
+        let s = s.as_ref();
         b.extend_from_slice(&(s.len() as u32).to_le_bytes());
-        b.extend_from_slice(s.as_bytes());
+        b.extend_from_slice(s);
     }
     b
 }
@@ -184,11 +185,13 @@ pub(crate) fn by_id(calls: &Mutex<HttpCalls>, op: i32, id: u32) -> (i64, Vec<u8>
     match op {
         54 => ok_text(if core::http_call_poll(&sh).is_some() { "1" } else { "0" }.to_string()),
         55 => match core::http_call_wait(&sh) {
+            // The body cell carries the bytes as the server sent them (#4746):
+            // the guest's `body_bytes` copies the cell, `body` decodes it.
             Ok((status, headers, body)) => {
-                let mut items = vec![status.to_string(), body];
+                let mut items = vec![status.to_string().into_bytes(), body];
                 for (k, v) in headers {
-                    items.push(k);
-                    items.push(v);
+                    items.push(k.into_bytes());
+                    items.push(v.into_bytes());
                 }
                 let b = frames(&items);
                 (pack(0, b.len()), b)
