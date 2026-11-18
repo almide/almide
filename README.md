@@ -104,7 +104,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/a
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
-The installer checks the archive against the release's `almide-checksums.sha256`; every release asset is Sigstore-attested ([SECURITY.md](./SECURITY.md#release-integrity) shows how to verify one). Each archive also carries `almide-verify`, the certificate checker `almide verify` hands its witnesses to. From source, with [Rust](https://rustup.rs/) 1.96+: `make install`.
+The installer checks the archive against the release's `almide-checksums.sha256`; every release asset is Sigstore-attested ([SECURITY.md](./SECURITY.md#release-integrity) shows how to verify one). Each archive also carries `almide-verify`, the certificate checker `almide verify` hands its witnesses to. From source, with [Rust](https://rustup.rs/) 1.97+: `make install`.
 
 ```almd
 fn main() -> Unit = {
