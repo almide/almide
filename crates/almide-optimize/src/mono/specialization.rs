@@ -217,6 +217,16 @@ fn lower_protocol_order_calls(
             let v = self.vt.alloc_fresh(prefix, ty.clone(), Mutability::Let, span);
             (v, mk(IrExprKind::Var { id: v }, ty.clone(), span))
         }
+        /// `list.<f>(xs)` → `list.<with>(xs, (a, b) => compare(a, b))` when the
+        /// element orders through its protocol's `compare`.
+        fn with_comparator(&mut self, expr: &mut IrExpr, elem: &Ty, with: &str) {
+            let Some(target) = operator_requirement_target(elem, "compare", self.table) else { return };
+            let span = expr.span;
+            let IrExprKind::Call { args, .. } = &mut expr.kind else { return };
+            let xs = std::mem::take(&mut args[0]);
+            let cmp = self.comparator(elem, |e| e, target, span);
+            *expr = list_call(with, vec![xs, cmp], expr.ty.clone(), span);
+        }
         /// `(a, b) => compare(key(a), key(b))` over values of type `of`.
         fn comparator(&mut self, of: &Ty, key: impl Fn(IrExpr) -> IrExpr, target: CallTarget, span: Option<almide_base::Span>) -> IrExpr {
             let (a, ea) = self.var("__order_a", of, span);
@@ -240,13 +250,10 @@ fn lower_protocol_order_calls(
                 _ => return,
             };
             match (func.as_str(), args.len()) {
-                ("sort" | "min" | "max", 1) => {
-                    let Some(target) = operator_requirement_target(&elem, "compare", self.table) else { return };
-                    let cmp = self.comparator(&elem, |e| e, target, span);
-                    let xs = std::mem::take(&mut args[0]);
-                    let with = format!("{func}_with");
-                    *expr = list_call(&with, vec![xs, cmp], expr.ty.clone(), span);
-                }
+                // Each intrinsic's own comparator form (dispatch, one name per arm).
+                ("sort", 1) => self.with_comparator(expr, &elem, "sort_with"),
+                ("min", 1) => self.with_comparator(expr, &elem, "min_with"),
+                ("max", 1) => self.with_comparator(expr, &elem, "max_with"),
                 ("sort_by", 2) => {
                     let key_ty = match &args[1].ty {
                         Ty::Fn { ret, .. } => (**ret).clone(),
