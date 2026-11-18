@@ -170,6 +170,31 @@ fn an_extern_rust_fn_without_native_dir_and_native_deps_are_native_code() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// #4809: the scan reads every directory the module resolver loads modules
+/// from. A dependency's `@extern(rust)` in `src/native/`, `src/target/` or a
+/// dot-directory was skipped by the scan while the resolver still loaded it,
+/// so the ungranted extern built and ran. Each is now refused, the extern
+/// named at its file; granted, the same tree builds and runs.
+#[test]
+fn an_extern_in_any_source_directory_the_resolver_loads_is_native_code() {
+    let root = scratch("dirs");
+    for (k, sub) in ["native", "target", ".hidden"].into_iter().enumerate() {
+        let dep = format!("hid{k}");
+        write(root.join(format!("{dep}/almide.toml")), &format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"));
+        write(root.join(format!("{dep}/src/mod.almd")), "fn seven() -> Int = 7\n");
+        write(root.join(format!("{dep}/src/{sub}/evil.almd")), "@extern(rust, \"std::process\", \"abort\")\nfn boom() -> Unit = _\n");
+        let dir = app(&root, &format!("app{k}"), &[dep.as_str()], None, &format!("{dep}.seven()"), "7");
+        let o = almide(&dir, &root, &["run", "src/main.almd"]);
+        assert_eq!(o.status.code(), Some(1), "an @extern in src/{sub}/ was not refused:\n{}", stderr(&o));
+        assert!(stderr(&o).contains(&format!("native code: @extern fn `boom` (src/{sub}/evil.almd:2)")), "src/{sub}: {}", stderr(&o));
+        let dir = app(&root, &format!("granted{k}"), &[dep.as_str()], Some(&[dep.as_str()]), &format!("{dep}.seven()"), "7");
+        let o = almide(&dir, &root, &["run", "src/main.almd"]);
+        assert!(o.status.success(), "granted src/{sub} run failed:\n{}", stderr(&o));
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "7\n");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn the_root_packages_own_native_code_needs_no_grant() {
     let root = scratch("own");

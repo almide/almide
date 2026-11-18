@@ -139,18 +139,16 @@ fn native_files(dir: &Path, rel: &Path) -> Vec<(PathBuf, bool)> {
     out
 }
 
+/// Every `.almd` file under `dir`, walked through the module resolver's own
+/// enumeration ([`crate::resolve::source_entries`]): the grant scans read
+/// exactly the tree a package's modules are loaded from (#4809 — a scan that
+/// skipped `target/`, `native/` and dot-directories let a dependency's
+/// `@extern` there build without the root's grant).
 pub(crate) fn almd_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if path.is_dir() {
-            if !name.starts_with('.') && name != "target" && name != "native" {
-                almd_files(&path, out);
-            }
-        } else if name.ends_with(".almd") {
-            out.push(path);
-        }
+    let (files, dirs) = crate::resolve::source_entries(dir);
+    out.extend(files);
+    for d in dirs {
+        almd_files(&d, out);
     }
 }
 

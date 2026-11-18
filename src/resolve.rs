@@ -670,6 +670,24 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
     load_sub_namespaces(root, &sub_name, subdir, pkg_id, ctx)
 }
 
+/// One source directory's `.almd` files and subdirectories, each in name
+/// order: the enumeration the resolver loads a package's sub-namespaces from
+/// and the native / media grant scans walk (#4809). No directory is skipped
+/// here — whatever this lists is loadable, so it is scanned.
+pub(crate) fn source_entries(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let (mut files, mut dirs) = (Vec::new(), Vec::new());
+    for p in std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()) {
+        if p.is_dir() {
+            dirs.push(p);
+        } else if p.extension().is_some_and(|ext| ext == "almd") {
+            files.push(p);
+        }
+    }
+    files.sort();
+    dirs.sort();
+    (files, dirs)
+}
+
 /// Load all sibling .almd files as sub-namespaces, recursively scanning subdirectories.
 ///
 /// `pkg_name` is the namespace the files in `src_dir` are registered under
@@ -679,42 +697,35 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
 /// package called `snaidhm.native` and failed the consumer's build.
 fn load_sub_namespaces(root: &str, pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
     // Load .almd files in this directory (excluding mod.almd, lib.almd, main.almd)
-    let mut files: Vec<PathBuf> = match std::fs::read_dir(src_dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                // `*_test.almd` is a TEST module: its `test` blocks lower to
-                // synthesized `__test_almd_*` fns that call the package's own
-                // modules. Linking it into a CONSUMER's build pulls in code the
-                // consumer never imports and cannot resolve (#884 — 25 IR-verify
-                // errors, all inside `<dep>.<x>_test.__test_almd_*`). A package's
-                // own `almide test` finds them by walking the tree, not through
-                // this sub-namespace loader, so excluding them here costs no
-                // coverage.
-                let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-                p.extension().map_or(false, |ext| ext == "almd")
-                    && name != "mod.almd"
-                    && name != "lib.almd"
-                    && name != "main.almd"
-                    && !name.ends_with("_test.almd")
-            })
-            .collect(),
-        Err(_) => return Ok(()),
-    };
-    files.sort();
+    if !src_dir.is_dir() {
+        return Ok(());
+    }
+    let (files, subdirs) = source_entries(src_dir);
+    let files: Vec<PathBuf> = files
+        .into_iter()
+        .filter(|p| {
+            // `*_test.almd` is a TEST module: its `test` blocks lower to
+            // synthesized `__test_almd_*` fns that call the package's own
+            // modules. Linking it into a CONSUMER's build pulls in code the
+            // consumer never imports and cannot resolve (#884 — 25 IR-verify
+            // errors, all inside `<dep>.<x>_test.__test_almd_*`). A package's
+            // own `almide test` finds them by walking the tree, not through
+            // this sub-namespace loader, so excluding them here costs no
+            // coverage.
+            let name = p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            p.extension().map_or(false, |ext| ext == "almd")
+                && name != "mod.almd"
+                && name != "lib.almd"
+                && name != "main.almd"
+                && !name.ends_with("_test.almd")
+        })
+        .collect();
 
     for file_path in &files {
         load_sub_namespace_file(root, pkg_name, file_path, pkg_id, ctx)?;
     }
 
     // Scan subdirectories recursively
-    let mut subdirs: Vec<PathBuf> = match std::fs::read_dir(src_dir) {
-        Ok(e) => e.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect(),
-        Err(_) => vec![],
-    };
-    subdirs.sort();
-
     for subdir in &subdirs {
         load_sub_namespace_dir(root, pkg_name, subdir, pkg_id, ctx)?;
     }
