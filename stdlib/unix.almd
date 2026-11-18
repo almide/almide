@@ -49,12 +49,14 @@ effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
 effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
+@ordered
 effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(
   __raw(fd),
   size,
 )
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+@ordered
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
   __raw(fd),
   offset,

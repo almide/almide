@@ -475,6 +475,30 @@ builds and runs both lowerings and requires the same output, and asserts that
 the overlapped one has every hook in flight at once (the issue measured
 510 ms → 50 ms for ten 50 ms reads).
 
+## Amendment 2026-11-18: shared-memory files and Unix sockets (#4618)
+
+Accepted by the maintainer's ruling on #4618 (item 1). The 2026-11-09 fan
+red-team found two effects outside the ordered set that one arm can see of
+another's: a `unix.shm` file and Unix-socket traffic between arms of one
+program. C-004 and C-386 named both as outside the promise "until ADR-0024 D3
+classifies them". This amendment classifies them.
+
+**D3, amended.** A shared-memory file is process-local state a sibling
+element can read, the class of an `fs` write: `unix.shm_write` and
+`unix.shm_resize` join the ordered set (`@ordered`, stdlib/unix.almd).
+`unix.shm_create` makes a new file no sibling holds yet, and `unix.shm_read`
+is a read; neither is ordered. A fan whose executable closure reaches either
+writer runs its elements in order on every target, so a sleeping reader arm
+sees the file as it was before the writer arm — its bytes and its size
+(spec/embedded_cross/fan_ordered_shm_arms.almd, C-004).
+
+Socket operations between the arms of one fan stay **unordered**: the order
+in which the peer end receives an arm's bytes is the environment's ω, as
+D2 gives an outside system's requests, and the language makes no ordering
+promise about it. Arms that talk to each other over a socket (a server arm
+and its client arm) may finish on threads and never finish sequentially;
+that remains outside C-004's scope.
+
 ## References
 
 - #1000 / [concurrency-stance.md](../roadmap/active/concurrency-stance.md),

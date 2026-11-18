@@ -757,13 +757,19 @@ mod ordered_tests {
         assert!(super::is_ordered_runtime_symbol("almide_rt_env___set"));
         assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"), "env.set's bodied wrapper");
         assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
-        // reads, output and the clock are not ordered (D3)
+        // A shared-memory file is state a sibling arm reads (#4618).
+        assert!(super::is_ordered_stdlib_fn("unix", "shm_write"));
+        assert!(super::is_ordered_stdlib_fn("unix", "shm_resize"));
+        // reads, output and the clock are not ordered (D3), nor are sockets
+        // between arms (#4618: ω, no ordering promise)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
         assert!(!super::is_ordered_stdlib_fn("env", "vars"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
+        assert!(!super::is_ordered_stdlib_fn("unix", "shm_read"));
+        assert!(!super::is_ordered_stdlib_fn("unix", "connect"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 30, "{t:?}");
+        assert_eq!(t.len(), 32, "{t:?}");
     }
 
     #[test]
