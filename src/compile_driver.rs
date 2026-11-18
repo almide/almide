@@ -14,7 +14,19 @@ pub(crate) fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::D
         .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
 
     if file.ends_with(".json") {
-        let prog = serde_json::from_str(&input)
+        let value: serde_json::Value = serde_json::from_str(&input)
+            .unwrap_or_else(|e| { err(&format!("JSON parse error: {}", e)); std::process::exit(1); });
+        // #4820: an AST entry is source like a `.almd` file (row 13): a
+        // hidden character in any of its names or strings — raw or written as
+        // a JSON escape — is refused as E101 refuses it in source text.
+        if let Some(s) = first_hidden_string(&value) {
+            err(&format!(
+                "error[E101]: {file}: the AST entry holds a hidden character in `{}`\n  hint: hidden characters are refused in source; write the text without it, or as an escape in a string literal",
+                almide_base::err_text::escape_hidden(s)
+            ));
+            std::process::exit(1);
+        }
+        let prog = serde_json::from_value(value)
             .unwrap_or_else(|e| { err(&format!("JSON parse error: {}", e)); std::process::exit(1); });
         (prog, input, Vec::new())
     } else {
@@ -24,6 +36,17 @@ pub(crate) fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::D
             .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
         let parse_errors = std::mem::take(&mut parser.errors);
         (prog, input, parse_errors)
+    }
+}
+
+/// The first key or string of `v` holding a C-418 hidden character.
+fn first_hidden_string(v: &serde_json::Value) -> Option<&str> {
+    let hidden = |s: &str| matches!(almide_base::err_text::escape_hidden(s), std::borrow::Cow::Owned(_));
+    match v {
+        serde_json::Value::String(s) => hidden(s).then_some(s.as_str()),
+        serde_json::Value::Array(xs) => xs.iter().find_map(first_hidden_string),
+        serde_json::Value::Object(m) => m.iter().find_map(|(k, x)| if hidden(k) { Some(k.as_str()) } else { first_hidden_string(x) }),
+        _ => None,
     }
 }
 

@@ -938,16 +938,17 @@ fn refuse_changed_sources(project: &Project, locked: &[LockedDep], resolved: &[R
 /// manifest or it fails to parse. Extracted verbatim from
 /// `fetch_deps_recursive`'s per-dep body (the 3 branches computed the same
 /// `src_dir` expression independently; hoisted out here, same result).
-fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> (String, PathBuf, Vec<Dependency>) {
+/// #4820: a dependency's manifest is read like the root's — a control or
+/// bidi character in it, or any other manifest error, is refused, not
+/// swallowed into "no manifest".
+fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> Result<(String, PathBuf, Vec<Dependency>), String> {
     let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.to_path_buf() };
     let dep_toml = path.join("almide.toml");
     if !dep_toml.exists() {
-        return (fallback_name.to_string(), src_dir, vec![]);
+        return Ok((fallback_name.to_string(), src_dir, vec![]));
     }
-    match parse_toml(&dep_toml) {
-        Ok(dep_project) => (dep_project.package.name, src_dir, dep_project.dependencies),
-        Err(_) => (fallback_name.to_string(), src_dir, vec![]),
-    }
+    let dep_project = parse_toml(&dep_toml).map_err(|e| format!("error: dependency `{fallback_name}`: {e}"))?;
+    Ok((dep_project.package.name, src_dir, dep_project.dependencies))
 }
 
 /// MVS ordering: parse as semver, treating an unparseable version as the
@@ -1099,7 +1100,7 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
     // nothing and is simply absent from the lock, as it was before.
     let git_commit = git_head_hash(&path).ok().filter(|_| lockable);
 
-    let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
+    let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name)?;
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
     if let Some(commit) = git_commit {
