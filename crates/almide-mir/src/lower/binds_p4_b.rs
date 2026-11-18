@@ -295,6 +295,9 @@ impl LowerCtx {
             IrExprKind::Var { id } if self.is_borrowed_param_var(*id) => {
                 self.piece_from_borrowed_param_var(*id)?
             }
+            IrExprKind::Var { id } if self.is_unmaterialized_global_var(*id) => {
+                self.piece_from_global_var(*id)?
+            }
             IrExprKind::LitStr { value } => self.piece_from_lit_str(&expr.ty, value)?,
             // A variant-CTOR name here would emit a dangling `(call $Circle)` —
             // decline instead, so the ctor chain's own arm (the
@@ -383,6 +386,31 @@ impl LowerCtx {
 
     fn is_borrowed_param_var(&self, id: almide_ir::VarId) -> bool {
         self.value_for(id).map(|v| self.param_values.contains(&v)).unwrap_or(false)
+    }
+
+    /// A module-level global (a top `let` or a mutable `var`) this function has
+    /// not read yet: it has no `value_of` entry, so neither Var arm above sees it,
+    /// although reading it yields an owned local like any other (#4749 shape 6:
+    /// `(x) => some(NOTE)` walled the lift while `some(NOTE + "")` passed).
+    pub(crate) fn is_unmaterialized_global_var(&self, id: almide_ir::VarId) -> bool {
+        !self.value_of.contains_key(&id)
+            && !self.cell_of.contains_key(&id)
+            && (self.globals.contains_key(&id) || crate::lower::mutable_global_info(id).is_some())
+    }
+
+    /// Read the global through the one global-read path (`value_or_global`: a
+    /// fresh owned copy of a const init, or the Dup'd slot of a mutable `var`,
+    /// either way a function-owned live handle dropped at scope end), then take
+    /// the payload's own reference exactly as [`Self::piece_from_live_heap_var`]
+    /// does. A read that is not a live owned handle declines.
+    pub(crate) fn piece_from_global_var(&mut self, id: almide_ir::VarId) -> Option<ValueId> {
+        let src = self.value_or_global(id).ok()?;
+        if !self.live_heap_handles.contains(&src) {
+            return None;
+        }
+        let dup = self.fresh_value();
+        self.ops.push(Op::Dup { dst: dup, src });
+        Some(dup)
     }
 
     /// A SCALAR-element `List[T]` — used by both the literal and computed-list
@@ -676,6 +704,9 @@ impl LowerCtx {
                     .unwrap_or(false) =>
             {
                 self.piece_from_borrowed_param_var(*id)?
+            }
+            IrExprKind::Var { id } if self.is_unmaterialized_global_var(*id) => {
+                self.piece_from_global_var(*id)?
             }
             IrExprKind::LitStr { value } => self.piece_from_lit_str(&expr.ty, value)?,
             // A variant-CTOR name here would emit a dangling `(call $Circle)` —
