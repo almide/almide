@@ -658,7 +658,7 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
     if !ctx.loaded_names.contains(&sub_name) {
         // Check for mod.almd in subdirectory
         let sub_mod = subdir.join("mod.almd");
-        if sub_mod.exists() {
+        if in_tree_file(&sub_mod) {
             let (program, mod_source) = parse_almd_file(&sub_mod, &sub_name)?;
             record_module_source(ctx, &sub_name, &sub_mod, mod_source);
             resolve_submodule_imports(&program, root, ctx)?;
@@ -673,19 +673,37 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
 /// One source directory's `.almd` files and subdirectories, each in name
 /// order: the enumeration the resolver loads a package's sub-namespaces from
 /// and the native / media grant scans walk (#4809). No directory is skipped
-/// here — whatever this lists is loadable, so it is scanned.
+/// by name — whatever this lists is loadable, so it is scanned. A symlink is
+/// never followed (#4813): one could reach outside the package (a module
+/// loaded from anywhere on the disk) or back into it (`/` hung the walk), and
+/// the root project's own walk skips them too.
 pub(crate) fn source_entries(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let (mut files, mut dirs) = (Vec::new(), Vec::new());
-    for p in std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()) {
-        if p.is_dir() {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let (Ok(kind), p) = (e.file_type(), e.path()) else { continue };
+        if kind.is_dir() {
             dirs.push(p);
-        } else if p.extension().is_some_and(|ext| ext == "almd") {
+        } else if kind.is_file() && p.extension().is_some_and(|ext| ext == "almd") {
             files.push(p);
         }
     }
     files.sort();
     dirs.sort();
     (files, dirs)
+}
+
+/// A regular file, not a symlink to one (#4813).
+fn in_tree_file(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file())
+}
+
+/// No component of `rel` below `base` is a symlink (#4813).
+fn no_symlink_below(base: &Path, rel: &Path) -> bool {
+    let mut at = base.to_path_buf();
+    rel.components().all(|c| {
+        at.push(c);
+        std::fs::symlink_metadata(&at).is_ok_and(|m| !m.file_type().is_symlink())
+    })
 }
 
 /// Load all sibling .almd files as sub-namespaces, recursively scanning subdirectories.
@@ -753,7 +771,9 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
         dir.join(last.as_str()).join("mod.almd"),
     ];
 
-    let file_path = candidates.iter().find(|p| p.exists())
+    // #4813: every step from the source dir down is a real directory and the
+    // module a real file — a symlink on the way could lead out of the package.
+    let file_path = candidates.iter().find(|p| in_tree_file(p) && p.strip_prefix(&src_dir).is_ok_and(|rel| no_symlink_below(&src_dir, rel)))
         .ok_or_else(|| format!(
             "sub-module '{}.{}' not found\n  searched: {}\n  hint: Create {} in the package's src/ directory",
             pkg_name, sub_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."),
