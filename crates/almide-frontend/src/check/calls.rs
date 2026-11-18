@@ -846,6 +846,28 @@ impl Checker {
         self.check_protocol_bounds_on(name, sig, bindings, &|tv| !open.contains(&tv));
     }
 
+    /// A generic fn named as a VALUE (`list.zip_with(xs, ys, list.join)`, #4751)
+    /// is instantiated with fresh vars that the callback slot fixes later. Its
+    /// protocol bounds are the call form's: judged post-solve on those vars by
+    /// [`Self::validate_deferred_protocol_bounds`], with the call's diagnostic.
+    pub(crate) fn defer_fn_value_protocol_bounds(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
+        // A stdlib signature from the registry carries no bounds; the checked
+        // declaration in the environment does (the call path reads that one).
+        let declared = self.env.functions.get(&sym(name)).filter(|d| d.generics == sig.generics).cloned();
+        let sig = declared.as_ref().filter(|d| !d.protocol_bounds.is_empty()).unwrap_or(sig);
+        let tvs: Vec<Sym> = sig.protocol_bounds.keys().filter(|tv| bindings.contains_key(*tv)).copied().collect();
+        if tvs.is_empty() {
+            return;
+        }
+        self.deferred_protocol_bounds.push(DeferredBoundSite {
+            callee: name.to_string(),
+            sig: sig.clone(),
+            bindings: bindings.clone(),
+            tvs,
+            span: self.current_span,
+        });
+    }
+
     /// Post-solve half of [`Self::check_protocol_bounds`]: each deferred
     /// parameter, now resolved, gets the call-time check verbatim. One still
     /// open after the solve is left to inference defaulting, as before.

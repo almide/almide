@@ -1,0 +1,7 @@
+// A generic stdlib fn passed by name gets the protocol bound checks its
+// call form gets (#4751): list.sum needs Numeric, which String is not.
+fn total(xss: List[List[String]]) -> List[String] = list.map(xss, list.sum)
+
+effect fn main() -> Unit = {
+  println(list.join(total([["a"]]), ","))
+}

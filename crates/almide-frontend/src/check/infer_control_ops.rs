@@ -762,7 +762,7 @@ impl Checker {
             self.record_purity_ref(callee, span);
         }
         self.reject_mut_param_fn_value(name, &sig, user_fn);
-        Some(self.instantiated_fn_value_ty(&sig))
+        Some(self.instantiated_fn_value_ty(name, &sig))
     }
 
     /// The Ty a named fn carries when referenced as a VALUE (#1055, #1148):
@@ -794,12 +794,13 @@ impl Checker {
     /// the declared letters, `list.map(rows, list.len)` checked clean (a
     /// rigid `A` unifies with anything) and reached codegen as a lambda over
     /// `List[A]` (#4745).
-    pub(crate) fn instantiated_fn_value_ty(&mut self, sig: &crate::types::FnSig) -> Ty {
+    pub(crate) fn instantiated_fn_value_ty(&mut self, name: &str, sig: &crate::types::FnSig) -> Ty {
         let ty = self.fn_value_ty(sig);
         if sig.generics.is_empty() {
             return ty;
         }
         let fresh: std::collections::HashMap<Sym, Ty> = sig.generics.iter().map(|g| (*g, self.fresh_var())).collect();
+        self.defer_fn_value_protocol_bounds(name, sig, &fresh);
         crate::types::substitute(&ty, &fresh)
     }
 
