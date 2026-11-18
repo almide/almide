@@ -6057,3 +6057,15 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/http_response_header_names.almd", class = "fixture" },
 ]
+
+# ── ORDER: A TYPE ORDERED BY ITS PROTOCOL'S compare ORDERS BY IT EVERYWHERE ─
+[[contract]]
+id        = "C-456"
+spec      = "ALS-C9"
+title     = "A declared type whose protocol defines its order through `compare` (BigInt) orders by that compare in every natural-order operation a generic body reaches, on every leg"
+statement = "ALS-C9 (almide/almide#4788): when a generic body's type parameter is bound to a declared type whose protocol defines its order through the `compare` requirement (`BigInt: Integer`), every natural-order operation the body reaches through the bound orders that type by its `compare` — the same order `<`, `<=`, `>`, `>=` on it already take (R-bigint-04) — and never by the layout of its fields: `list.sort`, `list.min`, `list.max`, the key order of `list.sort_by`, and the operations that reduce to them (`set.sort`, `set.min`, `set.max`, `deque.sort`, `list.min_by`, `list.max_by`). Over `[5, -3, 12, 0, -40, 10^12, 2^32, -(2^32) - 1, 7]` as BigInt, `set.sort` and `list.sort` both give `-4294967297, -40, -3, 0, 5, 7, 12, 4294967296, 1000000000000`, `list.min` / `list.max` give the two ends, and `sort_by` / `min_by` / `max_by` keyed on a BigInt order as they do keyed on the same values as Int; `sort_by` still computes each key once, in list order. The bytes are identical on native, stock wasm and the reference evaluator. Before, the wasm leg and the reference evaluator ordered a BigInt by its `{ neg, limbs }` fields (every negative after every positive, 2^32 before 5) and the native build of the same program failed in rustc for want of an order on the runtime type. A direct natural-order call on a concrete BigInt (`list.sort(bs)` with `bs: List[BigInt]`) is still E030: this contract covers the order a bound reaches."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bigint_protocol_order.almd", class = "fixture" },
+]

@@ -1,0 +1,89 @@
+// @contract: C-456
+// ALS-C9 (almide/almide#4788): a declared type whose protocol defines its order
+// through the `compare` requirement (`BigInt: Integer`) orders by that compare
+// in every natural-order operation a generic body reaches through the bound —
+// `list.sort`, `list.min`, `list.max`, the key order of `list.sort_by`, and
+// what reduces to them (`set.sort`, `set.min`, `set.max`, `deque.sort`,
+// `list.min_by`, `list.max_by`) — exactly as `<` on it does, never by the
+// layout of its fields (`{ neg, limbs }` would put every negative after every
+// positive and 2^32 before 5). The same generic fns over Int are the control.
+import bigint
+
+fn set_sorted[T: Integer](s: Set[T]) -> List[T] = set.sort(s)
+
+fn sorted[T: Integer](xs: List[T]) -> List[T] = list.sort(xs)
+
+fn least[T: Integer](xs: List[T]) -> T? = list.min(xs)
+
+fn greatest[T: Integer](xs: List[T]) -> T? = list.max(xs)
+
+fn set_least[T: Integer](s: Set[T]) -> T? = set.min(s)
+
+fn set_greatest[T: Integer](s: Set[T]) -> T? = set.max(s)
+
+fn by_amount[T: Integer](xs: List[(String, T)]) -> List[String] = list.sort_by(xs, (p) => p.1) |> list.map((p) => p.0)
+
+fn first_by[T: Integer](xs: List[(String, T)]) -> String = list.min_by(xs, (p) => p.1) |> option.map((p) => p.0) ?? "none"
+
+fn last_by[T: Integer](xs: List[(String, T)]) -> String = list.max_by(xs, (p) => p.1) |> option.map((p) => p.0) ?? "none"
+
+fn less[T: Integer](a: T, b: T) -> Bool = a < b
+
+fn show(xs: List[BigInt]) -> String = xs |> list.map((b) => bigint.to_string(b)) |> list.join(",")
+
+fn show_int(xs: List[Int]) -> String = xs |> list.map((n) => int.to_string(n)) |> list.join(",")
+
+fn main() -> Unit = {
+  let vals = [
+    5,
+    -3,
+    12,
+    0,
+    -40,
+    1000000000000,
+    4294967296,
+    -4294967297,
+    7
+  ]
+  let bs = vals |> list.map((n) => bigint.from(n))
+  println("set.sort  " + show(set_sorted(set.from_list(bs))))
+  println("list.sort " + show(sorted(bs)))
+  println("min " + (least(bs) |> option.map((b) => bigint.to_string(b)) ?? "none") + " max " + (greatest(bs) |> option.map((b) => bigint.to_string(b)) ?? "none"))
+  println("set.min " + (set_least(set.from_list(bs)) |> option.map((b) => bigint.to_string(b)) ?? "none") + " set.max " + (set_greatest(set.from_list(bs)) |> option.map((b) => bigint.to_string(b)) ?? "none"))
+  let named = list.zip(
+    [
+      "e",
+      "c",
+      "l",
+      "z",
+      "f",
+      "t",
+      "w",
+      "m",
+      "s"
+    ],
+    bs,
+  )
+  println("sort_by " + (by_amount(named) |> list.join(",")))
+  println("min_by " + first_by(named) + " max_by " + last_by(named))
+  let below = less(bigint.from(-3), bigint.from(2))
+  let above = less(bigint.from(4294967296), bigint.from(5))
+  println("less ${below} ${above}")
+  println("int set.sort  " + show_int(set_sorted(set.from_list(vals))))
+  println("int list.sort " + show_int(sorted(vals)))
+  println("int sort_by " + (by_amount(list.zip(
+    [
+      "e",
+      "c",
+      "l",
+      "z",
+      "f",
+      "t",
+      "w",
+      "m",
+      "s"
+    ],
+    vals,
+  )) |> list.join(",")))
+  println("empty " + show(sorted(list.take(bs, 0))) + "|" + (least(list.take(bs, 0)) |> option.map((b) => bigint.to_string(b)) ?? "none"))
+}
