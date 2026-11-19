@@ -210,14 +210,30 @@ pub(crate) fn render_final(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueI
     render_final_opt(dst, pieces, tys).ok_or_else(|| crate::render_native::wall("native: a concatenation chain over a piece that is not a string or an Int"))
 }
 
+/// The output line `op` writes `v` as, when it is one: `Some(false)` for a
+/// stdout line (`RtFn::PrintStr`), `Some(true)` for a stderr line (the bare
+/// `eprintln` builtin's call). Read off the op's kind, never off a value.
+pub(crate) fn prints_line(op: &Op, v: ValueId) -> Option<bool> {
+    match op {
+        Op::Call { func: crate::RtFn::PrintStr, args, dst: None, .. } => {
+            matches!(args.as_slice(), [CallArg::Handle(h)] if *h == v).then_some(false)
+        }
+        Op::CallFn { dst: None, name, args, .. } if name == "eprintln" => {
+            matches!(args.as_slice(), [CallArg::Handle(h)] if *h == v).then_some(true)
+        }
+        _ => None,
+    }
+}
+
 /// The chain's last step printed by the very next op and read by nothing
 /// else (#4006, no-perf-loss): one `println!` over the pieces, as the
 /// standard codegen prints an interpolation, with no string built for it.
-pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<usize> {
+/// Also the stream: `true` = stderr (ADR-0038: an `eprintln` line streams too).
+pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<(usize, bool)> {
     let ops = &func.ops;
     let j = (at + 1..ops.len()).find(|&j| !crate::render_native_move::bookkeeping(&ops[j]))?;
-    let prints = matches!(&ops[j], Op::Call { func: crate::RtFn::PrintStr, args, dst: None, .. }
-        if matches!(args.as_slice(), [CallArg::Handle(v)] if *v == dst));
+    let sink = prints_line(&ops[j], dst);
+    let prints = sink.is_some();
     let mut vals = Vec::new();
     let other_use = ops.iter().enumerate().any(|(k, op)| {
         if k == at || k == j || crate::render_native_move::bookkeeping(op) {
@@ -227,13 +243,14 @@ pub(crate) fn printed_by(func: &MirFunction, at: usize, dst: ValueId) -> Option<
         crate::mir_ops::op_values(op, &mut vals);
         vals.contains(&dst)
     });
-    (prints && !other_use && func.ret != Some(dst)).then_some(j)
+    (prints && !other_use && func.ret != Some(dst)).then(|| (j, sink == Some(true)))
 }
 
-/// The `println!` a printed chain renders as.
-pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
+/// The line a printed chain renders as, on stdout or (`stderr`) stderr.
+pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>, stderr: bool) -> Option<String> {
     let (template, args) = fmt_parts(pieces, tys)?;
-    Some(format!("rt_println_fmt(format_args!(\"{template}\"{args}));"))
+    let line = if stderr { "rt_eprintln_fmt" } else { "rt_println_fmt" };
+    Some(format!("{line}(format_args!(\"{template}\"{args}));"))
 }
 
 /// The appends of each piece after a chain's head onto its unique view,
@@ -353,8 +370,8 @@ pub(crate) fn float_arg(n: ValueId, tys: &BTreeMap<ValueId, crate::render_native
 /// no-perf-loss): `println(int.to_string(n))`. The print formats the scalar
 /// itself, as the standard codegen does, and the string is never built.
 /// Returns the definitions that render nothing and, per print op, the
-/// scalar and whether it is a Bool.
-pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, bool)>) {
+/// scalar, whether it is a Bool, and whether the line goes to stderr.
+pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<usize, (ValueId, bool, bool)>) {
     let ops = &func.ops;
     let mut occurs: BTreeMap<ValueId, Vec<usize>> = BTreeMap::new();
     let mut vals = Vec::new();
@@ -371,8 +388,9 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
     let mut skip = BTreeSet::new();
     let mut prints = BTreeMap::new();
     for (j, op) in ops.iter().enumerate() {
-        let Op::Call { func: crate::RtFn::PrintStr, args, dst: None, .. } = op else { continue };
+        let (Op::Call { args, .. } | Op::CallFn { args, .. }) = op else { continue };
         let [CallArg::Handle(v)] = args.as_slice() else { continue };
+        let Some(stderr) = prints_line(op, *v) else { continue };
         let Some(at) = occurs.get(v) else { continue };
         let [d, p] = at.as_slice() else { continue };
         if *p != j || func.ret == Some(*v) {
@@ -396,7 +414,7 @@ pub(crate) fn printed_scalars(func: &MirFunction) -> (BTreeSet<usize>, BTreeMap<
         });
         if !rebound && !crosses {
             skip.insert(*d);
-            prints.insert(j, (*n, is_bool));
+            prints.insert(j, (*n, is_bool, stderr));
         }
     }
     (skip, prints)
