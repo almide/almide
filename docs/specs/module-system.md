@@ -128,7 +128,7 @@ error[E003]: undefined variable 'yaml'
 - Tier 1 は対象外（既にスコープにあるため追加しない）
 
 **サブモジュール発見:**
-依存パッケージのキャッシュディレクトリ (`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/<ref-or-commit>/` 配下の package source（`subdir` があればその内側）) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
+依存パッケージのキャッシュ (cache-only の依存解決が返す `~/.almide/cache/trees/<sum>/` 配下の package source（`subdir` があればその内側）。使う前に tree hash を再計算する — ADR-0035) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
 
 ```bash
 $ almide fmt app.almd
@@ -525,11 +525,11 @@ lock は「第三者が同じバイト列を再構築できる」ために存在
 
 ### キャッシュ
 
-現在の clone root は
-`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/`。
-取得元 URL の成分を可逆にエンコードし、その下に ref / commit ごとの checkout を置く。
-同じ取得元・ref の `subdir` 依存も通常の依存も checkout を共有し、各 package の
-ディレクトリを読む。実装は `src/project_fetch.rs::dep_cache_root`。
+パッケージの tree は `~/.almide/cache/trees/<sum>/` に置く（ADR-0035 D4）。
+`<sum>` は tree hash で、使うたびに再計算して照合する。取得元のコミットから
+sum への索引は正規化した取得元の sha256 をキーにする。同じ取得元・コミットの
+`subdir` 依存も通常の依存も tree を共有し、各 package のディレクトリを読む。
+実装は `src/project_fetch.rs::use_tree`（[package-system.md §6.5](./package-system.md)）。
 
 以前の name-keyed / `.src-<64bit hash>` / `.repos` 配置は履歴であり、現在は再利用しない。
 古いエントリは `almide clean` まで容量だけ占める。
@@ -728,8 +728,8 @@ export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns:
 2. `{base_dir}/pkg/mod.almd`
 3. `{base_dir}/pkg/src/mod.almd`
 4. `{base_dir}/pkg/src/lib.almd` (非推奨)
-5. `almide.toml` の `[dependencies]` → `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/...`
-   （`subdir` 依存はその checkout 内の指定ディレクトリ）
+5. `almide.toml` の `[dependencies]` → `~/.almide/cache/trees/<sum>/...`
+   （`subdir` 依存はその tree 内の指定ディレクトリ）
 
 依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
 

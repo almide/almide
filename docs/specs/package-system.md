@@ -230,8 +230,8 @@ reader of `almide.toml` sees it without fetching.
   or contains `..` at all (even `a/../b`: one spelling per directory).
 - **Git only.** `subdir` beside `path` is refused — a `path` already names the
   package directory; the hint gives the joined `path`.
-- **Checked at fetch.** The directory must exist in the checkout, stay inside it
-  (a symlink out of the clone is refused), and hold an `almide.toml` whose
+- **Checked at fetch.** The directory must exist in the fetched tree (which
+  holds no links, §6.5), and hold an `almide.toml` whose
   `[package] name` is the dependency's key — the key is the import name. Each
   refusal names the manifest line and lists the package directories the
   repository does hold (up to two levels down):
@@ -250,11 +250,11 @@ error: almide.toml:6: subdir `pkgs/ceangal` of dependency `ceangal` does not exi
   repository are two packages, walked separately for their own requirements and
   locked as two entries. `PkgId` (name, major) and MVS are unchanged — the name
   is still the package's own `[package] name`.
-- **One clone.** Checkouts are source-keyed under
-  `~/.almide/cache/.sources/<encoded-source>/@/<ref-or-commit>/`.
-  Dependencies on the same source/ref share the checkout whether or not they
-  specify `subdir`; each reads its package directory within it. Older
-  `.repos/.src-<hash>` and name-keyed layouts are not reused (see §6.3).
+- **One fetch.** The fetched unit is the repository's tree at one commit,
+  cached under `~/.almide/cache/trees/<sum>/` (§6.5). Dependencies on the same
+  source/ref share that tree whether or not they specify `subdir`; each reads
+  its package directory within it. Older layouts (`.sources/`,
+  `.repos/.src-<hash>`, name-keyed) are not read (see §6.5).
 - **CLI.** `almide add <repo>[@<tag>] --subdir <dir>` names the package after
   the subdir's last component (`--subdir pkgs/ceangal` → `ceangal`); with
   `--git <url>` the first argument is the name. `add` fetches and checks the
@@ -326,9 +326,10 @@ therefore fetches a git dependency only from an owner the **root** manifest
 trusts:
 
 - `github.com/almide` is trusted by default;
-- any other owner, on any host, is listed as `host/owner` in `[trust] owners`;
-- `path =` dependencies and git sources on the local filesystem (`file://…` or
-  a plain path) are exempt, since nobody can register a name there;
+- any other owner, on any host, is listed as `host/owner` in `[trust] owners`
+  (or a deeper path prefix, `gitlab.com/group/sub`);
+- `path =` dependencies are exempt, since nobody can register a name there
+  (a `file://` or plain-path `git` source is refused outright, §6.5);
 - a dependency's own `[trust]` is never read: a package cannot grant trust on
   the root's behalf.
 
@@ -343,16 +344,19 @@ owners = ["github.com/alice"]
 
 The check runs before any network access, on `almide add` and on every fetch
 (`build`, `run`, `test`, `bench`, `update`), for direct, transitive and
-already-locked dependencies alike; a lock is not a grant. Owners compare
-case-insensitively. A URL whose path has a `.` or `..` segment or a percent
-escape is refused outright, because the owner it fetches from cannot be read
-from its text. There is no flag or environment variable that trusts
+already-locked dependencies alike; a lock is not a grant. Trust is decided on
+the typed source (§6.5): its host, and a grant's path as a whole-segment
+prefix of the source's path (`github.com/almide` covers
+`github.com/almide/json` and `github.com/Almide/json`, never
+`github.com/almide-evil/json` or `github.com.evil.io/almide/json`). Path
+segments compare without case. A source the grammar refuses never reaches the
+check. There is no flag or environment variable that trusts
 everything: a grant always names its owner, in a file reviewed with the rest
 of the change.
 
 **`almide add`** resolves the spec, checks the owner, probes that the
-repository exists and has the requested tag (`git ls-remote`, prompts off;
-`--dry-run` stops here), fetches it, and only then
+repository exists and has the requested tag (one ref listing over the
+in-process client, §6.5; `--dry-run` stops here), fetches it, and only then
 writes `almide.toml` and `almide.lock`. Any refusal or failure exits 1 and
 leaves both files byte-identical:
 
@@ -405,22 +409,22 @@ resolution that would change the lock, and writes no lock. Use it in CI.
 (The lock records direct dependencies only; a transitive one is resolved by
 its ref, as before.)
 
-**The cache is keyed by source.** A checkout lives under
-`~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/<ref or commit>`,
-each URL piece encoded injectively, so a package named `svg` fetched from
-`github.com/evil/svg` can never answer for `github.com/almide/svg`. The
-previous layout hashed the URL into 64 bits (FNV-1a), which is not collision
-resistant. Directories of older layouts are never read; `almide clean`
-removes them. Each entry is filled under a lock file beside it
-(`.<entry>.lock`), so concurrent `almide` processes and threads fetching one
-dependency run one clone and the others reuse it; `almide update` removes a
-stale entry under the same lock.
+**The cache is keyed by content.** A package tree lives under
+`~/.almide/cache/trees/<sum>/`, named by its tree hash (§6.5), and the index
+that maps a source's commit to a sum is keyed by the sha256 of the canonical
+source, so a package named `svg` fetched from `github.com/evil/svg` can never
+answer for `github.com/almide/svg`: their content hashes differ, and the
+tree is re-hashed on every use. Directories of older layouts are never read;
+`almide clean` removes them. One fetch of a `(source, commit)` runs at a
+time, under a lock file beside its index entry, so concurrent `almide`
+processes and threads fetching one dependency run one fetch and the others
+reuse its tree.
 
 Trust is intent, so it lives in `almide.toml`; the lock records facts and
 carries no trust bit.
 
-Tests: `tests/dependency_trust_test.rs`, the `trust` and `project_fetch` unit
-tests.
+Tests: `tests/dependency_trust_test.rs`, the `trust`, `git_source` and
+`project_fetch` unit tests.
 
 ### 6.4 Native code from a dependency needs a grant: `[permissions] native`
 
@@ -488,15 +492,115 @@ nat = path ../nat
 
 Tests: `tests/native_grant_test.rs`.
 
+### 6.5 Sources, the fetch and the package format (ADR-0035)
+
+ADR-0035 removes the second reader of every dependency string: a source is
+read once into a typed value, nothing but one typed launcher starts a process
+on the fetch path, a package is a tree of regular files, and the lock holds
+its tree hash.
+
+**Sources (D1).** A `git =` value — in the root manifest, a dependency's
+manifest, the lock, `almide add --git` or `almide tool install` — is read once
+into
+
+```text
+GitSource = { transport: Https | Ssh, user: Segment?, host: Host, port: 1..65535?, path: [Segment] (1 or more) }
+Host      = lowercase ASCII DNS name, 1..253 bytes, labels [a-z0-9-], not starting or ending with "-"
+Segment   = [A-Za-z0-9_] [A-Za-z0-9._-]{0,99}   -- never starts with "-" or ".", never "." or ".."
+```
+
+Any git host, any path depth, a port, `https://`, `ssh://` and the scp-like
+`user@host:owner/repo` (normalized to `ssh://user@host/owner/repo`) are kept;
+a `.git` suffix is not part of the identity. Refused, each on its manifest
+line with a diagnostic that prints the canonical form when there is one: a
+component starting with `-`; a `?` or `#`; a password or token in the user
+part, and any user part on https; any scheme but https and ssh (`git://`,
+`http://`, `file://`, `ext::`); control, bidi or whitespace characters, raw
+or percent-encoded (any `%` escape at all); an empty or dot-only segment; an
+IP-literal host; a Windows reserved name. The fetch URL, the ssh argv, the
+cache key and the lock's `git` are all serialized from the typed value, never
+from the text.
+
+**The fetch (D2).** An https source is fetched by an in-process git client
+(`src/fetch/`): smart HTTP over rustls (git protocol v2, v0 as fallback), one
+shallow fetch of the one commit, every object of the pack re-hashed, so the
+tree is bound to the commit id. It honours `HTTPS_PROXY` / `NO_PROXY` and
+`SSL_CERT_FILE` / `SSL_CERT_DIR`, follows no redirect (a moved repository is
+reported with its new location) and sends no credentials. An ssh source
+starts exactly one program, `ssh -o SendEnv=GIT_PROTOCOL [-p PORT] [-l USER]
+-- HOST git-upload-pack '/a/b'`, built only from typed fields; host-key
+checking is the user's ssh configuration. Nothing else on the fetch path
+starts a process.
+
+**The package format (D3).** A fetched commit becomes a tree of regular files
+before anything is written. Refused as a package-format error naming the
+entry: a symlink, a submodule, anything else that is not a regular file; a
+name outside `[A-Za-z0-9._-]{1,100}` (not starting with `-`, not `.`/`..`,
+not `.git`, not a Windows reserved name — a leading `.` is kept, for
+`.gitignore`); two paths equal under case folding. Budgets, fixed (no
+manifest key, lock entry, environment variable or flag raises them):
+
+| Budget | Value | Measured (2026-11-19, every almide-org repository, every tag and HEAD) |
+|---|---|---|
+| bytes per file | 16 MiB | largest library file 0.2 MB |
+| bytes per package | 64 MiB | largest library 3.4 MB (porta) |
+| files per package | 10 000 | largest library 359 (porta) |
+| path depth | 32 | deepest library 5 |
+
+The tree is written with directories and new regular files only.
+`package_files(root)` is the one enumeration of a package on disk: the tree
+hash, the module resolver and the native / media grant scans all walk with
+its primitive, which never follows a link — in a dependency's cache entry a
+link is tampering and is refused; in a local package it is skipped.
+
+**The tree sum (D4).** `sum = "h1:<base64 sha256>"` over the lines
+`sha256(file) + "  " + RelPath + "\n"` in RelPath order — the shape of Go's
+`h1:` dirhash. It is computed when the tree is fetched, recorded in the lock,
+and **checked on every use, a cache hit included**: a cache entry that no
+longer hashes to its sum (a file edited, added or removed, a link planted) is
+refused in cache-only mode (LSP, `almide ide`, `almide mcp` tools) and
+otherwise removed and fetched again, with a warning. A fetched tree whose sum
+is not the lock's is refused: the remote served other content for the locked
+commit.
+
+**Migration.** The refused source forms are refused outright, with no
+dialect-epoch row; a scan of every almide-org manifest and lock (2026-11-19)
+found none. A lock without `sum` still reads, and the next run that resolves
+it writes the sum (read old, write new); `--locked` refuses a lock entry with
+no `sum`. Cache directories of the older layouts are not read; `almide clean`
+removes them.
+
+Open in the ADR's trust boundary: TLS and its roots, the user's ssh host
+keys, the in-process client, sha256, the host on the first fetch, and the
+package author (held by `[permissions]`, not here). A private https
+repository is not reachable (no credentials are sent); fetch it over ssh.
+
+Tests: `tests/dep_source_hardening_test.rs` (every refused form in the root
+and in a dependency's manifest; a non-hash lock commit and sum),
+`tests/dep_package_format_test.rs` (a symlink, a submodule, `..`, `.git`, a
+`-` name, a bidi name, a case collision and an over-budget file, each refused
+naming the entry with nothing cached; a cache entry edited, extended, emptied
+or given a link, refused cache-only and fetched again online; a lock sum that
+does not match; `--locked` and a lock without sums),
+`tests/fetch_spawn_gate_test.rs` (the spawn gate and its negative controls,
+and an ssh source fetched through a stub `ssh` whose argv is checked), the
+`git_source`, `package_tree` and `fetch` unit tests. Every dependency test is
+served by `tests/support/git_host.rs`, an in-test https git host reached
+through `HTTPS_PROXY` and `SSL_CERT_FILE`.
+
 ## 7. Lock File
 
 ```toml
 # almide.lock — auto-generated, do not edit
 
-bindgen = { git = "https://github.com/almide/almide-bindgen", ref = "v0.1.0", commit = "a629eded8d20..." }
-json = { git = "https://github.com/almide/json", ref = "v2.0.0", commit = "b8f3a1..." }
-ceangal = { git = "https://github.com/almide-graphics/ceangal2", ref = "v0.1.0", commit = "c41d...", subdir = "ceangal" }
+bindgen = { git = "https://github.com/almide/almide-bindgen", ref = "v0.1.0", commit = "a629eded8d20…", sum = "h1:…" }
+json = { git = "https://github.com/almide/json", ref = "v2.0.0", commit = "b8f3a1…", sum = "h1:…" }
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", ref = "v0.1.0", commit = "c41d…", sum = "h1:…", subdir = "ceangal" }
 ```
+
+Every field is typed on read (§6.5): `git` through the source grammar
+(written back in canonical form), `commit` as 40 or 64 lowercase hex, `sum`
+as an `h1:` tree sum. Any other value refuses the lock and names the entry.
 
 An entry for a `subdir` dependency (§6.1) records the normalized `subdir`, so
 the lock names the package exactly; entries without one are written exactly as
@@ -539,14 +643,15 @@ Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
 ```text
 1. Parse almide.toml → direct dependencies
 2. For each dep:
-   a. If almide.lock has an entry for this (git, ref) → use its exact commit
-      (no network)
-   b. Else a tag → fetch it, or reuse its cached checkout (tags never move)
+   a. If almide.lock has an entry for this (git, ref) → use its exact commit,
+      and its sum: the cached tree named by the sum (no network), re-hashed
+   b. Else a tag → its commit from the index (tags never move), else from one
+      ref listing; then that commit's tree, cached or fetched
    c. Else a branch, or no ref (the remote's default branch) → ask the remote
-      for its current head (`git ls-remote`) and fetch that commit; the cache
-      is not trusted for a ref that moves. A remote that cannot be reached
-      falls back to the checkout the ref last resolved to, with a warning
-      naming its commit, and that commit is not written to the lock
+      for its current head (one ref listing) and use that commit's tree; the
+      cache is not trusted for a ref that moves. A remote that cannot be
+      reached falls back to the commit the ref last resolved to, with a
+      warning naming it, and that commit is not written to the lock
    d. A ref the remote does not have is an error naming the dependency, the
       ref, the chain from the root that requires it and the newest tags
    e. With `subdir`, the package is that directory of the checkout (§6.1)
@@ -556,8 +661,8 @@ Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
    - Same (name, major): keep maximum requested version (MVS)
    - Different major: both coexist with versioned names
 6. Detect impossible constraints → error with explanation
-7. Write almide.lock: per direct dependency, the (git, ref, commit) of the
-   version step 5 selected for its package
+7. Write almide.lock: per direct dependency, the (git, ref, commit, sum) of
+   the version step 5 selected for its package
 ```
 
 ## 9. Error Messages

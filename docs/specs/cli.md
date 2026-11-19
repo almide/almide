@@ -1083,8 +1083,8 @@ almide update            # tag 固定でない全依存
   既存依存への `almide add` も同じ pin を書き戻す)。前進の唯一の正規手段が本コマンド。
 - **tag 固定の依存は動かさない**(マニフェストの要求そのものが変わるため。skip を報告)。
 - 変更した entry だけを書き換え、他の pin はバイト単位で不変。
-- 前進時は当該 ref のキャッシュディレクトリを破棄し、次のフェッチで再取得させる。
-- `git ls-remote` 1 回で解決(clone しない)。
+- 前進先のコミットを取得し、その tree の `sum` も lock に書く(ADR-0035。[package-system.md §6.5](./package-system.md))。
+- ref の解決はプロセス内 git クライアントの ref 一覧 1 回(`git` プロセスは起動しない)。
 - ネットワークに触れる前に所有者を `[trust] owners` と照合する(#4093)。
 - `almide.toml` の `git` がロックと違う依存(ソース変更)は、tag 固定でも古い pin を捨てて新しいソースから
   ロックし直す。ビルドはソース変更を拒否し、本コマンドを案内する([package-system.md §6.3](./package-system.md))。
@@ -1093,7 +1093,7 @@ almide update            # tag 固定でない全依存
 
 ### `almide add`
 
-依存パッケージを追加する。順序は「解決 → 所有者の信頼確認 → 存在確認(`git ls-remote`)→ フェッチ →
+依存パッケージを追加する。順序は「解決 → ソースの型付き読み取り(ADR-0035 D1)→ 所有者の信頼確認 → 存在確認(ref 一覧)→ フェッチ →
 `almide.toml` と `almide.lock` の書き込み」(#4093)。拒否・失敗はすべて終了コード 1 で、両ファイルを一切変えない。
 
 ```bash
@@ -1238,9 +1238,9 @@ looked up; an unknown NAME is `Dependency 'NAME' not found in almide.toml`.
 
 ```bash
 almide deps --path bindgen
-# ~/.almide/cache/.sources/<encoded-source>/@/<commit>/src
-almide deps --path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
-# ~/.almide/cache/.sources/<encoded-source>/@/<commit>/ceangal/src
+# ~/.almide/cache/trees/<sum>/src
+almide deps --path ceangal     # subdir 依存: 共有 tree 内のパッケージディレクトリ
+# ~/.almide/cache/trees/<sum>/ceangal/src
 almide deps --path bindgen --json
 # {"schema_version":1,"ok":true,"diagnostics":[],"result":{"name":"bindgen","path":"/abs/dir"}}
 ```
