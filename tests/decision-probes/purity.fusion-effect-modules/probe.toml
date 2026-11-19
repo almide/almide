@@ -1,0 +1,3 @@
+# The fusion purity decision: stages calling an effect-declaring module run
+# stage by stage. A route that runs the program prints the staged order.
+expect = "a:1\na:2\na:3\nb:1"

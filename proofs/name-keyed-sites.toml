@@ -399,11 +399,6 @@ class = "legacy"
 names = 49
 
 [[site]]
-id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
-class = "legacy"
-names = 12
-
-[[site]]
 id = "crates/almide-ir/src/fusion.rs::TOTAL_MODULES::table"
 class = "legacy"
 names = 4

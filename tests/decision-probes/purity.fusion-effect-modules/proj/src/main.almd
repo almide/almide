@@ -1,0 +1,9 @@
+// The probe of purity.fusion-effect-modules: two pipeline stages that each
+// print through `io` (a module that declares `effect fn print`). They must
+// run stage by stage, never element by element (#4855).
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+    |> list.map((x) => { io.print("a:${x}\n"); x })
+    |> list.map((x) => { io.print("b:${x}\n"); x })
+  println("n=${list.len(xs)}")
+}

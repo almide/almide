@@ -1,0 +1,10 @@
+effect fn staged() -> Int = {
+  let xs = [1, 2, 3]
+    |> list.map((x) => { io.print("a:${x}\n"); x })
+    |> list.map((x) => { io.print("b:${x}\n"); x })
+  list.len(xs)
+}
+
+test "effectful stages run stage by stage" {
+  assert_eq(staged(), 3)
+}

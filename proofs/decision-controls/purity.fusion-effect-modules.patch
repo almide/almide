@@ -1,15 +1,14 @@
-# Negative control of purity.fusion-effect-modules (proofs/decision-sites.toml): purity stops reading the declarations (#4855): a stdlib module no list names that declares an effect fn reads pure
-# control_test: crates/almide-ir/tests/fusion_declared_effects.rs::novel_a_module_declaring_an_effect_is_not_fused_as_pure
+# Negative control of purity.fusion-effect-modules (proofs/decision-sites.toml): fusion reads only whether a module's source is known, not what it declares: an effect-declaring stdlib module fuses as pure
+# control_test: crates/almide-ir/tests/fusion_purity_novel.rs::novel_fusion_purity_is_the_declared_effect_set
 diff --git a/crates/almide-ir/src/fusion.rs b/crates/almide-ir/src/fusion.rs
 --- a/crates/almide-ir/src/fusion.rs
 +++ b/crates/almide-ir/src/fusion.rs
-@@ -45,7 +45,8 @@
+@@ -42,7 +42,7 @@
      is_stdlib: impl Fn(&str) -> bool,
      declares_effect: impl Fn(&str) -> Option<bool>,
  ) -> bool {
--    is_stdlib(module) && !EFFECT_MODULES.contains(&module) && declares_effect(module) == Some(false)
-+    let _ = &declares_effect;
-+    is_stdlib(module) && !EFFECT_MODULES.contains(&module)
+-    is_stdlib(module) && declares_effect(module) == Some(false)
++    is_stdlib(module) && declares_effect(module).is_some()
  }
  
  /// Every fn of stdlib `module` returns without aborting.
