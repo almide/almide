@@ -22,10 +22,11 @@ effect fn has_flag(name: String) -> Bool = {
 // is passed.
 @category
 fn __name_ok(reader: String, name: String) -> Result[Unit, String] =
-  if not string.starts_with(name, "-") and name != "" then ok(())
-  else match __undash(name) {
-    "" => err("${reader}: the name is empty: write it without dashes, as in \"out\""),
-    bare => err("${reader}: write the name without its dashes: \"${bare}\""),
+  if name != "" and not string.starts_with(name, "-") then ok(())
+  else {
+    let bare = __undash(name)
+    err(if bare == "" then reader + ": the name is empty: write it without dashes, as in \"out\""
+    else reader + ": write the name without its dashes: \"" + bare + "\"")
   }
 
 @category
