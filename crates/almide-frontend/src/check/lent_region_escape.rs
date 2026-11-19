@@ -94,6 +94,14 @@ impl Checker {
                         {
                             lent.insert(*name);
                         }
+                        // #4862: a destructuring binding that names a lent
+                        // name makes every name it binds lent; the escape
+                        // rules then read each one's own type.
+                        if let Stmt::LetDestructure { pattern, value, .. } = s
+                            && mentions(value, &lent)
+                        {
+                            lent.extend(crate::concurrent_reach::pattern_binders(pattern));
+                        }
                     }
                 }
             });
@@ -111,6 +119,9 @@ impl Checker {
                 for s in stmts {
                     if let Stmt::Var { name, .. } | Stmt::Let { name, .. } = s {
                         locals.insert(*name);
+                    }
+                    if let Stmt::LetDestructure { pattern, .. } = s {
+                        locals.extend(crate::concurrent_reach::pattern_binders(pattern));
                     }
                 }
             }
