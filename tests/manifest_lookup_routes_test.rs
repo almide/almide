@@ -144,14 +144,17 @@ fn a_test_run_over_two_projects_judges_each_file_by_its_own_manifest() {
     for (name, allow) in [("a_open", "\"IO\", \"FS\", \"Abort\""), ("b_closed", "\"IO\", \"Abort\"")] {
         write(&root.join(format!("{name}/almide.toml")), &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [{allow}]\n"));
         write(&root.join(format!("{name}/s.txt")), "x");
+        // Each test loads a module of its project, so the one-program lane
+        // batches the four files (a file that loads none is run alone).
+        write(&root.join(format!("{name}/src/{name}_reader.almd")), "import fs\n\npub effect fn read() -> String = fs.read_text(\"s.txt\") ?? \"none\"\n");
         for i in 0..2 {
             write(
-                &root.join(format!("{name}/src/r{i}_test.almd")),
-                "import fs\n\ntest \"reads\" {\n  assert_eq(fs.read_text(\"s.txt\") ?? \"none\", fs.read_text(\"s.txt\") ?? \"none\")\n}\n",
+                &root.join(format!("{name}/src/{name}_r{i}_test.almd")),
+                &format!("import {name}_reader\n\ntest \"reads\" {{\n  assert_eq({name}_reader.read()!, {name}_reader.read()!)\n}}\n"),
             );
         }
     }
-    let o = almide(root, &["test", "."], &[]);
+    let o = almide(root, &["test", ".", "--target", "wasm"], &[]);
     let t = text(&o);
     assert!(!o.status.success(), "a file of b_closed read a file under allow = [\"IO\", \"Abort\"]:\n{t}");
     assert!(t.contains("FS.read is not in [permissions].allow"), "the refusal was not named:\n{t}");
