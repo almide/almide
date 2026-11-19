@@ -1,0 +1,14 @@
+# Negative control of witness.e083-exit-validator (proofs/decision-sites.toml): only the recorded windows are judged: an exit no plan accounts for passes.
+# control_test: crates/almide-wasm/tests/exit_unrecorded.rs::novel_an_exit_no_plan_records_is_refused
+diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+--- a/crates/almide-wasm/src/exit_plan.rs
++++ b/crates/almide-wasm/src/exit_plan.rs
+@@ -754,7 +754,7 @@
+     // no window claims was emitted without an ExitPlan, so its releases were
+     // never judged: refuse it rather than read only the recorded windows.
+     for &(off, kind) in &ops {
+-        if matches!(kind, Op::Return | Op::ReturnCall) && !claimed.iter().any(|&(s, e)| off >= s && off <= e) {
++        if matches!(kind, Op::Return | Op::ReturnCall) && !claimed.iter().any(|&(s, e)| off >= s && off <= e) && function.is_empty() {
+             return Err(d.at(
+                 "an emitted exit has no ExitPlan",
+                 format!("byte {off}"),
