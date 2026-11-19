@@ -54,9 +54,10 @@ pub struct MediaGrant {
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
-    /// The git URL it was fetched from; empty for a path dependency. Read by
-    /// the media grant, which names a package by its source (ADR-0032 Q17).
-    pub source: String,
+    /// The git source it was fetched from; `None` for a path dependency.
+    /// Read by the media grant, which names a package by its source
+    /// (ADR-0032 Q17).
+    pub source: Option<crate::git_source::GitSource>,
     /// The requested version this entry currently holds — MVS keeps the
     /// maximum requested version per `PkgId` (#1458).
     pub version: String,
@@ -80,7 +81,9 @@ pub struct Package {
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub name: String,
-    pub git: String,
+    /// The git source, read once (ADR-0035 D1); `None` for a `path`
+    /// dependency.
+    pub git: Option<crate::git_source::GitSource>,
     pub tag: Option<String>,
     pub branch: Option<String>,
     pub version: Option<String>,
@@ -504,9 +507,9 @@ fn dependency_from(
         debug_assert!(DEPENDENCY_KEYS.contains(&k), "dependency key `{k}` is read but not in DEPENDENCY_KEYS");
         table.get(k).map(value_text)
     };
-    let git = field("git").unwrap_or_default();
+    let git_text = field("git").unwrap_or_default();
     let dep_path = field("path");
-    if git.is_empty() && dep_path.is_none() {
+    if git_text.is_empty() && dep_path.is_none() {
         return Ok(None);
     }
     // The byte offset of `key` in this entry (its value), else of the entry.
@@ -519,6 +522,14 @@ fn dependency_from(
             .map_or(entry.span().start, |v| v.span().start)
     };
     let declared_at = Some(format!("{}:{}", path.display(), lines.line(offset_of("git"))));
+    // ADR-0035 D1: the source is read here, once; everything after uses the
+    // typed value. A refused form is an error on its manifest line.
+    let git = match git_text.is_empty() {
+        true => None,
+        false => Some(crate::git_source::GitSource::parse(&git_text).map_err(|e| {
+            located(path, content, offset_of("git"), &format!("dependency `{name}`: {e}"))
+        })?),
+    };
     let subdir = match table.get("subdir") {
         None => None,
         Some(raw) => {
@@ -1118,19 +1129,18 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".almide").join("cache")
 }
 
-/// A git commit hash as a lock or a remote names it: 1 to 64 hex digits
-/// (#4812) — never a path or an option.
-pub fn is_commit_hash(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-/// A locked dependency entry for almide.lock
+/// A locked dependency entry for almide.lock. Every field is typed on read
+/// (ADR-0035 D4): `git` through the manifest's own source grammar, `commit`
+/// as 40 or 64 lowercase hex, `sum` as an `h1:` tree hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedDep {
     pub name: String,
-    pub git: String,
+    pub git: crate::git_source::GitSource,
     pub ref_name: String,
-    pub commit: String,
+    pub commit: crate::git_source::CommitId,
+    /// The tree hash of the package content (`None` only in a lock written
+    /// before ADR-0035: read old, write new; `--locked` refuses it).
+    pub sum: Option<crate::package_tree::TreeSum>,
     /// The package directory inside the repository (#3381), as the
     /// manifest's normalized `subdir`; `None` = the repository root. Several
     /// entries may share one `(git, commit)` — one clone, distinct packages.
@@ -1190,19 +1200,23 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
                 )
             })
         };
-        let git = required("git")?;
-        let commit = required("commit")?;
-        // #4812: the commit names a cache directory and is handed to `git
-        // checkout`, so it is a hex hash and nothing else (an absolute path
-        // was joined in as the package directory).
-        if !is_commit_hash(&commit) {
-            return Err(format!(
-                "{}: lock entry '{}' has a `commit` that is not a hex commit hash\n  \
-                 hint: almide.lock is generated; delete the entry and the next `almide check` rewrites it",
-                path.display(),
-                name
-            ));
-        }
+        let regenerate = "hint: almide.lock is generated; delete the entry and the next `almide check` rewrites it";
+        let git = crate::git_source::GitSource::parse(&required("git")?)
+            .map_err(|e| format!("{}: lock entry '{}': {e}\n  {regenerate}", path.display(), name))?;
+        // #4812: the commit is typed — 40 or 64 lowercase hex — so it can
+        // never be a path or an option.
+        let commit = crate::git_source::CommitId::parse(&required("commit")?).map_err(|e| {
+            format!("{}: lock entry '{}' has a `commit` that is not a hex commit hash: {e}\n  {regenerate}", path.display(), name)
+        })?;
+        let sum = match entry.get("sum") {
+            None => None,
+            Some(v) => Some(
+                v.as_str()
+                    .ok_or_else(|| "not a string".to_string())
+                    .and_then(crate::package_tree::TreeSum::parse)
+                    .map_err(|e| format!("{}: lock entry '{}' has a `sum` that is not a tree sum: {e}\n  {regenerate}", path.display(), name))?,
+            ),
+        };
         let ref_name =
             entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let subdir = entry
@@ -1213,7 +1227,7 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
                 })
             })
             .transpose()?;
-        locked.push(LockedDep { name, git, ref_name, commit, subdir });
+        locked.push(LockedDep { name, git, ref_name, commit, sum, subdir });
     }
     Ok(locked)
 }
@@ -1235,12 +1249,14 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
         // `subdir` only when there is one, so a lock without subdir
         // dependencies stays byte-identical to what earlier compilers wrote.
         let subdir = dep.subdir.as_deref().map(|s| format!(", subdir = {}", toml_quoted(s))).unwrap_or_default();
+        let sum = dep.sum.map(|s| format!(", sum = {}", toml_quoted(&s.to_string()))).unwrap_or_default();
         content.push_str(&format!(
-            "{} = {{ git = {}, ref = {}, commit = {}{} }}\n",
+            "{} = {{ git = {}, ref = {}, commit = {}{}{} }}\n",
             dep.name,
-            toml_quoted(&dep.git),
+            toml_quoted(&dep.git.to_string()),
             toml_quoted(&dep.ref_name),
-            toml_quoted(&dep.commit),
+            toml_quoted(dep.commit.as_str()),
+            sum,
             subdir
         ));
     }
