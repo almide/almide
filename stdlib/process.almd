@@ -105,17 +105,17 @@ local fn __child(c: ProcessChild) -> Int = match c {
 @ordered
 @intrinsic("almide_rt_process___os_output")
 @spawns_process(cmd)
-effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
+local effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_run")
 @spawns_process(cmd)
-effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+local effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_start")
 @spawns_process(cmd)
-effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+local effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_process___os_poll")
 effect fn __os_poll(h: Int) -> Result[Bool, String] = _

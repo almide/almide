@@ -115,10 +115,10 @@ fn files_are_fs_not_io() {
     }
 }
 
-/// #4817: a runtime leaf that starts a child (`process.__os_run`, declared
-/// with a `cmd: String` first parameter) is charged by `[permissions] proc`
-/// like `exec`: the spawning set is read off the declarations, not a list of
-/// names, so a command outside the list is refused at check time.
+/// #4817: a runtime leaf that starts a child (`process.__os_run`) never runs
+/// a command outside `[permissions] proc`. The leaves are module-private, and
+/// the spawning set the gate charges is read off the declarations (a
+/// `cmd: String` or `ProcessCommand` first parameter), not a list of names.
 #[test]
 fn a_spawning_leaf_is_bounded_by_the_proc_list() {
     let td = tempfile::TempDir::new().unwrap();
@@ -130,7 +130,6 @@ fn a_spawning_leaf_is_bounded_by_the_proc_list() {
     for args in [&["check", "main.almd"][..], &["run", "main.almd"]] {
         let o = almide(td.path(), args);
         assert!(!o.status.success(), "`almide {}` started `echo` under proc = [\"git\"]:\n{}", args.join(" "), text(&o));
-        assert!(text(&o).contains("`echo` is not in [permissions] proc"), "`almide {}`:\n{}", args.join(" "), text(&o));
-        assert!(!text(&o).contains("spawned-4817"), "`almide {}` ran the command", args.join(" "));
+        assert!(!String::from_utf8_lossy(&o.stdout).contains("spawned-4817"), "`almide {}` ran the command", args.join(" "));
     }
 }
