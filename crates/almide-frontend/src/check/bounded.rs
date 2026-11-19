@@ -50,6 +50,9 @@ impl Checker {
                 }
             }
         }
+        // #4871: each user fn's allocation summary, computed by reach and
+        // shared by every fn's walk (`None` while it is being computed).
+        let alloc_memo: std::cell::RefCell<HashMap<String, Option<bool>>> = Default::default();
         for decl in &program.decls {
             let ast::Decl::Fn { name, attrs, body: Some(body), span, .. } = decl else {
                 continue;
@@ -76,6 +79,7 @@ impl Checker {
                 fn_span: *span,
                 consts: Vec::new(),
                 loop_depth: 0,
+                alloc_memo: &alloc_memo,
             };
             cx.walk_expr(body);
         }
@@ -356,6 +360,8 @@ struct BoundedCx<'a, 'c> {
     /// "constant-foldable from a literal"); shadowing/mutation removes them
     consts: Vec<String>,
     loop_depth: u32,
+    /// #4871: user fn -> does a call to it allocate (by reach)?
+    alloc_memo: &'a std::cell::RefCell<std::collections::HashMap<String, Option<bool>>>,
 }
 
 impl BoundedCx<'_, '_> {
@@ -868,6 +874,17 @@ impl BoundedCx<'_, '_> {
     /// nothing the profile admits.
     fn check_call_ident(&mut self, call: &ast::Expr, n: &str, args: &[ast::Expr]) {
         if let Some((is_bounded, _)) = self.fns.get(n) {
+            // ALS-B4 / E071 (#4871): a call allocates when the callee's body
+            // does, by reach — decided from what the callee's body contains,
+            // under the same rules as a loop body, never from its name.
+            if *is_bounded && self.loop_depth > 0 && self.callee_allocates(n) {
+                self.err(
+                    "calling a function that allocates inside a counted loop is not admissible in a @bounded function",
+                    "allocate outside the loop and keep the loop body allocation-free",
+                    "E071",
+                    call.span,
+                );
+            }
             if !is_bounded {
                 // ALS-B7 / E074
                 self.err(
@@ -1070,6 +1087,42 @@ impl BoundedCx<'_, '_> {
                 call.span,
             );
         }
+    }
+
+    /// #4871: does calling user fn `n` allocate? The callee's body is walked
+    /// as a loop body under every profile rule into a scratch list: any
+    /// allocation it makes (E071 / E075), and any callee the profile cannot
+    /// follow (E074 indirect or outside the profile, E100 foreign code), makes
+    /// the call allocating. A callee without a body (`@extern`) is foreign, so
+    /// allocating. A callee already being summarised (recursion, itself E073)
+    /// is read as allocating: fail closed.
+    fn callee_allocates(&mut self, n: &str) -> bool {
+        if let Some(known) = self.alloc_memo.borrow().get(n) {
+            return known.unwrap_or(true);
+        }
+        let Some((_, body)) = self.fns.get(n) else { return true };
+        let Some(body) = *body else {
+            self.alloc_memo.borrow_mut().insert(n.to_string(), Some(true));
+            return true;
+        };
+        self.alloc_memo.borrow_mut().insert(n.to_string(), None);
+        let mut scratch: Vec<Diagnostic> = Vec::new();
+        let mut probe = BoundedCx {
+            checker: self.checker,
+            diags: &mut scratch,
+            fns: self.fns,
+            fn_name: n,
+            fn_span: self.fn_span,
+            consts: Vec::new(),
+            loop_depth: 1,
+            alloc_memo: self.alloc_memo,
+        };
+        probe.walk_expr(body);
+        let allocates = scratch
+            .iter()
+            .any(|d| matches!(d.code, Some("E071" | "E074" | "E075" | "E100")));
+        self.alloc_memo.borrow_mut().insert(n.to_string(), Some(allocates));
+        allocates
     }
 
     /// #4855: the call's own result type, as the checker instantiated it

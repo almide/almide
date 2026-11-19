@@ -43,7 +43,7 @@
 # naming the PR and why):
 # unstamped_ceiling     = "140"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "202"
+# skipped_route_ceiling = "201"
 # failopen_ceiling      = "54"
 #
 # History:
@@ -690,6 +690,7 @@ items = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident",
 ]
 keys = [
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident::S1::E071",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident::S1::E074",
 ]
 decides = "a bare callee is admitted if it is an entry fn of the profile, or its name starts with print/eprint, or is assert/assert_eq; else E074"
@@ -752,8 +753,13 @@ items = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_member_call_shape",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::unwrap_rule",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::walk_stmts",
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::callee_allocates",
 ]
 keys = [
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::callee_allocates::S1::E071",
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::callee_allocates::S1::E074",
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::callee_allocates::S1::E075",
+  "crates/almide-frontend/src/check/bounded.rs::BoundedCx::callee_allocates::S1::E100",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call::S1::E074",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_member_call_shape::S1::E071",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_member_call_shape::S1::E074",
@@ -797,12 +803,12 @@ tests = [
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
 issues = [4855, 4871]
 status = "UNSTAMPED"
-reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)", "c2:fail-open (#4871, probed: an allocating user fn called inside a counted loop is not followed)"]
-note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities."
+reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)"]
+note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates); the probe allocates only through a @bounded callee in a counted loop, observed refused on all 14 routes inside and outside the project (2026-11-20 ds-2)."
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
 novel = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871): base green, patched red (scripts/run-decision-controls.sh); the #4871 hunk alone turns novel_a_callee_allocation_is_followed_by_reach red"
 probe = "tests/decision-probes/bounded.shape-rules"
 
 [[site]]
@@ -3548,19 +3554,19 @@ decides = "a call to a stdlib fn the declared both-legs table marks unavailable 
 from = "name"
 unknown = "allow"
 unknown_note = "keyed by fn name from proofs/target-availability.toml (wasm_compile.rs:213-250); a fn not in the table passes here and is caught (or not) by the render wall E082; ALMIDE_NO_AVAIL_CHECK skips it (registered Gate switch)"
-routes = { check = "runs: --target wasm only (check.rs:249)", check_json = "runs: check --json --target wasm reports E081 as a JSON row (#4857)", check_effects = "n.a.", run = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", build = "runs: wasm, stock-p1 leg", test = "skipped: #4857 test lane walls to the native fallback", bench = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", native = "n.a.", wasm = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "runs: almide_check with target = \"wasm\"; an unknown target is refused (#4857)", emit = "n.a." }
+routes = { check = "runs: --target wasm only (check.rs:249)", check_json = "runs: check --json --target wasm reports E081 as a JSON row (#4857)", check_effects = "n.a.", run = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", build = "runs: wasm, stock-p1 leg", test = "n.a.: the --target wasm test lane runs on the embedded host and makes run's own decision (wasm_compile.rs embedded_leg_availability, test_wasm.rs; #4857 ruling A): an embedded-leg row is E081 FAILED, and the p1 audit only decides whether a stock artifact exists; observed 2026-11-20 ds-2: the probe runs, as run does. The default lane's reported native fallback is that lane's design (src/cli/test_wasm.rs WasmTestOutcome); no contract states it", bench = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", native = "n.a.", wasm = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "runs: almide_check with target = \"wasm\"; an unknown target is refused (#4857)", emit = "n.a." }
 tests = [
   "tests/wasm_availability_e081_test.rs",
 ]
 control_note = "scripts/check-target-availability.sh (four-directional table ⇄ measured walls)"
 issues = [4857]
 status = "UNSTAMPED"
-reasons = ["c1:name-keyed table (proofs/target-availability.toml; the render wall E082 is the backstop)", "c3:`almide test --target wasm` runs the file on the native fallback instead of reporting E081 (observed 2026-11-19, #4857)", "c2:unknown = allow (a fn the table does not list is admitted until the render wall)", "c3:route-skipped (see cells)"]
+reasons = ["c1:name-keyed table (proofs/target-availability.toml; the render wall E082 is the backstop)", "c2:unknown = allow (a fn the table does not list is admitted until the render wall)", "c3:route-skipped (see cells)"]
 note = "Availability, not a security property; the render wall is the backstop (wasm_compile.rs:195-196)."
 control_patch = "proofs/decision-controls/verify.wasm-e081-availability.patch"
 control_test = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
 novel = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871/#4857): base green, patched red (scripts/run-decision-controls.sh); the test-lane hunk alone turns novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host red"
 probe = "tests/decision-probes/verify.wasm-e081-availability"
 
 [[site]]
