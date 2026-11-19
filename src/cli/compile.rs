@@ -28,9 +28,16 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
             // concurrent `almide compile <module>` runs share the final
             // path, and a plain write truncates it under the other run's
             // read, which then parses an empty module (0 functions).
-            let tmp = std::env::temp_dir().join(format!("almide-stdlib-iface-{}.almd", module));
+            // In the private cache base, and governed by no manifest
+            // (#4835): an `almide.toml` above the temp dir decided its
+            // dependencies and `[permissions]`.
+            let tmp = super::private_path(&format!("stdlib-iface-{}.almd", module));
             let staged = tmp.with_extension(format!("almd.{}", std::process::id()));
-            if let Err(e) = std::fs::write(&staged, src).and_then(|()| std::fs::rename(&staged, &tmp)) {
+            if let Err(e) = std::fs::write(&staged, src)
+                .and_then(|()| std::fs::rename(&staged, &tmp))
+                .map_err(|e| e.to_string())
+                .and_then(|()| project::register_generated_entry(&tmp, None))
+            {
                 let _ = std::fs::remove_file(&staged);
                 err(&format!("error: cannot stage bundled stdlib source for '{}': {}", module, e));
                 std::process::exit(1);
@@ -48,7 +55,9 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
         std::path::PathBuf::from(".")
     };
 
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    // A module named, not a file: the working directory's package is the one
+    // asked about, so its project is the one read.
+    let dep_paths = super::dep_paths_for(".");
 
     // Try common file patterns
     let candidates = [
@@ -136,7 +145,7 @@ pub(crate) fn parse_and_typecheck_for_compile(file: &str, bundled_module: Option
         std::process::exit(1);
     }
 
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    let dep_paths = super::dep_paths_for(file);
 
     let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });

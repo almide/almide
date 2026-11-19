@@ -43,7 +43,7 @@ fn report_check_errors_or_exit(
 /// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
 /// at exactly its original point in the control flow.
 fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str, critical: Option<&[String]>) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });

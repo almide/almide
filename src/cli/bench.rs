@@ -69,7 +69,9 @@ fn bench_native(file: &str, runs: u32, args: &[String]) {
             std::process::exit(1);
         }
     };
-    let ns_file = std::env::temp_dir().join(format!("almide-bench-main-{}.ns", std::process::id()));
+    // In the private cache base (#4835): the timed binary writes this file
+    // through `std::fs::write`, which follows a link planted in a shared temp dir.
+    let ns_file = super::private_path(&format!("bench-main-{}.ns", std::process::id()));
     let run_once = || -> Result<(Vec<u8>, Timing), String> {
         let _ = std::fs::remove_file(&ns_file);
         let started = Instant::now();

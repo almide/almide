@@ -95,15 +95,26 @@ pub(super) fn compile_native_tests(files: &[String], no_check: bool, scratch: &A
         }
     }
 
+    // One program takes one project (#4830): a context group is split by
+    // the manifest that governs each file.
+    let groups: Vec<(String, Context, Option<PathBuf>, Vec<String>)> = groups
+        .into_iter()
+        .flat_map(|(key, context, members)| {
+            crate::project::group_by_manifest(&members)
+                .into_iter()
+                .map(move |(manifest, files)| (key.clone(), context.clone(), manifest, files))
+                .collect::<Vec<_>>()
+        })
+        .collect();
     let mut per_file: Vec<String> = Vec::new();
-    for (key, context, members) in groups {
+    for (key, context, manifest, members) in groups {
         // `almide survive`'s overlay changes what one file reads; the one
         // program is compiled by a child process that does not carry it.
         if members.len() < 2 || almide::source_overlay::is_armed() {
             per_file.extend(members);
             continue;
         }
-        let ctx = match crate::compile_driver::test_run_context() {
+        let ctx = match crate::compile_driver::test_run_context(manifest.as_deref()) {
             Ok(ctx) => ctx,
             Err(e) => {
                 note_fallback(members.len(), &e);
@@ -271,7 +282,15 @@ pub fn cmd_test_run_compile(out: &str, cache: Option<&str>, files: &[String]) {
         .filter_map(|(i, file)| Some(crate::compile_driver::PlannedTestFile { index: i.parse().ok()?, file: file.to_string() }))
         .collect();
     let failure = |message: String| crate::compile_driver::BatchFailure { message, culprits: vec![] };
-    let verdict = crate::compile_driver::test_run_context().map_err(failure).and_then(|ctx| {
+    // The batch's files share one governing manifest (the parent grouped
+    // them so); a batch that does not is refused, never read as the first's.
+    let groups = crate::project::group_by_manifest(&batch.iter().map(|p| p.file.clone()).collect::<Vec<_>>());
+    let manifest = match groups.as_slice() {
+        [(m, _)] => Ok(m.clone()),
+        [] => Ok(None),
+        _ => Err(failure("the batch's files belong to different projects".to_string())),
+    };
+    let verdict = manifest.and_then(|m| crate::compile_driver::test_run_context(m.as_deref()).map_err(failure)).and_then(|ctx| {
         let resolved = crate::compile_driver::resolve_test_batch(&ctx, &batch).map_err(failure)?;
         let entry = cache.and_then(|dir| ProgramCacheEntry::for_batch(std::path::Path::new(dir), &ctx, &batch, &resolved));
         let program = match entry.as_ref().and_then(ProgramCacheEntry::read) {

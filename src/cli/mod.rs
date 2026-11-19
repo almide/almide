@@ -62,6 +62,7 @@ use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generat
 
 pub use run::{cmd_run, RunArgs};
 pub(crate) use run::{phase_lap, PhaseTimer};
+pub(crate) use build_dir::private_path;
 pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
@@ -327,15 +328,17 @@ pub(crate) fn enforce_native_grants(
     Ok(())
 }
 
-/// Resolve `./almide.toml`'s dependencies before a command that builds runs
-/// (#4093): a fetch error (an untrusted owner, a source changed under the
-/// lock, a `--locked` miss, a missing repository) and an ungranted native
-/// dependency ([`enforce_native_grants`]) are printed and exit 1. Several
-/// build routes read the dependencies with errors swallowed (the wasm test
-/// lane resolved against an empty set), so the refusal is made once, here,
-/// for every route. A manifest that does not parse is left to the command.
-pub(crate) fn resolve_cwd_deps_or_exit() {
-    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+/// Resolve the dependencies of the project governing `entry` (the one
+/// lookup, `project::manifest_for_entry`; #4830: it read `./almide.toml`
+/// while the build compiled the entry's own project) before a command that
+/// builds runs (#4093): a fetch error (an untrusted owner, a source changed
+/// under the lock, a `--locked` miss, a missing repository) and an ungranted
+/// native dependency ([`enforce_native_grants`]) are printed and exit 1.
+/// Several build routes read the dependencies with errors swallowed (the
+/// wasm test lane resolved against an empty set), so the refusal is made
+/// once, here, for every route.
+pub(crate) fn resolve_deps_or_exit(entry: &str) {
+    let Some(proj) = crate::project::permissions_project_for(entry) else { return };
     if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
         return;
     }
@@ -364,8 +367,8 @@ fn enforce_media_grants_or_exit(proj: &crate::project::Project, fetched: &[crate
 
 /// `almide check`'s share of the dependency gate: the media grant only, as
 /// it is a check-time rule (ADR-0032 D7). Fetch errors are left to the check.
-pub(crate) fn check_cwd_media_grants_or_exit() {
-    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+pub(crate) fn check_media_grants_or_exit(entry: &str) {
+    let Some(proj) = crate::project::permissions_project_for(entry) else { return };
     if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
         return;
     }
@@ -531,51 +534,37 @@ fn meter_in_codegen(metered: almide::ir::IrProgram, opts: &crate::codegen::Codeg
     crate::codegen_metered(metered, opts)
 }
 
-/// Resolve `[dependencies]` search paths from `almide.toml` in the current
-/// directory (if present), exiting the process on a fetch failure. Shared
-/// by `cmd_emit`, `resolve_module_to_file` and `cmd_compile` (`compile.rs`)
-/// — all three had identical copies of this almide.toml lookup + exit-on-
-/// error handling.
-pub(crate) fn dep_paths_from_cwd_toml() -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = crate::project::parse_toml(std::path::Path::new("almide.toml")) {
-            crate::project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
+/// The `[dependencies]` search paths of `entry`'s own project (the one
+/// lookup, `project::manifest_for_entry`: never the working directory's,
+/// #4830), exiting the process on a fetch failure; none outside a package.
+/// Shared by `check`, `emit`, `fix`, `compile` and `survive`.
+pub(crate) fn dep_paths_for(entry: &str) -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
+    match crate::project::permissions_project_for(entry) {
+        Some(proj) => crate::project_fetch::fetch_all_deps(&proj)
+            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
+            .into_iter()
+            .map(|fd| (fd.pkg_id, fd.source_dir))
+            .collect(),
+        None => vec![],
     }
 }
 
-/// Load `[native-deps]` and dependency-presence info from `almide.toml`,
-/// searching first in `file`'s directory then CWD. `source_root` (the
-/// directory containing `almide.toml`, where `native/*.rs` lives) is
-/// `Some` whenever there's anything to inject — native deps or
-/// `[dependencies]` — `None` otherwise, matching the previous inline
-/// `!native_deps.is_empty() || has_deps` gate. Shared by `cmd_build`
-/// (`build.rs`) and `compile_to_binary_with` (`run.rs`), which had
-/// identical copies of this almide.toml lookup.
+/// Load `[native-deps]` and dependency-presence info from the `almide.toml`
+/// governing `file` (the one lookup, `project::manifest_for_entry`, #4830:
+/// it used to read only `file`'s own directory and then the cwd, so a
+/// `src/main.almd` entry got no `source_root` and the `CrateInputs` native-
+/// grant backstop never ran). `source_root` (the directory containing
+/// `almide.toml`, where `native/*.rs` lives) is `Some` whenever there's
+/// anything to inject — native deps or `[dependencies]` — `None` otherwise.
+/// Shared by `cmd_build` (`build.rs`) and `compile_to_binary_with` (`run.rs`).
 pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::NativeDep>, Option<std::path::PathBuf>) {
-    let file_dir = std::path::Path::new(file).parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let toml_path = {
-        let candidate = file_dir.join("almide.toml");
-        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
-    };
+    let Some(toml_path) = crate::project::manifest_for_entry(file) else { return (Vec::new(), None) };
     // A broken almide.toml is refused (#4829): ignoring it with a warning
     // dropped its [permissions] and [native-deps] alike.
-    let parsed = toml_path.exists().then(|| crate::project::governing_manifest(&toml_path));
-    let native_deps = parsed.as_ref().map(|p| p.native_deps.clone()).unwrap_or_default();
-    let toml_dir = toml_path.parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
+    let parsed = crate::project::governing_manifest(&toml_path);
+    let native_deps = parsed.native_deps.clone();
+    let toml_dir = toml_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let has_deps = !parsed.dependencies.is_empty();
     // A `native/` DIRECTORY is itself something to inject (#886): a package
     // whose only native requirement is a `native/*.rs` module — no
     // [native-deps], no [dependencies] — got `None` here, so the module was

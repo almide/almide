@@ -170,7 +170,7 @@ fn reaches(file: &Path, edited: &Path, deps: &[(almide::project::PkgId, PathBuf)
 /// either side of the edit (an importer that fails to resolve against the
 /// before-text may resolve against the after-text, and vice versa).
 pub fn reach_set(root: &Path, edited_display: &str, edited: &Path, after_text: &str) -> Vec<String> {
-    let deps = super::dep_paths_from_cwd_toml();
+    let deps = super::dep_paths_for(edited_display);
     let mut files = Vec::new();
     walk_almd(root, &mut files);
     let mut out = vec![edited_display.to_string()];

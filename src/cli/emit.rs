@@ -163,7 +163,7 @@ pub fn cmd_emit(args: EmitArgs) {
     let (mut program, source_text, parse_errors) = parse_file(file);
     exit_on_parse_errors(&parse_errors, &source_text);
 
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });

@@ -111,6 +111,15 @@ pub(crate) fn cache_base() -> std::path::PathBuf {
     }
 }
 
+/// `name` inside [`cache_base`], the directory only this user can enter
+/// (#4835): where the compiler stages a file of its own (a generated entry,
+/// the bench timer file, the verifier hand-off). A fixed or pid-keyed name
+/// directly in the shared temp directory could be planted first, as a link
+/// the write follows or a file the read takes, by another local user.
+pub(crate) fn private_path(name: &str) -> std::path::PathBuf {
+    cache_base().join(name)
+}
+
 /// [`cache_base`] under `temp`.
 pub(crate) fn private_base_in(temp: &std::path::Path) -> Result<std::path::PathBuf, String> {
     #[cfg(unix)]

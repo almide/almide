@@ -78,16 +78,13 @@ fn delegate(verifier: &Path, args: &[String]) -> i32 {
     }
 }
 
-/// `[permissions].allow` from `./almide.toml`, when the key is written — the
-/// same manifest `almide check` enforces; it makes the caps witness able to
-/// reject. An explicit `allow = []` grants nothing (#4101).
-fn manifest_allow() -> Option<Vec<String>> {
-    let path = Path::new("almide.toml");
-    if !path.exists() {
-        return None;
-    }
+/// `[permissions].allow` of `file`'s own project (the one lookup,
+/// `project::manifest_for_entry`; #4830: it read `./almide.toml`), when the
+/// key is written — the same manifest `almide check` enforces; it makes the
+/// caps witness able to reject. An explicit `allow = []` grants nothing (#4101).
+fn manifest_allow(file: &str) -> Option<Vec<String>> {
     // #4829: a manifest that does not parse is refused, never "no allow".
-    crate::project::governing_manifest(path).permissions
+    crate::project::permissions_project_for(file).and_then(|p| p.permissions)
 }
 
 /// What the bundle is pinned to: the shipped file, if one is named or
@@ -118,7 +115,7 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
             return Err(1);
         }
     };
-    let allow = manifest_allow();
+    let allow = manifest_allow(file);
     let (records, uncertified) = almide_wasm::witness::bundle::records(&emitted, &shipped, allow.as_deref()).map_err(|e| {
         err(&format!("error: {file}: the structural build recorded no complete certificate: {e}"));
         1
@@ -186,12 +183,13 @@ pub(super) fn verifier_present() -> bool {
 /// judges its own certificate — the verdict is the separate binary's.
 pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(), String> {
     let Some(verifier) = locate_verifier() else { return Ok(()) };
-    let allow = manifest_allow();
+    let allow = manifest_allow(file);
     let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
-    let dir = std::env::temp_dir();
+    // The hand-off the verifier reads back, in the private cache base
+    // (#4835), not under a pid-keyed name in the shared temp dir.
     let id = std::process::id();
-    let (art, bun) = (dir.join(format!("almide-build-{id}.wasm")), dir.join(format!("almide-build-{id}.bundle")));
+    let (art, bun) = (super::private_path(&format!("build-{id}.wasm")), super::private_path(&format!("build-{id}.bundle")));
     let cleanup = || {
         let _ = std::fs::remove_file(&art);
         let _ = std::fs::remove_file(&bun);
@@ -239,7 +237,7 @@ fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
     let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
     let modules: Vec<(String, almide_lang::ast::Program, bool)> =
         resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
-    let allow = manifest_allow();
+    let allow = manifest_allow(file);
     let w = almide_mir::pipeline::program_witnesses(&source_text, &modules, allow.as_deref()).map_err(|e| {
         err(&format!("error: {file} cannot be certified — it does not lower as a whole program: {e}"));
         1
@@ -306,7 +304,7 @@ pub fn cmd_verify(args: &[String]) -> i32 {
     if verifier.is_none() && emit.is_none() {
         return no_verifier();
     }
-    let scratch = std::env::temp_dir().join(format!("almide-verify-{}.bundle", std::process::id()));
+    let scratch = super::private_path(&format!("verify-{}.bundle", std::process::id()));
     let bundle = emit.map_or(scratch.clone(), PathBuf::from);
     let pin = artifact.map_or(Pin::Default, Pin::Named);
     let produced = if mir { produce_mir(file, &bundle) } else { produce(file, pin, &bundle) };

@@ -899,14 +899,34 @@ pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<alm
     Ok(out)
 }
 
-/// The manifest whose `[permissions]` govern `entry`: the nearest
-/// `almide.toml` in the entry file's directory or above it, else the one in
-/// the working directory. Before, only the working directory was read, so
-/// `almide run sub/app.almd` from outside the project ran with no
-/// `[permissions]` at all.
+/// The ONE manifest lookup (#4829, #4830, #4835, #4846): the `almide.toml`
+/// that governs `entry`, a source file or a directory of them. It is the
+/// nearest one in the entry's own directory (the directory itself for a
+/// directory) or above it, and nothing else: never the working directory and
+/// never a temp directory's parents. Every route reads its project here: the
+/// up-front manifest gate and version pin, the dependency and grant gates,
+/// the compile driver, the native build's `CrateInputs` backstop, `verify`,
+/// both test lanes and the editor server. A file the compiler writes itself
+/// is looked up in [`register_generated_entry`]'s table instead, never by its
+/// location.
 pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
-    let start = std::path::Path::new(entry).parent().map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p });
-    let mut dir = start.and_then(|d| d.canonicalize().ok());
+    let path = std::path::Path::new(entry);
+    let canon = path.canonicalize().ok();
+    if let Some(c) = &canon {
+        if let Some(gov) = generated_entries().lock().unwrap_or_else(|p| p.into_inner()).get(c) {
+            return gov.clone();
+        }
+    }
+    let start = match &canon {
+        Some(c) if c.is_dir() => Some(c.clone()),
+        Some(c) => c.parent().map(std::path::Path::to_path_buf),
+        // An entry that does not exist yet: its directory decides.
+        None => path
+            .parent()
+            .map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p })
+            .and_then(|d| d.canonicalize().ok()),
+    };
+    let mut dir = start;
     while let Some(d) = dir {
         let candidate = d.join("almide.toml");
         if candidate.is_file() {
@@ -914,8 +934,39 @@ pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
         }
         dir = d.parent().map(std::path::Path::to_path_buf);
     }
-    let cwd = std::path::Path::new("almide.toml");
-    cwd.is_file().then(|| cwd.to_path_buf())
+    None
+}
+
+/// `files` split by the manifest that governs each ([`manifest_for_entry`]),
+/// in first-seen order: a run that compiles several files as one program
+/// takes one project, so files of different projects are different runs.
+pub fn group_by_manifest(files: &[String]) -> Vec<(Option<PathBuf>, Vec<String>)> {
+    let mut groups: Vec<(Option<PathBuf>, Vec<String>)> = Vec::new();
+    for f in files {
+        let m = manifest_for_entry(f);
+        match groups.iter_mut().find(|(k, _)| *k == m) {
+            Some((_, members)) => members.push(f.clone()),
+            None => groups.push((m, vec![f.clone()])),
+        }
+    }
+    groups
+}
+
+fn generated_entries() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>> {
+    static TABLE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(Default::default)
+}
+
+/// Declare `entry`, a file the compiler wrote itself (`almide deps`'s import
+/// list, `almide compile <stdlib module>`'s staged source), as governed by
+/// `manifest` — the project the command is about, or `None` for no project.
+/// Its location (a temp directory, whose parents anyone may write to) then
+/// decides nothing (#4835).
+pub fn register_generated_entry(entry: &Path, manifest: Option<PathBuf>) -> Result<(), String> {
+    let canon = entry.canonicalize().map_err(|e| format!("cannot resolve {}: {e}", entry.display()))?;
+    generated_entries().lock().unwrap_or_else(|p| p.into_inner()).insert(canon, manifest);
+    Ok(())
 }
 
 /// The project [`manifest_for_entry`] names, parsed; `None` only when there
@@ -929,12 +980,26 @@ pub fn permissions_project_for(entry: &str) -> Option<Project> {
 /// `path`, an `almide.toml` that exists and governs the command, read by the
 /// one reader every route uses: the gate's checks (`check_manifest`) and
 /// `parse_toml`; any error ends the command (#4829).
+///
+/// Every caller compiles or checks under the project, so its `almide =
+/// "X.Y.Z"` minimum holds here too (#4846): the pin is read off the same
+/// manifest on every route, not off `./almide.toml` alone.
 pub fn governing_manifest(path: &Path) -> Project {
-    let read = read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path));
-    read.unwrap_or_else(|e| {
+    let proj = read_governing_manifest(path).unwrap_or_else(|e| {
         eprintln!("error: {}: {e}", path.display());
         std::process::exit(1)
-    })
+    });
+    if let Err(e) = check_compiler_version(&proj) {
+        eprintln!("error: {e}");
+        std::process::exit(1)
+    }
+    proj
+}
+
+/// [`governing_manifest`]'s reader, for a caller that must not exit (the
+/// editor server reports the error as a diagnostic instead).
+pub fn read_governing_manifest(path: &Path) -> Result<Project, String> {
+    read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path))
 }
 
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
