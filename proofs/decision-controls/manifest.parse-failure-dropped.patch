@@ -1,0 +1,14 @@
+# Negative control of manifest.parse-failure-dropped (proofs/decision-sites.toml): the entry's manifest is read with .ok() again: one that does not parse is no manifest (#4829)
+# control_test: tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -923,7 +923,7 @@
+ /// command all the same (#4829: read as "no manifest", its `[permissions]`
+ /// were dropped), so the command is refused with its error.
+ pub fn permissions_project_for(entry: &str) -> Option<Project> {
+-    manifest_for_entry(entry).map(|p| governing_manifest(&p))
++    manifest_for_entry(entry).and_then(|p| parse_toml(&p).ok())
+ }
+ 
+ /// `path`, an `almide.toml` that exists and governs the command, read by the

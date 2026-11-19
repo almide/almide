@@ -1,0 +1,6 @@
+effect fn say() -> Unit = println("hi")
+
+test "say" {
+  say()!
+  assert(true)
+}

@@ -1,0 +1,14 @@
+# Negative control of pure.e092-reach (proofs/decision-sites.toml): a reached @inline_rust fn counts as pure again (#4824)
+# control_test: tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused
+diff --git a/crates/almide-frontend/src/check/pure_attr.rs b/crates/almide-frontend/src/check/pure_attr.rs
+--- a/crates/almide-frontend/src/check/pure_attr.rs
++++ b/crates/almide-frontend/src/check/pure_attr.rs
+@@ -213,7 +213,7 @@
+                 Some((k.to_string(), "is an `@extern` fn, whose body cannot be checked".to_string()))
+             }
+             // #4824: an `@inline_rust` body outside the stdlib is foreign too.
+-            PurityCallee::User(k) if self.env.inline_rust_fns.contains(k) => {
++            PurityCallee::User(k) if false && self.env.inline_rust_fns.contains(k) => {
+                 Some((k.to_string(), "is an `@inline_rust` fn, whose body is Rust text the checker cannot see".to_string()))
+             }
+             PurityCallee::User(_) => None,

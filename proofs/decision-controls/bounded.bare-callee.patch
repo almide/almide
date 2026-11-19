@@ -1,0 +1,14 @@
+# Negative control of bounded.bare-callee (proofs/decision-sites.toml): a selectively imported bare callee is admitted without being judged as its module.member (#4823); bounded.rs is being edited on another branch, re-derive if it no longer applies
+# control_test: tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -909,7 +909,7 @@
+         } else if let Some((m, f)) = self.checker.env.import_table.resolve_direct(n).as_deref().and_then(|q| q.rsplit_once('.')) {
+             // A selectively imported fn is judged exactly as its
+             // `module.member` spelling.
+-            if !self.member_module_decided(call, m, f) {
++            if false && !self.member_module_decided(call, m, f) {
+                 self.check_member_call_shape(call, m, f, args);
+             }
+             return;

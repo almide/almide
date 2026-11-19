@@ -1,0 +1,14 @@
+# Negative control of critical.entry-scope (proofs/decision-sites.toml): --profile critical is not armed for the entry program
+# control_test: tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee
+diff --git a/src/cli/check.rs b/src/cli/check.rs
+--- a/src/cli/check.rs
++++ b/src/cli/check.rs
+@@ -64,7 +64,7 @@
+     // so imported modules (stdlib above all — the trusted runtime BELOW the
+     // profile, full of while loops by design) are never profiled.
+     if let Some(grants) = critical {
+-        checker.profile_critical = true;
++        checker.profile_critical = false;
+         checker.critical_allow = grants.to_vec();
+     }
+     let diagnostics = checker.infer_program(program);

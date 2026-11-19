@@ -1,0 +1,7 @@
+# The probe of fsscope.component-preopens: The component host (a program importing http) preopens only [permissions] fs roots. From OUTSIDE the project the relative path names no file, so that side refuses for an unrelated reason: read only the inside side.
+expect = "refused"
+exit = "any"
+
+[argv]
+run = ["run", "{main}", "--target", "wasm"]
+component = ["run", "{main}", "--target", "wasm"]

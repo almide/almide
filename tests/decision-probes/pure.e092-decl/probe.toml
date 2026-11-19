@@ -1,0 +1,2 @@
+# The probe of pure.e092-decl: @pure on an @inline_rust fn (#4824).
+expect = "E092"

@@ -1,0 +1,2 @@
+# The probe of manifest.permission-list-shape: [permissions] proc that is not an array of strings.
+expect = "must be an array of strings"

@@ -1,0 +1,6 @@
+import helper.{print_novel}
+
+@bounded
+fn go(k: Int) -> Int = print_novel(k)
+
+fn main() -> Unit = println(int.to_string(go(1)))

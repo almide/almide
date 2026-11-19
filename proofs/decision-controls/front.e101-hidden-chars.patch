@@ -1,0 +1,14 @@
+# Negative control of front.e101-hidden-chars (proofs/decision-sites.toml): no raw hidden character is reported (the parser's scan finds them and drops them)
+# control_test: tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry
+diff --git a/crates/almide-syntax/src/parser/diagnostics.rs b/crates/almide-syntax/src/parser/diagnostics.rs
+--- a/crates/almide-syntax/src/parser/diagnostics.rs
++++ b/crates/almide-syntax/src/parser/diagnostics.rs
+@@ -155,7 +155,7 @@
+     /// unaffected: its spelling is ASCII.
+     pub(crate) fn report_hidden_chars(&mut self) {
+         let found = std::mem::take(&mut self.hidden_chars);
+-        for (ch, line, col) in found {
++        for (ch, line, col) in found.into_iter().filter(|_| false) {
+             let message = format!(
+                 "raw hidden character U+{:04X} {} at line {}, column {}",
+                 ch as u32,

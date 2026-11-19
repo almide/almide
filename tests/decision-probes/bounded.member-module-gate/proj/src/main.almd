@@ -1,0 +1,9 @@
+type Holder = { run: (Int) -> Int }
+
+@bounded
+fn go(math: Holder, k: Int) -> Int = math.run(k)
+
+fn main() -> Unit = {
+  let b = Holder { run: (x) => x + 1 }
+  println(int.to_string(go(b, 1)))
+}

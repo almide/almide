@@ -1,0 +1,2 @@
+# The probe of manifest.parse-failure-dropped: A manifest the reader refuses (a hyphenated name) governs every route; read as no manifest before #4829.
+expect = "contains hyphens"

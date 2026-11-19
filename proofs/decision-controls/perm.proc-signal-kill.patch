@@ -1,0 +1,14 @@
+# Negative control of perm.proc-signal-kill (proofs/decision-sites.toml): a @signals_process call no longer needs `kill` on [permissions] proc
+# control_test: tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -230,7 +230,7 @@
+                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                     if module.as_str() == "process" =>
+                 {
+-                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
++                    if false && almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                         && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
+                     {
+                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));

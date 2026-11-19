@@ -3559,9 +3559,9 @@ tests = [
   "tests/wasm_availability_e081_test.rs",
 ]
 control_note = "scripts/check-target-availability.sh (four-directional table ⇄ measured walls)"
-issues = [4857]
+issues = [4857, 4874]
 status = "UNSTAMPED"
-reasons = ["c1:name-keyed table (proofs/target-availability.toml; the render wall E082 is the backstop)", "c2:unknown = allow (a fn the table does not list is admitted until the render wall)", "c3:route-skipped (see cells)"]
+reasons = ["c1:name table, fails closed; host-op derivation deferred past 0.70.0 by owner ruling 2026-11-20 (proofs/target-availability.toml; the render wall E082 is the backstop)", "c2:unknown = allow (a fn the table does not list is admitted until the render wall)", "c3:route-skipped (see cells)"]
 note = "Availability, not a security property; the render wall is the backstop (wasm_compile.rs:195-196)."
 control_patch = "proofs/decision-controls/verify.wasm-e081-availability.patch"
 control_test = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
@@ -3726,10 +3726,10 @@ items = [
   "crates/almide-ir/src/fusion.rs::stdlib_module_is_pure",
 ]
 keys = []
-decides = "a pipeline stage calling a stdlib module may be fused element-by-element (reordering its work) unless the module is in EFFECT_MODULES"
+decides = "a pipeline stage calling a stdlib module may be fused element-by-element (reordering its work) only when that module's own source declares no effect (effect fn, @ordered, @memory_unsafe, @signals_process; stdlib_info::source_declares_effect)"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "pure only when the module's bundled source is known and declares no effect fn, @ordered, @memory_unsafe or @signals_process fn (#4855); a module with no readable source is not pure; EFFECT_MODULES only refuses more"
+unknown_note = "pure only when the module's bundled source is known and declares no effect (#4855); a module with no readable source, or one no registry has, is not pure. EFFECT_MODULES removed (ruling 2026-11-20): no module is named in the decision"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: native + wasm fusion", build = "runs", test = "runs", bench = "runs", native = "runs: pass_stream_fusion", wasm = "runs: list_fuse", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
 tests = [
   "tests/stream_fusion_module_purity_test.rs::module_function_purity_does_not_leak_into_root_namespace",
@@ -3740,9 +3740,10 @@ status = "UNSTAMPED"
 reasons = ["c3:no probe yet: the cells are read, not driven by the route matrix"]
 note = "Observable-order property (#2953), not a capability; complete today per the namesweep."
 control_patch = "proofs/decision-controls/purity.fusion-effect-modules.patch"
-control_test = "crates/almide-ir/tests/fusion_declared_effects.rs::novel_a_module_declaring_an_effect_is_not_fused_as_pure"
-novel = "crates/almide-ir/tests/fusion_declared_effects.rs::novel_a_module_declaring_an_effect_is_not_fused_as_pure"
+control_test = "crates/almide-ir/tests/fusion_purity_novel.rs::novel_fusion_purity_is_the_declared_effect_set"
+novel = "crates/almide-ir/tests/fusion_purity_novel.rs::novel_fusion_purity_is_the_declared_effect_set"
 control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+probe = "tests/decision-probes/purity.fusion-effect-modules"
 
 [[site]]
 id = "purity.bounded-pure-modules"

@@ -1,0 +1,14 @@
+# Negative control of perm.allow-gate (proofs/decision-sites.toml): check_permissions reports no fn as a violation, so every route admits a capability past [permissions].allow
+# control_test: tests/decision_batch1a_test.rs::novel_allow_gate_refuses_a_capability_reached_through_a_fresh_module
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -109,7 +109,7 @@
+             .filter(|e| !allowed.contains(e))
+             .collect();
+         forbidden.sort_by_key(|e| e.to_string());
+-        if !forbidden.is_empty() {
++        if false && !forbidden.is_empty() {
+             err(&format!("error: capability violation in `{}`", name));
+             for e in &forbidden {
+                 err(&format!("  {} is not in [permissions].allow", e));

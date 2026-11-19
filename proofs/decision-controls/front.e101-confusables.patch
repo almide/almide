@@ -1,0 +1,14 @@
+# Negative control of front.e101-confusables (proofs/decision-sites.toml): the identifier scan is skipped as if every identifier were ASCII
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_confusable_identifier_is_refused
+diff --git a/crates/almide-syntax/src/parser/diagnostics.rs b/crates/almide-syntax/src/parser/diagnostics.rs
+--- a/crates/almide-syntax/src/parser/diagnostics.rs
++++ b/crates/almide-syntax/src/parser/diagnostics.rs
+@@ -195,7 +195,7 @@
+         // Both refusals below need a non-ASCII spelling, so a file of ASCII
+         // identifiers has nothing to judge; skip the per-name skeletons, which
+         // cost the parse phase ~29% on the edit-loop ladder.
+-        if idents.iter().all(|(name, _, _)| name.is_ascii()) {
++        if true || idents.iter().all(|(name, _, _)| name.is_ascii()) {
+             return;
+         }
+         let mut judged: std::collections::HashSet<String> = std::collections::HashSet::new();

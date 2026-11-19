@@ -1,0 +1,6 @@
+import process
+
+test "kill" {
+  let _ = process.kill(0, 0)
+  assert(true)
+}

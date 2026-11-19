@@ -1,0 +1,14 @@
+# Negative control of pure.e092-decl (proofs/decision-sites.toml): @pure on an @inline_rust fn is queued as an Almide body instead of refused (#4824)
+# control_test: tests/decision_batch1a_test.rs::novel_pure_on_a_fresh_foreign_or_effect_fn_is_refused
+diff --git a/crates/almide-frontend/src/check/pure_attr.rs b/crates/almide-frontend/src/check/pure_attr.rs
+--- a/crates/almide-frontend/src/check/pure_attr.rs
++++ b/crates/almide-frontend/src/check/pure_attr.rs
+@@ -129,7 +129,7 @@
+                 format!("`@pure` fn `{name}` is an `effect fn`")
+             } else if !extern_attrs.is_empty() {
+                 format!("`@pure` cannot be checked on `@extern` fn `{name}`: its body is foreign")
+-            } else if self.env.inline_rust_fns.contains(&self.fn_decl_key(name)) {
++            } else if false && self.env.inline_rust_fns.contains(&self.fn_decl_key(name)) {
+                 format!("`@pure` cannot be checked on `@inline_rust` fn `{name}`: its body is foreign")
+             } else {
+                 let key = self.fn_decl_key(name);

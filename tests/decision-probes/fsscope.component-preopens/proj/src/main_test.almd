@@ -1,0 +1,5 @@
+import fs
+
+test "secret" {
+  assert_eq(fs.read_text("secret/b.txt") ?? "refused", "LEAKED\n")
+}

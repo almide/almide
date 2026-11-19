@@ -1,0 +1,13 @@
+# Negative control of front.nesting-budget (proofs/decision-sites.toml): an interpolation hole's sub-parse starts at depth 0 again (#4841)
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget
+diff --git a/crates/almide-syntax/src/parser/primary.rs b/crates/almide-syntax/src/parser/primary.rs
+--- a/crates/almide-syntax/src/parser/primary.rs
++++ b/crates/almide-syntax/src/parser/primary.rs
+@@ -722,7 +722,6 @@
+         // #4841: a hole nests inside the expression that holds it, so the
+         // sub-parse draws on the same `nesting` budget (C-440): it starts at
+         // this parser's depth, not at 0.
+-        sub_parser.depth = self.depth;
+         match sub_parser.parse_single_expr() {
+             Ok(parsed) => {
+                 // Advance our id counter past sub-parser's allocations
