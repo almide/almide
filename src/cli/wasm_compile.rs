@@ -184,6 +184,35 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
     Ok(())
 }
 
+// #4857: the wasm route's refusals (E081 / E082 / E083) as rows, for
+// `check --json --target wasm` (and so the MCP check tool). Outside a capture
+// each refusal is printed as before; inside one it is collected instead, so
+// the JSON report carries it as a diagnostic with its code.
+thread_local! {
+    static ROUTE_REFUSALS: std::cell::RefCell<Option<Vec<(&'static str, String)>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn route_refusal(code: &'static str, text: String) {
+    let captured = ROUTE_REFUSALS.with(|r| match r.borrow_mut().as_mut() {
+        Some(rows) => {
+            rows.push((code, text.clone()));
+            true
+        }
+        None => false,
+    });
+    if !captured {
+        err(&text);
+    }
+}
+
+/// Run `f` with the wasm route's refusals collected rather than printed.
+pub(crate) fn capturing_route_refusals<T>(f: impl FnOnce() -> T) -> (T, Vec<(&'static str, String)>) {
+    ROUTE_REFUSALS.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    let out = f();
+    let rows = ROUTE_REFUSALS.with(|r| r.borrow_mut().take()).unwrap_or_default();
+    (out, rows)
+}
+
 /// `compile_to_wasm_bytes`'s native-only-matrix-op guard: native-only matrix
 /// ops (none today; the list is NATIVE_ONLY_MATRIX_OPS) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
@@ -328,7 +357,7 @@ fn check_wasm_availability(
         _ => None,
     };
     if let Some(why) = shape_refusal {
-        err(&format!(
+        route_refusal("E081", format!(
             "error[E081]: `http.serve` is not available on --target wasm from this `main`\n  \
              reason: {why}\n  \
              note: `almide run --target wasm` and the native target serve it as written"
@@ -343,7 +372,7 @@ fn check_wasm_availability(
             .cloned()
             .unwrap_or_else(|| "declared unavailable on this leg".to_string());
         let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
-        err(&format!(
+        route_refusal("E081", format!(
             "error[E081]: `{key}` is not available on --target wasm\n  \
              reason: {reason}{alt_line}\n  \
              note: the availability matrix is proofs/target-availability.toml (#1423); \
@@ -437,7 +466,7 @@ fn report_route_error(e: almide::wasm_route::RouteError, file: &str, library_ok:
         // E082 (#1922, one leg since #2752): the structural leg declined the
         // program and there is no second renderer to hand it to.
         RouteError::Wall { why } => {
-            err(&format!("error[E082]: the wasm target cannot lower this program: {why}"));
+            route_refusal("E082", format!("error[E082]: the wasm target cannot lower this program: {why}"));
             report_structural_wall_site();
             if library_ok {
                 err("  note: this is the stock-WASI BUILD route; `almide run --target wasm` (the embedded host serves every op) may still run it");
@@ -453,7 +482,7 @@ fn report_route_error(e: almide::wasm_route::RouteError, file: &str, library_ok:
         }
         // E083 (#1996): a compiler ownership defect — the message must never
         // tell the writer to change valid code.
-        RouteError::OwnershipLowering(d) => err(&d.to_string()),
+        RouteError::OwnershipLowering(d) => route_refusal("E083", d.to_string()),
     }
 }
 

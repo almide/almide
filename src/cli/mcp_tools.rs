@@ -215,7 +215,17 @@ fn tool_check(args: &Value) -> Result<Value, String> {
     let file = require_str(args, "file")?;
     let pl = place(args)?;
     let target = path_arg(&pl, &file, "file")?;
-    let run = run_cli(&["check".into(), "--json".into(), "--".into(), target], Some(&pl.cwd))?;
+    // #4857: `target` asks for that compile target's verdict too (`wasm`:
+    // E081 / E082 at check time). A target this tool does not know is refused,
+    // never read as the default.
+    let mut argv: Vec<String> = vec!["check".into(), "--json".into()];
+    match arg_str(args, "target").as_deref() {
+        None => {}
+        Some("wasm") => argv.extend(["--target".to_string(), "wasm".to_string()]),
+        Some(other) => return Err(format!("almide_check: unknown target `{other}` (the one target it checks is `wasm`)")),
+    }
+    argv.extend(["--".to_string(), target]);
+    let run = run_cli(&argv, Some(&pl.cwd))?;
     let (diagnostics, unparsed) = split_json_lines(&run.stdout);
     let errors = count_level(&diagnostics, "error");
     let warnings = count_level(&diagnostics, "warning");
@@ -410,6 +420,7 @@ fn tool_check_def() -> Value {
         "inputSchema": obj_schema(
             json!({
                 "file": { "type": "string", "description": "Path to the .almd file to check" },
+                "target": { "type": "string", "enum": ["wasm"], "description": "Also judge this compile target: `wasm` reports what the wasm target refuses (E081 unavailable fn, E082 shape) at check time" },
                 "cwd": cwd_prop(),
             }),
             json!(["file"]),
