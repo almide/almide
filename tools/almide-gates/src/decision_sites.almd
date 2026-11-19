@@ -250,12 +250,20 @@ fn wanted(rows: List[Row]) -> List[String] = rows |> list.filter((r) => r.status
 effect fn patch_findings(root: String, r: Row) -> List[String] = {
   let want = "proofs/decision-controls/" + r.id + ".patch"
   let text = fs.read_text(root + "/" + r.control_patch) ?? ""
-  if r.control_patch != want then [r.id + ": control_patch must be " + want]
-  else if text == "" then [r.id + ": " + want + " does not exist"]
-  else if not string.contains(text, "# control_test: " + r.control_test + "\n") then [r.id + ": " + want + " does not name the row's control_test `" + r.control_test + "`"]
+  if r.control_patch != want then [
+    r.id + ": control_patch must be " + want
+  ]
+  else if text == "" then [
+    r.id + ": " + want + " does not exist"
+  ]
+  else if not string.contains(text, "# control_test: " + r.control_test + "\n") then [
+    r.id + ": " + want + " does not name the row's control_test `" + r.control_test + "`"
+  ]
   else match process.exec("git", ["-C", root, "apply", "--check", want]) {
     ok(_) => [],
-    err(_) => [r.id + ": " + want + " no longer applies — re-derive it against the moved check"],
+    err(_) => [
+      r.id + ": " + want + " no longer applies — re-derive it against the moved check"
+    ],
   }
 }
 
