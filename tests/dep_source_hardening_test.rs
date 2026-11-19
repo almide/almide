@@ -1,9 +1,15 @@
 //! A dependency's source, lock entry and source tree are untrusted input
-//! (#4810, #4811, #4812, #4813). Each case below was measured to run a
-//! command, reach another host, use an arbitrary directory as the package or
-//! load modules from outside the package before the change; each is now
-//! refused (or ignored) before git or the loader acts on it.
+//! (#4810, #4811, #4812, #4813; ADR-0035 D1). Each case below was measured to
+//! run a command, reach another host, use an arbitrary directory as the
+//! package or load modules from outside the package before the change; each
+//! is now refused (or ignored) before anything is fetched or loaded.
+//!
+//! Repositories are served by `support/git_host.rs` (no network).
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
+use git_host::GitHost;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -19,15 +25,15 @@ fn scratch(tag: &str) -> PathBuf {
     root
 }
 
-/// `almide <args>` in `dir`, with the dependency cache under `root/home`.
-fn almide(dir: &Path, root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_almide"))
-        .current_dir(dir)
-        .env("HOME", root.join("home"))
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(args)
-        .output()
-        .expect("spawn almide")
+/// `almide <args>` in `dir`, with the dependency cache under `root/home`,
+/// pointed at `host` when there is one.
+fn almide(dir: &Path, root: &Path, host: Option<&GitHost>, args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.current_dir(dir).env("HOME", root.join("home")).args(args);
+    if let Some(h) = host {
+        h.env(&mut cmd);
+    }
+    cmd.output().expect("spawn almide")
 }
 
 /// [`almide`], killed after `secs` (`None`: it did not finish).
@@ -61,70 +67,91 @@ fn app(dir: &Path, deps: &str, main: &str) {
     write(dir.join("src/main.almd"), main);
 }
 
-fn git(dir: &Path, args: &[&str]) {
-    let o = Command::new("git")
-        .current_dir(dir)
-        .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "init.defaultBranch=main"])
-        .args(args)
-        .output()
-        .expect("spawn git");
-    assert!(o.status.success(), "git {args:?}: {}", text(&o));
+/// Every form ADR-0035 D1 lists as refused, as a manifest `git = …` value,
+/// with a word its diagnostic must hold.
+fn refused_sources(marker: &Path) -> Vec<(String, &'static str)> {
+    vec![
+        (format!("--upload-pack=touch {};true", marker.display()), "begins with `-`"),
+        ("https://other.invalid?@github.com/almide/json".into(), "holds a `?` or `#`"),
+        ("https://other.invalid#@github.com/almide/json".into(), "holds a `?` or `#`"),
+        ("https://user:pw@github.com/almide/json".into(), "password or token"),
+        ("git://github.com/almide/json".into(), "scheme"),
+        ("file:///srv/git/json".into(), "scheme"),
+        ("ext::sh".into(), "transport helper"),
+        ("https://github.com/-x/json".into(), "begins with `-`"),
+        ("https://github.com/almide/js\u{202E}on".into(), "bidi"),
+        ("https://github.com/almide/%E2%80%AEjson".into(), "percent-encoded"),
+        ("https://github.com/almide/../json".into(), "path segment"),
+        ("https://github.com/almide/aux".into(), "reserved"),
+    ]
 }
 
-/// #4810: an option-shaped git source — in the root manifest, or in a
-/// fetched dependency's own manifest — is refused before git runs; the
-/// command it smuggles in never runs, on `check`, `test` or `deps`.
+fn toml_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 || ('\u{202A}'..='\u{202E}').contains(&c) => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// #4810, #4811, ADR-0035 D1: each refused form, in the root manifest, is
+/// refused before anything is fetched, on `check`, `test` and `deps`, and
+/// the command an option-shaped source smuggles in never runs.
 #[test]
-fn an_option_shaped_git_source_runs_nothing() {
+fn every_refused_source_form_in_the_root_manifest_runs_and_fetches_nothing() {
     let root = scratch("g1");
+    let host = GitHost::start(&root);
     let marker = root.join("MARKER");
-    let evil = format!("x = {{ git = \"--upload-pack=touch {};true\" }}\n", marker.display());
-    let direct = root.join("direct");
-    app(&direct, &evil, "effect fn main() -> Unit = println(\"hi\")\n\ntest \"t\" { assert(true) }\n");
-    for args in [&["check", "src/main.almd"][..], &["test", "src/main.almd"], &["deps"]] {
-        let o = almide(&direct, &root, args);
-        assert!(!o.status.success(), "`almide {}` accepted an option-shaped source:\n{}", args.join(" "), text(&o));
-        assert!(text(&o).contains("begins with `-`"), "`almide {}`: {}", args.join(" "), text(&o));
-        assert!(!marker.exists(), "`almide {}` ran the source's command", args.join(" "));
+    for (i, (src, why)) in refused_sources(&marker).into_iter().enumerate() {
+        let dir = root.join(format!("direct{i}"));
+        app(&dir, &format!("x = {{ git = {}, tag = \"v0.1.0\" }}\n", toml_string(&src)), "effect fn main() -> Unit = println(\"hi\")\n\ntest \"t\" { assert(true) }\n");
+        for args in [&["check", "src/main.almd"][..], &["test", "src/main.almd"], &["deps"]] {
+            let o = almide(&dir, &root, Some(&host), args);
+            assert!(!o.status.success(), "`almide {}` accepted `{}`:\n{}", args.join(" "), src.escape_debug(), text(&o));
+            assert!(text(&o).contains(why), "`almide {}` on `{}`: expected `{why}`:\n{}", args.join(" "), src.escape_debug(), text(&o));
+        }
     }
-    // The same source in a fetched dependency's own almide.toml.
-    let depa = root.join("depa");
-    write(depa.join("src/mod.almd"), "fn hello() -> String = \"hi\"\n");
-    write(depa.join("almide.toml"), &format!("[package]\nname = \"depa\"\nversion = \"0.1.0\"\n\n[dependencies]\n{evil}"));
-    git(&depa, &["init", "-q"]);
-    git(&depa, &["add", "-A"]);
-    git(&depa, &["commit", "-qm", "init"]);
-    git(&depa, &["tag", "v0.1.0"]);
-    let trans = root.join("trans");
-    app(
-        &trans,
-        &format!("depa = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n", depa.display()),
-        "import depa\neffect fn main() -> Unit = println(depa.hello())\n",
-    );
-    let o = almide(&trans, &root, &["check", "src/main.almd"]);
-    assert!(!o.status.success(), "a transitive option-shaped source was accepted:\n{}", text(&o));
-    assert!(!marker.exists(), "the fetched dependency's source ran its command:\n{}", text(&o));
+    assert!(!marker.exists(), "a source's command ran");
+    assert_eq!(host.requests(), 0, "a refused source reached the network");
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// #4811: a `?` or `#` ahead of an `@` made the owner check read
-/// github.com/almide while git contacts the host before it.
+/// The same forms in a fetched dependency's own almide.toml: the
+/// dependency is fetched, its manifest is refused, and nothing it names is.
 #[test]
-fn a_query_or_fragment_in_a_git_source_is_refused() {
-    let root = scratch("g2");
-    for sep in ["?", "#"] {
-        let dir = root.join(format!("app{}", sep.len()));
-        let src = format!("https://other.invalid{sep}@github.com/almide/json");
-        app(&dir, &format!("json = {{ git = \"{src}\", tag = \"v0.1.0\" }}\n"), "effect fn main() -> Unit = println(\"hi\")\n");
-        let o = almide(&dir, &root, &["check", "src/main.almd"]);
-        assert!(!o.status.success(), "{src} was accepted:\n{}", text(&o));
-        assert!(text(&o).contains("holds a `?` or `#`"), "{src}: {}", text(&o));
+fn every_refused_source_form_in_a_dependency_manifest_is_refused() {
+    let root = scratch("g1t");
+    let host = GitHost::start(&root);
+    let marker = root.join("MARKER");
+    for (i, (src, why)) in refused_sources(&marker).into_iter().enumerate() {
+        let url = format!("https://github.com/almide/hardening-depa-{i}");
+        host.publish(
+            &url,
+            &root.join(format!("depa{i}")),
+            &[
+                ("src/mod.almd", "fn hello() -> String = \"hi\"\n"),
+                ("almide.toml", &format!("[package]\nname = \"depa\"\nversion = \"0.1.0\"\n\n[dependencies]\nx = {{ git = {}, tag = \"v0.1.0\" }}\n", toml_string(&src))),
+            ],
+            &["v0.1.0"],
+        );
+        let trans = root.join(format!("trans{i}"));
+        app(&trans, &format!("depa = {{ git = \"{url}\", tag = \"v0.1.0\" }}\n"), "import depa\neffect fn main() -> Unit = println(depa.hello())\n");
+        let o = almide(&trans, &root, Some(&host), &["check", "src/main.almd"]);
+        assert!(!o.status.success(), "a transitive `{}` was accepted:\n{}", src.escape_debug(), text(&o));
+        assert!(text(&o).contains(why) && text(&o).contains("dependency `depa`"), "transitive `{}`:\n{}", src.escape_debug(), text(&o));
     }
+    assert!(!marker.exists(), "the fetched dependency's source ran its command");
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// #4812: the lock's `commit` names the cache directory; an absolute path
-/// there was joined in as the package directory.
+/// #4812: the lock's `commit` named the cache directory; an absolute path
+/// there was joined in as the package directory. It is now a typed hash.
 #[test]
 fn a_lock_commit_that_is_not_a_hash_is_refused() {
     let root = scratch("g4");
@@ -137,13 +164,26 @@ fn a_lock_commit_that_is_not_a_hash_is_refused() {
         "foo = { git = \"https://github.com/almide/does-not-exist-hardening\", tag = \"v0.1.0\" }\n",
         "import foo\neffect fn main() -> Unit = println(foo.hello())\n",
     );
+    for commit in [elsewhere.display().to_string(), "--upload-pack=x".to_string(), "ABCDEF".repeat(7)[..40].to_string(), "abc".to_string()] {
+        write(
+            dir.join("almide.lock"),
+            &format!("foo = {{ git = \"https://github.com/almide/does-not-exist-hardening\", ref = \"v0.1.0\", commit = \"{commit}\" }}\n"),
+        );
+        let o = almide(&dir, &root, None, &["check", "src/main.almd"]);
+        assert!(!o.status.success(), "`{commit}` as the lock's commit was accepted:\n{}", text(&o));
+        assert!(text(&o).contains("is not a hex commit hash"), "{}", text(&o));
+    }
+    // A sum that is not a tree sum (a path, say) is refused the same way.
     write(
         dir.join("almide.lock"),
-        &format!("foo = {{ git = \"https://github.com/almide/does-not-exist-hardening\", ref = \"v0.1.0\", commit = \"{}\" }}\n", elsewhere.display()),
+        &format!(
+            "foo = {{ git = \"https://github.com/almide/does-not-exist-hardening\", ref = \"v0.1.0\", commit = \"{}\", sum = \"{}\" }}\n",
+            "a".repeat(40),
+            elsewhere.display()
+        ),
     );
-    let o = almide(&dir, &root, &["check", "src/main.almd"]);
-    assert!(!o.status.success(), "a path as the lock's commit was accepted:\n{}", text(&o));
-    assert!(text(&o).contains("is not a hex commit hash"), "{}", text(&o));
+    let o = almide(&dir, &root, None, &["check", "src/main.almd"]);
+    assert!(!o.status.success() && text(&o).contains("is not a tree sum"), "{}", text(&o));
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -167,5 +207,59 @@ fn a_dependency_source_symlink_is_not_followed() {
         assert!(o.status.success(), "src/ext -> {}: {}", target.display(), text(&o));
         assert!(!text(&o).contains("evil"), "a module outside the package was loaded:\n{}", text(&o));
     }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// ADR-0035 (owner ruling 2026-11-19): https is anonymous, so a repository
+/// the host will not show without credentials is refused with the ssh form
+/// to write instead.
+#[test]
+fn a_private_https_repository_is_refused_with_the_ssh_form() {
+    let root = scratch("private");
+    let host = GitHost::start(&root);
+    host.answer_missing_with(401);
+    let dir = root.join("app");
+    app(&dir, "secret = { git = \"https://github.com/almide/secret-pkg.git\", tag = \"v0.1.0\" }\n", "import secret\neffect fn main() -> Unit = println(\"x\")\n");
+    let o = almide(&dir, &root, Some(&host), &["check", "src/main.almd"]);
+    assert!(!o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("fetch it over ssh: `git = \"git@github.com:almide/secret-pkg\"`"), "{}", text(&o));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// #4838: a dependency's `tag` / `branch` was joined into the cache path
+/// unvalidated, so an absolute or `..` value loaded any local directory
+/// under a trusted source (`check` passed, `run` printed the planted
+/// string, `deps` named the trusted URL). Each probe shape, for `tag` and
+/// `branch`, is now refused on its manifest line, by every command, before
+/// anything is loaded or fetched.
+#[test]
+fn a_tag_or_branch_that_is_a_path_is_refused_on_its_line() {
+    let root = scratch("ref");
+    let host = GitHost::start(&root);
+    let planted = root.join("planted");
+    write(planted.join("almide.toml"), "[package]\nname = \"json2\"\nversion = \"0.1.0\"\n");
+    write(planted.join("src/mod.almd"), "fn hello() -> String = \"PLANTED-FROM-OUTSIDE-CACHE\"\n");
+    // The cache directory the old join resolved a relative value against.
+    let cache = root.join("home/.almide/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let up = format!("{}{}", "../".repeat(cache.components().count() + 4), planted.display().to_string().trim_start_matches('/'));
+    for key in ["tag", "branch"] {
+        for (k, value) in [planted.display().to_string(), up.clone(), "../../../planted".to_string()].into_iter().enumerate() {
+            let dir = root.join(format!("app-{key}-{k}"));
+            app(
+                &dir,
+                &format!("json2 = {{ git = \"https://github.com/almide/json\", {key} = \"{value}\" }}\n"),
+                "import json2\neffect fn main() -> Unit = println(json2.hello())\n",
+            );
+            for args in [&["check", "src/main.almd"][..], &["run", "src/main.almd", "--target", "wasm"], &["deps"]] {
+                let o = almide(&dir, &root, Some(&host), args);
+                let t = text(&o);
+                assert!(!o.status.success(), "`almide {}` accepted {key} = {value}:\n{t}", args.join(" "));
+                assert!(!t.contains("PLANTED-FROM-OUTSIDE-CACHE"), "the planted module ran:\n{t}");
+                assert!(t.contains(&format!("`{key} = ")) && t.contains("is not a ref name") && t.contains("almide.toml:6"), "`almide {}` on {key} = {value}:\n{t}", args.join(" "));
+            }
+        }
+    }
+    assert_eq!(host.requests(), 0, "a refused ref reached the network");
     let _ = std::fs::remove_dir_all(&root);
 }

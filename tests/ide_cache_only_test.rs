@@ -8,6 +8,9 @@
 //! so a fetch is visible: a checkout under `$HOME/.almide/cache` and a lock.
 //! Control: a plain `almide check` in the same project fetches and locks.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -42,8 +45,8 @@ fn project(root: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
     std::fs::write(
         app.join("almide.toml"),
         format!(
-            "[package]\nname = \"ide_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
-            repo.display()
+            "[package]\nname = \"ide_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"{}\", tag = \"v0.1.0\" }}\n",
+            git_host::shared().url_of(&repo)
         ),
     )
     .unwrap();
@@ -60,19 +63,18 @@ fn ide_outline_and_doc_never_fetch_or_write_the_lock() {
     let root = tempfile::tempdir().unwrap();
     let (app, home) = project(root.path());
     for args in [&["query", "outline", "main.almd"][..], &["query", "doc", "greet", "--file", "main.almd"][..]] {
-        let o = Command::new(almide()).args(args).current_dir(&app).env("HOME", &home).output().expect("run almide query");
+        let mut cmd = Command::new(almide());
+        cmd.args(args).current_dir(&app).env("HOME", &home);
+        let o = git_host::shared().env(&mut cmd).output().expect("run almide query");
         let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
         assert!(text.contains("greet"), "`almide {}` did not describe the file:\n{text}", args.join(" "));
         assert!(!app.join("almide.lock").exists(), "`almide {}` wrote almide.lock:\n{text}", args.join(" "));
         assert!(!cloned(&home), "`almide {}` cloned into the dependency cache:\n{text}", args.join(" "));
     }
 
-    let control = Command::new(almide())
-        .args(["check", "main.almd"])
-        .current_dir(&app)
-        .env("HOME", &home)
-        .output()
-        .expect("run almide check");
+    let mut cmd = Command::new(almide());
+    cmd.args(["check", "main.almd"]).current_dir(&app).env("HOME", &home);
+    let control = git_host::shared().env(&mut cmd).output().expect("run almide check");
     assert!(
         app.join("almide.lock").exists() && cloned(&home),
         "control: a plain `almide check` must fetch and lock (stderr: {})",

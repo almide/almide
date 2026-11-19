@@ -39,19 +39,13 @@ pub struct DepMedia {
 }
 
 /// The key `[trust] media` names a package by (ADR-0032 Q17).
-pub fn grant_key(source: &str, name: &str) -> String {
-    let rest = match source.split_once("://") {
-        Some((scheme, rest)) if !scheme.eq_ignore_ascii_case("file") => rest,
-        _ => return name.to_ascii_lowercase(),
-    };
-    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    let host = host.split(':').next().unwrap_or(host).to_ascii_lowercase();
-    let segments: Vec<&str> = path.trim_matches('/').split('/').filter(|s| !s.is_empty()).collect();
-    let [owner, repo, ..] = segments.as_slice() else { return name.to_ascii_lowercase() };
-    let repo = repo.strip_suffix(".git").unwrap_or(repo);
-    let tail = format!("{}/{}", owner.to_ascii_lowercase(), repo.to_ascii_lowercase());
-    if host == "github.com" { tail } else { format!("{host}/{tail}") }
+pub fn grant_key(source: Option<&crate::git_source::GitSource>, name: &str) -> String {
+    // The key spells the source's host and its first two path segments
+    // (github.com's host is left out), from the typed source (ADR-0035 D1).
+    let Some(src) = source else { return name.to_ascii_lowercase() };
+    let [owner, repo, ..] = src.path.as_slice() else { return name.to_ascii_lowercase() };
+    let tail = format!("{}/{}", owner.as_str().to_ascii_lowercase(), repo.as_str().to_ascii_lowercase());
+    if src.host.as_str() == "github.com" { tail } else { format!("{}/{tail}", src.host.as_str()) }
 }
 
 /// Every `@media_owns` pattern declared under `dir`, with its file.
@@ -74,12 +68,12 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepMedia> {
     fetched
         .iter()
         .map(|fd| {
-            let key = grant_key(&fd.source, &fd.pkg_id.name);
+            let key = grant_key(fd.source.as_ref(), &fd.pkg_id.name);
             DepMedia {
                 name: fd.pkg_id.name.clone(),
                 granted: proj.media_grants.iter().filter(|g| g.key == key).flat_map(|g| g.media.clone()).collect(),
                 key,
-                direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name),
+                direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
                 owns: owns_under(&fd.source_dir),
             }
         })
@@ -214,10 +208,10 @@ mod tests {
 
     #[test]
     fn a_grant_names_the_source() {
-        assert_eq!(grant_key("https://github.com/almide/svg", "svg"), "almide/svg");
-        assert_eq!(grant_key("https://github.com/Almide/SVG.git", "svg"), "almide/svg");
-        assert_eq!(grant_key("https://gitlab.com/alice/svg", "svg"), "gitlab.com/alice/svg");
-        assert_eq!(grant_key("", "local_svg"), "local_svg");
-        assert_eq!(grant_key("file:///tmp/svg", "svg"), "svg");
+        let src = |s: &str| crate::git_source::GitSource::parse(s).unwrap();
+        assert_eq!(grant_key(Some(&src("https://github.com/almide/svg")), "svg"), "almide/svg");
+        assert_eq!(grant_key(Some(&src("https://github.com/Almide/SVG.git")), "svg"), "almide/svg");
+        assert_eq!(grant_key(Some(&src("https://gitlab.com/alice/svg")), "svg"), "gitlab.com/alice/svg");
+        assert_eq!(grant_key(None, "local_svg"), "local_svg");
     }
 }

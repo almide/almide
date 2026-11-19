@@ -49,9 +49,12 @@ read here is what the current compiler accepts.
   `heap_restore` are gone: they did nothing under reference counting.
 - Dependencies come from `github.com/almide` unless the project's
   `almide.toml` trusts another owner (`[trust] owners = ["github.com/alice"]`).
-  Two sources need no trust: a `path =` dependency and a git source on the
-  local filesystem (`file://` or a plain path). `almide install` builds a
-  package under that package's own `[trust]`.
+  A `path =` dependency needs no trust. A `git` source is an `https://` or
+  `ssh://` URL (or `git@host:owner/repo`) on any host; `file://`, `git://`,
+  `http://`, a query, a fragment and a password in the URL are refused.
+  `almide.lock` records each dependency's `commit` and a `sum` of its files,
+  checked on every build. `almide install` builds a package under that
+  package's own `[trust]`.
   `almide add alice/lib` is refused; add `--trust github.com/alice` only when
   the user asked for that exact repository. Never invent a repository name:
   an invented name may be registered by an attacker. A dependency that brings

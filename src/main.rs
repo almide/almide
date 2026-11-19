@@ -15,6 +15,7 @@ pub use almide::{
     ast, canonicalize, check, codegen, diagnostic, diagnostic_render, fmt,
     import_table, intern, ir, lexer, lower, mono, optimize,
     parser, project, project_fetch, native_grant, media_grant, media_owners, trust, resolve, stdlib, types,
+    git_source,
     out, out_no_nl, err, err_no_nl, WASM_WALL_MARKER,
 };
 

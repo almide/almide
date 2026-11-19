@@ -6,8 +6,26 @@
 //! lock. Two packages of one repository at one ref share one clone (one
 //! fetch) and are still two packages: two lock entries, two imports.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+/// The one git host of this test binary; each test serves its repository at
+/// its own URL ([`url_for`]).
+fn host() -> &'static git_host::GitHost {
+    static HOST: std::sync::OnceLock<git_host::GitHost> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| git_host::GitHost::start(&std::env::temp_dir().join(format!("almide-issue3381-host-{}", std::process::id()))))
+}
+
+/// The URL `repo` is served at (registered here).
+fn url_for(repo: &Path) -> String {
+    let tag = repo.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let url = format!("https://github.com/almide/ceangal2-{}", tag.rsplit('-').nth(1).unwrap_or("x"));
+    host().serve(&url, repo);
+    url
+}
 
 fn almide_bin() -> String {
     if let Ok(bin) = std::env::var("ALMIDE_BIN") {
@@ -60,7 +78,7 @@ fn commit_monorepo(repo: &Path) -> String {
 }
 
 fn dep(name: &str, repo: &Path, subdir: &str) -> String {
-    format!("{name} = {{ git = \"file://{}\", tag = \"v0.1.0\", subdir = \"{subdir}\" }}", repo.display())
+    format!("{name} = {{ git = \"{}\", tag = \"v0.1.0\", subdir = \"{subdir}\" }}", url_for(repo))
 }
 
 fn write_project(proj: &Path, deps: &[String], main: &str) {
@@ -75,40 +93,20 @@ fn write_project(proj: &Path, deps: &[String], main: &str) {
 }
 
 fn almide(proj: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(almide_bin())
-        .args(args)
-        .current_dir(proj)
-        .env("HOME", home)
-        .output()
-        .expect("spawn almide")
+    let mut cmd = Command::new(almide_bin());
+    cmd.args(args).current_dir(proj).env("HOME", home);
+    host().env(&mut cmd).output().expect("spawn almide")
 }
 
 fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).to_string()
 }
 
-/// The checkout directories under the source-keyed clone roots: the
-/// children of every `@` directory below `~/.almide/cache/.sources` (#4093).
+/// The package trees in the cache (`~/.almide/cache/trees/<sum>`, ADR-0035).
 fn shared_checkouts(home: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        for e in std::fs::read_dir(dir).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-            if !e.path().is_dir() {
-                continue;
-            }
-            if e.file_name() == "@" {
-                for co in std::fs::read_dir(e.path()).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-                    if !co.file_name().to_string_lossy().starts_with('.') {
-                        out.push(co.path());
-                    }
-                }
-            } else {
-                walk(&e.path(), out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    walk(&home.join(".almide").join("cache").join(".sources"), &mut out);
-    out
+    std::fs::read_dir(home.join(".almide/cache/trees"))
+        .map(|r| r.flatten().map(|e| e.path()).filter(|p| !p.file_name().unwrap().to_string_lossy().starts_with('.')).collect())
+        .unwrap_or_default()
 }
 
 fn scratch(tag: &str) -> PathBuf {
@@ -148,12 +146,12 @@ fn two_subdir_packages_of_one_repository_resolve_lock_and_share_a_clone() {
     for (name, sub) in [("ceangal", "ceangal"), ("snaidhm", "snaidhm")] {
         let e = lock.iter().find(|l| l.name == name).unwrap_or_else(|| panic!("no {name} entry: {lock:?}"));
         assert_eq!(e.subdir.as_deref(), Some(sub));
-        assert_eq!(e.commit, commit);
+        assert_eq!(e.commit.as_str(), commit);
         assert_eq!(e.ref_name, "v0.1.0");
     }
 
-    // The locked re-run: the ref checkout already sits at the locked commit, so
-    // it is reused; nothing is fetched and no second checkout appears.
+    // The locked re-run: the tree the lock's sum names is in the cache, so it
+    // is reused; nothing is fetched and no second tree appears.
     let out = almide(&proj, &home, &["check", "src/main.almd"]);
     assert!(out.status.success(), "the locked check should succeed:\n{}", stderr(&out));
     assert_eq!(stderr(&out).matches("Fetching").count(), 0, "{}", stderr(&out));
@@ -203,7 +201,7 @@ fn a_subdir_that_is_not_this_package_is_refused_with_what_was_found() {
     assert!(e.contains("`ceangal`, `snaidhm`"), "{e}");
 
     // No subdir, and the root is no package: the issue's original report.
-    let e = check(&[format!("ceangal = {{ git = \"file://{}\", tag = \"v0.1.0\" }}", repo.display())]);
+    let e = check(&[format!("ceangal = {{ git = \"{}\", tag = \"v0.1.0\" }}", url_for(&repo))]);
     assert!(e.contains("needs a `subdir`") && e.contains("`subdir = \"ceangal\"`"), "{e}");
 
     // Refused before anything is fetched, on the line that writes it.
@@ -232,7 +230,7 @@ fn add_with_subdir_writes_the_entry_only_after_the_package_resolves() {
     std::fs::create_dir_all(&proj).expect("mkdir");
     let manifest = "[package]\nname = \"app\"\nversion = \"0.1.0\"\n";
     std::fs::write(proj.join("almide.toml"), manifest).expect("write");
-    let url = format!("file://{}", repo.display());
+    let url = url_for(&repo);
 
     // A key that is not the subdir's package: refused, manifest untouched.
     let out = almide(&proj, &home, &["add", "cg", "--git", &url, "--tag", "v0.1.0", "--subdir", "ceangal"]);
@@ -260,9 +258,9 @@ fn the_manifest_reader_normalizes_and_refuses_subdirs() {
         std::fs::write(&toml, format!("[package]\nname = \"app\"\n\n[dependencies]\n{dep}\n")).unwrap();
         almide::project::parse_toml(&toml)
     };
-    let p = parse("c = { git = \"https://x/r\", subdir = \"./pkgs//c/\" }").expect("parse");
+    let p = parse("c = { git = \"https://x.example/o/r\", subdir = \"./pkgs//c/\" }").expect("parse");
     assert_eq!(p.dependencies[0].subdir.as_deref(), Some("pkgs/c"));
-    let p = parse("c = { git = \"https://x/r\" }").expect("parse");
+    let p = parse("c = { git = \"https://x.example/o/r\" }").expect("parse");
     assert_eq!(p.dependencies[0].subdir, None);
     for (bad, why) in [
         ("\"\"", "it is empty"),
@@ -272,7 +270,7 @@ fn the_manifest_reader_normalizes_and_refuses_subdirs() {
         ("\"C:/x\"", "absolute path"),
         ("3", "must be a string"),
     ] {
-        let e = parse(&format!("c = {{ git = \"https://x/r\", subdir = {bad} }}")).expect_err(bad);
+        let e = parse(&format!("c = {{ git = \"https://x.example/o/r\", subdir = {bad} }}")).expect_err(bad);
         assert!(e.contains(":5:") && e.contains(why), "{bad}: {e}");
         // `check_manifest` (run before every command) refuses it the same way.
         let content = std::fs::read_to_string(&toml).unwrap();
