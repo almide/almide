@@ -151,11 +151,12 @@ fn text_result(text: &str, is_error: bool) -> Value {
 }
 
 fn success_response(id: Value, result: Value) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
+    // #4819: `almide mcp` hands its text to an agent; no hidden character raw.
+    super::envelope::escape_hidden_json(&json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string())
 }
 
 fn error_response(id: Value, code: i64, message: &str) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string()
+    super::envelope::escape_hidden_json(&json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string())
 }
 
 #[cfg(test)]

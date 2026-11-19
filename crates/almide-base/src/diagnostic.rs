@@ -553,7 +553,9 @@ impl Diagnostic {
             out.push_str(&row);
         }
         self.push_annotation_rows(&mut out);
-        out
+        // #4819: a hidden character quoted into a message or hint is shown as
+        // its escape, like the echoed source line.
+        crate::err_text::escape_hidden(&out).into_owned()
     }
 }
 

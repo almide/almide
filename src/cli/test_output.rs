@@ -87,7 +87,7 @@ impl TestOutput {
                 if t.stdout.is_empty() || claimed.iter().any(|c| std::ptr::eq(*c, t)) {
                     continue;
                 }
-                out.push_str(&format!("  test: {}\n", t.name));
+                out.push_str(&format!("  test: {}\n", almide_base::err_text::escape_hidden(&t.name)));
                 out.push_str(&stdout_block(&t.stdout));
             }
         }

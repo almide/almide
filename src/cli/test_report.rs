@@ -376,7 +376,7 @@ impl TestFailure {
     pub fn render(&self) -> String {
         let mut out = String::new();
         if let Some(n) = &self.name {
-            out.push_str(&format!("  test: {n}\n"));
+            out.push_str(&format!("  test: {}\n", almide_base::err_text::escape_hidden(n)));
         }
         if let Some(l) = self.line {
             out.push_str(&format!("  at:   {}:{}\n", self.file, l));
@@ -795,11 +795,14 @@ fn mangle(name: &str) -> String {
 /// offers a match, else the mangled tail (still better than the full path).
 pub(super) fn display_name(names: &[(String, String)], raw: &str) -> String {
     let tail = raw.rsplit("::").next().unwrap_or(raw);
-    names
+    let name = names
         .iter()
         .find(|(m, _)| m == tail)
         .map(|(_, orig)| orig.clone())
-        .unwrap_or_else(|| almide::ir::test_label(tail).to_string())
+        .unwrap_or_else(|| almide::ir::test_label(tail).to_string());
+    // #4819: a name written with a `\u{202E}` escape holds the raw character;
+    // the report (human and --json) shows it escaped.
+    almide_base::err_text::escape_hidden(&name).into_owned()
 }
 
 // ── Diffing ─────────────────────────────────────────────────────────────────

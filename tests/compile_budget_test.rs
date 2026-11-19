@@ -294,6 +294,18 @@ fn deep_pattern_nesting_ends_at_the_nesting_budget() {
     }
 }
 
+/// #4841: an interpolation hole nests inside its string, so nested holes draw
+/// on the same `nesting` budget — 50 000 of them overflowed the stack.
+#[test]
+fn deep_interpolation_nesting_ends_at_the_nesting_budget() {
+    let interp = |depth: usize| format!("effect fn main() -> Unit = println({}1{})\n", "\"${".repeat(depth), "}\"".repeat(depth));
+    for depth in [600, 50_000] {
+        let run = check(&format!("interp-nesting-{depth}.almd"), &interp(depth), &[]);
+        assert!(!run.ok, "{depth} nested interpolations checked clean");
+        assert!(run.stderr.contains("nesting too deep (max 500)"), "expected the nesting budget at {depth}:\n{}", run.stderr);
+    }
+}
+
 /// D3: the operator raises a budget on the command line, and the verdict
 /// moves with it — the same source that ends at the default passes.
 #[test]

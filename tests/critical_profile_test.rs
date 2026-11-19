@@ -215,3 +215,46 @@ fn memory_safety_refusal_is_critical_only() {
     assert!(!ok, "a @bounded fn accepted an ffi call");
     assert!(err.contains("E076") && !err.contains("E100"), "expected E076 under @bounded, got:\n{err}");
 }
+
+/// #4823: a bare callee is decided by what it resolves to. A selectively
+/// imported fn whose name starts with `print` was admitted by the name alone,
+/// whatever it reached; it is now judged as its `module.member` spelling.
+#[test]
+fn a_selectively_imported_print_named_fn_is_judged_by_its_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("almide.toml"), "[package]\nname = \"crit\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        dir.path().join("src/helper.almd"),
+        "import process\neffect fn print_report(cmd: String) -> String = process.exec(cmd, [])!\neffect fn run_report(cmd: String) -> String = process.exec(cmd, [])!\n",
+    )
+    .unwrap();
+    for f in ["print_report", "run_report"] {
+        std::fs::write(
+            dir.path().join("src/main.almd"),
+            format!("import helper.{{{f}}}\neffect fn main() -> Unit = println({f}(\"id\"))\n"),
+        )
+        .unwrap();
+        let out = Command::new(almide())
+            .args(["check", "src/main.almd", "--profile", "critical"])
+            .current_dir(dir.path())
+            .output()
+            .expect("spawn almide check");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "`{f}` passed --profile critical with no --allow:\n{err}");
+        assert!(err.contains("E074") || err.contains("E076"), "`{f}`: {err}");
+    }
+}
+
+/// #4840: a receiver named like a pure stdlib module (`math`) but bound to a
+/// value made `math.run(n)` read as a stdlib member; it is an indirect call
+/// through the value's field, E074 under the profile.
+#[test]
+fn a_value_named_like_a_module_is_an_indirect_callee() {
+    let src = "type Box = { run: (Int) -> Int }\n\nfn go(math: Box, n: Int) -> Int = math.run(n)\n\nfn main() -> Unit = {\n  let b = Box { run: (x) => x + 1 }\n  println(int.to_string(go(b, 1)))\n}\n";
+    let (crit, err) = check(src, "shadow_math.almd", &["--profile", "critical"]);
+    assert!(!crit, "`math.run(n)` through a value passed --profile critical:\n{err}");
+    assert!(err.contains("indirect call") && err.contains("shadow_math.almd:3:"), "no E074 at `math.run(n)` (line 3):\n{err}");
+    let (normal, err) = check(src, "shadow_math.almd", &[]);
+    assert!(normal, "the normal check rejected the program:\n{err}");
+}

@@ -238,6 +238,17 @@ pub fn cmd_build(args: BuildArgs) {
         std::process::exit(2);
     }
 
+    // #4816: `[permissions] fs` is enforced by the host a program runs
+    // under — the embedded host of `almide run` / `almide test`, the scope
+    // the native build embeds in `main`. A `.wasm` module built for another
+    // host carries no scope (the host chooses its preopens), so the key is
+    // refused here rather than shipped unenforced.
+    if is_wasm && crate::project::permissions_project_for(file).is_some_and(|p| p.fs_allow.is_some()) {
+        err("error: [permissions] fs cannot be carried into a wasm module: the host that runs it chooses the directories it may touch");
+        err("  hint: run it with `almide run --target wasm` (the embedded host enforces the scope), build natively, or remove `fs` from [permissions]");
+        std::process::exit(1);
+    }
+
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
         // The knob rides a render-scoped guard, not a params thread-through:

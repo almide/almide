@@ -56,6 +56,10 @@ fn routes(root: &Path) -> Vec<(std::path::PathBuf, Vec<&'static str>)> {
         (elsewhere, vec!["../proj/src/main.almd", "--target", "rust"]),
         // `check` judges the module's function.
         (proj.clone(), vec!["check", "src/main.almd"]),
+        // #4815: `check --json` (the MCP `almide_check`) and `check --effects`
+        // judge it too.
+        (proj.clone(), vec!["check", "src/main.almd", "--json"]),
+        (proj.clone(), vec!["check", "src/main.almd", "--effects"]),
         // Both test lanes.
         (proj.clone(), vec!["test", "src/reads_test.almd"]),
         (proj, vec!["test", "src/reads_test.almd", "--target", "wasm"]),
@@ -84,11 +88,40 @@ fn granting_fs_admits_every_route() {
     for (dir, args) in routes(td.path()) {
         let o = almide(&dir, &args);
         let t = text(&o);
-        assert!(!t.contains("[permissions].allow"), "`almide {}` refused a granted read:\n{t}", args.join(" "));
+        assert!(!t.contains("is not in [permissions].allow"), "`almide {}` refused a granted read:\n{t}", args.join(" "));
         if args[0] == "test" {
             assert!(t.contains(SECRET), "`almide {}` did not run the read:\n{t}", args.join(" "));
         } else {
             assert!(o.status.success(), "`almide {}`:\n{t}", args.join(" "));
+        }
+    }
+}
+
+/// #4829: a manifest `parse_toml` refuses was read as "no manifest", so its
+/// `[permissions]` were dropped and the program ran unbounded. Each way it
+/// can fail — a hyphenated name, a non-list `native`, a key written twice
+/// (checked from outside the project, where the working-directory gate does
+/// not see it) — now ends every route with the manifest's error.
+#[test]
+fn a_manifest_that_does_not_parse_refuses_every_route() {
+    let cases = [
+        ("hyphen", "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"IO\"]\n"),
+        ("native", "[package]\nname = \"p\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"IO\"]\nnative = \"x\"\n"),
+        ("dup", "[package]\nname = \"p\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"IO\"]\nallow = [\"IO\"]\n"),
+    ];
+    for (tag, manifest) in cases {
+        let td = tempfile::TempDir::new().unwrap();
+        let p = td.path().join("p");
+        std::fs::create_dir_all(p.join("src")).unwrap();
+        std::fs::write(p.join("almide.toml"), manifest).unwrap();
+        std::fs::write(p.join("s.txt"), SECRET).unwrap();
+        std::fs::write(p.join("src/main.almd"), "import fs\neffect fn main() -> Unit = println(fs.read_text(\"p/s.txt\")!)\n").unwrap();
+        for args in [vec!["check", "p/src/main.almd"], vec!["run", "p/src/main.almd"], vec!["run", "p/src/main.almd", "--target", "wasm"]] {
+            let o = almide(td.path(), &args);
+            let t = text(&o);
+            assert_eq!(o.status.code(), Some(1), "[{tag}] `almide {}` ignored a manifest that does not parse:\n{t}", args.join(" "));
+            assert!(t.contains("almide.toml"), "[{tag}] `almide {}` did not name the manifest:\n{t}", args.join(" "));
+            assert!(!t.contains(SECRET), "[{tag}] `almide {}` read the file:\n{t}", args.join(" "));
         }
     }
 }

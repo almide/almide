@@ -846,7 +846,7 @@ impl BoundedCx<'_, '_> {
 
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) {
         match &callee.kind {
-            ast::ExprKind::Ident { name } => self.check_call_ident(call, name.as_str()),
+            ast::ExprKind::Ident { name } => self.check_call_ident(call, name.as_str(), args),
             ast::ExprKind::Member { object, field } => self.check_call_member(call, object, field.as_str(), args),
             // ALS-B7 (#2297): a variant constructor application builds a
             // value, as a record literal or a tuple does. It is not a call,
@@ -866,7 +866,7 @@ impl BoundedCx<'_, '_> {
 
     /// A bare callee: a @bounded fn, the print family, the assert macros, or
     /// nothing the profile admits.
-    fn check_call_ident(&mut self, call: &ast::Expr, n: &str) {
+    fn check_call_ident(&mut self, call: &ast::Expr, n: &str, args: &[ast::Expr]) {
         if let Some((is_bounded, _)) = self.fns.get(n) {
             if !is_bounded {
                 // ALS-B7 / E074
@@ -879,13 +879,23 @@ impl BoundedCx<'_, '_> {
             }
             return;
         }
-        // bare builtins: the print family is B9's one capability (a pure fn
-        // cannot reach it anyway; E006 owns that)
-        if n.starts_with("print") || n.starts_with("eprint") {
+        // #4823: a bare callee is decided by what it resolves to, never by its
+        // spelling. A builtin answers a bare call before any declaration
+        // (builtin_calls.rs), so it is the builtin itself: the output builtins
+        // (B9's one capability) and the assertions (test-position machinery)
+        // are admitted, read off the builtin table's own description; an
+        // unconditional abort is not.
+        if let Some((_, does)) = crate::check::OUTPUT_ABORT_BUILTINS.iter().find(|(b, _)| *b == n) {
+            if *does != "aborts the program" {
+                return;
+            }
+        } else if let Some((m, f)) = self.checker.env.import_table.resolve_direct(n).as_deref().and_then(|q| q.rsplit_once('.')) {
+            // A selectively imported fn is judged exactly as its
+            // `module.member` spelling.
+            if !self.member_module_decided(call, m, f) {
+                self.check_member_call_shape(call, m, f, args);
+            }
             return;
-        }
-        if n == "assert" || n == "assert_eq" {
-            return; // test-position machinery, not a profile callee
         }
         // unknown bare callee: not a @bounded fn, not admissible
         self.err(
@@ -909,6 +919,27 @@ impl BoundedCx<'_, '_> {
             );
             return;
         };
+        // #4840: a receiver the checker typed as a VALUE (a parameter or local,
+        // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
+        // through that value: indirect, never a stdlib member.
+        if self.checker.type_map.get(&object.id).is_some() {
+            // `p.norm()` on a value is UFCS for the user fn `norm(p)`: judged
+            // as that direct call; anything else through a value is indirect.
+            if self.fns.contains_key(f) {
+                let mut all = Vec::with_capacity(args.len() + 1);
+                all.push((*object).clone());
+                all.extend(args.iter().cloned());
+                self.check_call_ident(call, f, &all);
+                return;
+            }
+            self.err(
+                "an indirect call is not admissible in a @bounded function",
+                "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
+                "E074",
+                call.span,
+            );
+            return;
+        }
         let m0 = module.as_str();
         let resolved = self
             .checker
@@ -943,7 +974,11 @@ impl BoundedCx<'_, '_> {
             if self.module_granted("io") {
                 return true;
             }
-            if !(f.starts_with("print") || f.starts_with("eprint")) {
+            // #4823: admitted by its declared category (standard output or
+            // error), not by a `print` prefix.
+            let streams = almide_ir::effect::stdlib_call_effect("io", f);
+            let declared_output = !streams.is_empty() && streams.iter().all(|e| matches!(e, almide_ir::effect::Effect::IoStdout | almide_ir::effect::Effect::IoStderr));
+            if !declared_output {
                 self.err(
                     "an effect outside the declared capability is not admissible in a @bounded function",
                     "the profile's declared capability is standard output only",

@@ -476,9 +476,10 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
 
     // `[permissions] fs` (#4084): the embedded host bounds a test run to the
     // granted directories exactly as it bounds `almide run --target wasm`.
-    // The manifest is the working directory's, as every build route reads it
-    // (`compile_driver`), so every file of one run sets the same scope.
-    almide_wasm_run::set_fs_scope(cwd_fs_scope());
+    // The manifest is the test file's own project's (#4816: the working
+    // directory's let a run from outside the project read anything);
+    // `run_wasm_test_phase` runs files one at a time when their scopes differ.
+    almide_wasm_run::set_fs_scope(file_fs_scope(test_file));
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     // Counted before any filtering so the summary can say what `--run` excluded.
     let declared_tests = program
@@ -761,20 +762,31 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
-/// The working directory's `[permissions] fs` roots (anchored to the
-/// manifest), or `None` without a manifest or without the key.
-fn cwd_fs_scope() -> Option<Vec<String>> {
-    let manifest = std::path::Path::new("almide.toml");
-    if !manifest.exists() {
-        return None;
+/// The `[permissions] fs` roots (anchored to the manifest) of `file`'s own
+/// project — the nearest almide.toml at or above it, as `check` and `run`
+/// read it (#4816) — or `None` without a manifest or without the key.
+fn file_fs_scope(file: &str) -> Option<Vec<String>> {
+    crate::project::permissions_project_for(file).and_then(|p| p.fs_allow)
+}
+
+/// The one fs scope every file of `files` runs under, or `Err` when their
+/// projects grant different ones (the host's scope is one per process).
+fn one_fs_scope(files: &[String]) -> Result<Option<Vec<String>>, String> {
+    let mut scopes = files.iter().map(|f| file_fs_scope(f));
+    let first = scopes.next().flatten();
+    match scopes.all(|s| s == first) {
+        true => Ok(first),
+        false => Err("the files' projects grant different [permissions] fs scopes".to_string()),
     }
-    crate::project::parse_toml(manifest).ok().and_then(|p| p.fs_allow)
 }
 
 pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
     // #4441: the run's files as ONE program first — one emit, one compile,
     // a fresh instance per file; what it does not cover runs file by file.
     let (mut outcomes, rest) = run_one_program_phase(test_files, cpus, run_filter);
+    // #4816: each file runs under its own project's fs scope, which the host
+    // holds per process — files whose scopes differ run one at a time.
+    let cpus = if one_fs_scope(&rest).is_ok() { cpus } else { 1 };
     outcomes.extend(run_wasm_test_files(&rest, scratch, cpus, run_filter));
     outcomes
 }
@@ -835,7 +847,7 @@ fn run_one_program_phase(test_files: &[String], cpus: usize, run_filter: Option<
 /// Lower, emit and compile `batch` as one program, then run each file's
 /// tests on a fresh instance of it.
 fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::PathBuf)], cpus: usize, run_filter: Option<&str>, t: &super::run::PhaseTimer) -> Result<Vec<WasmTestOutcome>, String> {
-    almide_wasm_run::set_fs_scope(cwd_fs_scope());
+    almide_wasm_run::set_fs_scope(one_fs_scope(batch)?);
     let sources: Vec<(String, String)> = batch
         .iter()
         .map(|f| almide::source_overlay::read_to_string(f).map(|s| (f.clone(), s)).map_err(|e| e.to_string()))

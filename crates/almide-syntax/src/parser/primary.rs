@@ -719,6 +719,10 @@ impl Parser {
         let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset)
             .with_caseless_type_names(&self.caseless_type_names)
             .with_legacy_grouping(self.legacy_grouping);
+        // #4841: a hole nests inside the expression that holds it, so the
+        // sub-parse draws on the same `nesting` budget (C-440): it starts at
+        // this parser's depth, not at 0.
+        sub_parser.depth = self.depth;
         match sub_parser.parse_single_expr() {
             Ok(parsed) => {
                 // Advance our id counter past sub-parser's allocations

@@ -513,6 +513,9 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     if !extern_attrs.is_empty() {
         env.extern_fns.insert(sym(&fn_key));
     }
+    if prefix.is_none_or(crate::lower::is_user_module) && attrs.iter().any(|a| a.name.as_str() == "inline_rust") {
+        env.inline_rust_fns.insert(sym(&fn_key));
+    }
     // #3504: a user module's fn spelled into the compiler's fn-name space is
     // escaped at lowering; recorded here so an importer lowered before or
     // after the module names it the same way.

@@ -1,0 +1,7 @@
+// #4824: `@pure` on an `@inline_rust` fn cannot be checked: its body is the
+// Rust text, not the Almide one the checker reads.
+@pure
+@inline_rust("{ let _ = {p}; 1i64 }")
+fn touch(p: String) -> Int = 1
+
+fn main() -> Unit = println(int.to_string(touch("x")))
