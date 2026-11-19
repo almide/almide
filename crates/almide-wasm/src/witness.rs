@@ -673,7 +673,9 @@ pub fn path_walk_steps() -> u64 {
     paths::steps()
 }
 
-pub(crate) fn collecting() -> bool {
+/// Are the sinks armed? A module reused from a cache recorded nothing to
+/// judge, so the run cache treats an armed build apart (#4836).
+pub fn collecting() -> bool {
     sink().lock().expect("witness sink").is_some()
 }
 

@@ -185,15 +185,32 @@ pub(super) fn certified<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T
         return make();
     }
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
+    super::wasm_run_cache::reset_judged();
     almide_wasm::witness::start_collecting();
     let (bytes, rest) = make()?;
+    // A run-cache hit on this route is a module this verifier accepted
+    // before (entries are written only after acceptance, keyed by it).
+    if super::wasm_run_cache::took_judged_hit() {
+        let _ = almide_wasm::witness::take();
+        return Ok((bytes, rest));
+    }
     if let Err(e) = gate_build(file, &bytes, &bytes) {
         err(&format!(
             "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"
         ));
         std::process::exit(1);
     }
+    super::wasm_run_cache::commit_judged();
     Ok((bytes, rest))
+}
+
+/// The installed verifier's identity — its path, size and mtime — for the
+/// run cache's judged entries (hashing it would cost more than a render).
+pub(super) fn verifier_identity() -> String {
+    let Some(p) = locate_verifier() else { return "none".into() };
+    let meta = std::fs::metadata(&p).ok();
+    let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    format!("{} {} {mtime}", p.display(), meta.map_or(0, |m| m.len()))
 }
 
 /// The build gate (#4011, row 3 of the security table): the certificate of

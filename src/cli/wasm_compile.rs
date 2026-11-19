@@ -556,18 +556,30 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     let _ = (&mut ir_program, allow_unverified, verified);
     // The embedded-leg run form (`run` / `bench`) reuses a module rendered
     // from the same inputs (`wasm_run_cache`); every gate above has run.
+    // On a certified route (`verify::certified`: the witness sinks armed) a
+    // reused module recorded no certificate, so an entry there is written
+    // only after the installed verifier accepted it, keyed by that verifier
+    // too (#4836): a hit is a module this verifier already judged.
+    let certifying = almide_wasm::witness::collecting();
     let cache = (embedded_leg && !library_ok && inputs.has_main)
-        .then(|| super::wasm_run_cache::entry_path(file, &source_text, &resolved, &dep_paths, verified))
+        .then(|| super::wasm_run_cache::entry_path(file, &source_text, &resolved, &dep_paths, verified, certifying))
         .flatten();
     let (bytes, host_ops) = match cache.as_deref().and_then(super::wasm_run_cache::lookup) {
         Some(hit) => {
             t.lap("render (cache hit)");
+            if certifying {
+                super::wasm_run_cache::note_judged_hit();
+            }
             hit
         }
         None => {
             let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths, &fresh_resolved)?;
             if let Some(entry) = &cache {
-                super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
+                if certifying {
+                    super::wasm_run_cache::store_once_judged(entry, &rendered.0, &rendered.1);
+                } else {
+                    super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
+                }
             }
             t.lap("render");
             rendered
