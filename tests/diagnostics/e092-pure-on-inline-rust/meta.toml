@@ -1,0 +1,3 @@
+expects_code = "E092"
+expects_error = "`@pure` cannot be checked on `@inline_rust` fn `touch`: its body is foreign"
+hint_substring = "remove `@pure`"
