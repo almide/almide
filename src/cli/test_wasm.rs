@@ -190,7 +190,7 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     // stdlib-test leg judges exactly these bytes.
     // #4836: judged by the installed verifier like the module `build` writes.
     let mut walled: Option<(&'static str, String)> = None;
-    let routed = super::verify::certified(test_file, || {
+    let routed = super::verify::certified_test(test_file, || {
         match almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(test_file), run_filter, declared_tests > 0, &gate) {
             Ok(r) => Ok((r.bytes, r.host_ops)),
             Err(w) => {
@@ -888,7 +888,7 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     }
     // #4836: judged by the installed verifier like the module `build` writes.
     let mut emit_err = String::new();
-    let (bytes, host_ops) = super::verify::certified(&batch[0], || {
+    let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {
         almide_wasm::emit_program_with_ops(&ir).map_err(|e| emit_err = format!("emit: {e:?}"))
     })
     .map_err(|()| emit_err.clone())?;

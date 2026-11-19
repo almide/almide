@@ -180,6 +180,25 @@ pub(super) fn verifier_present() -> bool {
 /// so a parallel test lane makes and judges one module at a time while a
 /// verifier is installed; without one nothing changes.
 pub(super) fn certified<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+    certified_with(file, &[], make)
+}
+
+/// The grants the test runner's own calls need (#4836): its abort-site
+/// selector reads how the run was launched (`Env.read`) and a site's child
+/// run starts a fresh instance (`Proc`) — the `testing` host ops the
+/// compiler's runner `main` makes, not the program's. The program's own
+/// calls were already held to `[permissions]` by the front gate.
+/// `the_test_runner_grants_cover_the_testing_host_ops` ties this to the
+/// host-op table.
+pub(super) const TEST_RUNNER_GRANTS: &[&str] = &["Env.read", "Proc"];
+
+/// [`certified`] for a test lane's module: the runner's grants
+/// ([`TEST_RUNNER_GRANTS`]) join the manifest's allow when it has one.
+pub(super) fn certified_test<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+    certified_with(file, TEST_RUNNER_GRANTS, make)
+}
+
+fn certified_with<T>(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if !verifier_present() {
         return make();
@@ -194,7 +213,7 @@ pub(super) fn certified<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T
         let _ = almide_wasm::witness::take();
         return Ok((bytes, rest));
     }
-    if let Err(e) = gate_build(file, &bytes, &bytes) {
+    if let Err(e) = gate_build(file, &bytes, &bytes, runner) {
         err(&format!(
             "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"
         ));
@@ -222,9 +241,12 @@ pub(super) fn verifier_identity() -> String {
 /// when it REJECTS a witness or the bundle (exit 1 / 2), or cannot be run:
 /// the build then refuses to write the artifact. The compiler still never
 /// judges its own certificate — the verdict is the separate binary's.
-pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(), String> {
+pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<(), String> {
     let Some(verifier) = locate_verifier() else { return Ok(()) };
-    let allow = manifest_allow(file);
+    let allow = manifest_allow(file).map(|mut a| {
+        a.extend(runner.iter().map(|g| g.to_string()));
+        a
+    });
     let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
     // The hand-off the verifier reads back, in the private cache base
@@ -363,4 +385,26 @@ pub fn cmd_verify(args: &[String]) -> i32 {
         let _ = std::fs::remove_file(&scratch);
     }
     code
+}
+
+#[cfg(test)]
+mod runner_grant_tests {
+    /// The runner's grants cover every capability a `testing` host op
+    /// reaches, and nothing a non-`testing` op needs beyond them.
+    #[test]
+    fn the_test_runner_grants_cover_the_testing_host_ops() {
+        let granted = almide_mir::certificate::manifest_caps(&super::TEST_RUNNER_GRANTS.iter().map(|g| g.to_string()).collect::<Vec<_>>());
+        let testing: Vec<_> = almide_mir::host_ops::HOST_OPS.iter().filter(|o| o.module == "testing").collect();
+        assert!(!testing.is_empty(), "no testing host op in the table");
+        let mut needed = Vec::new();
+        for o in testing {
+            for c in o.caps {
+                assert!(granted.contains(c), "testing.{} reaches {c:?}, which the runner grants do not cover", o.func);
+                if !needed.contains(c) {
+                    needed.push(*c);
+                }
+            }
+        }
+        assert_eq!(granted.len(), needed.len(), "the runner grants {granted:?} exceed what the testing host ops reach {needed:?}");
+    }
 }

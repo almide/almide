@@ -100,7 +100,7 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
         // (`almide verify` refuses it the same way): the core module it
         // packages is judged before it is packaged (#4836).
         let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
-        if let Err(e) = super::verify::gate_build(file, &emitted, shipped) {
+        if let Err(e) = super::verify::gate_build(file, &emitted, shipped, &[]) {
             err(&format!(
                 "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
             ));
