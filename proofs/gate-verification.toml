@@ -856,6 +856,16 @@ varies = "#2413 landing: four forged inputs each read as a finding (a grown tota
 blind = "UNMAPPED"
 
 [[gate]]
+path = "tools/almide-gates:decision-sites"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "decision-sites landing (2026-11-19, VM ds-1, `main.almd -- decision-sites .` on the branch tree): five forged inputs, each run and each demonstrated to FAIL, tree restored and green after each — (1) a forged row `forged.no-control` with status STAMPED, a `runs` cell and no novel / probe / control => 'STAMPED but c2: no `novel` test', 'c3: `runs` cells but no probe directory', 'c4: control_patch must be proofs/decision-controls/forged.no-control.patch'; (2) a STAMPED row's check cell set to `skipped: own copy` => 'route check is skipped without an issue', 'STAMPED but c3: route cells not `runs` / `n.a.: <why>`' and 'skipped_route_ceiling: 195 is above the ceiling 194'; (3) the check a patch neuters moved (report_effect_isolation's parameter renamed) => 'effect.e006-isolation.patch no longer applies — re-derive it against the moved check'; (4) a patch file no row names => 'orphan.patch belongs to no row's control_patch'; (5) the counts below their ceilings after stamping 15 rows => 'unstamped_ceiling: 144 is below the ceiling 159 — lower the ceiling'. The Almide unit tests (tools/almide-gates/src/decision_sites.almd, 7) hold the same verdicts on synthetic ledgers, among them 'a forged STAMPED row with no control fails'. Baseline after restore: 159 rows, 15 stamped, 144 not stamped (31 unclassified), 194 skipped route cells, 62 fail-open."
+measures = "per [[site]] row of proofs/decision-sites.toml: for a STAMPED row, its from / unknown / novel test (calling tests/support/novel.rs) / route cells and probe directory / control patch, control_test and control_seen / stamp; for every row, a skipped route cell naming #NNNN; every named patch applying (git apply --check) and naming its row's control_test; every patch owned by a row; and the four counts (not stamped, unclassified, skipped cells, unknown = allow) against the header ceilings in both directions"
+varies = "decision-sites landing: unstamped 159 -> 144 and skipped 193 -> 194 as batch 4 stamped 15 rows and ran the route matrix; the forged inputs above each read as a finding"
+blind = "a decision site that emits no code, carrier or gate switch -> tests/decision_sites_test.rs (row items must exist; unsignalled sites are seeded by hand); a `runs` cell whose probe exercises a different check -> tests/decision_route_matrix_test.rs; a patch that applies but neuters nothing -> scripts/run-decision-controls.sh (control_seen)"
+
+[[gate]]
 path = "tools/almide-gates:structure"
 reads = "structured"
 wired_by = ".github/workflows/ci.yml"

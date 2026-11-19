@@ -41,9 +41,9 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "159"
+# unstamped_ceiling     = "144"
 # unclassified_ceiling  = "31"
-# skipped_route_ceiling = "193"
+# skipped_route_ceiling = "194"
 # failopen_ceiling      = "62"
 #
 # History:
@@ -51,6 +51,14 @@
 #               first run (the sites the draft missed enter UNCLASSIFIED):
 #               159 rows, 0 stamped, 31 unclassified (15 draft + 16 detector),
 #               193 skipped route cells, 62 fail-open rows.
+#   2026-11-19  batch 4 (VM ds-1): the route matrix RAN every probe on all 14
+#               columns, inside and outside the project; cells corrected to
+#               what happens. 15 rows STAMPED (controls red, cells driven).
+#               Skipped cells 193 -> 194: the version pin is admitted from
+#               outside the project (#4846, 9 cells) and check --effects runs
+#               no value gate (#4847, 1 cell), cells the draft read as `runs`;
+#               other draft `skipped` cells became `n.a.` with a reason. Every
+#               skipped cell now names an open issue (13 filed: #4846-#4858).
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -451,13 +459,12 @@ tests = [
 ]
 control_note = "security-by-construction.md row 26: rc2 accepts e006-effect-fn-path-to-user-hof / e006-effect-fs-remove-as-value / e006-effect-protocol-method-through-bound"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "calls.rs:219-224, 671-683, 1241-1246. Declaration/type-based. The only residual is that `effect` is not a capability marker for prim host ops (#4827), which this site does not claim."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "effect.e109-value-gate"
@@ -614,13 +621,12 @@ tests = [
 ]
 control_note = "tests/diagnostics/e100-critical-extern-fn"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "bounded.rs:40-52. Critical routes are check / check --json only by design."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "critical.memory-unsafe-call"
@@ -650,13 +656,12 @@ tests = [
 ]
 control_note = "tests/diagnostics/e100-critical-ffi-read"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "bounded.rs:921-931. Shares the receiver-resolution weakness of bounded.member-module-gate, but a shadowing local cannot BE a memory-unsafe stdlib fn."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "bounded.bare-callee"
@@ -829,13 +834,12 @@ tests = [
 ]
 control_note = "security-by-construction.md row 17 (inline Rust): dropping the E085 identity check fails inline_rust_authority_test (exit 101)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "intrinsic_authority.rs:157-180. The attribute list is the closed set of runtime-binding attributes; attr_vocab refuses unknown attributes."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "prim.e085-prim-ref"
@@ -885,13 +889,12 @@ tests = [
 ]
 control_note = "security-by-construction.md row 17 (inline Rust) E085 identity control"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "The `stdlib` dir name only narrows (AND with byte identity), so it cannot widen authority."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "ffi.e100-import-opt-in"
@@ -1223,13 +1226,12 @@ tests = [
 ]
 control_note = "security-by-construction.md row 10: 6ada3a14e (rooted read by path, O_NOFOLLOW dropped, segment guards dropped -> exit 101)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "fs_beneath_core.rs:117-138; rooted family is the program's own call, so it holds on every route including emit and stock artifacts."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "fsscope.wasm-host-touched"
@@ -1276,10 +1278,7 @@ tests = [
 control_note = "security-by-construction.md row 19: op_allowed answering Ok / old no-list fallback -> op let through, both tests fail (GCE 2026-10-26)"
 issues = []
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c3:no route probe \u2014 only a hand-built module calls an fs op outside its set (unit tests in host.rs)", "c2:no novel-item test yet", "c4:no control patch yet (the 2026-10-26 GCE control is recorded in control_note)"]
 note = "host.rs:210-223."
 draft = "STAMPABLE"
 
@@ -1665,21 +1664,20 @@ keys = [
 ]
 decides = "bypass the E081 stdlib availability check on the wasm build"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Gate, registered; release lock ignores it unless --allow-switch"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
 ]
 control_note = "tests/switch_lock_test.rs (unlocked control runs every CI)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:196 Gate; locked in release, announced when on."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.no-verified-ok"
@@ -1697,21 +1695,20 @@ keys = [
 ]
 decides = "re-enable the retired --no-verified legs (v0 fallback) instead of refusing the flag"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Gate; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: takes no --no-verified, the only place the switch is read", check_json = "n.a.: takes no --no-verified, the only place the switch is read", check_effects = "n.a.: takes no --no-verified, the only place the switch is read", run = "runs", build = "runs", test = "n.a.: takes no --no-verified, the only place the switch is read", bench = "n.a.: takes no --no-verified, the only place the switch is read", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: takes no --no-verified, the only place the switch is read", mcp = "n.a.: takes no --no-verified, the only place the switch is read", emit = "n.a.: takes no --no-verified, the only place the switch is read" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_refuses_the_retired_no_verified_leg_from_the_environment",
 ]
 control_note = "tests/switch_lock_test.rs"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:198. Test harnesses (tests/fs_scope_test.rs:71) set it on dev builds."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.skip-version-check"
@@ -1729,8 +1726,8 @@ keys = [
 ]
 decides = "skip the project's almide version requirement check"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Gate; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", check_json = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", check_effects = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", run = "runs", build = "runs", test = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", bench = "runs", native = "runs", wasm = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", wasi = "runs", component = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", lsp = "skipped: #4846 the editor route never reads the pin", mcp = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", emit = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
@@ -1739,12 +1736,10 @@ tests = [
 control_note = "scripts/check-release-switch-lock.sh negative control (predicate false -> exit 1)"
 issues = [4846]
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c3:route-skipped #4846 (the pin is read from ./almide.toml)"]
 note = "env.rs:227."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
 
 [[site]]
 id = "env.test-lax-wasm"
@@ -1762,8 +1757,8 @@ keys = [
 ]
 decides = "let the default almide test lane PASS a file whose wasm leg diverged (trapped where native passed)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Gate; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "unprobed: read only after a file traps on the wasm leg and passes the native re-run (commands.rs:384) \u2014 no probe can cause that on purpose", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
@@ -1771,12 +1766,10 @@ tests = [
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c3:unprobeable \u2014 the switch is read only after a file traps on the wasm leg and passes the native re-run; the lock and its control are verified (control_seen)"]
 note = "env.rs:235."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
 
 [[site]]
 id = "env.shuffle-passes"
@@ -1794,21 +1787,20 @@ keys = [
 ]
 decides = "run native passes in a seeded random order permitted by declared edges (probe)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Gate; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "runs", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "runs", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "runs" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:223."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.wasm-skip-stock-audit"
@@ -1824,21 +1816,20 @@ switches = [
 keys = []
 decides = "skip the stock-WASI host-op audit on almide build --target wasm"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Route; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:269."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.control-admit-codec-at-input"
@@ -1856,21 +1847,20 @@ keys = [
 ]
 decides = "admit a Codec type at an @input_sink parameter instead of E110 (negative control switch)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Ablation; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/input_sink_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:107."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.control-admit-hand-decode"
@@ -1886,8 +1876,8 @@ switches = [
 keys = []
 decides = "admit hand-decoded request data into a sent-out type (E110 flow half off)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Ablation; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "runs", check_json = "runs", check_effects = "skipped: #4847 check --effects runs no E110 flow gate (rc 0 on the probe without the switch)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (the flow gate is the CLI's; the switch is not read there)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/input_sink_test.rs",
@@ -1895,12 +1885,10 @@ tests = [
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = [4847]
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c3:route-skipped #4847 (check --effects runs no flow gate)"]
 note = "env.rs:108."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
 
 [[site]]
 id = "env.control-ignore-skip-decode"
@@ -1916,21 +1904,20 @@ switches = [
 keys = []
 decides = "make the Codec derive read a @skip_decode field from input again"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Ablation; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route derives no codec (the switch is not read there)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/codec_field_skip_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:110."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.control-no-type-sharing"
@@ -1946,21 +1933,20 @@ switches = [
 keys = []
 decides = "copy whole type trees instead of sharing (lifts the type-sharing protection of the compile budget)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Ablation; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/compile_budget_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:111."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.native-drill-force-moves"
@@ -1976,21 +1962,20 @@ switches = [
 keys = []
 decides = "make the certified native render move copies ignoring the MIR liveness verdict (negative control of the copy-to-move rule)"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "Ablation; locked in release"
+unknown = "refuse"
+unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
 routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "runs", build = "runs", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "runs", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:194."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "env.skip-pass"
@@ -2898,12 +2883,10 @@ tests = [
 control_note = "row 25 (2026-10-26): resolve_cached_deps online -> lsp_didopen_never_fetches_or_writes_lock and ide_cache_only_test fail; mcp children without ALMIDE_DEPS_CACHE_ONLY -> 'almide_check wrote almide.lock'"
 issues = []
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c3:the probe cannot hold a fetchable git source, so a route that fetched looks like one that did not; from outside the project MCP does not read the dependency at all (#4830 shape). Control verified (control_seen)"]
 note = "Offline mode takes fetch_dep_in_chain's (None, true) ref path (project_fetch.rs:518-520), so no ls-remote runs. Option-shaped git sources (#4810) are not run in this mode because populate_cache_dir refuses before the clone closure. bugs-final: unchanged."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
 
 [[site]]
 id = "native.grant-survey"
@@ -3123,10 +3106,7 @@ tests = [
 control_note = "row 16: the old installers fail it — `install.sh [no-gh]: expected a refusal, got exit 0`, same for install.ps1 (proofs/gate-verification.toml)"
 issues = []
 status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+reasons = ["c2:no novel-item test (the installers are shell, outside the cargo tests)", "c4:control is a CI script negative (check-installer-attestation.sh), not a patch", "c3:all cells n.a. by design (no compile route) \u2014 the row needs a different evidence shape"]
 note = "Outside src/ but the same decision as selfupdate; included for completeness. bugs-final: unchanged."
 draft = "STAMPABLE"
 
@@ -4000,13 +3980,12 @@ tests = [
 ]
 control_note = "tests/compile_budget_test.rs (assert_linear: without the budget the doubling shapes are exponential)"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c3:routes-read-not-run",
-  "c4:control-not-run",
-]
+status = "STAMPED"
+reasons = []
 note = "Manifest / dependency budgets belong to the deps domain. The MIR re-link (pipeline.rs:529, pipeline_native_bundled.rs:183) calls link_ir without budget_refusal but only after the front link already passed the same input."
 draft = "STAMPABLE"
+control_seen = "3ac0714c94 2026-11-19 ds-1: base green, patched red"
+stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "unclassified.s1.e011"
