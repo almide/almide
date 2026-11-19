@@ -108,3 +108,20 @@ fn a_native_test_run_over_two_projects_scopes_each_by_its_own_manifest() {
         assert!(o.status.success(), "round {round}: a test saw the other project's scope:\n{}", text(&o));
     }
 }
+
+/// #4843: `--target rust` prints the source the build compiles, the scope
+/// included: the emitted source carried no scope, so a crate built from it
+/// read outside `data`.
+#[test]
+fn emitted_rust_carries_the_projects_fs_scope() {
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path());
+    let dir = td.path().join("fsp");
+    for args in [vec!["src/main.almd", "--target", "rust"], vec!["emit", "src/main.almd", "--target", "rust"]] {
+        let o = almide(&dir, &args);
+        assert!(o.status.success(), "{}", text(&o));
+        let src = String::from_utf8_lossy(&o.stdout);
+        assert!(src.contains("__ALMIDE_FS_SCOPE_INSTALLED__"), "`almide {}` emitted no scope:\n{src}", args.join(" "));
+        assert!(src.contains("__almide_fs_path!("), "`almide {}` emitted an unguarded fs call", args.join(" "));
+    }
+}

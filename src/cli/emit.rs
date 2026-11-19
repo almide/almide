@@ -121,6 +121,10 @@ fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &
     match codegen::codegen_with(ir, t, &opts) {
         codegen::CodegenOutput::Source(code) => {
             let code = if metered { code + &almide_mir::pipeline::native_meter_runtime() } else { code };
+            // `[permissions] fs` of the entry's project, baked in as the build
+            // bakes it (#4843): the printed source is the source the build
+            // compiles, and a crate built from it is bounded the same way.
+            let code = if t == codegen::pass::Target::Rust { super::build::inject_fs_scope(code, super::fs_scope_for(src_file)) } else { code };
             if trace_map {
                 write_trace_map(src_file, &code);
             }
