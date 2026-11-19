@@ -1,6 +1,6 @@
 # ADR-0038: An output line of scalars is written to the sink — `println("${n} …")` whose holes all have a fixed-width text form lowers to one write from a fixed-size line buffer, builds no String, and E071 admits it by its types and shape
 
-- **Status**: Proposed (design; not implemented), 2026-11-20. Implementation waits for review.
+- **Status**: Accepted (design), 2026-11-20, with the rulings recorded under [Rulings](#rulings-2026-11-20). Not implemented yet.
 - **Date**: 2026-11-20
 - **Scope**: the output builtins (`println`, `eprintln`) when their argument is an interpolated string; the E071 rule (ALS-B4) under `@bounded` and `--profile critical`; the native (v1) and wasm lowerings of that one shape.
 - **Related**:
@@ -52,13 +52,16 @@ An **output line** is a call to an output builtin (`println`, `eprintln`, as `OU
 | `Int` (i64) | 20 | the same digits `int.to_string` produces, `-9223372036854775808` at most |
 | sized ints `Int8` … `Int64`, `UInt8` … `UInt64` | 4 / 6 / 11 / 20 / 3 / 5 / 10 / 20 | the same digits as that type's `to_string` |
 | `Bool` | 5 | `true` / `false` |
+| `Float` (f64) | 327 | the same text `float.to_string` produces (shortest round-trip digits, no exponent, `.0` on an integral value; `NaN`, `inf`, `-inf`) |
+| `Float32` | 48 | the same text `float32.to_string` produces |
+
+The Float widths are measured, not estimated. The longest f64 texts are `-5e-324` (`-0.` followed by 323 zeros and `5`) and the smallest normal `-2.2250738585072014e-308` (`-0.`, 307 zeros, 17 digits); both are 327 bytes. The largest finite value prints 309 integer digits plus `.0` (311 bytes). For f32 the longest is the smallest subnormal, `-1.4e-45`, at 48 bytes. A unit test pins each constant by walking every binary exponent (both ends of each binade plus sampled mantissas) and asserting no text exceeds it. A constant that turns out too small is a compile-time refusal in the writer, never a truncated line.
 
 Each hole's type alone fixes the line's maximum length: the literal bytes, plus the widths above, plus the newline. That bound is what makes the line allocation-free. The whole line fits in a buffer whose size is a compile-time constant.
 
 Not in the fixed-width set in this ADR:
 
 - **`String` holes** (a borrowed, existing value). Writing them does not allocate, but they remove the static line bound, so the line could no longer be one write from a fixed buffer (see Open questions).
-- **`Float` holes.** Shortest round-trip float text is bounded (about 24 bytes), but the formatting code is large, and floats belong to E077's domain. This is left for a separate decision.
 - **Records, variants, lists, `Option`, type variables, unknown types.** These are refused (fail closed).
 
 Programs outside the critical profile see no change in meaning or output. The lowering in §3 applies to the shape wherever it appears, so normal and critical builds of the same line emit the same code. The checker admits the shape *because* its lowering never allocates; it does not depend on a profile switch.
@@ -68,8 +71,8 @@ Programs outside the critical profile see no change in meaning or output. The lo
 E071 keeps refusing an interpolated string inside a counted loop, with one exception, decided from **position and types**, never from a name:
 
 1. The interpolated string is the direct, single argument of a call that resolves to an output builtin. "Resolves" means the #4823 rule: the bare callee is the builtin itself, as the builtin table describes it ("writes to stdout" / "writes to stderr"), and a user declaration cannot shadow it.
-2. Every hole's type in the checker's `type_map` passes `ty_has_fixed_text_width(ty)`. This is a closed predicate over the `Ty` constructors in the table above. An unknown type, a type variable, or any constructor not in the table answers **no** (fail closed).
-3. Each hole expression is still walked by every other rule. `println("${f(x)}")` where `f` allocates is refused by the call rules for `f`; the line exemption covers only the line's own text.
+2. Every hole's type in the checker's `type_map` passes `ty_has_fixed_text_width(ty)` (Int, the sized ints, Bool, Float, Float32). This is a closed predicate over the `Ty` constructors in the table above. An unknown type, a type variable, or any constructor not in the table answers **no** (fail closed).
+3. Each hole expression is still walked by every other rule. A Float hole *observes* its value, as `float.to_string` does under E077; any computation inside the hole (`${a * b}` on Floats) is still refused by E077. `println("${f(x)}")` where `f` allocates is refused by the call rules for `f`; the line exemption covers only the line's own text.
 
 Everything else stays refused, as today:
 
@@ -86,12 +89,13 @@ The lowering is **one write per line**, the same as today, so stdout and stderr 
 - **MIR.** A new runtime op `RtFn::WriteLine { sink: Stdout | Stderr }` takes a list of parts:
   - `Lit(data-segment slice)`;
   - `Int(scalar, kind)`;
+  - `Float(scalar, kind)`;
   - `Bool(scalar)`.
 
   Its capability is the same `Capability::Stdout` / `Stderr` that `RtFn::PrintStr` carries, and the `RtFn → Capability` mapping stays exhaustive, so the capability witness accounts for it automatically. The holes are evaluated to scalars **before** the op, so the op is a leaf: it runs no user code and cannot re-enter.
 - **Native (v1 renderer).** The op renders as a stack array `[u8; N]`, where `N` is the static bound from §1. The array is filled by one runtime digit writer (`almide_rt_write_i64_digits(&mut [u8], i64) -> usize`, and the same for unsigned) and then written with one `write_all` on the same locked handle, at the same flush point as `PrintStr`. `--target rust` emits the equivalent formatting macro, which also writes through `core::fmt` without a heap String.
 - **Wasm.** The line is assembled in a scratch region of linear memory, reserved once at link time with size `max N` over the module's output lines, and passed to the same host write (`fd_write` on preview 1, the output-stream write on preview 2/3) that `PrintStr` uses. The op is a leaf and an instance runs one write at a time, so one region is enough. If a target ever runs two writes concurrently in one memory, the region must move to per-thread storage, and the lowering will refuse to emit until it does.
-- **One digit algorithm.** `int.to_string` (and each sized int's `to_string`) is re-expressed as "measure the width, allocate exactly that, call the same digit writer". The String path and the sink path then share one implementation, so byte equality is enforced by construction rather than by two implementations agreeing. The `alloc_count` ledger records zero allocations for an output line on wasm, and that serves as evidence.
+- **One digit algorithm.** `int.to_string` (and each sized int's `to_string`) and `float.to_string` / `float32.to_string` are re-expressed as "measure the width, allocate exactly that, call the same writer". On native the writer is one runtime function per kind. On wasm it is the self-hosted writer (today `stdlib/float_to_string.almd` builds a String; it is split into a writer into a byte region plus a thin String wrapper). The String path and the sink path then share one implementation per target, so the two forms cannot diverge on either target. Native-versus-wasm equality of the writers is a separate claim, and the cross-target fixture in §4 proves it. The `alloc_count` ledger records zero allocations for an output line on wasm, and that serves as evidence.
 
 ### 4. Contracts and als
 
@@ -100,6 +104,7 @@ New contracts land in almide/als first. The order is: als PR → advance `proofs
 - **C-311 (ALS-B4), amended statement**: "… constructing, concatenating or pushing to a list/string/map/set … is rejected with E071 — except an output line (ADR-0038): an interpolated string written directly as the argument of an output builtin, whose holes all have a fixed-width text form. It builds no string." The ALS spec text in `docs/specs/als/bounded.md` §ALS-B4 changes with it. This is a spec change and waits for the owner's ○.
 - **New contract (id assigned in als)**: "An output line writes the same bytes on both targets as the String path would, and allocates nothing." Its evidence is:
   - a `spec/wasm_cross` fixture printing boundary values (`i64::MIN`, `-1`, `0`, `i64::MAX`, each sized int's min and max, `true`, `false`) both as an output line and through `int.to_string`. Native and wasm must match each other and the two forms must match each other.
+  - a `spec/wasm_cross` Float fixture on the new writer path, with the same two-form, two-target comparison. It covers, for f64 and f32: `0.0` and `-0.0`; the smallest and largest subnormals; the smallest normal; the largest finite value and its negation; NaN; `inf` and `-inf`; and the values whose shortest text is the longest (`-5e-324` and `-2.2250738585072014e-308` at 327 bytes, `-1.4e-45` at 48 bytes). The fixture builds NaN and the infinities from bits, so it needs no Float computation.
   - the wasm `alloc_count` ledger row (0 allocations for the line).
   - E071 diagnostic fixtures: admitted line; refused String hole; refused record hole; refused `let`-bound interpolation; refused `println(int.to_string(n))`.
 - **No dialect epoch.** No program that compiled before stops compiling. The change only admits more under `@bounded` / critical. The interface diff is *identical*: no stdlib function is added or removed.
@@ -137,6 +142,12 @@ The app changes one line, in als first and then here:
 
 ## Open questions (for review)
 
-1. **`String` holes.** Should a borrowed `String` hole be admitted? Doing so removes the static line bound, so the line would be several writes (literal, hole, literal, …) or a bounded buffer plus an overflow path. The ADR's position is to leave it out until a measured need appears.
-2. **`Float` holes.** Should they wait for an E077 decision?
-3. **Interpolation outside output builtins.** Should it ever be admitted (for example, into a caller-provided fixed buffer)? That is the explicit-writer alternative (3).
+1. **Interpolation outside output builtins.** Should it ever be admitted (for example, into a caller-provided fixed buffer)? That is the explicit-writer alternative (3).
+
+## Rulings (2026-11-20)
+
+1. ○ to the design as written, including the amended statement of C-311 (ALS-B4). That spec change is approved.
+2. Hole types: Int, the sized ints and Bool, **and Float** (f64 and f32). The Float widths are the measured constants in §1. Byte equality between native and wasm on the new writer path is proven by the Float fixture in §4, under a new contract or contract clause that lands in almide/als first.
+3. `float.to_string` is rebuilt on the same writer as the Float hole (§3), as `int.to_string` is, so the two cannot diverge.
+4. **`String` holes stay refused.** They would remove the static line bound.
+5. Order: the als PR (C-311 amendment, the new contract, its fixtures) → the pin commit here → the implementation → the flight app changes to `println("${cmd}")`, which turns `reference_app_is_critical_clean` green.
