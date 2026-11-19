@@ -121,7 +121,7 @@ fn a_same_named_git_package_from_another_source_is_refused_and_not_granted() {
     write(app.join("src/main.almd"), "import codec\neffect fn main() -> Unit = println(codec.who())\n");
     let o = run(&app, &root);
     let t = text(&o);
-    assert!(!o.status.success() && !t.contains("codec-b"), "the other source's `codec` was used:\n{t}");
+    assert!(!o.status.success() && !String::from_utf8_lossy(&o.stdout).contains("codec-b"), "the other source's `codec` was used:\n{t}");
     assert!(t.contains("two sources declare the package `codec`") && t.contains(&url_a) && t.contains(&url_b), "{t}");
     // Control: with only the root's own `codec`, the same app builds.
     write(app.join("almide.toml"), &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ncodec = {{ git = \"{url_a}\", tag = \"v1.0.0\" }}\n"));
