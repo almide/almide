@@ -12,14 +12,14 @@
 //! only file of the fetch path that may start a process, [`launch`] is its
 //! only function that does, and `launch` takes no string.
 
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 use crate::git_source::GitSource;
 
-/// `ssh [-p PORT] [-l USER] -o SendEnv=GIT_PROTOCOL -- HOST git-upload-pack '/a/b[.git]'`,
+/// `ssh -o SendEnv=GIT_PROTOCOL [-p PORT] [-l USER] -- HOST git-upload-pack '/a/b[.git]'`,
 /// with stdin and stdout piped for the git protocol.
 pub fn launch(source: &GitSource, dot_git: bool) -> std::io::Result<Child> {
-    let mut cmd = Command::new("ssh");
+    let mut cmd = std::process::Command::new("ssh");
     cmd.arg("-o").arg("SendEnv=GIT_PROTOCOL");
     if let Some(port) = source.port {
         cmd.arg("-p").arg(port.to_string());

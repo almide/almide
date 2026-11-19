@@ -892,16 +892,19 @@ fn refuse_changed_sources(project: &Project, locked: &[LockedDep], resolved: &[R
 /// After fetching a dependency at `path`, read its own `almide.toml` (if
 /// any) for its declared package name, src dir, and transitive deps —
 /// falling back to the requesting `Dependency`'s own name when there's no
-/// manifest or it fails to parse.
-fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str) -> (String, PathBuf, Vec<Dependency>) {
+/// manifest. A manifest that does not read is an error naming the
+/// dependency: skipping it would drop its requirements silently, and a
+/// requirement in a refused form (ADR-0035 D1) would vanish instead of
+/// being reported.
+fn resolve_fetched_dep_manifest(path: &Path, fallback_name: &str, chain: &[String]) -> Result<(String, PathBuf, Vec<Dependency>), String> {
     let src_dir = if path.join("src").is_dir() { path.join("src") } else { path.to_path_buf() };
     let dep_toml = path.join("almide.toml");
     if !dep_toml.exists() {
-        return (fallback_name.to_string(), src_dir, vec![]);
+        return Ok((fallback_name.to_string(), src_dir, vec![]));
     }
     match parse_toml(&dep_toml) {
-        Ok(dep_project) => (dep_project.package.name, src_dir, dep_project.dependencies),
-        Err(_) => (fallback_name.to_string(), src_dir, vec![]),
+        Ok(dep_project) => Ok((dep_project.package.name, src_dir, dep_project.dependencies)),
+        Err(e) => Err(format!("error: the manifest of dependency `{fallback_name}`{} is refused:\n{e}", chain_text(chain))),
     }
 }
 
@@ -1021,7 +1024,7 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
     let Fetched { dir: path, lockable } = fetch_dep_in_chain(dep, pin, &shown)?;
     let (fetched, resolved) = (&mut walk.fetched, &mut walk.resolved);
 
-    let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
+    let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name, &shown)?;
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
     // Record what THIS dependency resolved to, here, where the manifest entry

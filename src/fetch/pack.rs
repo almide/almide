@@ -84,8 +84,10 @@ impl Objects {
 }
 
 /// Inflated bytes one object may have: a blob is a package file, and a tree
-/// or commit is far smaller than one.
-const MAX_OBJECT: usize = crate::package_tree::MAX_FILE_BYTES as usize;
+/// or commit is far smaller than one. One byte past the per-file budget is
+/// still inflated, so a file just over it reaches the package format check,
+/// which names it; a larger object is refused here, before it is inflated.
+const MAX_OBJECT: usize = crate::package_tree::MAX_FILE_BYTES as usize + 1;
 /// Inflated bytes of every object of one pack together.
 const MAX_INFLATED: usize = 2 * crate::package_tree::MAX_PACKAGE_BYTES as usize;
 /// Objects one pack may hold: the package's files plus its trees and commit.
@@ -109,7 +111,10 @@ fn inflate(data: &[u8], at: usize, size: usize) -> Result<(Vec<u8>, usize), Stri
     use miniz_oxide::inflate::TINFLStatus;
     use miniz_oxide::inflate::core::{DecompressorOxide, decompress, inflate_flags};
     if size > MAX_OBJECT {
-        return err(format!("an object of {size} bytes (max {MAX_OBJECT})"));
+        return err(format!(
+            "an object of {size} bytes, past the package format's {} bytes per file",
+            crate::package_tree::MAX_FILE_BYTES
+        ));
     }
     let mut out = vec![0u8; size];
     let mut d = DecompressorOxide::new();
