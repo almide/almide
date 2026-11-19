@@ -55,7 +55,11 @@ pub fn spawning_of(sources: &[(&str, String)]) -> SpawnTable {
     let mut fns: Vec<((String, String), FnInfo)> = Vec::new();
     for (module, text) in sources {
         let tokens = crate::lexer::Lexer::tokenize(text);
-        let Ok(Program { decls, .. }) = crate::parser::Parser::new(tokens).parse() else { continue };
+        // A module that does not parse cannot be read for spawns: refuse
+        // rather than leave its fns uncharged.
+        let Ok(Program { decls, .. }) = crate::parser::Parser::new(tokens).parse() else {
+            panic!("bundled stdlib module `{module}` does not parse; its process spawns cannot be read")
+        };
         for d in decls {
             let Decl::Fn { name, attrs, params, body, .. } = d else { continue };
             let mark = attrs.iter().find(|a| a.name.as_str() == MARK).map(|a| {
@@ -100,17 +104,18 @@ pub fn spawning_of(sources: &[(&str, String)]) -> SpawnTable {
 /// reached (yet).
 fn reached(module: &str, params: &[String], body: &Expr, table: &SpawnTable) -> Option<Option<CommandAt>> {
     let mut found: Option<Option<CommandAt>> = None;
+    // Every mention of a spawning fn, and how many of them are the callee of
+    // a call: a mention that is not called (the fn passed as a value) hands
+    // its command over where it cannot be traced.
+    let mut mentions = 0usize;
+    let mut called = 0usize;
     almide_lang::ast::visit_expr(body, &mut |e| {
+        if spawn_target(module, e, table).is_some() {
+            mentions += 1;
+        }
         let ExprKind::Call { callee, args, .. } = &e.kind else { return };
-        let target = match &callee.kind {
-            ExprKind::Ident { name } => (module.to_string(), name.as_str().to_string()),
-            ExprKind::Member { object, field } => match &object.kind {
-                ExprKind::Ident { name } => (name.as_str().to_string(), field.as_str().to_string()),
-                _ => return,
-            },
-            _ => return,
-        };
-        let Some(at) = table.get(&target) else { return };
+        let Some(at) = spawn_target(module, callee, table) else { return };
+        called += 1;
         let here = at.as_ref().and_then(|at| handed(params, args, at));
         found = Some(match &found {
             None => here,
@@ -118,7 +123,23 @@ fn reached(module: &str, params: &[String], body: &Expr, table: &SpawnTable) -> 
             Some(_) => None,
         });
     });
+    if mentions > called {
+        return Some(None);
+    }
     found
+}
+
+/// The table's entry for the fn `e` names (`f` in `module`, or `m.f`).
+fn spawn_target<'t>(module: &str, e: &Expr, table: &'t SpawnTable) -> Option<&'t Option<CommandAt>> {
+    let key = match &e.kind {
+        ExprKind::Ident { name } => (module.to_string(), name.as_str().to_string()),
+        ExprKind::Member { object, field } => match &object.kind {
+            ExprKind::Ident { name } => (name.as_str().to_string(), field.as_str().to_string()),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    table.get(&key)
 }
 
 /// The caller's command position, from the argument it passes at `at`.
@@ -166,11 +187,13 @@ mod tests {
         let src = "type Job = { exe: String, n: Int }\n\
             @spawns_process(program)\nlocal effect fn __odd(n: Int, program: String) -> Int = _\n\
             effect fn go(j: Job) -> Int = __odd(j.n, j.exe)\n\
-            effect fn hidden(n: Int) -> Int = __odd(n, \"x\" + \"y\")\n"
+            effect fn hidden(n: Int) -> Int = __odd(n, \"x\" + \"y\")\n\
+            effect fn passed(n: Int) -> Int = apply(n, __odd)\n"
             .to_string();
         let t = spawning_of(&[("m", src)]);
         assert_eq!(t.get(&("m".into(), "__odd".into())), Some(&Some(CommandAt::Arg(1))));
         assert_eq!(t.get(&("m".into(), "go".into())), Some(&Some(CommandAt::Field(0, "exe".into()))));
         assert_eq!(t.get(&("m".into(), "hidden".into())), Some(&None), "a computed command must be flagged");
+        assert_eq!(t.get(&("m".into(), "passed".into())), Some(&None), "a leaf passed as a value must be flagged");
     }
 }
