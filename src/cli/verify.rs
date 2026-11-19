@@ -259,7 +259,10 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&
     };
     use sha2::Digest;
     let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
-    let art_path = art.display().to_string();
+    // The verifier runs in the hand-off dir and is handed both files by
+    // name: the dir sits under TMPDIR, which need not be UTF-8, and its
+    // argv and the bundle's artifact line must be text.
+    let art_path = art.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let text = almide_wasm::witness::bundle::render(
         &format!("almide {}", env!("ALMIDE_VERSION_LINE")),
         file,
@@ -271,7 +274,13 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&
         cleanup();
         return Err(format!("cannot write the certificate for {}: {e}", verifier.display()));
     }
-    let run = Command::new(&verifier).arg("bundle").arg(&bun).output();
+    let mut cmd = Command::new(&verifier);
+    if let (Some(dir), Some(name)) = (bun.parent(), bun.file_name()) {
+        cmd.current_dir(dir).arg("bundle").arg(name);
+    } else {
+        cmd.arg("bundle").arg(&bun);
+    }
+    let run = cmd.output();
     cleanup();
     let out = run.map_err(|e| format!("could not start {}: {e}", verifier.display()))?;
     match out.status.code() {
