@@ -50,7 +50,7 @@ An **output line** is a call to an output builtin (`println`, `eprintln`, as `OU
 | Hole type | What the sink receives |
 |---|---|
 | `Int` (i64) and the sized ints `Int8` … `Int64`, `UInt8` … `UInt64` | the digits that type's `to_string` produces, from the shared digit writer (§3) |
-| `Float` (f64), `Float32` | the text `float.to_string` / `float32.to_string` produces (shortest round-trip digits, no exponent, `.0` on an integral value; `NaN`, `inf`, `-inf`), from the shared float writer (§3) |
+| `Float` (f64), `Float32` | the text the interpolation already produces for a Float, which is the compound form: shortest round-trip digits, no exponent, and **no** `.0` suffix on an integral value (`"${2.0}"` is `2`, while `float.to_string(2.0)` is `2.0`); `NaN`, `inf`, `-inf`. It comes from the shared float writer (§3) |
 | `Bool` | `true` / `false` |
 | `String` | the existing string's bytes, borrowed in place; nothing is copied or allocated |
 
@@ -114,9 +114,10 @@ The holes are evaluated to values **before** the lock is taken. The write is the
   - Under a foreign host, no instance-parallel fan exists (op 74 is offered only by the Almide host), so no other writer is in the instance and the single call cannot be split.
 
   The component targets (WASI preview 2/3) have no gather write in the output-stream interface. Their lowering is one `blocking-write-and-flush` per part, issued under a host-held line lock: the host takes it at the line's first part and releases it at the newline or when the instance traps. This needs one host change, and the implementation must show it with a two-instance interleaving test. Until that test is green, the component target does not lower output lines with more than one part, and refuses them with an "unavailable on this target" diagnostic rather than writing them unlocked.
-- **One digit algorithm, one float algorithm.** `int.to_string` and each sized int's `to_string` become "measure the width, allocate exactly that, call the shared digit writer". `float.to_string` and `float32.to_string` become the same with the shared float writer.
+- **One digit algorithm, one float algorithm.** `int.to_string` and each sized int's `to_string` become "measure the width, allocate exactly that, call the shared digit writer". `float.to_string`, `float32.to_string` and their compound forms (`float.__to_string_compound`, the interpolation's text) become the same with the shared float writer, which already exists as one printer with a suffix flag (`__sf_main(x, suffix)` in `stdlib/float_to_string.almd`; `almide_rt_float_to_string` / `_compound` on native).
   - On native, each writer is one runtime function per kind.
   - On wasm, each writer is self-hosted. Today `stdlib/float_to_string.almd` builds a String; it is split into a writer into a byte region plus a thin String wrapper.
+  - **What "the same bytes" means.** An output line writes exactly the bytes the interpolated String would hold. That is the interpolation's own text, not `float.to_string`'s, which differs on integral Floats. Every fixture therefore compares `println("${x}")` against the String path of the same interpolation, built outside the line.
 
   The String path and the sink path then share one implementation per target, so the two forms cannot diverge on either target. Native-versus-wasm equality of the writers is a separate claim, and the cross-target fixtures in §4 prove it.
 
@@ -126,7 +127,7 @@ New contracts land in almide/als first. The order is: als PR → advance `proofs
 
 - **C-311 (ALS-B4), amended statement**: "… constructing, concatenating or pushing to a list/string/map/set … is rejected with E071, except an output line (ADR-0038). An output line is an interpolated string written directly as the argument of an output builtin, whose holes all have a direct sink writer (the integer types, Float, Float32, Bool, String). It builds no string." The ALS spec text in `docs/specs/als/bounded.md` §ALS-B4 changes with it. This is the approved spec change.
 - **New contract (id assigned in als)**: "An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream." Its evidence:
-  - a `spec/wasm_cross` fixture printing boundary integers both as an output line and through `to_string`: `i64::MIN`, `-1`, `0`, `i64::MAX`, each sized int's min and max, `true` and `false`. It also prints lines that mix String, Int and literal parts, compared against the same text built with `+`. Native and wasm must match each other, and the two forms must match each other.
+  - a `spec/wasm_cross` fixture printing boundary integers both as an output line and through the String path of the same interpolation: `i64::MIN`, `-1`, `0`, `i64::MAX`, each sized int's min and max, `true` and `false`. It also prints lines that mix String, Int and literal parts, compared against the same text built with `+`. Native and wasm must match each other, and the two forms must match each other.
   - a `spec/wasm_cross` Float fixture on the new writer path, with the same two-form, two-target comparison. For f64 and f32 it covers:
     - `0.0` and `-0.0`;
     - the smallest and largest subnormals, and the smallest normal;
