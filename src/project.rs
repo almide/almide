@@ -986,7 +986,7 @@ pub fn permissions_project_for(entry: &str) -> Option<Project> {
 /// manifest on every route, not off `./almide.toml` alone.
 pub fn governing_manifest(path: &Path) -> Project {
     let proj = read_governing_manifest(path).unwrap_or_else(|e| {
-        eprintln!("error: {}: {e}", path.display());
+        eprintln!("error: {}", naming(path, e));
         std::process::exit(1)
     });
     if let Err(e) = check_compiler_version(&proj) {
@@ -1020,8 +1020,15 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
     // #4829: everything `parse_toml` refuses is refused here too, so the gate
-    // and the readers cannot accept different manifests.
-    parse_toml(path).map(|_| ())
+    // and the readers cannot accept different manifests. The error names the
+    // manifest, which the command may not have read from the cwd.
+    parse_toml(path).map(|_| ()).map_err(|e| naming(path, e))
+}
+
+/// `e`, prefixed with `path` unless it already names it.
+fn naming(path: &Path, e: String) -> String {
+    let shown = path.display().to_string();
+    if e.contains(&shown) { e } else { format!("{shown}: {e}") }
 }
 
 // ── Unknown keys (#3382) ────────────────────────────────────────────
