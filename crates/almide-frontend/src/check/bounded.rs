@@ -913,6 +913,15 @@ impl BoundedCx<'_, '_> {
         // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
         // through that value: indirect, never a stdlib member.
         if self.checker.type_map.get(&object.id).is_some() {
+            // `p.norm()` on a value is UFCS for the user fn `norm(p)`: judged
+            // as that direct call; anything else through a value is indirect.
+            if self.fns.contains_key(f) {
+                let mut all = Vec::with_capacity(args.len() + 1);
+                all.push((*object).clone());
+                all.extend(args.iter().cloned());
+                self.check_call_ident(call, f, &all);
+                return;
+            }
             self.err(
                 "an indirect call is not admissible in a @bounded function",
                 "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
