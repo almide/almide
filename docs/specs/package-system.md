@@ -545,7 +545,10 @@ part, and any user part on https; any scheme but https and ssh (`git://`,
 or percent-encoded (any `%` escape at all); an empty or dot-only segment; an
 IP-literal host; a Windows reserved name. The fetch URL, the ssh argv, the
 cache key and the lock's `git` are all serialized from the typed value, never
-from the text.
+from the text. A `tag` or `branch` is read the same way into a ref name — `/`-separated
+segments of that grammar (`v1.2.0`, `feat/x`) — and anything else (an
+absolute path, `..`, a leading `-` or `.`) is refused on its manifest line
+(#4838); a ref is never part of a path.
 
 **The fetch (D2).** An https source is fetched by an in-process git client
 (`src/fetch/`): smart HTTP over rustls (git protocol v2, v0 as fallback), one
