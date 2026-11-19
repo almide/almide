@@ -2821,12 +2821,6 @@ probe = 'int.count_trailing_zeros(8)'
 expect = "3"
 
 [[int.fn]]
-name = "pop_count"
-index_unit = "count"
-probe = 'int.pop_count(255)'
-expect = "8"
-
-[[int.fn]]
 name = "bit_reverse"
 index_unit = "bit-pattern"
 probe = 'int.bit_reverse(1)'
@@ -2837,12 +2831,6 @@ name = "byte_swap"
 index_unit = "bit-pattern"
 probe = 'int.byte_swap(1)'
 expect = "72057594037927936"
-
-[[int.fn]]
-name = "bit_width"
-index_unit = "count"
-probe = 'int.bit_width(255)'
-expect = "8"
 
 [[int.fn]]
 name = "log2_floor"

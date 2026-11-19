@@ -147,7 +147,7 @@ fn main() -> Unit = {
 
 Return the sign of a float as 1.0 or -1.0, decided by the sign BIT (f64
 `signum`): `signum(0.0)` is 1.0 and `signum(-0.0)` is -1.0. A NaN input returns
-NaN. It never returns 0.0. `float.sign` is a deprecated alias.
+NaN. It never returns 0.0. (`float.sign`, its old name, was removed at dialect epoch 17.)
 
 ```almd run
 fn main() -> Unit = {

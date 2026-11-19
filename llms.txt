@@ -104,6 +104,9 @@ read here is what the current compiler accepts.
   takes the `!` before a default:
   `args.option("in")! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
+  A failed child process is an err: `process.exec(cmd, args)!` and
+  `process.run(c)!` stop on a non-zero exit (dialect epoch 17); read an exit
+  code with `process.output(c)!.code`.
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms are a compile error (E010).
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`

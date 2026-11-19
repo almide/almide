@@ -1,6 +1,6 @@
 // @contract: C-338
 // #1423 stage 4: the int bit-introspection family (count_leading_zeros,
-// count_trailing_zeros, pop_count, bit_reverse, byte_swap, bit_width,
+// count_trailing_zeros, count_ones, bit_reverse, byte_swap, bit_length,
 // log2_floor, log2_ceil, next_power_of_two, prev_power_of_two), the f32
 // reinterpret `float32.from_bits`, and the `Int -> Float32` convert
 // (`float32.from`, its checked twin and the eight sized-int twins)
@@ -43,7 +43,7 @@ fn edges() -> List[Int] = [
 
 fn main() -> Unit = {
   for n in edges() {
-    println("bits ${n} clz=${int.count_leading_zeros(n)} ctz=${int.count_trailing_zeros(n)} pop=${int.pop_count(n)} width=${int.bit_width(n)}")
+    println("bits ${n} clz=${int.count_leading_zeros(n)} ctz=${int.count_trailing_zeros(n)} pop=${int.count_ones(n)} width=${int.bit_length(n)}")
     println("log ${n} floor=${int.log2_floor(n)} ceil=${int.log2_ceil(n)} next=${int.next_power_of_two(n)} prev=${int.prev_power_of_two(n)}")
     println("swap ${n} rev=${int.bit_reverse(n)} bswap=${int.byte_swap(n)}")
     println("f32 ${n} ${float32.to_string(float32.from(n))} ${opt32(float32.from_checked(n))} ${float.from(float32.from_bits(n))}")

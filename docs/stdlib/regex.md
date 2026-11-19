@@ -58,7 +58,7 @@ The reasons, first violation from the left: `unclosed group`, `unmatched )`,
 ### `regex.is_match(re: Regex, s: String) -> Bool` and `regex.is_full_match(re: Regex, s: String) -> Bool`
 
 `is_match`: re matches somewhere in s. `is_full_match`: re matches the whole
-of s (`regex.full_match` is its deprecated old name, scheduled for removal at epoch 16).
+of s (`regex.full_match`, its old name, was removed at dialect epoch 17).
 
 ```almd run
 import regex

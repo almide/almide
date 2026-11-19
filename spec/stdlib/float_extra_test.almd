@@ -1,16 +1,16 @@
 // float_extra_test — Additional float module coverage
-// ── float.sign ──
-test "float.sign positive" {
-  assert_eq(float.sign(5.0), 1.0)
+// ── float.signum ──
+test "float.signum positive" {
+  assert_eq(float.signum(5.0), 1.0)
 }
 
-test "float.sign negative" {
-  assert_eq(float.sign(-3.0), -1.0)
+test "float.signum negative" {
+  assert_eq(float.signum(-3.0), -1.0)
 }
 
-test "float.sign zero" {
+test "float.signum zero" {
   // Rust signum(0.0) may return 0.0 or handle differently
-  let s = float.sign(0.0)
+  let s = float.signum(0.0)
   assert(s >= 0.0)
 }
 

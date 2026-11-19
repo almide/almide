@@ -6,7 +6,7 @@
 // ALS-T23: signed zero propagates per IEEE 754, compares equal to +0, displays
 // with its sign, and min/max/fmin/fmax order -0 below +0 (IEEE 754-2019
 // minimum/maximum, commutative) — retiring the first-operand tie rule.
-// Zeros built at run time; ±0 distinguished via float.sign (= signum).
+// Zeros built at run time; ±0 distinguished via float.signum (= signum).
 // Agreement-judged today; the reference leg (ADR-0015) pins the values.
 fn main() -> Unit = {
   let one: Float = float.abs(-1.0)
@@ -31,21 +31,21 @@ fn main() -> Unit = {
   println(float.to_string(one / (0.0 - one / 0.0)))
   // -0.0 (1 / -inf)
   // min: -0 wins in either order
-  println(float.to_string(float.sign(float.min(mz, pz))))
+  println(float.to_string(float.signum(float.min(mz, pz))))
   // -1
-  println(float.to_string(float.sign(float.min(pz, mz))))
+  println(float.to_string(float.signum(float.min(pz, mz))))
   // -1
-  println(float.to_string(float.sign(float.min(mz, pz))))
+  println(float.to_string(float.signum(float.min(mz, pz))))
   // -1
-  println(float.to_string(float.sign(float.min(pz, mz))))
+  println(float.to_string(float.signum(float.min(pz, mz))))
   // -1
   // max: +0 wins in either order
-  println(float.to_string(float.sign(float.max(mz, pz))))
+  println(float.to_string(float.signum(float.max(mz, pz))))
   // 1
-  println(float.to_string(float.sign(float.max(pz, mz))))
+  println(float.to_string(float.signum(float.max(pz, mz))))
   // 1
-  println(float.to_string(float.sign(float.max(mz, pz))))
+  println(float.to_string(float.signum(float.max(mz, pz))))
   // 1
   // 1
-  println(float.to_string(float.sign(float.max(pz, mz))))
+  println(float.to_string(float.signum(float.max(pz, mz))))
 }

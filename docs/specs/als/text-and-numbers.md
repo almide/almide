@@ -238,7 +238,7 @@ Contracts: C-048。
 
 ## ALS-T15 符号と min/max の NaN 規則
 
-`float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
+`float.signum` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
 minNum/maxNum 系）。`float.round` はゼロ結果の
 符号を保つ（round(-0.0) = -0.0、half away from zero は不変）。±0 同士の
 min/max の順序は ALS-T23（IEEE-754-2019 minimum/maximum）。
@@ -470,12 +470,12 @@ test "signed zero propagates, compares equal, and orders -0 < +0 in min/max" {
   assert_eq(float.to_string(mz), "-0.0")
   assert(mz == 0.0)
   assert_eq(float.to_string(mz + 0.0), "0.0")
-  assert_eq(float.sign(float.min(mz, 0.0)), -1.0)
-  assert_eq(float.sign(float.min(0.0, mz)), -1.0)
-  assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
-  assert_eq(float.sign(float.max(0.0, mz)), 1.0)
-  assert_eq(float.sign(float.min(0.0, mz)), -1.0)
-  assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
+  assert_eq(float.signum(float.min(mz, 0.0)), -1.0)
+  assert_eq(float.signum(float.min(0.0, mz)), -1.0)
+  assert_eq(float.signum(float.max(mz, 0.0)), 1.0)
+  assert_eq(float.signum(float.max(0.0, mz)), 1.0)
+  assert_eq(float.signum(float.min(0.0, mz)), -1.0)
+  assert_eq(float.signum(float.max(mz, 0.0)), 1.0)
 }
 ```
 
