@@ -1,0 +1,40 @@
+# Negative control of bounded.shape-rules (proofs/decision-sites.toml): E071/E075/E077 read only the name tables (#4855): an unlisted allocating, sized or Float-computing member is admitted
+# control_test: tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -1048,11 +1048,12 @@
+     /// heap value `mut` (grows it in place). An unknown result type or an
+     /// unknown signature is read as allocating.
+     fn call_allocates(&self, call: &ast::Expr, m: &str, f: &str) -> bool {
+-        let returns_heap = self.call_ty(call).is_none_or(ty_allocates);
++        let returns_heap = false && self.call_ty(call).is_none_or(ty_allocates);
+         let grows_heap = crate::stdlib::lookup_sig(m, f).is_none_or(|sig| {
+             sig.mut_params.iter().any(|&i| sig.params.get(i).is_none_or(|(_, t)| almide_lang::types::is_heap_ty(t)))
+         });
+-        returns_heap || grows_heap
++        let _ = grows_heap;
++        returns_heap
+     }
+ 
+     /// #4855 (E075, from the types): a call that returns a collection (a
+@@ -1074,7 +1075,8 @@
+         let arg_ty = |a: &ast::Expr| self.checker.type_map.get(&a.id);
+         let bounded_by_input = args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty));
+         let runtime_int = args.iter().any(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a));
+-        returns_heap && !bounded_by_input && runtime_int
++        let _ = (bounded_by_input, runtime_int);
++        false && returns_heap
+     }
+ 
+     /// #4855 (E077, from the types): a call whose result carries a Float
+@@ -1089,7 +1091,8 @@
+                 _ => false,
+             }
+         }
+-        self.call_ty(call).is_none_or(has_float)
++        let _ = call;
++        false && has_float(&Ty::Unit)
+     }
+ 
+     /// A sized constructor (`list.repeat`-like) given a size slot that is not

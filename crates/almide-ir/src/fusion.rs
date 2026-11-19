@@ -28,7 +28,24 @@ pub const TOTAL_MODULES: &[&str] = &["int", "float", "math", "bool"];
 /// its result. A user module is never answered here: its fns are judged from
 /// their bodies, or refused.
 pub fn stdlib_module_is_pure(module: &str) -> bool {
-    almide_lang::stdlib_info::is_stdlib_module(module) && !EFFECT_MODULES.contains(&module)
+    module_is_pure_by_declaration(
+        module,
+        almide_lang::stdlib_info::is_stdlib_module,
+        almide_lang::stdlib_info::bundled_module_declares_effect,
+    )
+}
+
+/// The judgment behind [`stdlib_module_is_pure`] (#4855), from the module's
+/// own declarations: pure only when its source is known (`declares_effect`
+/// answers `Some`) and declares no effect. A module this list does not name
+/// is judged by what it declares; a module whose source cannot be read is
+/// not pure. `EFFECT_MODULES` only ever refuses more.
+pub fn module_is_pure_by_declaration(
+    module: &str,
+    is_stdlib: impl Fn(&str) -> bool,
+    declares_effect: impl Fn(&str) -> Option<bool>,
+) -> bool {
+    is_stdlib(module) && !EFFECT_MODULES.contains(&module) && declares_effect(module) == Some(false)
 }
 
 /// Every fn of stdlib `module` returns without aborting.

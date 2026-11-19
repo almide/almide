@@ -234,6 +234,16 @@ mod bounded_tables_tests {
     }
 }
 
+/// #4855: does a value of this type hold a block of its own? An `Option` /
+/// `Result` of scalars is a tag and a scalar (`list.get(xs, i) ?? 0`); every
+/// other non-scalar shape, and any type not yet known, is read as allocating.
+fn ty_allocates(t: &Ty) -> bool {
+    match t {
+        Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, args) => args.iter().any(ty_allocates),
+        other => almide_lang::types::is_heap_ty(other),
+    }
+}
+
 /// Run-time-length heap constructors (ALS-B8): fn -> the size-argument slots
 /// that must be compile-time constants.
 const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
@@ -994,7 +1004,7 @@ impl BoundedCx<'_, '_> {
             return;
         }
         // ALS-B8 / E075: run-time-length heap construction
-        if self.has_runtime_sized_slot(&full, args) {
+        if self.has_runtime_sized_slot(&full, args) || self.call_sizes_from_an_int(call, args) {
             self.err(
                 "run-time-length heap construction is not admissible in a @bounded function",
                 "give every constructed length a compile-time size",
@@ -1004,7 +1014,7 @@ impl BoundedCx<'_, '_> {
             return;
         }
         // ALS-B4 / E071: allocating calls inside a counted loop
-        if self.loop_depth > 0 && BOUNDED_ALLOC_CALLS.contains(&full.as_str()) {
+        if self.loop_depth > 0 && (BOUNDED_ALLOC_CALLS.contains(&full.as_str()) || self.call_allocates(call, m, f)) {
             self.err(
                 "an allocating call inside a counted loop is not admissible in a @bounded function",
                 "allocate outside the loop and keep the loop body allocation-free",
@@ -1016,7 +1026,7 @@ impl BoundedCx<'_, '_> {
         // ALS-B10 / E077: a stdlib call computing on Float arguments.
         // float.to_string / float.sign etc. OBSERVE a Float — computing
         // calls (math.*, BOUNDED_FLOAT_COMPUTE_CALLS) reject it
-        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str());
+        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str()) || self.call_yields_float(call);
         if computes && args.iter().any(|a| self.expr_is_float(a)) {
             self.err(
                 "a Float operation is not admissible in a @bounded function",
@@ -1025,6 +1035,61 @@ impl BoundedCx<'_, '_> {
                 call.span,
             );
         }
+    }
+
+    /// #4855: the call's own result type, as the checker instantiated it
+    /// (`list.get` on a `List[Int]` is an `Option[Int]`); `None` when unknown.
+    fn call_ty(&self, call: &ast::Expr) -> Option<&Ty> {
+        self.checker.type_map.get(&call.id).filter(|t| !matches!(t, Ty::Unknown))
+    }
+
+    /// #4855 (E071, from the declaration): a member call allocates when the
+    /// value it returns is a heap block, or when its declared signature takes a
+    /// heap value `mut` (grows it in place). An unknown result type or an
+    /// unknown signature is read as allocating.
+    fn call_allocates(&self, call: &ast::Expr, m: &str, f: &str) -> bool {
+        let returns_heap = self.call_ty(call).is_none_or(ty_allocates);
+        let grows_heap = crate::stdlib::lookup_sig(m, f).is_none_or(|sig| {
+            sig.mut_params.iter().any(|&i| sig.params.get(i).is_none_or(|(_, t)| almide_lang::types::is_heap_ty(t)))
+        });
+        returns_heap || grows_heap
+    }
+
+    /// #4855 (E075, from the types): a call that returns a collection (a
+    /// List, Map, Set, Bytes or Matrix), takes no heap value its length could
+    /// be bounded by, and is handed an Int that is not a compile-time constant
+    /// builds a run-time-length block (`list.range(0, n)`, a fresh
+    /// `fn f(n: Int) -> List[Int]`). Text is left to the table: an Int's
+    /// digits are a bounded String.
+    fn call_sizes_from_an_int(&self, call: &ast::Expr, args: &[ast::Expr]) -> bool {
+        let returns_heap = self.call_ty(call).is_none_or(|t| {
+            matches!(
+                t,
+                Ty::Bytes
+                    | Ty::Matrix
+                    | Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set, _)
+                    | Ty::TypeVar(_)
+            )
+        });
+        let arg_ty = |a: &ast::Expr| self.checker.type_map.get(&a.id);
+        let bounded_by_input = args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty));
+        let runtime_int = args.iter().any(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a));
+        returns_heap && !bounded_by_input && runtime_int
+    }
+
+    /// #4855 (E077, from the types): a call whose result carries a Float
+    /// computes one (`float.abs`, a fresh `fn f(x: Float) -> Float`); one that
+    /// turns a Float into text or an Int observes it. Unknown is computing.
+    fn call_yields_float(&self, call: &ast::Expr) -> bool {
+        fn has_float(t: &Ty) -> bool {
+            match t {
+                Ty::Float | Ty::Float32 | Ty::Float64 => true,
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.iter().any(has_float),
+                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_float(t)),
+                _ => false,
+            }
+        }
+        self.call_ty(call).is_none_or(has_float)
     }
 
     /// A sized constructor (`list.repeat`-like) given a size slot that is not

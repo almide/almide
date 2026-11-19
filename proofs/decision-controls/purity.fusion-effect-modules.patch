@@ -1,0 +1,15 @@
+# Negative control of purity.fusion-effect-modules (proofs/decision-sites.toml): purity stops reading the declarations (#4855): a stdlib module no list names that declares an effect fn reads pure
+# control_test: crates/almide-ir/tests/fusion_declared_effects.rs::novel_a_module_declaring_an_effect_is_not_fused_as_pure
+diff --git a/crates/almide-ir/src/fusion.rs b/crates/almide-ir/src/fusion.rs
+--- a/crates/almide-ir/src/fusion.rs
++++ b/crates/almide-ir/src/fusion.rs
+@@ -45,7 +45,8 @@
+     is_stdlib: impl Fn(&str) -> bool,
+     declares_effect: impl Fn(&str) -> Option<bool>,
+ ) -> bool {
+-    is_stdlib(module) && !EFFECT_MODULES.contains(&module) && declares_effect(module) == Some(false)
++    let _ = &declares_effect;
++    is_stdlib(module) && !EFFECT_MODULES.contains(&module)
+ }
+ 
+ /// Every fn of stdlib `module` returns without aborting.
