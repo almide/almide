@@ -1,6 +1,6 @@
 # ADR-0037: A native List is a shared block with a count, copied only when written while shared
 
-- **Status**: Proposed (2026-11-20), for owner review before any implementation.
+- **Status**: Accepted (2026-11-20). The owner ruled ○ on the direction and on Q1 and Q2; see [Owner decisions](#owner-decisions-2026-11-20).
 - **Date**: 2026-11-20
 - **Scope**: how the native v1 renderer spells `List[T]` (and `Bytes`), the runtime list operations in `runtime/rs/src/list.rs`, and the thread-share marking of values that cross into a `fan` arm or a callback.
 - **Related**:
@@ -36,7 +36,7 @@ A native `List[T]` is `AlmideList<T>`: one heap block `[rc, len, cap | elements]
 - `Drop` takes one away. At zero it drops the elements and frees the block.
 - `rc == 0` marks an immortal static block (the empty list, constant literals) that is never written or freed.
 
-`Bytes` becomes `AlmideList<u8>`.
+`Bytes` becomes `AlmideList<u8>` (Q1).
 
 ### D2 — writes go through `unique()`
 
