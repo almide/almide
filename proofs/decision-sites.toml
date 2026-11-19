@@ -966,7 +966,7 @@ novel = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_o
 control_patch = "proofs/decision-controls/effect.fan-ordered-reach.patch"
 control_test = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 probe = "tests/decision-probes/effect.fan-ordered-reach"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "effect.e007-e008-fan-context"
@@ -2061,7 +2061,7 @@ control_patch = "proofs/decision-controls/env.expect-tools.patch"
 control_test = "tests/decision_expect_tools_test.rs::novel_a_missing_tool_fails_by_default"
 novel = "tests/decision_expect_tools_test.rs::novel_a_missing_tool_fails_by_default"
 control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
-stamp = "(set at commit)"
+stamp = "127a0a6312 2026-11-19"
 
 [[site]]
 id = "manifest.gate-check-manifest"
@@ -2447,7 +2447,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_trust_a_fresh_owner_on_a_fresh
 control_patch = "proofs/decision-controls/trust.source-owner.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_trust_a_fresh_owner_on_a_fresh_host_is_refused_before_any_fetch"
 probe = "tests/decision-probes/trust.source-owner"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.local-source-exempt"
@@ -2516,7 +2516,7 @@ note = "dispatch.rs:342-467: source parsed :359, --trust :361-371, verdict :372-
 novel = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
 control_patch = "proofs/decision-controls/trust.add-trust-flag.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.install-owner"
@@ -2537,7 +2537,7 @@ note = "install.rs:22-37 (trust before anything), 202-257 resolve_source, 323-35
 novel = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
 control_patch = "proofs/decision-controls/trust.install-owner.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.media-grant-key"
@@ -2582,7 +2582,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_lock_a_fresh_commit_or_source_
 control_patch = "proofs/decision-controls/deps.lock-parse.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_lock_a_fresh_commit_or_source_is_refused_at_read_time"
 probe = "tests/decision-probes/deps.lock-parse"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.ref-into-cache-path"
@@ -2604,7 +2604,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_ref_a_fresh_path_shaped_tag_or
 control_patch = "proofs/decision-controls/deps.ref-into-cache-path.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_ref_a_fresh_path_shaped_tag_or_branch_is_refused_on_its_line"
 probe = "tests/decision-probes/deps.ref-into-cache-path"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.git-invocation"
@@ -2626,7 +2626,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_source_a_fresh_scheme_helper_o
 control_patch = "proofs/decision-controls/deps.git-invocation.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_source_a_fresh_scheme_helper_or_option_shape_never_reaches_a_fetch"
 probe = "tests/decision-probes/deps.git-invocation"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.subdir-inside"
@@ -2722,7 +2722,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fres
 control_patch = "proofs/decision-controls/deps.mvs-identity.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fresh_name_are_refused"
 probe = "tests/decision-probes/deps.mvs-identity"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.dep-manifest-swallow"
@@ -2787,7 +2787,7 @@ novel = "tests/decision_deps_novel_test.rs::novel_a_fresh_link_under_a_dependenc
 control_patch = "proofs/decision-controls/deps.symlink-walk.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_a_fresh_link_under_a_dependency_src_is_never_followed"
 probe = "tests/decision-probes/deps.symlink-walk"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.cache-only"
@@ -3930,8 +3930,8 @@ novel = "tests/decision_gap_fixes_test.rs::novel_e011_by_declaration_kind"
 control_patch = "proofs/decision-controls/effect.e011-closure-mutation.patch"
 control_test = "tests/decision_gap_fixes_test.rs::novel_e011_by_declaration_kind"
 probe = "tests/decision-probes/effect.e011-closure-mutation"
-control_seen = "ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
-stamp = "(set at commit)"
+control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "127a0a6312 2026-11-19"
 
 [[site]]
 id = "scope.e033-opaque-outside-module"
