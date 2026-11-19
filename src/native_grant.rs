@@ -235,3 +235,57 @@ pub fn granted_lines(deps: &[DepNative]) -> Vec<String> {
         .map(|d| format!("note: building native code from `{}` (granted by [permissions].native): {}", d.name, d.code.describe()))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    /// ADR-0035 D3, extending #4809: the grant scan and the module resolver
+    /// walk a package with the same primitive as the tree hash
+    /// (`package_tree::dir_entries`), so on one fixture tree — dot
+    /// directories, nesting, a non-module file and links to a file and to a
+    /// directory outside the package — they list the same `.almd` files as
+    /// `package_files`, and none behind a link.
+    #[test]
+    fn the_grant_scan_and_the_resolver_list_what_package_files_lists() {
+        let root = std::env::temp_dir().join(format!("almide-one-enumeration-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pkg = root.join("pkg");
+        let outside = root.join("outside");
+        for (path, body) in [
+            ("pkg/almide.toml", "[package]\nname = \"pkg\"\n"),
+            ("pkg/src/mod.almd", "fn a() -> Int = 1\n"),
+            ("pkg/src/native/n.almd", "fn n() -> Int = 1\n"),
+            ("pkg/src/.hidden/h.almd", "fn h() -> Int = 1\n"),
+            ("pkg/src/target/deep/t.almd", "fn t() -> Int = 1\n"),
+            ("pkg/src/notes.txt", "x"),
+            ("outside/evil.almd", "fn evil() -> Int = 1\n"),
+        ] {
+            let p = root.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, pkg.join("src/linkdir")).unwrap();
+            std::os::unix::fs::symlink(outside.join("evil.almd"), pkg.join("src/linked.almd")).unwrap();
+        }
+        let src = pkg.join("src");
+        let mut scanned = Vec::new();
+        super::almd_files(&src, &mut scanned);
+        scanned.sort();
+        let listed: Vec<std::path::PathBuf> = crate::package_tree::package_files(&pkg, crate::package_tree::Links::Skip)
+            .unwrap()
+            .into_iter()
+            .filter(|(rel, _)| rel.starts_with("src/") && rel.ends_with(".almd"))
+            .map(|(_, p)| p)
+            .collect();
+        let mut listed = listed;
+        listed.sort();
+        assert_eq!(scanned, listed);
+        assert_eq!(scanned.len(), 4, "{scanned:?}");
+        assert!(!scanned.iter().any(|p| p.to_string_lossy().contains("link")), "a link was followed: {scanned:?}");
+        // In a dependency's cache entry the same link is refused outright.
+        #[cfg(unix)]
+        assert!(crate::package_tree::package_files(&pkg, crate::package_tree::Links::Refuse).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
