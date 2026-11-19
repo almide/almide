@@ -225,3 +225,41 @@ fn a_private_https_repository_is_refused_with_the_ssh_form() {
     assert!(text(&o).contains("fetch it over ssh: `git = \"git@github.com:almide/secret-pkg\"`"), "{}", text(&o));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// #4838: a dependency's `tag` / `branch` was joined into the cache path
+/// unvalidated, so an absolute or `..` value loaded any local directory
+/// under a trusted source (`check` passed, `run` printed the planted
+/// string, `deps` named the trusted URL). Each probe shape, for `tag` and
+/// `branch`, is now refused on its manifest line, by every command, before
+/// anything is loaded or fetched.
+#[test]
+fn a_tag_or_branch_that_is_a_path_is_refused_on_its_line() {
+    let root = scratch("ref");
+    let host = GitHost::start(&root);
+    let planted = root.join("planted");
+    write(planted.join("almide.toml"), "[package]\nname = \"json2\"\nversion = \"0.1.0\"\n");
+    write(planted.join("src/mod.almd"), "fn hello() -> String = \"PLANTED-FROM-OUTSIDE-CACHE\"\n");
+    // The cache directory the old join resolved a relative value against.
+    let cache = root.join("home/.almide/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let up = format!("{}{}", "../".repeat(cache.components().count() + 4), planted.display().to_string().trim_start_matches('/'));
+    for key in ["tag", "branch"] {
+        for (k, value) in [planted.display().to_string(), up.clone(), "../../../planted".to_string()].into_iter().enumerate() {
+            let dir = root.join(format!("app-{key}-{k}"));
+            app(
+                &dir,
+                &format!("json2 = {{ git = \"https://github.com/almide/json\", {key} = \"{value}\" }}\n"),
+                "import json2\neffect fn main() -> Unit = println(json2.hello())\n",
+            );
+            for args in [&["check", "src/main.almd"][..], &["run", "src/main.almd", "--target", "wasm"], &["deps"]] {
+                let o = almide(&dir, &root, Some(&host), args);
+                let t = text(&o);
+                assert!(!o.status.success(), "`almide {}` accepted {key} = {value}:\n{t}", args.join(" "));
+                assert!(!t.contains("PLANTED-FROM-OUTSIDE-CACHE"), "the planted module ran:\n{t}");
+                assert!(t.contains(&format!("`{key} = ")) && t.contains("is not a ref name") && t.contains("almide.toml:6"), "`almide {}` on {key} = {value}:\n{t}", args.join(" "));
+            }
+        }
+    }
+    assert_eq!(host.requests(), 0, "a refused ref reached the network");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -1325,7 +1325,7 @@ mod tests {
         Dependency {
             name: name.into(),
             git: Some(GitSource::parse(git).unwrap()),
-            tag: tag.map(str::to_string),
+            tag: tag.map(|t| crate::git_source::GitRef::parse(t).unwrap()),
             branch: None,
             version: None,
             path: None,

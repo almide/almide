@@ -71,6 +71,42 @@ pub struct GitSource {
     pub dot_git: bool,
 }
 
+/// A `tag` or `branch` name (#4838): one or more [`Segment`]s joined by
+/// `/` (`v1.2.0`, `feat/x`). It never starts with `/`, `-` or `.`, holds no
+/// `..`, `\`, space, control or bidi character, so it can never be read as a
+/// path or an option by anything it reaches.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GitRef(String);
+
+impl GitRef {
+    pub fn parse(s: &str) -> Result<GitRef, String> {
+        if s.is_empty() {
+            return Err("it is empty".to_string());
+        }
+        for piece in s.split('/') {
+            Segment::parse(piece).map_err(|e| e.replace("path segment", "ref component").replace("it has an empty ref component", "it has an empty component (a leading, trailing or doubled `/`)"))?;
+        }
+        Ok(GitRef(s.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for GitRef {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for GitRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A commit id as a lock holds it: 40 or 64 lowercase hex digits.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CommitId(String);
@@ -644,6 +680,17 @@ mod tests {
         assert!(TrustPrefix::parse("github.com/-x").is_err());
         assert!(TrustPrefix::parse("github.com/a/../b").is_err());
         assert_eq!(TrustPrefix::parse("https://GitHub.com/Bob/").unwrap().to_string(), "github.com/Bob");
+    }
+
+    /// #4838: a tag or branch is a ref name, never a path or an option.
+    #[test]
+    fn refs_are_slash_separated_segments() {
+        for good in ["v1.2.0", "main", "feat/x", "release/2026/11", "v0.1.0-rc1", "a_b"] {
+            assert_eq!(GitRef::parse(good).unwrap().as_str(), good);
+        }
+        for bad in ["", "/abs/path", "../up", "a/../b", "a/./b", "-x", "a/-x", ".hidden", "a//b", "a/", "a\\b", "a b", "a\u{202E}b", "C:/x", "~/x"] {
+            assert!(GitRef::parse(bad).is_err(), "{bad} was accepted");
+        }
     }
 
     #[test]

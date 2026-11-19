@@ -228,11 +228,14 @@ fn resolve_source(
         }
     };
 
+    let as_ref = |what: &str, text: String| {
+        crate::git_source::GitRef::parse(&text).map_err(|why| format!("error: --{what} `{}` is not a ref name: {why}", text.escape_debug()))
+    };
     let dep = Dependency {
         name,
         git: Some(src.clone()),
-        tag: tag.map(String::from).or(default_tag),
-        branch: branch.map(String::from),
+        tag: tag.map(String::from).or(default_tag).map(|t| as_ref("tag", t)).transpose()?,
+        branch: branch.map(String::from).map(|b| as_ref("branch", b)).transpose()?,
         version: None,
         path: None,
         subdir: None,
@@ -245,7 +248,7 @@ fn resolve_source(
     // silently reinstalled a stale version (#1956). The commit is printed so
     // what was built is visible.
     if dep.tag.is_none() {
-        let ref_name = dep.branch.clone().unwrap_or_else(|| "HEAD".to_string());
+        let ref_name = dep.branch.as_deref().unwrap_or("HEAD").to_string();
         let head = project_fetch::git_remote_head(&src, &ref_name)?;
         err(&format!("Resolved {} {} -> {}", dep.name, ref_name, head.short()));
         return project_fetch::fetch_dep_with_lock(&dep, Some(&head));

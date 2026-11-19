@@ -120,8 +120,9 @@ pub struct Dependency {
     /// The git source, read once (ADR-0035 D1); `None` for a `path`
     /// dependency.
     pub git: Option<crate::git_source::GitSource>,
-    pub tag: Option<String>,
-    pub branch: Option<String>,
+    /// The `tag` / `branch`, read as ref names (#4838): never a path.
+    pub tag: Option<crate::git_source::GitRef>,
+    pub branch: Option<crate::git_source::GitRef>,
     pub version: Option<String>,
     pub path: Option<String>,
     /// `subdir = "…"` (#3381): the package directory inside the git
@@ -589,11 +590,27 @@ fn dependency_from(
             })?)
         }
     };
+    // #4838: a `tag` / `branch` is a ref name, refused on its own line
+    // otherwise (an absolute or `..` value was joined into the cache path).
+    let git_ref = |key: &str| -> Result<Option<crate::git_source::GitRef>, String> {
+        match field(key) {
+            None => Ok(None),
+            Some(text) => crate::git_source::GitRef::parse(&text).map(Some).map_err(|why| {
+                located(
+                    path,
+                    content,
+                    offset_of(key),
+                    &format!("dependency `{name}`: `{key} = \"{}\"` is not a ref name: {why}\n  hint: a {key} is a name like `v1.2.0` or `feat/x`", text.escape_debug()),
+                )
+            }),
+        }
+    };
+    let (tag, branch) = (git_ref("tag")?, git_ref("branch")?);
     Ok(Some(Dependency {
         name,
         git,
-        tag: field("tag"),
-        branch: field("branch"),
+        tag,
+        branch,
         version: field("version"),
         path: dep_path,
         subdir,

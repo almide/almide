@@ -384,10 +384,14 @@ fn dispatch_add(cmd: AddCmd) {
     if granted.is_none() && !by_manifest {
         fail(&crate::trust::add_refusal(&name, &git_url, &retry));
     }
+    // #4838: the tag is a ref name, read before anything is fetched.
+    let tag_ref = tag.as_deref().map(crate::git_source::GitRef::parse).transpose().unwrap_or_else(|why| {
+        fail(&format!("error: --tag `{}` is not a ref name: {why}", tag.as_deref().unwrap_or("").escape_debug()))
+    });
     let dep = project::Dependency {
         name: name.clone(),
         git: Some(git_url.clone()),
-        tag: tag.clone(),
+        tag: tag_ref,
         branch: None,
         version: None,
         path: None,
