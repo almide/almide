@@ -63,7 +63,7 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
     let rs_code = super::build::arm_alloc_count(rs_code);
-    let rs_code = super::build::inject_fs_scope(rs_code);
+    let rs_code = super::build::inject_fs_scope(rs_code, super::fs_scope_for(file));
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).

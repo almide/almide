@@ -367,7 +367,7 @@ pub fn cmd_build(args: BuildArgs) {
         None => rs_code,
     };
     let rs_code = arm_alloc_count(rs_code);
-    let rs_code = inject_fs_scope(rs_code);
+    let rs_code = inject_fs_scope(rs_code, super::fs_scope_for(file));
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
@@ -502,8 +502,8 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// held descriptor without following a symlink; the rooted calls open their
 /// root the same way. A symlink swapped in after the check is refused by the
 /// call, and the guard answers it with the check's own refusal text.
-pub(crate) fn inject_fs_scope(rs_code: String) -> String {
-    let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
+pub(crate) fn inject_fs_scope(rs_code: String, roots: Option<Vec<String>>) -> String {
+    let Some(roots) = roots else { return rs_code };
     // The certified renderer installs its scope before the artifact is bound.
     if !almide_codegen::rust_idents::identifiers(&rs_code).any(|id| id.starts_with("almide_rt_fs_")) || rs_code.starts_with(almide_codegen::fs_scope::SCOPE_MARKER) {
         return rs_code;

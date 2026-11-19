@@ -58,3 +58,53 @@ fn a_wasm_or_wasi_build_of_an_fs_scoped_project_is_refused() {
         assert!(!out.exists(), "--target {target} wrote a module");
     }
 }
+
+/// #4831: `almide bench` (native) bakes in the scope `almide run` bakes in;
+/// it built the program with no scope, so a read outside `data` succeeded.
+#[test]
+fn bench_is_bounded_by_the_projects_fs_scope() {
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path());
+    let outside = td.path().join("outside.txt");
+    std::fs::write(
+        td.path().join("fsp/src/bench_main.almd"),
+        format!("import fs\neffect fn main() -> Unit = println(fs.read_text(\"{}\")!)\n", outside.display()),
+    )
+    .unwrap();
+    let o = almide(&td.path().join("fsp"), &["bench", "src/bench_main.almd", "--runs", "1"]);
+    assert!(!o.status.success(), "bench read outside [permissions] fs:\n{}", text(&o));
+    assert!(text(&o).contains("is outside [permissions] fs"), "{}", text(&o));
+}
+
+/// #4833: one native test run over two projects — `bounded` with `fs =
+/// ["data"]`, `open` with no `fs` key — bounds the first project's tests and
+/// not the second's, every time: the scope was a process-wide value the
+/// parallel per-file checks overwrote, and both projects' files were one
+/// program.
+#[test]
+fn a_native_test_run_over_two_projects_scopes_each_by_its_own_manifest() {
+    let td = tempfile::TempDir::new().unwrap();
+    let root = td.path();
+    let outside = root.join("outside.txt");
+    std::fs::write(&outside, "outside").unwrap();
+    for (name, fs_key, want) in [("bounded", "fs = [\"data\"]\n", "refused"), ("open", "", "outside")] {
+        std::fs::create_dir_all(root.join(format!("{name}/data"))).unwrap();
+        std::fs::write(
+            root.join(format!("{name}/almide.toml")),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[permissions]\n{fs_key}"),
+        )
+        .unwrap();
+        for i in 0..2 {
+            std::fs::create_dir_all(root.join(format!("{name}/src"))).unwrap();
+            std::fs::write(
+                root.join(format!("{name}/src/r{i}_test.almd")),
+                format!("import fs\ntest \"scope\" {{\n  assert_eq(fs.read_text(\"{}\") ?? \"refused\", \"{want}\")\n}}\n", outside.display()),
+            )
+            .unwrap();
+        }
+    }
+    for round in 0..3 {
+        let o = almide(root, &["test", ".", "--target", "native"]);
+        assert!(o.status.success(), "round {round}: a test saw the other project's scope:\n{}", text(&o));
+    }
+}

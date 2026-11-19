@@ -383,7 +383,9 @@ fn build_one_program(
     scratch: &TestScratch,
 ) -> Result<Vec<BuiltFile>, String> {
     let source = NativeSource {
-        rs_code: super::build::inject_fs_scope(super::build::arm_alloc_count(program.rs_code)),
+        // The program's files share one governing manifest (grouped so,
+        // #4830), and so one scope (#4833).
+        rs_code: super::build::inject_fs_scope(super::build::arm_alloc_count(program.rs_code), files.first().and_then(|f| super::fs_scope_for(f))),
         native_deps,
         source_root,
     };

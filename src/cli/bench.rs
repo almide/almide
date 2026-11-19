@@ -45,7 +45,9 @@ pub fn cmd_bench(file: &str, runs: u32, target: Option<&str>, args: &[String]) {
 }
 
 fn bench_native(file: &str, runs: u32, args: &[String]) {
-    let rs_code = match crate::try_compile(file, false).map(|c| inject_main_timer(&c)) {
+    // `[permissions] fs` bounds a benchmarked program as `almide run` bounds
+    // it (#4831): the same scope, baked in from the file's own project.
+    let rs_code = match crate::try_compile(file, false).map(|c| inject_main_timer(&super::build::inject_fs_scope(c, super::fs_scope_for(file)))) {
         Ok(Some(c)) => c,
         Ok(None) => {
             err("error: the generated program has no `fn main` to time");

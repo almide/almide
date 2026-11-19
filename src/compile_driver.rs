@@ -858,6 +858,7 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         Some(ir) => host_source(ir, &codegen::CodegenOptions::default(), &native_text),
         None => Box::new(String::new),
     };
-    let rs_code = render_native_tests("", native_text, host, native_input).map_err(unattributed)?;
+    let fs_scope = plan.project.as_ref().and_then(|p| p.fs_allow.clone());
+    let rs_code = render_native_tests("", native_text, host, native_input, fs_scope).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

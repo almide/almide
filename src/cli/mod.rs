@@ -429,6 +429,7 @@ pub(crate) fn render_v1_native_or_fallback(
 ) -> String {
     let source_text = std::mem::take(&mut pending.source);
     let native_input = pending.native_input.take();
+    let fs_scope = pending.fs_scope.clone();
     let host = pending.host_source();
     let _callbacks = almide_mir::native_callbacks::Scope::enter(std::mem::take(&mut pending.native_text)).with_host_source(host);
     let rs_code = move || pending.generate();
@@ -446,7 +447,7 @@ pub(crate) fn render_v1_native_or_fallback(
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
     let rendered = match native_input {
-        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, almide_wasm_run::fs_scope())
+        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, fs_scope)
             .map(|(rust, _)| rust),
         // A caller without checked IR retains the standalone source route.
         None => almide_mir::pipeline::try_render_rust_source(&source_text),
@@ -547,6 +548,13 @@ pub(crate) fn dep_paths_for(entry: &str) -> Vec<(crate::project::PkgId, std::pat
             .collect(),
         None => vec![],
     }
+}
+
+/// The `[permissions] fs` roots of `file`'s own project (the one lookup):
+/// what a native build of `file` bakes in (#4833: it read the process-wide
+/// copy, which a parallel check of another file could have set).
+pub(crate) fn fs_scope_for(file: &str) -> Option<Vec<String>> {
+    crate::project::permissions_project_for(file).and_then(|p| p.fs_allow)
 }
 
 /// Load `[native-deps]` and dependency-presence info from the `almide.toml`
