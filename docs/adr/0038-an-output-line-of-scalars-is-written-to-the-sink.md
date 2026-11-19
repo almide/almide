@@ -1,4 +1,4 @@
-# ADR-0037: An output line of scalars is written to the sink — `println("${n} …")` whose holes all have a fixed-width text form lowers to one write from a fixed-size line buffer, builds no String, and E071 admits it by its types and shape
+# ADR-0038: An output line of scalars is written to the sink — `println("${n} …")` whose holes all have a fixed-width text form lowers to one write from a fixed-size line buffer, builds no String, and E071 admits it by its types and shape
 
 - **Status**: Proposed (design; not implemented), 2026-11-20. Implementation waits for review.
 - **Date**: 2026-11-20
@@ -97,7 +97,7 @@ The lowering is **one write per line**, the same as today, so stdout and stderr 
 
 New contracts land in almide/als first. The order is: als PR → advance `proofs/als-pin.txt` → the implementation PR.
 
-- **C-311 (ALS-B4), amended statement**: "… constructing, concatenating or pushing to a list/string/map/set … is rejected with E071 — except an output line (ADR-0037): an interpolated string written directly as the argument of an output builtin, whose holes all have a fixed-width text form. It builds no string." The ALS spec text in `docs/specs/als/bounded.md` §ALS-B4 changes with it. This is a spec change and waits for the owner's ○.
+- **C-311 (ALS-B4), amended statement**: "… constructing, concatenating or pushing to a list/string/map/set … is rejected with E071 — except an output line (ADR-0038): an interpolated string written directly as the argument of an output builtin, whose holes all have a fixed-width text form. It builds no string." The ALS spec text in `docs/specs/als/bounded.md` §ALS-B4 changes with it. This is a spec change and waits for the owner's ○.
 - **New contract (id assigned in als)**: "An output line writes the same bytes on both targets as the String path would, and allocates nothing." Its evidence is:
   - a `spec/wasm_cross` fixture printing boundary values (`i64::MIN`, `-1`, `0`, `i64::MAX`, each sized int's min and max, `true`, `false`) both as an output line and through `int.to_string`. Native and wasm must match each other and the two forms must match each other.
   - the wasm `alloc_count` ledger row (0 allocations for the line).
