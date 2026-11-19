@@ -431,6 +431,10 @@ since = "0.69.0"
 severity = "error"
 since = "0.69.1"
 
+[E121]
+severity = "error"
+since = "0.70.0"
+
 [E420]
 severity = "error"
 since = "0.13.3"

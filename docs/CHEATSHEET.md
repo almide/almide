@@ -599,6 +599,9 @@ User { name: "alice" }     // named record construction — canonical form
 User(name: "alice")        // alias: named-argument call syntax, normalized to the brace form
 User("alice")              // WRONG: records take named fields, not positional (E021)
 ```
+A spread's base is a record. In a generic fn, bound the type parameter with a
+record shape: `fn copy[A: { .. }](x: A) -> A = { ...x }`. A spread of a bare
+`A` (or one with only a protocol bound) is E121.
 The paren alias also works for matching a plain record type (`User(name) => ...`).
 It does **not** work for a variant's record-payload case — `Circle { radius }` (a
 case of `type Shape = Circle { radius: Float } | ...`) only matches as
