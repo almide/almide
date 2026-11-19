@@ -61,8 +61,17 @@ fn run_cli_with_stdin(args: &[String], cwd: Option<&std::path::Path>, stdin: Opt
     let mut cmd = std::process::Command::new(exe);
     // `--raw-json`: each tool reads the command's own rows, not the shared
     // `--json` envelope (#4590), and builds its typed result from them.
-    cmd.arg("--raw-json")
-        .args(args)
+    cmd.arg("--raw-json");
+    // The child decides as this server does: a locked server (a release
+    // build, or `--lock-switches`) starts locked children with the same
+    // `--allow-switch` names, so an inherited switch is judged once, alike.
+    if let Some(allowed) = almide_base::env::lock_allowances() {
+        cmd.arg("--lock-switches");
+        for name in allowed {
+            cmd.arg("--allow-switch").arg(name);
+        }
+    }
+    cmd.args(args)
         .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())

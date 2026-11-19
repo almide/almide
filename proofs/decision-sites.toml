@@ -15,7 +15,9 @@
 #   tools/almide-gates decision-sites the judge: reads the rows' evidence and the
 #                                    ceilings below.
 #   tests/decision_route_matrix_test.rs runs each row's probe on every `runs` cell.
-#   scripts/check-decision-controls.sh  the c4 patches apply (PR) / turn red (VM).
+#   scripts/run-decision-controls.sh    the c4 mutation pass: base green, patched
+#                                    red (a build VM); the judge checks on every
+#                                    PR that each patch still applies.
 #
 # A row is STAMPED only when all four hold, and the judge recomputes each from
 # the row's evidence:
@@ -23,12 +25,13 @@
 #       suffixes, parameter names or Debug/Display text  (`from`);
 #   c2  an unknown item is refused, and a test adds a NOVEL item and sees it
 #       refused  (`unknown = "refuse"`, `novel = "<test file>::<fn>"`, the test
-#       calling a tests/common/novel.rs generator);
+#       calling a tests/support/novel.rs generator);
 #   c3  it runs on every route that produces or runs code; a route left out
 #       says why (`n.a.: <why>`) or names an open issue (`skipped: #NNNN`);
 #       every `runs` cell is executed by the route-matrix test (`probe`);
 #   c4  a negative control: proofs/decision-controls/<id>.patch removes the
-#       check and `control_test` turns red (`control_seen = "<sha> <date>"`).
+#       check and `control_test` turns red (`control_seen = "<sha> <date>"`,
+#       recorded from scripts/run-decision-controls.sh).
 #
 # Status: STAMPED (`stamp = "<sha> <date>"`) | UNSTAMPED (`reasons` says which
 # condition fails) | UNCLASSIFIED (not yet read to a verdict; never counted as
@@ -75,7 +78,7 @@ carriers = [
 "Commands::Survive" = "n.a.: a tombstone that names its replacement and exits"
 "Commands::SelfUpdate" = "n.a.: the toolchain rows (toolchain.selfupdate-attestation) cover it"
 "Commands::Run" = "run (the native / wasm / wasi / component columns are its `--target`s)"
-"Commands::Repl" = "skipped: #REPL compiles and runs each input (try_compile + the built binary) and is no column of the matrix"
+"Commands::Repl" = "run: compiles each input through try_compile (the native build route; [permissions] refuses there, observed 2026-11-19) and runs the binary"
 "Commands::Remove" = "n.a.: dependency management"
 "Commands::Query" = "n.a.: reads interfaces and docs; the Interface subcommand is mapped on its own row"
 "Commands::Mcp" = "mcp"
@@ -217,7 +220,7 @@ decides = "almide check applies [permissions] (allow + proc) on the whole-progra
 from = "declaration"
 unknown = "refuse"
 unknown_note = "user modules lowered by whole_program_ir; if that front end panics (debug assertion) the gate silently judges the entry IR only (check.rs:194, compile_driver.rs:295-299)"
-routes = { check = "runs", check_json = "skipped: check_json_one never calls it #4815", check_effects = "skipped: own copy", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs only with --target wasm (compile_to_wasm_bytes)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "skipped: #4815", emit = "n.a." }
+routes = { check = "runs", check_json = "skipped: check_json_one never calls it #4815", check_effects = "skipped: #4815 own copy", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs only with --target wasm (compile_to_wasm_bytes)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "skipped: #4815", emit = "n.a." }
 tests = [
   "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions",
 ]
@@ -264,7 +267,7 @@ decides = "every process.{exec,output,run,start} call must name its command as a
 from = "name"
 unknown = "allow"
 unknown_note = "a spawning fn not in PROC_SPAWNING (process.__os_run/__os_output/__os_start today; any future spawner) passes (#4817); match is module == \"process\" and func name, FnRef by \"process.\" prefix"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
+routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
 tests = [
   "tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route",
   "tests/proc_allowlist_test.rs::a_command_the_list_cannot_check_is_refused_too",
@@ -293,7 +296,7 @@ decides = "a @signals_process stdlib fn (call or value) needs `kill` on [permiss
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a new signalling fn declared @signals_process is covered automatically (stdlib_info::is_signals_process_stdlib_fn); undeclared one is not"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
+routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
 tests = [
   "tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list",
 ]
@@ -318,7 +321,7 @@ decides = "allow grants Proc with no proc list: warning on every route, error un
 from = "declaration"
 unknown = "n.a."
 unknown_note = "an allow list with an unknown name returns Ok here (mod.rs:161) — refused by allowed_effects elsewhere"
-routes = { check = "runs (refuse only with --profile critical)", check_json = "skipped: check --json --profile critical never calls it #4815", check_effects = "skipped", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs (warning)" }
+routes = { check = "runs (refuse only with --profile critical)", check_json = "skipped: check --json --profile critical never calls it #4815", check_effects = "skipped: #4815", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs (warning)" }
 tests = [
   "tests/proc_category_test.rs::proc_without_a_command_list_warns_and_critical_refuses_it",
 ]
@@ -411,6 +414,10 @@ note = "probe c1: allow=[\"IO\"] + entry @inline_rust fn => 11 categories refuse
 
 [[site]]
 id = "effect.e006-isolation"
+novel = "tests/decision_novel_test.rs::novel_e006_fresh_effect_fn_in_a_fresh_module"
+control_patch = "proofs/decision-controls/effect.e006-isolation.patch"
+control_test = "tests/decision_novel_test.rs::novel_e006_fresh_effect_fn_in_a_fresh_module"
+probe = "tests/decision-probes/effect.e006-isolation"
 at = "crates/almide-frontend/src/check/calls.rs::check_effect_isolation"
 items = [
   "crates/almide-frontend/src/check/calls.rs::Checker::check_effect_isolation",
@@ -465,7 +472,7 @@ decides = "a pure fn whose solved effect_flow set holds the effect bit concretel
 from = "reach"
 unknown = "refuse"
 unknown_note = "flow over every lowered fn; unresolved Named/Method calls contribute no bit (scan.rs:403-411, 447)"
-routes = { check = "runs", check_json = "runs (check.rs:385)", check_effects = "skipped: report-only route", run = "runs", build = "runs", test = "runs (test_wasm.rs:443)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped: front end only", mcp = "runs", emit = "runs (emit.rs:205)" }
+routes = { check = "runs", check_json = "runs (check.rs:385)", check_effects = "skipped: #4847 report-only route", run = "runs", build = "runs", test = "runs (test_wasm.rs:443)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs", emit = "runs (emit.rs:205)" }
 tests = [
   "tests/effect_value_laundering_test.rs::a_pure_fn_cannot_reach_a_file_through_a_fn_value",
   "tests/diagnostics/e109-effect-fn-value-list-map",
@@ -474,7 +481,7 @@ tests = [
   "tests/diagnostics/e109-effect-fn-value-pipe-into-lambda",
 ]
 control_note = "security-by-construction.md row 26: effect_value_laundering_test 0/3 on rc2"
-issues = []
+issues = [4847]
 status = "UNSTAMPED"
 reasons = [
   "c3:route-skipped (check --effects prints a verdict without E109; LSP)",
@@ -585,6 +592,10 @@ note = "Documented divergence: docs/specs/cli.md:577-589 and ADR-0026 §Open 'On
 
 [[site]]
 id = "critical.extern-decl"
+novel = "tests/decision_novel_test.rs::novel_extern_fn_with_a_fresh_name_under_critical"
+control_patch = "proofs/decision-controls/critical.extern-decl.patch"
+control_test = "tests/decision_novel_test.rs::novel_extern_fn_with_a_fresh_name_under_critical"
+probe = "tests/decision-probes/critical.extern-decl"
 at = "crates/almide-frontend/src/check/bounded.rs::Checker::check_bounded_profile"
 items = [
   "crates/almide-frontend/src/check/bounded.rs::Checker::check_bounded_profile",
@@ -596,7 +607,7 @@ decides = "under critical, an @extern fn declaration in the entry is E100"
 from = "declaration"
 unknown = "refuse"
 unknown_note = "keyed on extern_attrs non-empty; an entry @inline_rust fn is NOT refused (probe c1: No errors found) but it is inert on the entry (template spliced only for module calls) and module calls are E074"
-routes = { check = "runs", check_json = "runs", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "runs", check_json = "runs", check_effects = "n.a.: check --effects refuses --profile as a usage error (exit 1, dispatch.rs:136-139)", run = "n.a.: `--profile critical` is a check profile; no other route takes it", build = "n.a.: `--profile critical` is a check profile; no other route takes it", test = "n.a.: `--profile critical` is a check profile; no other route takes it", bench = "n.a.: `--profile critical` is a check profile; no other route takes it", native = "n.a.: `--profile critical` is a check profile; no other route takes it", wasm = "n.a.: `--profile critical` is a check profile; no other route takes it", wasi = "n.a.: `--profile critical` is a check profile; no other route takes it", component = "n.a.: `--profile critical` is a check profile; no other route takes it", lsp = "n.a.: `--profile critical` is a check profile; no other route takes it", mcp = "n.a.: `--profile critical` is a check profile; no other route takes it", emit = "n.a.: `--profile critical` is a check profile; no other route takes it" }
 tests = [
   "tests/diagnostics/e100-critical-extern-fn",
   "tests/critical_profile_test.rs::memory_unsafe_surface_is_refused_under_critical",
@@ -613,6 +624,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "critical.memory-unsafe-call"
+novel = "tests/decision_novel_test.rs::novel_every_memory_unsafe_stdlib_fn_under_critical"
+control_patch = "proofs/decision-controls/critical.memory-unsafe-call.patch"
+control_test = "tests/decision_novel_test.rs::novel_every_memory_unsafe_stdlib_fn_under_critical"
+probe = "tests/decision-probes/critical.memory-unsafe-call"
 at = "crates/almide-frontend/src/check/bounded.rs::BoundedCx::member_module_decided"
 items = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::member_module_decided",
@@ -627,7 +642,7 @@ decides = "under critical a call to a @memory_unsafe stdlib fn is E100, no grant
 from = "declaration"
 unknown = "refuse"
 unknown_note = "is_memory_unsafe_stdlib_fn reads the @memory_unsafe attribute; a new such fn is covered; ffi is also in BOUNDED_DENIED_MODULES. Bare selective-import spelling goes through check_call_ident (E074 unless print*/assert, #4823)"
-routes = { check = "runs", check_json = "runs", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "runs", check_json = "runs", check_effects = "n.a.: check --effects refuses --profile as a usage error (exit 1, dispatch.rs:136-139)", run = "n.a.: `--profile critical` is a check profile; no other route takes it", build = "n.a.: `--profile critical` is a check profile; no other route takes it", test = "n.a.: `--profile critical` is a check profile; no other route takes it", bench = "n.a.: `--profile critical` is a check profile; no other route takes it", native = "n.a.: `--profile critical` is a check profile; no other route takes it", wasm = "n.a.: `--profile critical` is a check profile; no other route takes it", wasi = "n.a.: `--profile critical` is a check profile; no other route takes it", component = "n.a.: `--profile critical` is a check profile; no other route takes it", lsp = "n.a.: `--profile critical` is a check profile; no other route takes it", mcp = "n.a.: `--profile critical` is a check profile; no other route takes it", emit = "n.a.: `--profile critical` is a check profile; no other route takes it" }
 tests = [
   "tests/diagnostics/e100-critical-ffi-read",
   "tests/diagnostics/e100-critical-ffi-write",
@@ -755,7 +770,7 @@ tests = [
   "tests/critical_profile_test.rs::a_violation_is_seen_through_every_expression_kind",
 ]
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
-issues = []
+issues = [4855]
 status = "UNSTAMPED"
 reasons = [
   "c1:name-keyed (call tables, proofs/name-keyed-sites.toml rows for BOUNDED_ALLOC_CALLS / SIZED_CTORS / FLOAT_COMPUTE_CALLS)",
@@ -789,6 +804,10 @@ note = "check.rs:62-71 arms profile_critical for infer_program only; test blocks
 
 [[site]]
 id = "prim.e085-intrinsic-attr"
+novel = "tests/decision_novel_test.rs::novel_user_intrinsic_with_a_fresh_runtime_symbol"
+control_patch = "proofs/decision-controls/prim.e085-intrinsic-attr.patch"
+control_test = "tests/decision_novel_test.rs::novel_user_intrinsic_with_a_fresh_runtime_symbol"
+probe = "tests/decision-probes/prim.e085-intrinsic-attr"
 at = "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::reject_user_intrinsic"
 items = [
   "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::reject_user_intrinsic",
@@ -800,7 +819,7 @@ decides = "@intrinsic / @wasm_intrinsic / @prim_op on a fn outside the stdlib's 
 from = "declaration"
 unknown = "refuse"
 unknown_note = "authority by origin (stdlib_authority); a copied stdlib layout with its own text is refused (#4100). LSP has no origin => abstains"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: no source path, abstains (produces no code)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (it publishes no E085 for the probe; nothing is built)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/diagnostics/e085-intrinsic-outside-stdlib",
   "tests/diagnostics/e085-wasm-intrinsic",
@@ -847,6 +866,10 @@ note = "reject_user_prim_import checks path.len()==1 (intrinsic_authority.rs:411
 
 [[site]]
 id = "prim.stdlib-authority"
+novel = "tests/decision_novel_test.rs::novel_stdlib_layout_with_a_fresh_stem"
+control_patch = "proofs/decision-controls/prim.stdlib-authority.patch"
+control_test = "tests/decision_novel_test.rs::novel_stdlib_layout_with_a_fresh_stem"
+probe = "tests/decision-probes/prim.stdlib-authority"
 at = "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::stdlib_authority"
 items = [
   "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::stdlib_authority",
@@ -856,7 +879,7 @@ decides = "a source is the stdlib iff it is a bundled module, or under a --stdli
 from = "declaration"
 unknown = "refuse"
 unknown_note = "an unknown file is Some(false) => E085/E100/E118 apply; only the LSP / pipeline re-check (no source_file) abstain"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: abstains (None)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (it publishes no E085 for the probe; nothing is built)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/inline_rust_authority_test.rs::a_stdlib_directory_layout_is_not_stdlib_authority",
 ]
@@ -912,7 +935,7 @@ unknown_note = "the @ordered set is declaration-driven, but Computed callees and
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "unknown", wasi = "unknown", component = "unknown", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
 tests = []
 control_note = "NONE"
-issues = []
+issues = [4856]
 status = "UNCLASSIFIED"
 reasons = [
   "c2:fail-open suspected (fn-value arms) — not probed",
@@ -973,7 +996,7 @@ decides = "which public almide_rt_fs_* runtime fn gets which scope guard macro (
 from = "param-name"
 unknown = "allow"
 unknown_note = "a new runtime fs fn whose path parameter is named e.g. `file`/`p`/`from,to`, or a 3-param src/dst, hits `_ => continue`: no guard, not twinned, so its std::fs calls run unbounded (bounded only if some guarded call already installed the global scope AND the fn uses almide_sfs)"
-routes = { check = "n.a.: no code", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs (bin and cdylib)", test = "runs: #4833 shared scope", bench = "skipped: #4831", native = "runs", wasm = "n.a.: host_fs_scope instead", wasi = "skipped: #4816 (cmd_build_wasi_rustc never injects)", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test child", emit = "skipped: --target rust prints no guards (probe p1)" }
+routes = { check = "n.a.: no code", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs (bin and cdylib)", test = "runs: #4833 shared scope", bench = "skipped: #4831", native = "runs", wasm = "n.a.: host_fs_scope instead", wasi = "skipped: #4816 (cmd_build_wasi_rustc never injects)", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test child", emit = "skipped: #4843 --target rust prints no guards (probe p1)" }
 tests = [
   "crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions",
   "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
@@ -1002,7 +1025,7 @@ decides = "which call sites in the user half of the emitted Rust are rewritten i
 from = "name"
 unknown = "allow"
 unknown_note = "a runtime fs fn named without a following `(` (a fn pointer, a `use` alias spelled differently) is copied unwrapped; today codegen eta-expands fn values (probe p1), so no such spelling is emitted"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs: #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped (probe p1)" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs: #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843 (probe p1)" }
 tests = [
   "crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions",
   "tests/fs_scope_test.rs::scoped_calls_do_not_rewrite_host_names_inside_user_strings",
@@ -1029,7 +1052,7 @@ decides = "whether a native program is built with the scope at all: no roots -> 
 from = "prefix"
 unknown = "allow"
 unknown_note = "a program whose only host fs reach is outside the almide_rt_fs_ prefix (unix.__os_listen/connect, shm_create's temp file, process `dir`) gets no scope at all"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (run.rs:66)", build = "runs (build.rs:359, before the cdylib split)", test = "runs (test_native.rs:367) with the process-global SCOPE: #4833", bench = "skipped: bench.rs:47-65 #4831", native = "runs", wasm = "n.a.", wasi = "skipped: build.rs:317-322 wasi rustc route #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: emit.rs:121 codegen_with, no inject (probe p1) — no issue" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (run.rs:66)", build = "runs (build.rs:359, before the cdylib split)", test = "runs (test_native.rs:367) with the process-global SCOPE: #4833", bench = "skipped: bench.rs:47-65 #4831", native = "runs", wasm = "n.a.", wasi = "skipped: build.rs:317-322 wasi rustc route #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843 emit.rs:121 codegen_with, no inject (probe p1) \u2014 no issue" }
 tests = [
   "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
   "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets",
@@ -1055,7 +1078,7 @@ decides = "whether the certified v1 native render installs the scope: roots set 
 from = "name"
 unknown = "allow"
 unknown_note = "a v1-rendered host item of another module that touches files (unix socket path, shm temp file) does not trigger the scope; its guards come from fsscope.native-guard-map"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (render_v1_native_or_fallback, mod.rs:456)", build = "runs", test = "runs (compile_driver_native.rs:80) #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (render_v1_native_or_fallback, mod.rs:456)", build = "runs", test = "runs (compile_driver_native.rs:80) #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843" }
 tests = [
   "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
   "src/compile_driver_native_tests.rs::checked_native_scope_bounds_reads_writes_and_predicates_before_artifact_binding",
@@ -1133,7 +1156,7 @@ decides = "whether a run-time path, resolved by the OS (longest existing prefix,
 from = "reach"
 unknown = "refuse"
 unknown_note = "every path is judged by where it resolves; an unresolvable path (fs_scope_resolve_parts None) is refused; a segment that is not one OS name (Windows ADS) is refused"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs native+wasm", build = "native runs; wasm/wasi artifact skipped #4816", test = "runs (scope source #4816/#4833)", bench = "wasm runs; native skipped #4831", native = "runs", wasm = "runs (embedded host)", wasi = "skipped: #4816", component = "n.a.: WASI preopens decide", lsp = "n.a.", mcp = "via almide_test", emit = "skipped (fsscope.native-inject)" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs native+wasm", build = "native runs; wasm/wasi artifact skipped #4816", test = "runs (scope source #4816/#4833)", bench = "wasm runs; native skipped #4831", native = "runs", wasm = "runs (embedded host)", wasi = "skipped: #4816", component = "n.a.: WASI preopens decide", lsp = "n.a.", mcp = "via almide_test", emit = "skipped: #4843 (fsscope.native-inject)" }
 tests = [
   "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
   "tests/fs_scope_test.rs::a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target",
@@ -1149,6 +1172,10 @@ note = "fs_scoped_core.rs:114-126, 186-216. The decision itself is c1/c2/c4-clea
 
 [[site]]
 id = "fsscope.beneath-walk"
+novel = "tests/decision_novel_test.rs::novel_beneath_walk_through_a_fresh_symlink"
+control_patch = "proofs/decision-controls/fsscope.beneath-walk.patch"
+control_test = "tests/decision_novel_test.rs::novel_beneath_walk_through_a_fresh_symlink"
+probe = "tests/decision-probes/fsscope.beneath-walk"
 at = "crates/almide-rt-core/src/fs_beneath_core.rs::fs_beneath_segments"
 items = [
   "crates/almide-rt-core/src/fs_beneath_core.rs::fs_beneath_segments",
@@ -1186,7 +1213,7 @@ decides = "rooted (fs.open_root / root_*) and scoped calls: refuse an absolute, 
 from = "reach"
 unknown = "refuse"
 unknown_note = "any segment shape not exactly one Component::Normal is Escape; a platform without descriptor calls refuses every call"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs (native binary; stock wasm via the stock fs service)", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs (stock-runtime fs service)", component = "n.a.: wasmtime-wasi preopen semantics", lsp = "n.a.", mcp = "via almide_test", emit = "runs: rooted calls are runtime code, not injected" }
+routes = { check = "n.a.: produces and runs no code", check_json = "n.a.: produces and runs no code", check_effects = "n.a.: produces and runs no code", run = "runs", build = "n.a.: builds the artifact and runs nothing; the walk is the runtime's and the run / native / wasm cells run it", test = "runs", bench = "n.a.: runs the program but reports only timings; the run / native cells run the same runtime", native = "runs", wasm = "runs", wasi = "n.a.: builds the artifact and runs nothing", component = "n.a.: builds the artifact and runs nothing", lsp = "n.a.: produces and runs no code", mcp = "n.a.: produces and runs no code", emit = "n.a.: prints Rust source; the native cell runs the runtime that source links" }
 tests = [
   "crates/almide-rt-core/tests/fs_beneath_core.rs",
   "crates/almide-rt-core/tests/fs_beneath_platform.rs",
@@ -1363,7 +1390,7 @@ decides = "unix.listen / unix.connect bind/connect a filesystem path with no [pe
 from = "prefix"
 unknown = "allow"
 unknown_note = "the path never reaches fs_scoped_admits: native guards only almide_rt_fs_* (unix is almide_rt_unix___os_*), wasm ops 104..=116 go to net_host::dispatch before host_fs_scope (host.rs:1009-1016)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4832", build = "skipped: #4832", test = "skipped: #4832", bench = "skipped", native = "skipped: #4832", wasm = "skipped: #4832", wasi = "n.a.: unix ops not served", component = "n.a.: walled (component_availability.rs:240)", lsp = "n.a.", mcp = "n.a.", emit = "skipped" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4832", build = "skipped: #4832", test = "skipped: #4832", bench = "skipped: #4832", native = "skipped: #4832", wasm = "skipped: #4832", wasi = "n.a.: unix ops not served", component = "n.a.: walled (component_availability.rs:240)", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4832" }
 tests = [
   "tests/net_unix_test.rs",
   "tests/net_unix_embedded_cross_test.rs",
@@ -1390,10 +1417,10 @@ decides = "unix.shm_create creates (then unlinks) a file in $XDG_RUNTIME_DIR or 
 from = "prefix"
 unknown = "allow"
 unknown_note = "not an almide_rt_fs_* fn, so neither the native guard nor the wasm pre-check sees it; the temp calls proper (fs.create_temp_*) are judged against the temp dir"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped", build = "skipped", test = "skipped", bench = "skipped", native = "skipped", wasm = "skipped (net_host)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4850", build = "skipped: #4850", test = "skipped: #4850", bench = "skipped: #4850", native = "skipped: #4850", wasm = "skipped: #4850 (net_host)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4850" }
 tests = []
 control_note = "NONE"
-issues = []
+issues = [4850]
 status = "UNSTAMPED"
 reasons = [
   "c1:prefix",
@@ -1417,7 +1444,7 @@ unknown_note = "PERMISSION_KEYS = allow/proc/fs/native (project.rs:906); anythin
 routes = { check = "runs (warning)", check_json = "unknown", check_effects = "unknown", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs: inherit_network + allow_tcp/udp/name_lookup (component_host.rs:181)", lsp = "unknown", mcp = "unknown", emit = "unknown" }
 tests = []
 control_note = "NONE"
-issues = []
+issues = [4851]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open",
@@ -1624,6 +1651,10 @@ note = "Release-reachable weakening: none beyond the documented release default.
 
 [[site]]
 id = "env.no-avail-check"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.no-avail-check.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.no-avail-check"
 at = "src/cli/wasm_compile.rs::ALMIDE_NO_AVAIL_CHECK"
 items = []
 switches = [
@@ -1636,7 +1667,7 @@ decides = "bypass the E081 stdlib availability check on the wasm build"
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Gate, registered; release lock ignores it unless --allow-switch"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "wasm", build = "wasm", test = "wasm", bench = "wasm", native = "n.a.", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
 ]
@@ -1652,6 +1683,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.no-verified-ok"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.no-verified-ok.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.no-verified-ok"
 at = "src/main.rs::ALMIDE_NO_VERIFIED_OK"
 items = []
 switches = [
@@ -1664,7 +1699,7 @@ decides = "re-enable the retired --no-verified legs (v0 fallback) instead of ref
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Gate; locked in release"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: takes no --no-verified, the only place the switch is read", check_json = "n.a.: takes no --no-verified, the only place the switch is read", check_effects = "n.a.: takes no --no-verified, the only place the switch is read", run = "runs", build = "runs", test = "n.a.: takes no --no-verified, the only place the switch is read", bench = "n.a.: takes no --no-verified, the only place the switch is read", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: takes no --no-verified, the only place the switch is read", mcp = "n.a.: takes no --no-verified, the only place the switch is read", emit = "n.a.: takes no --no-verified, the only place the switch is read" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_refuses_the_retired_no_verified_leg_from_the_environment",
 ]
@@ -1680,6 +1715,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.skip-version-check"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.skip-version-check.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.skip-version-check"
 at = "src/project.rs::ALMIDE_SKIP_VERSION_CHECK"
 items = []
 switches = [
@@ -1692,13 +1731,13 @@ decides = "skip the project's almide version requirement check"
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Gate; locked in release"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "runs", emit = "runs" }
+routes = { check = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", check_json = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", check_effects = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", run = "runs", build = "runs", test = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", bench = "runs", native = "runs", wasm = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", wasi = "runs", component = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", lsp = "skipped: #4846 the editor route never reads the pin", mcp = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)", emit = "skipped: #4846 refused inside the project, admitted from outside it (the pin is read from ./almide.toml)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
   "scripts/check-release-switch-lock.sh",
 ]
 control_note = "scripts/check-release-switch-lock.sh negative control (predicate false -> exit 1)"
-issues = []
+issues = [4846]
 status = "UNSTAMPED"
 reasons = [
   "c3:routes-read-not-run",
@@ -1709,6 +1748,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.test-lax-wasm"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.test-lax-wasm.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.test-lax-wasm"
 at = "src/cli/commands.rs::ALMIDE_TEST_LAX_WASM"
 items = []
 switches = [
@@ -1721,7 +1764,7 @@ decides = "let the default almide test lane PASS a file whose wasm leg diverged 
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Gate; locked in release"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "default lane", bench = "n.a.", native = "n.a.", wasm = "test", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "almide_test child", emit = "n.a." }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "unprobed: read only after a file traps on the wasm leg and passes the native re-run (commands.rs:384) \u2014 no probe can cause that on purpose", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
@@ -1737,6 +1780,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.shuffle-passes"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.shuffle-passes.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.shuffle-passes"
 at = "crates/almide-codegen/src/pass.rs::ALMIDE_SHUFFLE_PASSES"
 items = []
 switches = [
@@ -1749,7 +1796,7 @@ decides = "run native passes in a seeded random order permitted by declared edge
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Gate; locked in release"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "native", build = "native", test = "native", bench = "native", native = "runs", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "native" }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "runs", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "runs", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "runs" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
@@ -1765,6 +1812,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.wasm-skip-stock-audit"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.wasm-skip-stock-audit.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.wasm-skip-stock-audit"
 at = "src/wasm_route.rs::ALMIDE_WASM_SKIP_STOCK_AUDIT"
 items = []
 switches = [
@@ -1775,7 +1826,7 @@ decides = "skip the stock-WASI host-op audit on almide build --target wasm"
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Route; locked in release"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "wasm", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "build", wasi = "build", component = "unknown", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
@@ -1791,6 +1842,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.control-admit-codec-at-input"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.control-admit-codec-at-input.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.control-admit-codec-at-input"
 at = "crates/almide-frontend/src/check/input_sink.rs::ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT"
 items = []
 switches = [
@@ -1803,7 +1858,7 @@ decides = "admit a Codec type at an @input_sink parameter instead of E110 (negat
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Ablation; locked in release"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (if inherited, dev only)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/input_sink_test.rs",
 ]
@@ -1819,6 +1874,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.control-admit-hand-decode"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.control-admit-hand-decode.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.control-admit-hand-decode"
 at = "crates/almide-frontend/src/request_flow.rs::ALMIDE_CONTROL_ADMIT_HAND_DECODE"
 items = []
 switches = [
@@ -1829,12 +1888,12 @@ decides = "admit hand-decoded request data into a sent-out type (E110 flow half 
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Ablation; locked in release"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (dev only)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "skipped: #4847 check --effects runs no E110 flow gate (rc 0 on the probe without the switch)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (the flow gate is the CLI's; the switch is not read there)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/input_sink_test.rs",
 ]
 control_note = "tests/switch_lock_test.rs (generic lock control)"
-issues = []
+issues = [4847]
 status = "UNSTAMPED"
 reasons = [
   "c3:routes-read-not-run",
@@ -1845,6 +1904,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.control-ignore-skip-decode"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.control-ignore-skip-decode.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.control-ignore-skip-decode"
 at = "crates/almide-frontend/src/attr_vocab.rs::ALMIDE_CONTROL_IGNORE_SKIP_DECODE"
 items = []
 switches = [
@@ -1855,7 +1918,7 @@ decides = "make the Codec derive read a @skip_decode field from input again"
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Ablation; locked in release"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (dev only)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route derives no codec (the switch is not read there)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/codec_field_skip_test.rs",
 ]
@@ -1871,6 +1934,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.control-no-type-sharing"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.control-no-type-sharing.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.control-no-type-sharing"
 at = "crates/almide-base/src/budget.rs::ALMIDE_CONTROL_NO_TYPE_SHARING"
 items = []
 switches = [
@@ -1881,7 +1948,7 @@ decides = "copy whole type trees instead of sharing (lifts the type-sharing prot
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Ablation; locked in release"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (dev only)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/compile_budget_test.rs",
 ]
@@ -1897,6 +1964,10 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "env.native-drill-force-moves"
+novel = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+control_patch = "proofs/decision-controls/env.native-drill-force-moves.patch"
+control_test = "tests/decision_env_lock_novel_test.rs::novel_every_build_changing_switch_is_ignored_under_the_lock"
+probe = "tests/decision-probes/env.native-drill-force-moves"
 at = "crates/almide-mir/src/mir_liveness.rs::ALMIDE_NATIVE_DRILL_FORCE_MOVES"
 items = []
 switches = [
@@ -1907,7 +1978,7 @@ decides = "make the certified native render move copies ignoring the MIR livenes
 from = "declaration"
 unknown = "n.a."
 unknown_note = "Ablation; locked in release"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "native v1", build = "native v1", test = "native v1", bench = "native v1", native = "runs", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "unknown" }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "runs", build = "runs", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "runs", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
@@ -2005,7 +2076,7 @@ unknown_note = "Harness; local runs without the tool pass silently; CI sets it"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "cargo test harness only", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = []
 control_note = "NONE"
-issues = []
+issues = [4858]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open (local only)",
@@ -2025,7 +2096,7 @@ decides = "before any command, ./almide.toml is refused (exit 1) for a duplicate
 from = "declaration"
 unknown = "allow"
 unknown_note = "only the cwd manifest is judged; the entry's own project manifest (walk-up) is never gated, and check_manifest does not call validate_package_name, the [permissions].native shape or [trust].media, which parse_toml refuses later -> the later .ok() readers drop the whole manifest (#4829)"
-routes = { check = "runs:cwd only", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped:exempt by design (exit would kill the session)", mcp = "runs:server exempt, tool children are almide subprocesses that run it", emit = "runs:cwd only" }
+routes = { check = "runs:cwd only", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs:server exempt, tool children are almide subprocesses that run it", emit = "runs:cwd only" }
 tests = [
   "tests/manifest_permissions_test.rs::a_manifest_that_is_not_toml_is_refused_on_its_line",
   "tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command",
@@ -2079,7 +2150,7 @@ decides = "which almide.toml decides the native-grant gate (cwd only), the compi
 from = "mixed:declaration+text"
 unknown = "allow"
 unknown_note = "`cd elsewhere && almide run /abs/app/src/main.almd`: the cwd gate sees no deps, the build compiles the entry's project deps, the backstop finds no manifest beside src/main.almd -> an ungranted dependency's native code reaches rustc"
-routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:split #4830", build = "runs:split", test = "runs:split", bench = "runs:split", native = "runs:split", wasm = "n.a.:no cargo", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs:split (children)", emit = "skipped:emit is cwd-only and fails closed outside" }
+routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:split #4830", build = "runs:split", test = "runs:split", bench = "runs:split", native = "runs:split", wasm = "n.a.:no cargo", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs:split (children)", emit = "skipped: #4830 emit is cwd-only and fails closed outside" }
 tests = [
   "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
 ]
@@ -2236,13 +2307,13 @@ decides = "an unknown top-level table, [package]/[permissions]/[trust]/dependenc
 from = "name"
 unknown = "allow"
 unknown_note = "a typo of the restricting table or key (`[permission]`, `alow`) drops the restriction: absent `allow` is unchecked, so every capability is granted with exit 0 (probe P2)"
-routes = { check = "runs:warn only", check_json = "runs:warn row", check_effects = "runs:warn only", run = "runs:warn only", build = "runs:warn only", test = "runs:warn only", bench = "runs:warn only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped", mcp = "runs", emit = "runs" }
+routes = { check = "runs:warn only", check_json = "runs:warn row", check_effects = "runs:warn only", run = "runs:warn only", build = "runs:warn only", test = "runs:warn only", bench = "runs:warn only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/manifest_unknown_key_test.rs::package_permissions_and_top_level_tables_warn",
   "tests/manifest_unknown_key_test.rs::the_cli_warns_once_and_exits_zero",
 ]
 control_note = "NONE"
-issues = []
+issues = [4851]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open",
@@ -2289,7 +2360,7 @@ decides = "each [permissions].allow name must be an Effect leaf or one of the fo
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a name not in Effect::grantable_names is refused (`log`, `io`)"
-routes = { check = "runs", check_json = "runs:gate", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped:exempt", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs:gate", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs", emit = "runs" }
 tests = [
   "tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command",
   "tests/manifest_permissions_test.rs::log_is_not_a_capability",
@@ -2368,12 +2439,12 @@ decides = "a package whose [package].almide minimum is newer than the running co
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a pin semver cannot parse is refused; a manifest that does not parse skips the gate (dispatch.rs:771 `let Ok(proj) = … else return`); ALMIDE_SKIP_VERSION_CHECK honoured in release only with --allow-switch"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped:exempt", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped: #4846 exempt", mcp = "runs", emit = "runs" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
 control_note = "row 25: with lock_engaged_by_default false a release build honoured ALMIDE_SKIP_VERSION_CHECK and check-release-switch-lock.sh exited 1 (covers the bypass, not the pin itself)"
-issues = [4829]
+issues = [4829, 4846]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open",
@@ -2429,7 +2500,7 @@ tests = [
   "tests/dep_relative_transitive_path_test.rs",
 ]
 control_note = "NONE"
-issues = []
+issues = [4852]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open",
@@ -2528,13 +2599,13 @@ decides = "a [trust].media grant applies to a dependency whose key (owner/repo f
 from = "mixed:text+name"
 unknown = "refuse"
 unknown_note = "an unmatched key leaves the ownership ungranted (refused); but a path dependency is keyed by its own declared name, and a git URL by text alone (with a tag that is a path, probe P1, any local dir answers for owner/repo)"
-routes = { check = "runs:cwd only, fetch error skips", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped", mcp = "runs:children", emit = "skipped:not in dispatch gate" }
+routes = { check = "runs:cwd only, fetch error skips", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs:children", emit = "skipped: #4848 not in dispatch gate" }
 tests = [
   "tests/media_grant_test.rs::a_forged_owner_in_a_transitive_dependency_is_refused",
   "src/media_grant.rs::tests::a_grant_names_the_source",
 ]
 control_note = "row 21/ADR-0032 D7 (GCE 2026-10-29): grant check off -> media_grant_test exits 101"
-issues = [4834, 4830]
+issues = [4834, 4830, 4848]
 status = "UNSTAMPED"
 reasons = [
   "c1:url-text",
@@ -2664,12 +2735,12 @@ decides = "with --locked, a direct git dependency absent from the lock, or a res
 from = "mixed:name+text"
 unknown = "refuse"
 unknown_note = "a transitive dependency is not pinned by the lock (row 14 gap: resolved by its ref)"
-routes = { check = "skipped:--locked not accepted", check_json = "skipped", check_effects = "skipped", run = "runs", build = "runs", test = "runs", bench = "skipped:no --locked flag", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "unknown", emit = "skipped" }
+routes = { check = "skipped: #4852 --locked not accepted", check_json = "skipped: #4852", check_effects = "skipped: #4852", run = "runs", build = "runs", test = "runs", bench = "skipped: #4852 no --locked flag", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "unknown", emit = "skipped: #4852" }
 tests = [
   "tests/dependency_trust_test.rs",
 ]
 control_note = "NONE"
-issues = []
+issues = [4852]
 status = "UNSTAMPED"
 reasons = [
   "c3:route-skipped",
@@ -2693,7 +2764,7 @@ tests = [
   "tests/dependency_trust_test.rs::a_source_changed_under_the_lock_is_refused_until_update",
 ]
 control_note = "NONE"
-issues = []
+issues = [4852]
 status = "UNSTAMPED"
 reasons = [
   "c1:name-keyed",
@@ -2799,6 +2870,10 @@ note = "resolve.rs:680-723, 726-801. bugs-final: source_entries uses file_type()
 
 [[site]]
 id = "deps.cache-only"
+novel = "tests/decision_novel_test.rs::novel_mcp_check_does_not_fetch_a_fresh_dependency"
+control_patch = "proofs/decision-controls/deps.cache-only.patch"
+control_test = "tests/decision_novel_test.rs::novel_mcp_check_does_not_fetch_a_fresh_dependency"
+probe = "tests/decision-probes/deps.cache-only"
 at = "src/project_fetch.rs::offline / resolve_cached_deps / populate_cache_dir (LSP didOpen, lsp_code_actions.rs:413, ide.rs:323, ALMIDE_DEPS_CACHE_ONLY on mcp children)"
 items = [
   "src/project_fetch.rs::offline",
@@ -2813,7 +2888,7 @@ decides = "tools that look at a project without building it never run git to fet
 from = "declaration"
 unknown = "refuse"
 unknown_note = "any entry not on disk is refused in offline mode; but an on-disk directory named by a path-shaped tag is accepted (deps.ref-into-cache-path)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "runs", mcp = "runs", emit = "n.a." }
+routes = { check = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", check_json = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", check_effects = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", run = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", build = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", test = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", bench = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", native = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", wasm = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", wasi = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", component = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')", lsp = "partial: no fetch, no almide.lock, no cache entry (observed 2026-11-19); the probe cannot tell that from not reading the dependency", mcp = "partial: refused inside the project (`not fetched yet`); from outside it the dependency is not read at all (the #4830 shape)", emit = "n.a.: builds and checks resolve dependencies online by design (the decision is the editor and MCP routes')" }
 tests = [
   "tests/lsp_test.rs::lsp_didopen_never_fetches_or_writes_lock",
   "tests/ide_cache_only_test.rs",
@@ -2845,7 +2920,7 @@ decides = "a fetched dependency that brings native/ files, [native-deps] crates,
 from = "mixed:declaration+name"
 unknown = "allow"
 unknown_note = "grant matched on the self-declared package name (#4834); the .almd scan skips dot-dirs, target/ and native/ that the resolver still loads (#4809); a new native-bringing attribute not in TEMPLATE_ATTRS, or a file the scan cannot parse, counts as nothing"
-routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:cwd gate + backstop", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs:dispatch gate (graph property)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs:children", emit = "skipped:emits Rust text, no cargo" }
+routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:cwd gate + backstop", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs:dispatch gate (graph property)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs:children", emit = "skipped: #4848 emits Rust text, no cargo" }
 tests = [
   "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
   "tests/native_grant_test.rs::a_transitive_ungranted_native_dependency_is_refused",
@@ -2853,7 +2928,7 @@ tests = [
   "tests/inline_rust_authority_test.rs",
 ]
 control_note = "row 15: refusal returning None fails 3 of 6 native_grant tests (exit 101); dropping template detection fails 1 inline_rust test"
-issues = [4809, 4834]
+issues = [4809, 4834, 4848]
 status = "UNSTAMPED"
 reasons = [
   "c1:name-keyed",
@@ -2873,12 +2948,12 @@ decides = "before a building command, ./almide.toml's dependencies are fetched (
 from = "declaration"
 unknown = "allow"
 unknown_note = "no ./almide.toml or one that does not parse -> returns (nothing judged); the entry's own project outside cwd is never seen"
-routes = { check = "skipped:check runs only the media half", check_json = "skipped", check_effects = "skipped", run = "runs:cwd only", build = "runs:cwd only (not --print-release-rustflags)", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs:children", emit = "skipped:no cargo" }
+routes = { check = "n.a.: check builds no native code; the grant gates the build", check_json = "n.a.: check builds no native code; the grant gates the build", check_effects = "n.a.: check builds no native code; the grant gates the build", run = "runs:cwd only", build = "runs:cwd only (not --print-release-rustflags)", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs:children", emit = "skipped: #4848 no cargo" }
 tests = [
   "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
 ]
 control_note = "row 15 (refusal -> None)"
-issues = [4830, 4829]
+issues = [4830, 4829, 4848]
 status = "UNSTAMPED"
 reasons = [
   "c3:route-skipped",
@@ -2955,14 +3030,14 @@ decides = "a dependency owning a @script_capable media type without a root [trus
 from = "mixed:declaration+text"
 unknown = "refuse"
 unknown_note = "a media type not declared script-capable by html needs no grant (by design); a dependency file the scan cannot parse contributes no @media_owns; check skips the gate on a fetch error"
-routes = { check = "runs:cwd only, skipped on fetch error", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped", mcp = "runs:children", emit = "skipped" }
+routes = { check = "runs:cwd only, skipped on fetch error", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs:children", emit = "skipped: #4848" }
 tests = [
   "tests/media_grant_test.rs::the_grant_removed_refuses_the_build_naming_the_line_to_add",
   "tests/media_grant_test.rs::two_granted_owners_of_one_type_are_refused",
   "tests/media_grant_test.rs::a_grant_for_a_type_the_package_does_not_declare_is_refused",
 ]
 control_note = "GCE 2026-10-29 (sec doc, ADR-0032 D7): grant check off -> media_grant_test 101; one-owner rule off -> 101; check-time E118 off -> diagnostic_harness_test 101"
-issues = [4830, 4809, 4834]
+issues = [4830, 4809, 4834, 4848]
 status = "UNSTAMPED"
 reasons = [
   "c3:route-skipped",
@@ -3090,7 +3165,7 @@ decides = "build --target wasm writes the core module only when the installed al
 from = "mixed:declaration+text"
 unknown = "allow"
 unknown_note = "no almide-verify beside the exe or on PATH => `let Some(verifier) = locate_verifier() else { return Ok(()) }` (verify.rs:188): the build ships unjudged; a component build drops the sinks (build_wasm.rs:101-102)"
-routes = { check = "n.a.: writes nothing", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836 (run.rs:738 compile_to_wasm_bytes, no gate)", build = "runs: core module only, verifier present only", test = "skipped:#4836 (test_wasm.rs:192 route_wasm_tests)", bench = "skipped:#4836 (bench.rs:120)", native = "n.a.: native certs are not judged (see witness.native-verified-fallback)", wasm = "runs: build only", wasi = "skipped: build --target wasi is the rustc route (build.rs:322), no bundle", component = "skipped:#4836 (build_wasm.rs:101 drops the sinks)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: writes nothing", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836 (run.rs:738 compile_to_wasm_bytes, no gate)", build = "runs: core module only, verifier present only", test = "skipped:#4836 (test_wasm.rs:192 route_wasm_tests)", bench = "skipped:#4836 (bench.rs:120)", native = "n.a.: native certs are not judged (see witness.native-verified-fallback)", wasm = "runs: build only", wasi = "skipped: #4836 build --target wasi is the rustc route (build.rs:322), no bundle", component = "skipped:#4836 (build_wasm.rs:101 drops the sinks)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "tests/verify_shim_test.rs::a_real_program_is_judged_by_the_real_verifier",
   "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign",
@@ -3115,7 +3190,7 @@ decides = "exit 3 (INCOMPLETE: every witness accepted, some function declared un
 from = "declaration"
 unknown = "allow"
 unknown_note = "a frame the witness subset gate declines (any shape not yet admitted, witness_gate.rs) becomes an `uncertified` line (witness_bundle.rs:107-109), the bundle is INCOMPLETE, `Some(0 | 3) => Ok(())` (verify.rs:217) writes the artifact"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build only", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build only", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::an_uncertified_function_makes_the_outcome_incomplete",
 ]
@@ -3143,7 +3218,7 @@ unknown_note = "predictable names in a possibly shared temp dir (verify.rs:192-1
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "runs: wasm, verifier present", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs: build", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = []
 control_note = "NONE"
-issues = []
+issues = [4853]
 status = "UNSTAMPED"
 reasons = [
   "c2:predictable-shared-temp-path",
@@ -3189,7 +3264,7 @@ decides = "a bundle is read only when every line is a known record of its declar
 from = "declaration"
 unknown = "refuse"
 unknown_note = "unknown magic, record, property, a short witness, an artifact record before v2, a share-out `s` before v3, rc-sig before v4, native-calls before v5 => BundleError (bundle.rs:246-302)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: native certs discarded", wasm = "runs: build / verify", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836 native certs discarded", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::what_version_one_does_not_define_is_refused",
   "crates/almide-verify/src/bundle.rs::tests::a_malformed_or_repeated_artifact_record_is_refused",
@@ -3215,7 +3290,7 @@ decides = "CERTIFIED iff ≥1 witness and all accepted and no uncertified line; 
 from = "declaration"
 unknown = "allow"
 unknown_note = "a defined function of the shipped module with neither a witness record nor an `uncertified` line is simply absent from the verdict: the verifier links no wasm decoder (Cargo.toml: no dependencies) and never enumerates the artifact's functions; completeness is the producer's claim"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped", wasm = "runs: build / verify", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::no_witness_is_not_an_accept",
 ]
@@ -3240,7 +3315,7 @@ decides = "each witness is accepted or rejected by the Rust transcription of its
 from = "declaration"
 unknown = "refuse"
 unknown_note = "an unknown property name is refused at parse (Property::from_name, bundle.rs:237); malformed witness bytes reject in each checker"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: proofs/native-wall.sh only", wasm = "runs: build / verify", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836 proofs/native-wall.sh only", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/tests/coq_examples.rs",
   "crates/almide-verify/tests/cli.rs::one_witness_speaks_the_extracted_checker_interface",
@@ -3265,7 +3340,7 @@ decides = "every native host-call id in a native-calls block names a function of
 from = "name"
 unknown = "allow"
 unknown_note = "the producer gives an id only to host ops whose module has a native host class (fs, unix: certificate_native_calls.rs:190-195, host_ops.rs:365); a process / http / net / env host call gets no id and is not judged. An unnamed symbol inside a class gets the out-of-range id (refused)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: native certs discarded (src/cli/mod.rs:456-457 `.map(|(rust, _)| rust)`)", build = "skipped: same", test = "skipped: test lane renders v0", bench = "skipped: v0", native = "skipped: proofs/native-wall.sh only", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4828 native certs discarded (src/cli/mod.rs:456-457 `.map(|(rust, _)| rust)`)", build = "skipped: #4828 same", test = "skipped: #4828 test lane renders v0", bench = "skipped: #4828 v0", native = "skipped: #4828 proofs/native-wall.sh only", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "tests/native_fs_host_calls_test.rs",
 ]
@@ -3290,7 +3365,7 @@ decides = "every located init / bounds / fields / rc event of the bundle is the 
 from = "mixed:reach+text"
 unknown = "allow"
 unknown_note = "bundle_witness returns Ok(\"\") for an absent property (lib.rs:224): a bundle with no init/bounds/fields record and an empty anchor line is judged vacuously; events anchored `-` are counted, not checked (lib.rs:42-44)"
-routes = { check = "skipped: CI only", check_json = "skipped", check_effects = "skipped", run = "skipped", build = "skipped: not linked into almide or almide-verify", test = "skipped", bench = "skipped", native = "n.a.", wasm = "skipped: proofs/structural-wall.sh + scripts/witness-reinject.sh anchors only", wasi = "skipped", component = "skipped", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "skipped: #4849 CI only", check_json = "skipped: #4849", check_effects = "skipped: #4849", run = "skipped: #4849", build = "skipped: #4849 not linked into almide or almide-verify", test = "skipped: #4849", bench = "skipped: #4849", native = "n.a.", wasm = "skipped: #4849 proofs/structural-wall.sh + scripts/witness-reinject.sh anchors only", wasi = "skipped: #4849", component = "skipped: #4849", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-anchor-check/tests/check.rs",
   "crates/almide-anchor-check/tests/rc.rs",
@@ -3298,7 +3373,7 @@ tests = [
   "crates/almide-anchor-check/tests/string_bytes.rs",
 ]
 control_note = "scripts/witness-reinject.sh anchors (dead guard / misplaced store / doubled cursor / operand bugs: witnesses accepted, bytes rejected by anchor-check)"
-issues = [4826]
+issues = [4826, 4849]
 status = "UNSTAMPED"
 reasons = [
   "c3:runs on no CLI route (fixtures in CI only)",
@@ -3317,12 +3392,12 @@ decides = "whether an instruction between a bounds check and its access may chan
 from = "text"
 unknown = "allow"
 unknown_note = "falls back to `format!(\"{op:?}\")` containing Atomic/Store or starting Table/Memory (tags.rs:25-26): a validated operator whose Debug name has none (stack-switching resume/suspend/switch, GC struct.set / array.set / array.fill) counts as read-only"
-routes = { check = "skipped", check_json = "skipped", check_effects = "skipped", run = "skipped", build = "skipped", test = "skipped", bench = "skipped", native = "n.a.", wasm = "skipped: CI fixtures only", wasi = "skipped", component = "skipped", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "skipped: #4849", check_json = "skipped: #4849", check_effects = "skipped: #4849", run = "skipped: #4849", build = "skipped: #4849", test = "skipped: #4849", bench = "skipped: #4849", native = "n.a.", wasm = "skipped: #4849 CI fixtures only", wasi = "skipped: #4849", component = "skipped: #4849", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-anchor-check/tests/check.rs",
 ]
 control_note = "NONE"
-issues = [4826]
+issues = [4826, 4849]
 status = "UNSTAMPED"
 reasons = [
   "c1:Debug-name substrings",
@@ -3343,12 +3418,12 @@ decides = "whether an instruction inside a site's window branches out of it, and
 from = "type"
 unknown = "allow"
 unknown_note = "`_ => None` (decode.rs:181): br_on_cast / br_on_cast_fail, legacy try/delegate, resume handler labels are treated as not branching; depth counts only Block/Loop/If/TryTable (decode.rs:59-61), so a legacy `try` mis-depths every later instruction"
-routes = { check = "skipped", check_json = "skipped", check_effects = "skipped", run = "skipped", build = "skipped", test = "skipped", bench = "skipped", native = "n.a.", wasm = "skipped: CI fixtures only", wasi = "skipped", component = "skipped", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "skipped: #4849", check_json = "skipped: #4849", check_effects = "skipped: #4849", run = "skipped: #4849", build = "skipped: #4849", test = "skipped: #4849", bench = "skipped: #4849", native = "n.a.", wasm = "skipped: #4849 CI fixtures only", wasi = "skipped: #4849", component = "skipped: #4849", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-anchor-check/tests/check.rs::a_store_behind_a_branch_is_refused",
 ]
 control_note = "NONE"
-issues = []
+issues = [4854, 4849]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open novel control operator",
@@ -3368,7 +3443,7 @@ decides = "which function bodies the structural recorder certifies; anything out
 from = "mixed:type+prefix"
 unknown = "allow"
 unknown_note = "host-splice leaves are declined by a name-prefix list (__http_framed_/__http_call_/__http_serve_/__proc_, witness_gate.rs:533-538); the same lower_host_leaf path also intercepts __net_*/__unix_*/__shm_*/__net_udp_*/__net_lookup_host (net_call.rs:120, http_call.rs:115) which the list does not name, so those frames are admitted; a new leaf family is admitted the same way"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-wasm/tests/witness_*.rs",
   "crates/almide-wasm/tests/golden/witness-declines.txt",
@@ -3395,7 +3470,7 @@ decides = "which call sites get a call-modes row the checker judges; an out-of-p
 from = "text"
 unknown = "allow"
 unknown_note = "`n.contains('.') || n.starts_with(\"__\")` (pipeline_witnesses.rs:125; certificate_c.rs:115-118; certificate_native_calls.rs:74-80) gives any such callee no row"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: native certs discarded", build = "skipped: same", test = "skipped", bench = "skipped", native = "skipped: proofs/native-wall.sh, verify --mir", wasm = "n.a.: the structural leg has its own call-modes", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4828 native certs discarded", build = "skipped: #4828 same", test = "skipped: #4828", bench = "skipped: #4828", native = "skipped: #4828 proofs/native-wall.sh, verify --mir", wasm = "n.a.: the structural leg has its own call-modes", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-mir/src/certificate_p2.rs::tests::call_modes_witness_matches_the_coq_parser_format",
 ]
@@ -3421,14 +3496,14 @@ decides = "a native program is shipped from the verified v1 render (MIR well-for
 from = "mixed:type+reach"
 unknown = "allow"
 unknown_note = "any shape outside the v1 subset, a verify_ownership violation (render_native.rs:226-242, 381), a MIR def-before-use / Return-terminal failure (lower/mod_c_tail.rs:549-557) all fall back to `rs_code()` (mod.rs:502) silently unless ALMIDE_VERBOSE / ALMIDE_VERIFIED_DEBUG; the certificates the v1 render returns are dropped (mod.rs:456-457)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (native_verified default on, dispatch.rs:48)", build = "runs (not --repr-c / cdylib, build.rs:331)", test = "skipped: test lane renders generate_tests (run.rs:56-57)", bench = "skipped: generate() (bench.rs)", native = "runs: run/build/install", wasm = "n.a.", wasi = "skipped: rustc wasi route", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: --target rust emits v0" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (native_verified default on, dispatch.rs:48)", build = "runs (not --repr-c / cdylib, build.rs:331)", test = "skipped: #4006 test lane renders generate_tests (run.rs:56-57)", bench = "skipped: #4006 generate() (bench.rs)", native = "runs: run/build/install", wasm = "n.a.", wasi = "skipped: #4006 rustc wasi route", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4006 --target rust emits v0" }
 tests = [
   "tests/native_walls_b13_test.rs",
   "tests/native_codegen_walls_pin_test.rs",
   "proofs/native-verified-floor.txt",
 ]
 control_note = "proofs/native-wall.sh (floor programs must render v1 and their witnesses accept); scripts/witness-reinject.sh native"
-issues = []
+issues = [4006]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open (wall => unverified codegen ships)",
@@ -3447,13 +3522,13 @@ decides = "the native IR ownership certifier (#2231) re-derives each use and abo
 from = "reach"
 unknown = "n.a."
 unknown_note = "ALMIDE_CERTIFY_OWNERSHIP unset => `fail` in a debug build, `off` in a release build (lib.rs:315-316): the shipped binary never runs it"
-routes = { check = "skipped: release", check_json = "skipped", check_effects = "skipped", run = "skipped: release", build = "skipped: release", test = "skipped: release", bench = "skipped: release", native = "skipped: release (debug builds only)", wasm = "n.a.: Target::Rust only", wasi = "skipped", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: release" }
+routes = { check = "skipped: #4006 release", check_json = "skipped: #4006", check_effects = "skipped: #4006", run = "skipped: #4006 release", build = "skipped: #4006 release", test = "skipped: #4006 release", bench = "skipped: #4006 release", native = "skipped: #4006 release (debug builds only)", wasm = "n.a.: Target::Rust only", wasi = "skipped: #4006", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4006 release" }
 tests = [
   "tests/ownership_certifier_test.rs::a_capture_cloned_at_its_last_use_is_a_c3_violation",
   "proofs/ownership-certifier-baseline.txt",
 ]
 control_note = "scripts/check-ownership-certifier-negative.sh (ci.yml:2100)"
-issues = []
+issues = [4006]
 status = "UNSTAMPED"
 reasons = [
   "c3:off in the release binary on every route",
@@ -3471,12 +3546,12 @@ decides = "the Lean-mirrored RC balance check (decs = incs + 1 per heap var), sk
 from = "mixed:type+prefix"
 unknown = "n.a."
 unknown_note = "no production caller: only is_heap_type is used outside tests (pass_tco_loop_rewrite.rs:372); the prefix skip is guarded by info.synthetic (perceus_verified.rs:186-192)"
-routes = { check = "skipped: no caller", check_json = "skipped", check_effects = "skipped", run = "skipped", build = "skipped", test = "skipped", bench = "skipped", native = "skipped", wasm = "skipped", wasi = "skipped", component = "skipped", lsp = "n.a.", mcp = "n.a.", emit = "skipped" }
+routes = { check = "skipped: #4849 no caller", check_json = "skipped: #4849", check_effects = "skipped: #4849", run = "skipped: #4849", build = "skipped: #4849", test = "skipped: #4849", bench = "skipped: #4849", native = "skipped: #4849", wasm = "skipped: #4849", wasi = "skipped: #4849", component = "skipped: #4849", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4849" }
 tests = [
   "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs",
 ]
 control_note = "proofs/mcdc-mutation.sh (MC/DC vectors on the function itself)"
-issues = []
+issues = [4849]
 status = "UNSTAMPED"
 reasons = [
   "c3:runs on no route",
@@ -3500,7 +3575,7 @@ tests = [
   "tests/leak_free_exits_test.rs",
 ]
 control_note = "crates/almide-wasm/tests/exit_validation.rs (test hook omits the first release => E083)"
-issues = []
+issues = [4854]
 status = "UNSTAMPED"
 reasons = [
   "c2:unrecorded exit unjudged",
@@ -3518,7 +3593,7 @@ decides = "each function's capability reach, read from the shipped bytes' almide
 from = "mixed:reach+prefix"
 unknown = "refuse"
 unknown_note = "an op no family assigns, or a non-constant op, is SENTINEL (cert_project.rs:115-117, 658) which no bound contains; but `__selfhost_*` fns get declared=None (emit_decls.rs:90, prefix) and are bounded only by their own reach"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-wasm/tests/witness_floor.rs",
   "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign",
@@ -3569,12 +3644,12 @@ decides = "a call to a stdlib fn the declared both-legs table marks unavailable 
 from = "name"
 unknown = "allow"
 unknown_note = "keyed by fn name from proofs/target-availability.toml (wasm_compile.rs:213-250); a fn not in the table passes here and is caught (or not) by the render wall E082; ALMIDE_NO_AVAIL_CHECK skips it (registered Gate switch)"
-routes = { check = "runs: --target wasm only (check.rs:249)", check_json = "skipped: no --target wasm path", check_effects = "n.a.", run = "runs: wasm, embedded leg", build = "runs: wasm, stock-p1 leg", test = "skipped: test lane walls to the native fallback", bench = "runs: wasm", native = "n.a.", wasm = "runs", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "skipped: MCP calls check --json", emit = "n.a." }
+routes = { check = "runs: --target wasm only (check.rs:249)", check_json = "skipped: #4857 no --target wasm path", check_effects = "n.a.", run = "runs: wasm, embedded leg", build = "runs: wasm, stock-p1 leg", test = "skipped: #4857 test lane walls to the native fallback", bench = "runs: wasm", native = "n.a.", wasm = "runs", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "skipped: #4857 MCP calls check --json", emit = "n.a." }
 tests = [
   "tests/wasm_availability_e081_test.rs",
 ]
 control_note = "scripts/check-target-availability.sh (four-directional table ⇄ measured walls)"
-issues = []
+issues = [4857]
 status = "UNSTAMPED"
 reasons = [
   "c1:name-keyed table",
@@ -3643,7 +3718,7 @@ decides = "a stdlib <module>.<func> call may lower as a bare CallFn contributing
 from = "mixed:name+prefix"
 unknown = "refuse"
 unknown_note = "a module not in PURE_MODULES is not pure, but inside the impure modules: http `__http_request_*`/`__http_response_*` prefixes and a name list (incl. `logger`/`recover`/`wrap`, which stdlib does not declare) are pure (purity.rs:408-447), `ffi` => true for every fn (399), zlib by declaration"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: native v1 lowering admission (certs discarded)", build = "runs: same", test = "skipped: v0", bench = "skipped: v0", native = "runs: v1 render; verify --mir; proofs/gate.sh", wasm = "n.a.: structural leg uses cert_project", wasi = "skipped", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: native v1 lowering admission (certs discarded)", build = "runs: same", test = "skipped: #4827 v0", bench = "skipped: #4827 v0", native = "runs: v1 render; verify --mir; proofs/gate.sh", wasm = "n.a.: structural leg uses cert_project", wasi = "skipped: #4827", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4827" }
 tests = [
   "crates/almide-mir/src/purity.rs::tests::effectful_and_impure_plain_modules_are_walled",
   "crates/almide-mir/tests/host_ops_contract.rs::stdlib_modules_partition_into_pure_and_capability",
@@ -3750,7 +3825,7 @@ tests = [
   "tests/stream_fusion_module_purity_test.rs::module_function_purity_does_not_leak_into_root_namespace",
 ]
 control_note = "NONE"
-issues = []
+issues = [4855]
 status = "UNSTAMPED"
 reasons = [
   "c1:name deny-list",
@@ -3771,7 +3846,7 @@ decides = "a @bounded / --profile critical fn may call first-order members of th
 from = "name"
 unknown = "refuse"
 unknown_note = "allowlist with E074 fallback (bounded.rs:946-970); a stdlib plain fn inside an admitted module that reaches a prim host op is admitted (#4827)"
-routes = { check = "runs: @bounded / --profile critical", check_json = "skipped:#4815", check_effects = "unknown", run = "runs", build = "runs", test = "unknown: critical skips test blocks", bench = "unknown", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped: check --json", emit = "unknown" }
+routes = { check = "runs: @bounded / --profile critical", check_json = "skipped:#4815", check_effects = "unknown", run = "runs", build = "runs", test = "unknown: critical skips test blocks", bench = "unknown", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped: #4815 check --json", emit = "unknown" }
 tests = [
   "crates/almide-frontend/src/check/bounded.rs::tests::bounded_tables_name_real_modules",
 ]
@@ -3896,6 +3971,10 @@ note = "PROBED (almide 0.70.0, verify-probe/): `println(\"${\"${...1...}\"}\")` 
 
 [[site]]
 id = "front.checker-budgets"
+novel = "tests/decision_novel_test.rs::novel_budget_shapes_with_fresh_names"
+control_patch = "proofs/decision-controls/front.checker-budgets.patch"
+control_test = "tests/decision_novel_test.rs::novel_budget_shapes_with_fresh_names"
+probe = "tests/decision-probes/front.checker-budgets"
 at = "crates/almide-base/src/budget.rs::BUDGETS (type_size E111, generic_instances E112, exhaustiveness_steps E113)"
 items = [
   "crates/almide-base/src/budget.rs::BUDGETS",
@@ -3915,7 +3994,7 @@ decides = "a counted blowup in type size, monomorphized instances or match exhau
 from = "type"
 unknown = "refuse"
 unknown_note = "counts every node / instance / step regardless of shape; the source cannot raise a budget (D3), --budget is CLI-only and refused under --profile critical; E112 reported by every link_ir caller (wasm_leg.rs:351, emit.rs:217, test_wasm.rs:536, compile_driver.rs:276)"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs: E111/E113; E112 n.a. (no monomorphization)", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/compile_budget_test.rs (doubling, generic_doubling, wide_match, bool_matrix)",
 ]

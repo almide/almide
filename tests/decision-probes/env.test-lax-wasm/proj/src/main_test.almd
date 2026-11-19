@@ -1,0 +1,6 @@
+// The probe of env.test-lax-wasm: an inherited ALMIDE_TEST_LAX_WASM under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

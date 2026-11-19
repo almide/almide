@@ -1,0 +1,6 @@
+// The probe of env.shuffle-passes: an inherited ALMIDE_SHUFFLE_PASSES under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

@@ -351,6 +351,13 @@ pub fn locked() -> bool {
     LOCK.get().is_some()
 }
 
+/// The names `--allow-switch` let through the lock, when the lock is on: what
+/// a child `almide` the tool spawns for itself must be started with, so the
+/// child decides as its parent does (`almide mcp`'s tool children).
+pub fn lock_allowances() -> Option<Vec<String>> {
+    LOCK.get().cloned()
+}
+
 /// Does a binary whose `--version` line is `version_line` lock the switches
 /// with no `--lock-switches` on the command line? Only the release workflow's
 /// build says `(release` there (#2384), and that build locks by default

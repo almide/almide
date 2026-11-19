@@ -1,0 +1,6 @@
+// The probe of effect.e006-isolation: a pure fn calls an effect fn (E006).
+effect fn shout() -> Unit = println("effect ran")
+
+fn quiet() -> Unit = shout()
+
+effect fn main() -> Unit = quiet()

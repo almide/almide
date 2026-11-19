@@ -1,0 +1,15 @@
+# Negative control of fsscope.beneath-walk (proofs/decision-sites.toml): a rooted read opens <root>/<rel> by path, following any symlink on the way.
+# control_test: tests/decision_novel_test.rs::novel_beneath_walk_through_a_fresh_symlink
+diff --git a/crates/almide-rt-core/src/fs_beneath_core.rs b/crates/almide-rt-core/src/fs_beneath_core.rs
+--- a/crates/almide-rt-core/src/fs_beneath_core.rs
++++ b/crates/almide-rt-core/src/fs_beneath_core.rs
+@@ -197,7 +197,8 @@
+     let Some((last, parents)) = segs.split_last() else {
+         return almide_sfs::read_bounded(dir).map_err(FsBeneathError::Io);
+     };
+-    fs_beneath_imp::read(dir, parents, last, walk_only, hook)
++    let _ = (parents, last, walk_only, hook);
++    std::fs::read(std::path::Path::new(dir).join(rel)).map_err(FsBeneathError::Io)
+ }
+ 
+ #[cfg(any(target_os = "linux", target_os = "macos", windows))]

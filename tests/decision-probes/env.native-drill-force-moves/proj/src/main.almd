@@ -1,0 +1,12 @@
+// The probe of env.native-drill-force-moves: an inherited drill switch under the lock, on a
+// program whose native render asks the liveness pass where each heap value dies.
+fn total(xs: List[Int]) -> Int = list.fold(xs, 0, (a, x) => a + x)
+
+fn twice(xs: List[Int]) -> List[Int] = xs + xs
+
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  let ys = twice(xs)
+  println(int.to_string(total(ys)))
+  println(int.to_string(list.len(xs)))
+}
