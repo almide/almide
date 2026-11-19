@@ -2,18 +2,22 @@
 //! an owner the root manifest trusts — github.com/almide by default — on
 //! `almide add` and on every fetch, direct, transitive or locked.
 //!
-//! No network: each "host" is a directory of bare repositories, and git's
-//! own `url.<base>.insteadOf` (passed through `GIT_CONFIG_*`, never written
-//! to any config file) maps `https://github.com/` onto it. The manifests and
-//! locks therefore name the real `https://github.com/<owner>/<repo>` URLs,
-//! which is what the trust check reads, while git clones from disk. `HOME`
-//! is a scratch directory, so the dependency cache is per test.
+//! No network: each "host" is a directory of bare repositories served by
+//! `support/git_host.rs`, which the almide child reaches through
+//! `HTTPS_PROXY` and `SSL_CERT_FILE` (ADR-0035: the fetch is an in-process
+//! https client). The manifests and locks therefore name the real
+//! `https://github.com/<owner>/<repo>` URLs, which is what the trust check
+//! reads. `HOME` is a scratch directory, so the dependency cache is per test.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 struct Hosts {
     root: PathBuf,
+    host: git_host::GitHost,
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -36,7 +40,8 @@ impl Hosts {
         let root = std::env::temp_dir().join(format!("almide-issue4093a-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("mkdir");
-        let h = Hosts { root };
+        let host = git_host::GitHost::start(&root);
+        let h = Hosts { root, host };
         h.repo("almide", "svg", "svg", "fn value() -> Int = 1\n", "");
         h.repo("evil", "svg", "svg", "fn value() -> Int = 666\n", "");
         h.repo("almide", "csv", "csv", "fn value() -> Int = 3\n", "");
@@ -64,6 +69,7 @@ impl Hosts {
         let bare = self.root.join("hosts").join(owner);
         std::fs::create_dir_all(&bare).unwrap();
         git(&bare, &["clone", "-q", "--bare", work.to_str().unwrap(), repo]);
+        self.host.serve(&format!("https://github.com/{owner}/{repo}"), &bare.join(repo));
     }
 
     /// A project directory `name` with `manifest` and a `main` printing `expr`.
@@ -82,18 +88,12 @@ impl Hosts {
     }
 
     fn almide(&self, dir: &Path, args: &[&str]) -> Output {
-        let base = format!("file://{}/", self.root.join("hosts").display());
-        Command::new(env!("CARGO_BIN_EXE_almide"))
-            .current_dir(dir)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.current_dir(dir)
             .env("HOME", self.root.join("home"))
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", format!("url.{base}.insteadOf"))
-            .env("GIT_CONFIG_VALUE_0", "https://github.com/")
-            .env("GIT_TERMINAL_PROMPT", "0")
             .env("ALMIDE_RUN_PROJECT_DIR", self.root.join(".run"))
-            .args(args)
-            .output()
-            .expect("spawn almide")
+            .args(args);
+        self.host.env(&mut cmd).output().expect("spawn almide")
     }
 }
 
@@ -137,7 +137,8 @@ fn an_untrusted_add_is_refused_with_the_source_and_writes_nothing() {
     }
     assert_eq!(read(dir.join("almide.toml")), before, "a refused add edited almide.toml");
     assert!(read(dir.join("almide.lock")).is_none(), "a refused add wrote a lock");
-    assert!(!h.root.join("home/.almide/cache/.sources/https/github.com/carol").exists(), "a refused add fetched");
+    assert!(!h.root.join("home/.almide/cache/trees").exists(), "a refused add fetched");
+    assert_eq!(h.host.requests(), 0, "a refused add reached the host");
 }
 
 #[test]
@@ -245,8 +246,9 @@ fn the_cache_is_keyed_by_source_so_a_same_named_package_cannot_answer() {
     let honest = h.project("second", "\n[dependencies]\nsvg = { git = \"https://github.com/almide/svg\", tag = \"v0.1.0\" }\n", &["svg"], "svg.value()");
     let o = h.almide(&honest, RUN);
     assert_eq!(stdout(&o), "1\n", "the evil/svg checkout answered for almide/svg:\n{}", stderr(&o));
-    let sources = h.root.join("home/.almide/cache/.sources/https/github.com");
-    assert!(sources.join("evil/svg/@").is_dir() && sources.join("almide/svg/@").is_dir());
+    // Two sources, two trees: the cache is keyed by content (ADR-0035 D4).
+    let trees = std::fs::read_dir(h.root.join("home/.almide/cache/trees")).unwrap().flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).count();
+    assert_eq!(trees, 2);
 }
 
 #[test]
@@ -296,7 +298,7 @@ fn dry_run_reports_the_verdict_and_writes_nothing() {
     let o = h.almide(&dir, &["add", "carol/solo", "--dry-run"]);
     assert_eq!(o.status.code(), Some(1), "an untrusted dry run must still say no");
     assert_eq!(read(dir.join("almide.toml")), before);
-    assert!(!h.root.join("home/.almide/cache/.sources").exists(), "a dry run fetched");
+    assert!(!h.root.join("home/.almide/cache/trees").exists(), "a dry run fetched");
 }
 
 #[test]
@@ -308,7 +310,8 @@ fn locked_refuses_what_the_lock_does_not_name() {
     assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
     assert!(stderr(&o).contains("error: --locked: not in almide.lock: `svg`"), "{}", stderr(&o));
     assert!(read(dir.join("almide.lock")).is_none(), "--locked wrote a lock");
-    assert!(!h.root.join("home/.almide/cache/.sources").exists(), "--locked fetched");
+    assert!(!h.root.join("home/.almide/cache/trees").exists(), "--locked fetched");
+    assert_eq!(h.host.requests(), 0, "--locked reached the host");
     // Locked once, it builds under --locked.
     assert!(h.almide(&dir, RUN).status.success());
     let o = h.almide(&dir, run_locked);
