@@ -6062,11 +6062,6 @@ fn max(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_float_clamp")
 fn clamp(x: Float, lo: Float, hi: Float) -> Float = _
 
-/// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
-@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
-@intrinsic("almide_rt_float_sign")
-fn sign(n: Float) -> Float = _
-
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 fn signum(x: Float) -> Float = if float.is_nan(x) then x
 else if float.to_bits(x) < 0 then -1.0 else 1.0
@@ -6690,14 +6685,6 @@ fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
 }
 
 fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)
-
-
-
-
-fn float_sign(n: Float) -> Float = {
-  let nan = prim.fne(n, n)
-  if nan then n else prim.fcopysign(1.0, n)
-}
 
 
 
@@ -11827,11 +11814,6 @@ fn count_leading_zeros(x: Int) -> Int = _
 fn count_trailing_zeros(x: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
-@deprecated(since=15, use="int.count_ones")
-@intrinsic("almide_rt_int_pop_count")
-fn pop_count(n: Int) -> Int = _
-
-/// Number of set bits; 64 for -1.
 @intrinsic("almide_rt_int_pop_count")
 fn count_ones(x: Int) -> Int = _
 
@@ -11842,11 +11824,6 @@ fn bit_reverse(x: Int) -> Int = _
 /// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
 fn byte_swap(x: Int) -> Int = _
-
-/// Bits needed to hold n; 0 for 0, 64 if negative.
-@deprecated(since=15, use="int.bit_length")
-@intrinsic("almide_rt_int_bit_width")
-fn bit_width(n: Int) -> Int = _
 
 /// Bits needed to hold x; 0 for 0, 64 if negative.
 @intrinsic("almide_rt_int_bit_width")
@@ -32271,10 +32248,6 @@ fn is_match(re: Regex, s: String) -> Bool = regex.__is_match(re.pattern, s)
 
 /// re matches the whole of s.
 fn is_full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
-
-/// re matches the whole of s (renamed regex.is_full_match).
-@deprecated(since=15, use="regex.is_full_match")
-fn full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
 
 /// Leftmost match of re in s, or none.
 fn find(re: Regex, s: String) -> String? = regex.__find(re.pattern, s)

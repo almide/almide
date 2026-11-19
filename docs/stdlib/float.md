@@ -199,7 +199,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (27 functions)
+## Signature index (26 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
@@ -245,10 +245,6 @@ float.max(a: Float, b: Float) -> Float
 // x limited to lo..hi; lo > hi or a NaN bound aborts.
 // @since 0.5.0 or earlier
 float.clamp(x: Float, lo: Float, hi: Float) -> Float
-
-// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
-// @since 0.5.13 or earlier
-float.sign(n: Float) -> Float   (deprecated — use float.signum)
 
 // 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 // @since unreleased

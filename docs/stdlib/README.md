@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 51 stdlib modules, 1324 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1320 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -19,7 +19,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [ffi](#ffi) | 8 | 0 |
-| [float](#float) | 27 | 0 |
+| [float](#float) | 26 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
 | [fs](#fs) | 37 | 1 |
@@ -28,7 +28,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 8 | 0 |
 | [http](#http) | 36 | 4 |
-| [int](#int) | 47 | 0 |
+| [int](#int) | 45 | 0 |
 | [int16](#int16) | 37 | 0 |
 | [int32](#int32) | 37 | 0 |
 | [int64](#int64) | 37 | 0 |
@@ -44,7 +44,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [path](#path) | 11 | 0 |
 | [process](#process) | 13 | 2 |
 | [random](#random) | 10 | 0 |
-| [regex](#regex) | 16 | 1 |
+| [regex](#regex) | 15 | 1 |
 | [result](#result) | 15 | 0 |
 | [secret](#secret) | 2 | 0 |
 | [set](#set) | 42 | 0 |
@@ -451,7 +451,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.min(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
 - `float.max(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
 - `float.clamp(x: Float, lo: Float, hi: Float) -> Float` — x limited to lo..hi; lo > hi or a NaN bound aborts.
-- `float.sign(n: Float) -> Float   (deprecated — use float.signum)` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
 - `float.signum(x: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 - `float.is_nan(x: Float) -> Bool` — True only for NaN (unequal to itself).
 - `float.is_infinite(x: Float) -> Bool` — True for inf and -inf; false for NaN.
@@ -688,11 +687,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.bshr(a: Int, n: Int) -> Int` — Arithmetic (sign-filling) right shift; n mod 64.
 - `int.count_leading_zeros(x: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
 - `int.count_trailing_zeros(x: Int) -> Int` — Trailing zero bits; 64 for 0.
-- `int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)` — Number of set bits; 64 for -1.
 - `int.count_ones(x: Int) -> Int` — Number of set bits; 64 for -1.
 - `int.bit_reverse(x: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
 - `int.byte_swap(x: Int) -> Int` — The 8 bytes in reverse order (endian flip).
-- `int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)` — Bits needed to hold n; 0 for 0, 64 if negative.
 - `int.bit_length(x: Int) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
 - `int.log2_floor(x: Int) -> Int` — Floor of log2(x); -1 when x <= 0.
 - `int.log2_ceil(x: Int) -> Int` — Ceiling of log2(x); 0 when x <= 1.
@@ -1194,7 +1191,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `regex.compile(pattern: String) -> Result[Regex, String]` — The Regex for `pattern`, or err(reason) when it is refused.
 - `regex.is_match(re: Regex, s: String) -> Bool` — re matches somewhere in s.
 - `regex.is_full_match(re: Regex, s: String) -> Bool` — re matches the whole of s.
-- `regex.full_match(re: Regex, s: String) -> Bool   (deprecated — use regex.is_full_match)` — re matches the whole of s (renamed regex.is_full_match).
 - `regex.find(re: Regex, s: String) -> Option[String]` — Leftmost match of re in s, or none.
 - `regex.find_all(re: Regex, s: String) -> List[String]` — All non-overlapping matches, in order.
 - `regex.index_of(re: Regex, s: String) -> Option[Int]` — Code-point index where the leftmost match starts, or none.

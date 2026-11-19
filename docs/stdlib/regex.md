@@ -244,7 +244,7 @@ is not a whole quantifier, a quantifier with nothing to repeat, and more than
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (16 functions)
+## Signature index (15 functions)
 
 ```
 // The Regex for `pattern`; aborts with `Error: invalid regex: <reason>` when it is refused.
@@ -262,10 +262,6 @@ regex.is_match(re: Regex, s: String) -> Bool
 // re matches the whole of s.
 // @since unreleased
 regex.is_full_match(re: Regex, s: String) -> Bool
-
-// re matches the whole of s (renamed regex.is_full_match).
-// @since 0.6.0 or earlier
-regex.full_match(re: Regex, s: String) -> Bool   (deprecated — use regex.is_full_match)
 
 // Leftmost match of re in s, or none.
 // @since 0.5.0 or earlier
