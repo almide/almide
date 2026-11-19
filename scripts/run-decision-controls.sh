@@ -24,9 +24,10 @@ if [ ${#ids[@]} = 0 ]; then
   for p in proofs/decision-controls/*.patch; do ids+=("$(basename "$p" .patch)"); done
 fi
 
-run_test() { # tests/<file>.rs::<fn>
-  local file="${1%%::*}" fn="${1##*::}"
-  cargo test --release -q --test "$(basename "$file" .rs)" -- --exact "$fn" >/dev/null 2>&1
+run_test() { # [crates/<crate>/]tests/<file>.rs::<fn>
+  local file="${1%%::*}" fn="${1##*::}" pkg=()
+  case "$file" in crates/*/tests/*) pkg=(-p "$(echo "$file" | cut -d/ -f2)");; esac
+  cargo test --release -q "${pkg[@]}" --test "$(basename "$file" .rs)" -- --exact "$fn" >/dev/null 2>&1
 }
 
 fail=0
