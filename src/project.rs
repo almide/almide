@@ -1010,6 +1010,7 @@ pub fn read_governing_manifest(path: &Path) -> Result<Project, String> {
 pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
+    refuse_unknown_security_keys(path, content, &manifest)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.permission_list(path, content, "fs")?;
     manifest.trust_owners(path, content)?;
@@ -1110,6 +1111,55 @@ fn unknown_key_warnings(
             manifest_warning(path, lines, at, message, hint)
         })
         .collect()
+}
+
+/// The tables that restrict the program, with the keys each reads.
+const SECURITY_TABLES: &[(&str, &[&str])] = &[("permissions", PERMISSION_KEYS), ("trust", TRUST_KEYS)];
+
+/// #4851: in a table that restricts the program, a key no reader reads is
+/// refused, never a warning: `alow = []` in `[permissions]`, or a
+/// `[permission]` table, left the bound unset and granted every capability.
+/// An unknown top-level table one edit from a security table is its
+/// misspelling and refused the same way. Other unknown keys stay warnings
+/// ([`manifest_warnings`], #3382).
+fn refuse_unknown_security_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
+    for (k, _) in manifest.spans.iter() {
+        let name = k.get_ref().as_ref();
+        if TOP_LEVEL_KEYS.contains(&name) {
+            continue;
+        }
+        if let Some((table, _)) = SECURITY_TABLES.iter().find(|(t, _)| within_one_edit(&name.to_ascii_lowercase(), t)) {
+            return Err(located(
+                path,
+                content,
+                k.span().start,
+                &format!(
+                    "unknown table `{}` is refused — it is one edit from [{table}], which restricts the program, and a misspelled bound would grant everything\n  hint: write it as [{table}]",
+                    shown(name)
+                ),
+            ));
+        }
+    }
+    for (table, keys) in SECURITY_TABLES {
+        let Some(t) = spanned_entry(&manifest.spans, table).and_then(|t| t.get_ref().as_table()) else { continue };
+        let mut unknown: Vec<(usize, String)> =
+            t.iter().filter(|(k, _)| !keys.contains(&k.get_ref().as_ref())).map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect();
+        unknown.sort();
+        if let Some((at, key)) = unknown.into_iter().next() {
+            let list = keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+            let hint = match keys.iter().find(|k| within_one_edit(&key, k)) {
+                Some(k) => format!("did you mean `{k}`? [{table}] reads only {list}"),
+                None => format!("[{table}] reads only {list}; delete it or write one of them"),
+            };
+            return Err(located(
+                path,
+                content,
+                at,
+                &format!("unknown key `{}` in [{table}] is refused — a key the table does not read would leave its bound unset\n  hint: {hint}", shown(&key)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The warnings for keys `almide.toml` writes that no reader reads (#3382):
