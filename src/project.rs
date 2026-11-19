@@ -51,9 +51,45 @@ pub struct MediaGrant {
     pub line: usize,
 }
 
+/// Where a package comes from (#4834): the typed git source and the
+/// directory in it, or the canonical local directory of a `path`
+/// dependency. Two packages with one declared name but different origins
+/// are two packages, never one selected over the other.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PackageOrigin {
+    Git { source: crate::git_source::GitSource, subdir: Option<String> },
+    Path(PathBuf),
+}
+
+impl PackageOrigin {
+    /// The origin a dependency entry names.
+    pub fn of(dep: &Dependency) -> PackageOrigin {
+        match (&dep.path, &dep.git) {
+            (Some(p), _) => PackageOrigin::Path(std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p))),
+            (None, Some(g)) => PackageOrigin::Git { source: g.clone(), subdir: dep.subdir.clone() },
+            (None, None) => PackageOrigin::Path(PathBuf::new()),
+        }
+    }
+}
+
+impl std::fmt::Display for PackageOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackageOrigin::Git { source, subdir: None } => write!(f, "{source}"),
+            PackageOrigin::Git { source, subdir: Some(s) } => write!(f, "{source} subdir {s}"),
+            PackageOrigin::Path(p) => write!(f, "path {}", p.display()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
+    /// Where the selected package comes from (#4834).
+    pub origin: PackageOrigin,
+    /// The chain of dependency names from the root that first required it,
+    /// for the refusal two origins of one name get.
+    pub required_by: String,
     /// The git source it was fetched from; `None` for a path dependency.
     /// Read by the media grant, which names a package by its source
     /// (ADR-0032 Q17).

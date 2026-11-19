@@ -1061,10 +1061,29 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
             source_dir: source_dir.clone(),
         });
     }
+    // #4834: a package is its origin, not the name it declares for itself.
+    // Two origins that declare one name (at any major) would be one import
+    // name for two packages: MVS would put one in the other's place, and a
+    // grant by that name would follow the swap. Refused, naming both.
+    let origin = crate::project::PackageOrigin::of(dep);
+    let required_by = shown.join(" → ");
+    if let Some(other) = fetched.iter().find(|f| f.pkg_id.name == actual_pkg_id.name && f.origin != origin) {
+        return Err(format!(
+            "error: two sources declare the package `{name}`\n  \
+             {} (required by {})\n  \
+             {origin} (required by {required_by})\n  \
+             note: `import {name}` can name only one of them; almide never picks one over the other\n  \
+             hint: depend on `{name}` from one source; if both are needed, one of them must be published under another package name",
+            other.origin,
+            other.required_by,
+            name = actual_pkg_id.name,
+        ));
+    }
     match fetched.iter_mut().find(|f| f.pkg_id == actual_pkg_id) {
         Some(existing) => {
-            // MVS: a later, higher request replaces the selection in place —
-            // position (and therefore lock-file alignment) is preserved.
+            // MVS within one origin: a later, higher request replaces the
+            // selection in place — position (and therefore lock-file
+            // alignment) is preserved.
             if semver_of(&version_str) > semver_of(&existing.version) {
                 existing.version = version_str;
                 existing.source_dir = source_dir;
@@ -1074,6 +1093,8 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
         }
         None => fetched.push(FetchedDep {
             pkg_id: actual_pkg_id,
+            origin,
+            required_by,
             source: dep.git.clone(),
             version: version_str,
             source_dir,

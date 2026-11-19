@@ -184,6 +184,19 @@ fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)
 }
 
 /// Every fetched dependency of `proj` with the native code it brings.
+/// Does the root's `[permissions] native` grant `fd`? The grant names a
+/// package; when the root manifest itself depends on a package of that name,
+/// the grant is for THAT origin only, so a same-named package from another
+/// source is not covered by it (#4834).
+fn is_granted(proj: &Project, fd: &FetchedDep) -> bool {
+    proj.native_grants.iter().any(|g| *g == fd.pkg_id.name)
+        && proj
+            .dependencies
+            .iter()
+            .filter(|d| d.name == fd.pkg_id.name)
+            .all(|d| crate::project::PackageOrigin::of(d) == fd.origin)
+}
+
 pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
     fetched
         .iter()
@@ -195,9 +208,9 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
                 .map(|p| p.package.version)
                 .unwrap_or_else(|_| fd.version.clone()),
             package_dir: fd.package_dir.clone(),
-            direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name),
+            direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
             code: native_code_of(&fd.package_dir, &fd.source_dir),
-            granted: proj.native_grants.iter().any(|g| *g == fd.pkg_id.name),
+            granted: is_granted(proj, fd),
         })
         .collect()
 }

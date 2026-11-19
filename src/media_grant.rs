@@ -73,7 +73,7 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepMedia> {
                 name: fd.pkg_id.name.clone(),
                 granted: proj.media_grants.iter().filter(|g| g.key == key).flat_map(|g| g.media.clone()).collect(),
                 key,
-                direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name),
+                direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
                 owns: owns_under(&fd.source_dir),
             }
         })
