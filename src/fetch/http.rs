@@ -86,7 +86,8 @@ fn proxy_for(host: &str) -> Option<String> {
             return None;
         }
     }
-    let rest = proxy.trim().strip_prefix("http://").unwrap_or(proxy.trim());
+    // `http://host:port` is the form; a bare `host:port` is accepted too.
+    let rest = proxy.trim().split_once("://").map_or(proxy.trim(), |(_, r)| r);
     let rest = rest.trim_end_matches('/');
     let hostport = rest.rsplit_once('@').map_or(rest, |(_, h)| h);
     Some(if hostport.contains(':') { hostport.to_string() } else { format!("{hostport}:80") })

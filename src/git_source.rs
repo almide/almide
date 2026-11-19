@@ -276,13 +276,18 @@ impl GitSource {
             Some((u, h)) => (Some(u), h),
             None => (None, authority),
         };
-        let mut canonical_fix: Option<&'static str> = None;
+        // A spelling refused although it has a canonical form to suggest.
+        enum Fixable {
+            HttpsUser,
+            TrailingSlash,
+        }
+        let mut canonical_fix: Option<Fixable> = None;
         let user = match userinfo {
             Some(u) if u.contains(':') => {
                 return Err(refuse("it holds a password or token in its user part; credentials never go in a source".to_string()))
             }
             Some(_) if transport == Transport::Https => {
-                canonical_fix = Some("https userinfo");
+                canonical_fix = Some(Fixable::HttpsUser);
                 None
             }
             Some(u) => Some(Segment::parse(u).map_err(|e| refuse(e.replace("path segment", "user")))?),
@@ -315,7 +320,7 @@ impl GitSource {
         let path_text = path.strip_prefix('/').filter(|_| scp).unwrap_or(path);
         let mut pieces: Vec<&str> = path_text.split('/').collect();
         if pieces.len() > 1 && pieces.last() == Some(&"") && !pieces[..pieces.len() - 1].contains(&"") {
-            canonical_fix = canonical_fix.or(Some("trailing slash"));
+            canonical_fix = canonical_fix.or(Some(Fixable::TrailingSlash));
             pieces.pop();
         }
         let mut dot_git = false;
@@ -339,19 +344,12 @@ impl GitSource {
             return Err(refuse("it names no repository path".to_string()));
         }
         let source = GitSource { transport, user, host, port, path: segments, dot_git };
-        match canonical_fix {
-            Some("https userinfo") => Err(SourceError {
-                written: written.to_string(),
-                why: "it has a user part; an https source carries no user or credentials".to_string(),
-                canonical: Some(source.to_string()),
-            }),
-            Some(_) => Err(SourceError {
-                written: written.to_string(),
-                why: "it ends with `/`".to_string(),
-                canonical: Some(source.to_string()),
-            }),
-            None => Ok(source),
-        }
+        let why = match canonical_fix {
+            None => return Ok(source),
+            Some(Fixable::HttpsUser) => "it has a user part; an https source carries no user or credentials",
+            Some(Fixable::TrailingSlash) => "it ends with `/`",
+        };
+        Err(SourceError { written: written.to_string(), why: why.to_string(), canonical: Some(source.to_string()) })
     }
 
     /// The https URL of the repository (identity spelling, or with `.git`).
