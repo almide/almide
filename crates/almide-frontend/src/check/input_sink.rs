@@ -123,14 +123,23 @@ impl Checker {
                     caller: caller.map(|c| c.to_string()).unwrap_or_else(|| "the caller".to_string()),
                 })
             }
-            Ty::Named(name, _) => {
+            Ty::Named(name, args) => {
                 if let Some(proto) = self.sent_out_as(*name) {
                     return Some(NotInput::SentOut { ty: name.to_string(), proto });
                 }
                 let mut seen = std::collections::HashSet::new();
                 self.nested_sent_out(*name, &mut seen)
+                    .or_else(|| args.iter().find_map(|a| self.not_an_input_type(a, caller)))
             }
             Ty::Variant { name, .. } => self.not_an_input_type(&Ty::Named(*name, Default::default()), caller),
+            // #4861: a container of the decoded type is judged by what it
+            // holds (`List[User]`, `Option[User]`, a tuple, a record field).
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+                args.iter().find_map(|a| self.not_an_input_type(a, caller))
+            }
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().find_map(|(_, t)| self.not_an_input_type(t, caller))
+            }
             _ => None,
         }
     }
