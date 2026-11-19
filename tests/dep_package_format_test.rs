@@ -226,3 +226,28 @@ fn the_lock_sum_is_enforced_and_locked_needs_one() {
     assert!(o.status.success(), "{}", text(&o));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The fetch speaks git protocol v2 and falls back to v0 for a server that
+/// does not: both give the same commit and the same tree sum.
+#[test]
+fn a_protocol_v0_server_gives_the_same_tree() {
+    let root = scratch("v0");
+    let v2 = GitHost::start(&root);
+    let v0 = GitHost::start(&root);
+    v0.speak_v0_only();
+    let url = served_with(&v2, &root, "proto", |d: &Path| std::fs::write(d.join("src/extra.almd"), "fn e() -> Int = 2\n").unwrap());
+    v0.serve(&url, &root.join("repos/proto"));
+    let mut locks = Vec::new();
+    for (k, host) in [&v2, &v0].into_iter().enumerate() {
+        let dir = root.join(format!("app{k}"));
+        app(&dir, &url);
+        let home = root.join(format!("h{k}"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.current_dir(&dir).env("HOME", &home).args(["run", "src/main.almd", "--target", "wasm"]);
+        let o = host.env(&mut cmd).output().unwrap();
+        assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "ok", "protocol {}: {}", if k == 0 { 2 } else { 0 }, text(&o));
+        locks.push(std::fs::read_to_string(dir.join("almide.lock")).unwrap());
+    }
+    assert_eq!(locks[0], locks[1], "v0 and v2 resolved different content");
+    let _ = std::fs::remove_dir_all(&root);
+}

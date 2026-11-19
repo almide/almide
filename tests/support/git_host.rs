@@ -34,6 +34,8 @@ struct Shared {
     repos: Mutex<HashMap<String, PathBuf>>,
     /// Requests served (any URL), for "fetched nothing" assertions.
     requests: AtomicUsize,
+    /// Answer as a server that only speaks protocol v0.
+    v0_only: std::sync::atomic::AtomicBool,
     ca_params: rcgen::CertificateParams,
     ca_key: rcgen::KeyPair,
     leaves: Mutex<HashMap<String, Arc<rustls::ServerConfig>>>,
@@ -92,6 +94,7 @@ impl GitHost {
         let shared = Arc::new(Shared {
             repos: Mutex::new(HashMap::new()),
             requests: AtomicUsize::new(0),
+            v0_only: std::sync::atomic::AtomicBool::new(false),
             ca_params,
             ca_key,
             leaves: Mutex::new(HashMap::new()),
@@ -131,6 +134,11 @@ impl GitHost {
     /// Stop serving `url`: it answers 404 from now on.
     pub fn unserve(&self, url: &str) {
         self.shared.repos.lock().unwrap().remove(&key_of(url));
+    }
+
+    /// From now on, ignore `Git-Protocol: version=2` (an older server).
+    pub fn speak_v0_only(&self) {
+        self.shared.v0_only.store(true, Ordering::SeqCst);
     }
 
     /// Requests answered so far.
@@ -244,7 +252,7 @@ fn serve(s: Arc<Shared>, mut tcp: TcpStream) {
         }
         None => Vec::new(),
     };
-    let v2 = header("git-protocol").is_some_and(|p| p.contains("version=2"));
+    let v2 = header("git-protocol").is_some_and(|p| p.contains("version=2")) && !s.v0_only.load(Ordering::SeqCst);
     let (repo_path, advert) = if let Some(p) = path.strip_suffix("/info/refs?service=git-upload-pack") {
         (p, true)
     } else if let Some(p) = path.strip_suffix("/git-upload-pack") {
