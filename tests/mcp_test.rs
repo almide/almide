@@ -11,6 +11,9 @@
 //! gate. Its wiring (argv, parsing, counting) is covered by the unit tests in
 //! `src/cli/mcp_tools.rs`.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::io::Write;
 use std::process::{Command, Stdio};
 use serde_json::{json, Value};
@@ -35,6 +38,7 @@ fn mcp_session_in(dir: &std::path::Path, requests: &[Value]) -> Vec<Value> {
 
 fn mcp_session_with(dir: Option<&std::path::Path>, home: Option<&std::path::Path>, requests: &[Value]) -> Vec<Value> {
     let mut cmd = Command::new(almide());
+    git_host::shared().env(&mut cmd);
     if let Some(d) = dir {
         cmd.current_dir(d);
     }
@@ -392,8 +396,8 @@ fn check_never_fetches_or_writes_the_lock() {
     std::fs::write(
         app.join("almide.toml"),
         format!(
-            "[package]\nname = \"mcp_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
-            repo.display()
+            "[package]\nname = \"mcp_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"{}\", tag = \"v0.1.0\" }}\n",
+            git_host::shared().url_of(&repo)
         ),
     )
     .unwrap();
@@ -410,12 +414,9 @@ fn check_never_fetches_or_writes_the_lock() {
     assert!(!cloned(), "almide_check cloned into the dependency cache: {}", text);
     assert!(text.contains("not fetched yet"), "an uncached dependency must be reported, not fetched: {}", text);
 
-    let control = Command::new(almide())
-        .args(["check", "main.almd"])
-        .current_dir(&app)
-        .env("HOME", &home)
-        .output()
-        .expect("run almide check");
+    let mut cmd = Command::new(almide());
+    cmd.args(["check", "main.almd"]).current_dir(&app).env("HOME", &home);
+    let control = git_host::shared().env(&mut cmd).output().expect("run almide check");
     assert!(
         app.join("almide.lock").exists() && cloned(),
         "control: a plain `almide check` must fetch and lock (stderr: {})",

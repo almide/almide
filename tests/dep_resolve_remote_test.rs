@@ -10,9 +10,12 @@
 //! - #4529: concurrent `almide` processes fetching one dependency into one
 //!   cache all succeed, and one of them clones.
 //!
-//! No network: every remote is a local repository reached through
-//! `file://`, and `HOME` is a scratch directory, so the dependency cache is
-//! per test.
+//! No network: every remote is a local repository served by
+//! `support/git_host.rs`, and `HOME` is a scratch directory, so the
+//! dependency cache is per test.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -57,7 +60,7 @@ impl Fixture {
 
     /// A repository `remotes/<pkg>` holding package `pkg` on `main`, with
     /// `extra` appended to its manifest; tagged with each of `tags`.
-    /// Answers its `file://` url.
+    /// Answers the url it is served at.
     fn repo(&self, pkg: &str, extra: &str, tags: &[&str]) -> String {
         let work = self.root.join("remotes").join(pkg);
         write(work.join("almide.toml"), &format!("[package]\nname = \"{pkg}\"\nversion = \"0.1.0\"\n{extra}"));
@@ -68,7 +71,7 @@ impl Fixture {
         for t in tags {
             git(&work, &["tag", t]);
         }
-        format!("file://{}", work.display())
+        git_host::shared().url_of(&work)
     }
 
     /// A new commit on `pkg`'s `main`; answers it.
@@ -101,6 +104,7 @@ impl Fixture {
             .env_remove("ALMIDE_DEPS_CACHE_ONLY")
             .env("ALMIDE_RUN_PROJECT_DIR", self.root.join(".run"))
             .args(args);
+        git_host::shared().env(&mut cmd);
         cmd
     }
 
@@ -118,7 +122,7 @@ fn locked_commit(proj: &Path, name: &str) -> Option<String> {
         .expect("parse lock")
         .into_iter()
         .find(|l| l.name == name)
-        .map(|l| l.commit)
+        .map(|l| l.commit.to_string())
 }
 
 /// #4527: delete almide.lock after the branch moved, and the next resolve

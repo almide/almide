@@ -353,32 +353,45 @@ fn dispatch_add(cmd: AddCmd) {
         project::normalize_subdir(s).unwrap_or_else(|why| fail(&format!("invalid --subdir `{s}`: {why}")))
     });
     let retry = add_command_line(&cmd);
-    let (name, git_url, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
-    let owner = crate::trust::source_owner(&git_url).unwrap_or_else(|e| fail(&format!("error: {e}")));
-    let granted = match (&cmd.trust, &owner) {
-        (Some(t), Some(o)) if crate::trust::owner_arg(t) == *o => true,
-        (Some(t), Some(o)) => fail(&format!(
-            "error: --trust {t} does not match the owner of {git_url} ({o})\n  \
-             hint: --trust must name the owner the source belongs to; check that this is the repository the user asked for"
-        )),
-        (Some(t), None) => fail(&format!("error: --trust {t}: {git_url} is on the local filesystem, which needs no trust")),
-        (None, _) => false,
+    let (name, git_text, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
+    // ADR-0035 D1: the source is read once, here; everything below uses the
+    // typed value, and the manifest gets its canonical form.
+    let git_url = crate::git_source::GitSource::parse(&git_text).unwrap_or_else(|e| fail(&format!("error: {e}")));
+    let owner = git_url.owner();
+    let granted = match &cmd.trust {
+        Some(t) => match crate::trust::owner_arg(t) {
+            Ok(p) if p.covers(&git_url) => Some(p),
+            Ok(_) => fail(&format!(
+                "error: --trust {t} does not match the owner of {git_url} ({owner})\n  \
+                 hint: --trust must name the owner the source belongs to; check that this is the repository the user asked for"
+            )),
+            Err(e) => fail(&format!("error: --trust {t}: {e}")),
+        },
+        None => None,
     };
-    let verdict = match &owner {
-        None => "a local source (no trust needed)".to_string(),
-        Some(o) if o == crate::trust::DEFAULT_TRUSTED_OWNER => format!("owner {o}, trusted by default"),
-        Some(o) if crate::trust::is_trusted(&proj.trust_owners, o) => format!("owner {o}, trusted by [trust] owners"),
-        Some(o) if granted => format!("owner {o}, trusted by --trust"),
-        Some(o) => format!("owner {o}, NOT trusted"),
+    let by_default = crate::trust::is_trusted(&[], &git_url);
+    let by_manifest = crate::trust::is_trusted(&proj.trust_owners, &git_url);
+    let verdict = if by_default {
+        format!("owner {owner}, trusted by default")
+    } else if by_manifest {
+        format!("owner {owner}, trusted by [trust] owners")
+    } else if granted.is_some() {
+        format!("owner {owner}, trusted by --trust")
+    } else {
+        format!("owner {owner}, NOT trusted")
     };
     err(&format!("Resolved {name} → {git_url} ({verdict})"));
-    if let Some(o) = owner.as_deref().filter(|o| !granted && !crate::trust::is_trusted(&proj.trust_owners, o)) {
-        fail(&crate::trust::add_refusal(&name, &git_url, o, &retry));
+    if granted.is_none() && !by_manifest {
+        fail(&crate::trust::add_refusal(&name, &git_url, &retry));
     }
+    // #4838: the tag is a ref name, read before anything is fetched.
+    let tag_ref = tag.as_deref().map(crate::git_source::GitRef::parse).transpose().unwrap_or_else(|why| {
+        fail(&format!("error: --tag `{}` is not a ref name: {why}", tag.as_deref().unwrap_or("").escape_debug()))
+    });
     let dep = project::Dependency {
         name: name.clone(),
-        git: git_url.clone(),
-        tag: tag.clone(),
+        git: Some(git_url.clone()),
+        tag: tag_ref,
         branch: None,
         version: None,
         path: None,
@@ -430,8 +443,8 @@ fn dispatch_add(cmd: AddCmd) {
         }
     };
     let written = (|| -> Result<bool, String> {
-        let trusted_now = match (granted, owner.as_deref()) {
-            (true, Some(o)) => project::add_trust_owner(manifest, o)?,
+        let trusted_now = match (&granted, by_manifest || by_default) {
+            (Some(p), false) => project::add_trust_owner(manifest, &p.to_string())?,
             _ => false,
         };
         project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())?;
@@ -442,7 +455,7 @@ fn dispatch_add(cmd: AddCmd) {
     match written {
         Ok(trusted_now) => {
             if trusted_now {
-                err(&format!("Trusted {} in almide.toml [trust] owners", owner.as_deref().unwrap_or("")));
+                err(&format!("Trusted {} in almide.toml [trust] owners", granted.as_ref().map(|p| p.to_string()).unwrap_or_default()));
             }
             err(&format!("Added {name} to almide.toml"));
         }
@@ -473,8 +486,14 @@ fn dispatch_trust(owner: String) {
         err("almide.toml not found. Run 'almide init' first.");
         std::process::exit(1);
     }
-    let owner = crate::trust::owner_arg(&owner);
-    if owner == crate::trust::DEFAULT_TRUSTED_OWNER {
+    let owner = match crate::trust::owner_arg(&owner) {
+        Ok(p) => p.to_string(),
+        Err(e) => {
+            err(&format!("error: {e}"));
+            std::process::exit(1);
+        }
+    };
+    if owner.eq_ignore_ascii_case(crate::trust::DEFAULT_TRUSTED_OWNER) {
         err(&format!("{owner} is trusted by default; nothing to add"));
         return;
     }
@@ -554,9 +573,10 @@ fn dependency_source_line(dep: &project::Dependency) -> String {
         return format!("{} = path {}", dep.name, path);
     }
     let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+    let git = dep.git.as_ref().map(|g| g.to_string()).unwrap_or_default();
     match &dep.subdir {
-        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub),
-        None => format!("{} = {} ({})", dep.name, dep.git, ref_name),
+        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, git, ref_name, sub),
+        None => format!("{} = {} ({})", dep.name, git, ref_name),
     }
 }
 

@@ -84,6 +84,15 @@ crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.263"
 wasi-preview1-component-adapter-provider = "50.0.1"
+# The dependency fetch's in-process git client (ADR-0035 D2): https over the
+# same rustls / ring / root-store pin almide-rt-core's http client uses, a
+# pack's zlib streams inflated by miniz_oxide (pure Rust, no unsafe), and
+# every object id recomputed with sha1 (or sha2 for sha256 repositories).
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "1.0"
+rustls-native-certs = "0.8"
+miniz_oxide = "0.9"
+sha1 = "0.11"
 
 [features]
 default = ["embedded-host"]
@@ -131,6 +140,10 @@ almide-verify = { path = "crates/almide-verify" }
 # and the inspection fingerprint prints the wasm emitter arms it covers (tests/stdlib_inspection_test.rs).
 syn = { version = "3", default-features = false, features = ["full", "visit", "parsing", "printing", "clone-impls"] }
 quote = "1"
+# tests/support/git_host.rs: the dependency tests' git host mints a throwaway
+# CA and per-host leaves (ADR-0035: the fetch only speaks https). Same pin and
+# ring backend almide-rt-core's TLS tests use.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

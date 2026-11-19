@@ -4,15 +4,19 @@
 //! one type, are refused too. Every refusal is E118.
 //!
 //! No network, as in `dependency_trust_test.rs`: each "host" is a directory
-//! of bare repositories that git's `url.<base>.insteadOf` maps
-//! `https://github.com/` onto, so the manifests name the real source URLs a
-//! grant is keyed by.
+//! of bare repositories served by `support/git_host.rs` at their real
+//! `https://github.com/` URLs, so the manifests name the source URLs a grant
+//! is keyed by.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 struct Hosts {
     root: PathBuf,
+    host: git_host::GitHost,
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -43,7 +47,8 @@ impl Hosts {
         let root = std::env::temp_dir().join(format!("almide-media-grant-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("mkdir");
-        let h = Hosts { root };
+        let host = git_host::GitHost::start(&root);
+        let h = Hosts { root, host };
         h.repo("almide", "svg", "svg", &body_pkg("image/svg+xml", "image/svg+xml"), "");
         h.repo("almide", "svgtoo", "svgtoo", &body_pkg("image/svg+xml", "image/svg+xml"), "");
         h.repo("almide", "csvbody", "csvbody", &body_pkg("text/csv", "text/csv"), "");
@@ -70,6 +75,7 @@ impl Hosts {
         let bare = self.root.join("hosts").join(owner);
         std::fs::create_dir_all(&bare).unwrap();
         git(&bare, &["clone", "-q", "--bare", work.to_str().unwrap(), repo]);
+        self.host.serve(&format!("https://github.com/{owner}/{repo}"), &bare.join(repo));
     }
 
     /// A project `name` with `manifest`, whose main prints the Content-Type
@@ -87,18 +93,12 @@ impl Hosts {
     }
 
     fn almide(&self, dir: &Path, args: &[&str]) -> Output {
-        let base = format!("file://{}/", self.root.join("hosts").display());
-        Command::new(env!("CARGO_BIN_EXE_almide"))
-            .current_dir(dir)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.current_dir(dir)
             .env("HOME", self.root.join("home"))
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", format!("url.{base}.insteadOf"))
-            .env("GIT_CONFIG_VALUE_0", "https://github.com/")
-            .env("GIT_TERMINAL_PROMPT", "0")
             .env("ALMIDE_RUN_PROJECT_DIR", self.root.join(".run"))
-            .args(args)
-            .output()
-            .expect("spawn almide")
+            .args(args);
+        self.host.env(&mut cmd).output().expect("spawn almide")
     }
 }
 

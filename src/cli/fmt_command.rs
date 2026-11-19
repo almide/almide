@@ -15,30 +15,15 @@ fn load_dep_info_for_fmt() -> (Vec<String>, std::collections::HashMap<String, St
     };
     let dep_names: Vec<String> = project.dependencies.iter().map(|d| d.name.clone()).collect();
 
-    // Discover submodules for each dependency by scanning cached source directories
+    // Discover submodules for each dependency by scanning its package as the
+    // cache-only resolution finds it (ADR-0035): the tree the lock and the
+    // index name, re-hashed before it is read, never fetched. A dependency
+    // that is not cached contributes nothing.
     let mut submodules = std::collections::HashMap::new();
+    let cached = crate::project_fetch::resolve_cached_deps(&project).unwrap_or_default();
     for dep in &project.dependencies {
-        // Check cache dir: ~/.almide/cache/.sources/<url pieces>/@/{tag_or_commit}/.
-        // Rooted at THIS dependency's source (#2523, #4093) — the scan used to start at
-        // `{name}/` and take whatever was cached there first, so a same-named
-        // package from another URL could name this one's submodules.
-        let dep_cache = crate::project_fetch::dep_cache_root(dep);
-        if dep_cache.is_dir() {
-            // Use the first checkout found. Directories starting with a dot are
-            // layout, not checkouts (and a `.tmp-` one is a clone in progress).
-            if let Ok(entries) = std::fs::read_dir(&dep_cache) {
-                if let Some(version_dir) = entries.flatten().find(|e| {
-                    e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')
-                }) {
-                    // A `subdir` dependency's checkout is the whole
-                    // repository; its package is the subdir (#3381).
-                    let package_dir = match &dep.subdir {
-                        Some(sub) => version_dir.path().join(sub),
-                        None => version_dir.path(),
-                    };
-                    scan_submodules(&package_dir, &dep.name, &mut submodules);
-                }
-            }
+        if let Some(fd) = cached.iter().find(|f| f.pkg_id.name == dep.name) {
+            scan_submodules(&fd.package_dir, &dep.name, &mut submodules);
         }
         // Also check local: {name}/ next to almide.toml
         let local_dir = std::path::Path::new(&dep.name);

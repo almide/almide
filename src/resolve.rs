@@ -677,18 +677,15 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
 /// never followed (#4813): one could reach outside the package (a module
 /// loaded from anywhere on the disk) or back into it (`/` hung the walk), and
 /// the root project's own walk skips them too.
+///
+/// ADR-0035 D3: this is a view of [`crate::package_tree::dir_entries`], the
+/// one primitive every package reader walks with (the tree hash included).
+/// A dependency's cache entry has been re-hashed with links refused before
+/// the resolver gets here, so skipping a link is the second line, not the
+/// first.
 pub(crate) fn source_entries(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let (mut files, mut dirs) = (Vec::new(), Vec::new());
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let (Ok(kind), p) = (e.file_type(), e.path()) else { continue };
-        if kind.is_dir() {
-            dirs.push(p);
-        } else if kind.is_file() && p.extension().is_some_and(|ext| ext == "almd") {
-            files.push(p);
-        }
-    }
-    files.sort();
-    dirs.sort();
+    let (files, dirs) = crate::package_tree::dir_entries(dir, crate::package_tree::Links::Skip).unwrap_or_default();
+    let files = files.into_iter().filter(|p| p.extension().is_some_and(|ext| ext == "almd")).collect();
     (files, dirs)
 }
 
