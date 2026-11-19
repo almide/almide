@@ -438,7 +438,9 @@ impl Emitter<'_> {
 /// the held record; an INERT operand — literals, vars, field and tuple
 /// reads, operators over them — runs no code of the program's.
 fn appended_admitted(place: &FieldPlace, e: &IrExpr) -> bool {
-    !place.global || is_inert(e)
+    // #4790: a tuple, record or list of inert parts runs no program code
+    // either — it only allocates its own fresh block.
+    !place.global || reads_only(e)
 }
 
 /// #4790: an element that only READS: inert parts ([`is_inert`]) built into
