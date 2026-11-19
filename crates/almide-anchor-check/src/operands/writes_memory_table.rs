@@ -206,6 +206,8 @@ macro_rules! writes_memory {
     (RefTestNullable) => { true }; // @gc
     (RefCastNonNull) => { true }; // @gc
     (RefCastNullable) => { true }; // @gc
+    (BrOnCast) => { true }; // @gc
+    (BrOnCastFail) => { true }; // @gc
     (AnyConvertExtern) => { true }; // @gc
     (ExternConvertAny) => { true }; // @gc
     (RefI31) => { true }; // @gc
@@ -216,6 +218,8 @@ macro_rules! writes_memory {
     (RefGetDesc) => { true }; // @custom_descriptors
     (RefCastDescEqNonNull) => { true }; // @custom_descriptors
     (RefCastDescEqNullable) => { true }; // @custom_descriptors
+    (BrOnCastDescEq) => { true }; // @custom_descriptors
+    (BrOnCastDescEqFail) => { true }; // @custom_descriptors
     (I32TruncSatF32S) => { false }; // @saturating_float_to_int
     (I32TruncSatF32U) => { false }; // @saturating_float_to_int
     (I32TruncSatF64S) => { false }; // @saturating_float_to_int
