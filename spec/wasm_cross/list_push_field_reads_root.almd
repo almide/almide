@@ -1,0 +1,65 @@
+// @contract: C-033
+// `list.push(h.slots, (x, h.next))` on a `mut` record: the pushed element
+// reads the record it is pushed into (#4790). The wasm leg evaluates such an
+// element before it unshares the field and pushes in place; before, it took
+// the copying write and a build loop was quadratic (n = 40000 ran out of
+// memory). The values are the native leg's.
+//
+// Rows, and what each is for:
+//   param    the issue's shape: a `mut` param, the element a tuple reading
+//            another field of the root; 2000 pushes read back by length and sum
+//   alias    `old` was bound before the loop and keeps the pre-loop record
+//   self     the pushed element is a string field of the root itself, then
+//            that field is appended to: the list keeps each earlier value
+//   call     an element that reads the root through a call keeps the copying
+//            write and still lands in the field
+type R = { slots: List[(Int, Int)], next: Int }
+
+type Names = { all: List[String], keep: String }
+
+fn push(mut h: R, x: Int) -> Unit = list.push(h.slots, (x, h.next))
+
+fn param_rows(n: Int) -> String = {
+  var h: R = { slots: [], next: 7 }
+  for i in 0..<n {
+    push(h, i)
+    h.next = h.next + 1
+  }
+  let sum = h.slots |> list.fold(0, (acc, p) => acc + p.0 + p.1)
+  "${list.len(h.slots)} ${sum} ${list.first(h.slots) ?? (0, 0)} ${list.last(h.slots) ?? (0, 0)}"
+}
+
+fn alias_rows(n: Int) -> String = {
+  var h: R = { slots: [(1, 1)], next: 3 }
+  let old = h
+  for i in 0..<n {
+    list.push(h.slots, (i, h.next))
+    h.next = h.next * 2
+  }
+  "${old.slots} ${old.next} ${h.slots} ${h.next}"
+}
+
+fn self_rows(n: Int) -> String = {
+  var nm = Names { all: [], keep: "k" }
+  for i in 0..<n {
+    list.push(nm.all, nm.keep)
+    nm.keep = nm.keep + "${i}"
+  }
+  "${nm.all} ${nm.keep}"
+}
+
+fn call_rows(n: Int) -> String = {
+  var h: R = { slots: [], next: 0 }
+  for i in 0..<n {
+    list.push(h.slots, (i, list.len(h.slots)))
+  }
+  "${h.slots}"
+}
+
+effect fn main() -> Unit = {
+  println("param ${param_rows(3)}")
+  println("param ${param_rows(2000)}")
+  println("alias ${alias_rows(3)}")
+  println("self  ${self_rows(3)}")
+  println("call  ${call_rows(3)}")
+}

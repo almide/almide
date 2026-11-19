@@ -244,7 +244,7 @@ impl Emitter<'_> {
                 Some((left, right)) if is_place(left) => match &right.kind {
                     IrExprKind::List { elements }
                         if elements.len() == 1
-                            && free_of_root(&elements[0])
+                            && (free_of_root(&elements[0]) || reads_only(&elements[0]))
                             && appended_admitted(&place, &elements[0]) =>
                     {
                         (left, Appended::Elem(&elements[0]))
@@ -299,8 +299,11 @@ impl Emitter<'_> {
         let Some(place) = self.field_append_place(&target, &path) else {
             return Ok(false);
         };
+        // #4790: an element that reads the root (`(x, h.next)`) is admitted
+        // when it only reads — [`emit_field_append`] evaluates it before the
+        // place is made unique. Refused, it took the full `$concat` copy.
         if !matches!(place.leaf.0, SliceTy::List(_))
-            || almide_ir::free_vars::free_vars(v, &Default::default()).contains(&target)
+            || (almide_ir::free_vars::free_vars(v, &Default::default()).contains(&target) && !reads_only(v))
             || !appended_admitted(&place, v)
         {
             return Ok(false);
@@ -348,6 +351,23 @@ impl Emitter<'_> {
         place: &FieldPlace,
         appended: Appended<'_>,
     ) -> Result<(), EmitError> {
+        // #4790: an element that reads the root is evaluated FIRST, into a
+        // held temp that owns its credit (the share guard runs here), so the
+        // read sees the value before the push and holds nothing borrowed
+        // across the unsharing and the push. Lowered after the unsharing, as
+        // a free element is, its read of the root kept the record shared and
+        // the push copied the whole list.
+        let early = match &appended {
+            Appended::Elem(elem) if almide_ir::free_vars::free_vars(elem, &Default::default()).contains(target) => {
+                let SliceTy::List(h) = place.leaf.0 else { return unsup("field-append:leaf") };
+                let el = self.types.el(h);
+                self.lower_pushed_elem(elem, el)?;
+                let t = if el.slot_size() == 8 { self.hold_i64()? } else { self.hold_i32()? };
+                self.f.instructions().local_set(t);
+                Some((t, el.slot_size() == 8))
+            }
+            _ => None,
+        };
         self.make_mut_place_unique(head)?;
         // `$cow` took the var's credit on the record it held and left the
         // var holding one on the (possibly copied) record — the mut
@@ -367,18 +387,35 @@ impl Emitter<'_> {
             Appended::Elem(elem) => {
                 let SliceTy::List(h) = lty else { return unsup("field-append:leaf") };
                 let el = self.types.el(h);
-                self.lower(elem, Some(el))?;
-                if el.val_type() == ValType::F64 {
-                    self.f.instructions().i64_reinterpret_f64();
+                match early {
+                    Some((t, _)) => {
+                        self.f.instructions().local_get(t);
+                    }
+                    None => self.lower_pushed_elem(elem, el)?,
                 }
-                self.rc_share_guard(elem, el);
-                self.witness_store(elem, el);
                 let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
                 self.f.instructions().call(push);
                 self.store_ty_slot(lty, loff);
             }
         }
         self.release_i32();
+        match early {
+            Some((_, true)) => self.release_i64(),
+            Some((_, false)) => self.release_i32(),
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// The pushed element as the list slot holds it: lowered, an F64 as its
+    /// bits, and owning its credit (a borrowed read takes its share).
+    fn lower_pushed_elem(&mut self, elem: &IrExpr, el: SliceTy) -> Result<(), EmitError> {
+        self.lower(elem, Some(el))?;
+        if el.val_type() == ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        self.rc_share_guard(elem, el);
+        self.witness_store(elem, el);
         Ok(())
     }
 
@@ -402,6 +439,18 @@ impl Emitter<'_> {
 /// reads, operators over them — runs no code of the program's.
 fn appended_admitted(place: &FieldPlace, e: &IrExpr) -> bool {
     !place.global || is_inert(e)
+}
+
+/// #4790: an element that only READS: inert parts ([`is_inert`]) built into
+/// a fresh tuple, record or list. It runs no code of the program's, so
+/// evaluating it before the place is unshared cannot rebind the root; any
+/// other element that reads the root keeps the copy-on-write write.
+fn reads_only(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => elements.iter().all(reads_only),
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, f)| reads_only(f)),
+        _ => is_inert(e),
+    }
 }
 
 fn is_inert(e: &IrExpr) -> bool {
