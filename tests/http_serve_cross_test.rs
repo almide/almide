@@ -69,8 +69,73 @@ const SCRIPT: &[&[u8]] = &[
     b"GET /fail-bidi HTTP/1.1\r\nHost: a\r\n\r\n",
 ];
 
+/// The ports the servers of this suite are handed: below every ephemeral
+/// range (Linux starts at 32768, macOS at 49152), so no `bind(0)` and no
+/// client connection anywhere in the run is given one of them.
+const SERVER_PORTS: std::ops::Range<u32> = 20000..30000;
+
+/// A port for one server, handed to no other server of this suite (#4605).
+///
+/// It used to be `bind(0)` then drop: the kernel could hand the same
+/// ephemeral port to a second test (each test is its own process under
+/// nextest) or to a fixture's own listener (`held` below), and a request
+/// meant for one server reached the other — `GET /hello` answered by a
+/// socket that closed without a byte. Ports now come from a counter in a
+/// file every test process locks, below the ephemeral range, and a port is
+/// handed out only when nothing is bound to it.
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port").local_addr().expect("addr").port()
+    use std::io::Seek;
+    let floor = ephemeral_floor();
+    assert!(SERVER_PORTS.end <= floor, "server ports {SERVER_PORTS:?} reach the ephemeral range at {floor}");
+    let path = std::env::temp_dir().join("almide-serve-cross-ports");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .expect("open the port counter");
+    file.lock().expect("lock the port counter");
+    let mut text = String::new();
+    file.read_to_string(&mut text).expect("read the port counter");
+    let mut next: u32 = text.trim().parse().unwrap_or(0);
+    let span = SERVER_PORTS.end - SERVER_PORTS.start;
+    let port = (0..span)
+        .map(|_| {
+            let port = (SERVER_PORTS.start + next % span) as u16;
+            next = next.wrapping_add(1);
+            port
+        })
+        .find(|&port| TcpListener::bind(("0.0.0.0", port)).is_ok() && TcpListener::bind(("127.0.0.1", port)).is_ok())
+        .expect("every server port is bound");
+    file.set_len(0).expect("truncate the port counter");
+    file.rewind().expect("rewind the port counter");
+    file.write_all(next.to_string().as_bytes()).expect("write the port counter");
+    port
+}
+
+/// The lowest port the kernel hands out for `bind(0)` or a client connection.
+/// Unknown is refused: a floor that cannot be read is not assumed.
+fn ephemeral_floor() -> u32 {
+    if cfg!(target_os = "linux") {
+        let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range").expect("read the ephemeral port range");
+        range.split_whitespace().next().and_then(|s| s.parse().ok()).expect("the ephemeral range's floor")
+    } else {
+        let out = Command::new("sysctl").args(["-n", "net.inet.ip.portrange.first"]).output().expect("sysctl runs");
+        String::from_utf8_lossy(&out.stdout).trim().parse().expect("the ephemeral range's floor")
+    }
+}
+
+/// #4605: two servers are never handed one port, and no port a server is
+/// handed lies in the ephemeral range (the old `bind(0)` pick failed both:
+/// every port it returned was ephemeral).
+#[test]
+fn server_ports_are_distinct_and_below_the_ephemeral_range() {
+    let floor = ephemeral_floor();
+    let ports: Vec<u16> = (0..64).map(|_| free_port()).collect();
+    let distinct: std::collections::BTreeSet<u16> = ports.iter().copied().collect();
+    assert_eq!(distinct.len(), ports.len(), "a port was handed out twice: {ports:?}");
+    assert!(ports.iter().all(|&p| u32::from(p) < floor), "a port in the ephemeral range (from {floor}): {ports:?}");
 }
 
 // Keep compilation diagnostics out of the runtime transcript, and require
