@@ -65,7 +65,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [args.md](args.md)
 
 - `effect args.has_flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
-- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--`; none if absent.
+- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--` (a one-letter name also -n=v, -n v); none if absent.
 - `effect args.positional(options: List[String]) -> List[String]` — Args before `--` that are not flags or values of the named options, then all after `--`.
 
 ## base64
@@ -1159,7 +1159,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect process.exec(cmd: String, args: List[String]) -> String` — Stdout on exit 0; else err with stderr text.
 - `effect process.output(c: ProcessCommand) -> ProcessStatus` — Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
-- `effect process.run(c: ProcessCommand) -> Int` — Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+- `effect process.run(c: ProcessCommand) -> Unit` — Runs c on this terminal (its stdin too, unless c.stdin is set); ok on exit 0, err on any other exit, a signal, a failed start or the deadline.
 - `effect process.start(c: ProcessCommand) -> ProcessChild` — Starts c in its own process group and returns at once; its output is captured.
 - `effect process.poll(c: ProcessChild) -> Option[Result[ProcessStatus, String]]` — Never blocks: none while c runs, then its outcome (err past its deadline).
 - `effect process.wait(c: ProcessChild) -> ProcessStatus` — Blocks until c ends; its outcome.

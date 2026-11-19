@@ -10,8 +10,44 @@ pub const SRC_ARGS: &str = r#"
 
 import env
 
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
+/// True on --name before `--`; a one-letter name also matches -name. No short form is derived. Err on a dash-written or empty name.
+effect fn has_flag(name: String) -> Bool = {
+  __name_ok("args.has_flag", name)!
+  __has(__options(env.args()), name)
+}
+
+
+
+
+
+
+@category
+fn __name_ok(reader: String, name: String) -> Result[Unit, String] =
+  if name != "" and not string.starts_with(name, "-") then ok(())
+  else {
+    let bare = __undash(name)
+    err(if bare == "" then reader + ": the name is empty: write it without dashes, as in \"out\""
+    else reader + ": write the name without its dashes: \"" + bare + "\"")
+  }
+
+@category
+fn __undash(s: String) -> String = if string.starts_with(s, "-") then __undash(string.drop(s, 1)) else s
+
+
+
+@category
+fn __names_ok(reader: String, names: List[String], i: Int) -> Result[Unit, String] =
+  if i >= list.len(names) then ok(())
+  else {
+    __name_ok(reader, list.get(names, i) ?? "")!
+    __names_ok(reader, names, i + 1)
+  }
+
+
+
+
+@category
+fn __short(name: String, long: String) -> String = if string.len(name) == 1 then "-" + name else long
 
 
 
@@ -22,8 +58,8 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
-  let short = if string.len(name) == 1 then "-" + name else "--" + name
-  __flag_at(args, "--" + name, short, 0)
+  let long = "--" + name
+  __flag_at(args, long, __short(name, long), 0)
 }
 
 
@@ -53,24 +89,42 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
     else __flag_at(args, long, short, i + 1)
   }
 
-/// Value of --name=v or --name v before `--`; none if absent.
+/// Value of --name=v or --name v before `--` (a one-letter name also -n=v, -n v); none if absent. Err on a dash-written or empty name.
 effect fn option(name: String) -> String? = {
-  let args = __options(env.args())
-  let long = "--" + name
-  let eq_prefix = long + "="
+  __name_ok("args.option", name)!
+  __option(__options(env.args()), name)
+}
 
-  let eq_match = __find_prefixed(args, eq_prefix, 0)
-  match eq_match {
-    some(a) => string.strip_prefix(a, eq_prefix),
-    none => {
-      let idx = list.index_of(args, long)
-      match idx {
-        some(i) => list.get(args, i + 1),
-        none => none,
-      }
+
+
+@category
+fn __option(args: List[String], name: String) -> String? = {
+  let long = "--" + name
+  let short = __short(name, long)
+  let long_eq = long + "="
+  let short_eq = if string.len(name) == 1 then short + "=" else long_eq
+
+  match __find_either_prefixed(args, long_eq, short_eq, 0) {
+    some(v) => some(v),
+    none => match __index_either(args, long, short, 0) {
+      some(i) => list.get(args, i + 1),
+      none => none,
     },
   }
 }
+
+
+@category
+fn __find_either_prefixed(args: List[String], long: String, short: String, i: Int) -> String? =
+  if i >= list.len(args) then none
+  else {
+    let a = list.get(args, i) ?? ""
+    if string.starts_with(a, long) then string.strip_prefix(a, long)
+    else if string.starts_with(a, short) then string.strip_prefix(a, short)
+    else __find_either_prefixed(args, long, short, i + 1)
+  }
+
+
 
 @category
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
@@ -78,8 +132,21 @@ fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   else if string.starts_with(list.get(args, i) ?? "", prefix) then list.get(args, i)
   else __find_prefixed(args, prefix, i + 1)
 
-/// Args before `--` that are not flags or values of the named options, then all after `--`.
-effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
+
+@category
+fn __index_either(args: List[String], long: String, short: String, i: Int) -> Int? =
+  if i >= list.len(args) then none
+  else {
+    let a = list.get(args, i) ?? ""
+    if a == long or a == short then some(i)
+    else __index_either(args, long, short, i + 1)
+  }
+
+/// Args before `--` that are not flags or values of the named options, then all after `--`. Err on a dash-written or empty name.
+effect fn positional(options: List[String]) -> List[String] = {
+  __names_ok("args.positional", options, 0)!
+  __positional(env.args(), options)
+}
 
 
 
@@ -106,7 +173,7 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
   else {
     let a = list.get(args, i) ?? ""
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
-    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(
+    else if __names_value(options, a) then __positional_at(
       args,
       options,
       i + 2,
@@ -114,6 +181,13 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
     )
     else __positional_at(args, options, i + 1, acc)
   }
+
+
+
+@category
+fn __names_value(options: List[String], a: String) -> Bool =
+  if string.starts_with(a, "--") then list.contains(options, string.drop(a, 2))
+  else string.len(a) == 2 and list.contains(options, string.drop(a, 1))
 "#;
 pub const SRC_BASE64: &str = r#"
 
@@ -31595,15 +31669,31 @@ effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_outp
   c.timeout_ms,
 )
 
-/// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+/// Runs c on this terminal (its stdin too, unless c.stdin is set); ok on exit 0, err on any other exit, a signal, a failed start or the deadline.
 @ordered
-effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+effect fn run(c: ProcessCommand) -> Result[Unit, String] = match __os_run(
   c.cmd,
   c.args,
   c.dir,
   c.stdin,
   c.timeout_ms,
-)
+) {
+  ok(0) => ok(()),
+  ok(code) => err("process.run(${__run_operand(c)}): ${__run_ended(code)}"),
+  err(e) => err(e),
+}
+
+
+
+
+
+
+local fn __run_ended(code: Int) -> String = if code == -1 then "ended by a signal" else "exited with status ${code}"
+
+local fn __run_operand(c: ProcessCommand) -> String = if c.dir == "" then __quoted(c.cmd)
+else "${__quoted(c.dir)}, ${__quoted(c.cmd)}"
+
+local fn __quoted(s: String) -> String = "\"${string.__err_text(s)}\""
 
 /// Starts c in its own process group and returns at once; its output is captured.
 @ordered

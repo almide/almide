@@ -303,9 +303,9 @@ effect process.exec(cmd: String, args: List[String]) -> String
 // @since unreleased
 effect process.output(c: ProcessCommand) -> ProcessStatus
 
-// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+// Runs c on this terminal (its stdin too, unless c.stdin is set); ok on exit 0, err on any other exit, a signal, a failed start or the deadline.
 // @since unreleased
-effect process.run(c: ProcessCommand) -> Int
+effect process.run(c: ProcessCommand) -> Unit
 
 // Starts c in its own process group and returns at once; its output is captured.
 // @since unreleased

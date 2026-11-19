@@ -66,15 +66,15 @@ effect fn main() -> Unit = {
 ## Signature index (3 functions)
 
 ```
-// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
+// True on --name before `--`; a one-letter name also matches -name. No short form is derived. Err on a dash-written or empty name.
 // @since unreleased
 effect args.has_flag(name: String) -> Bool
 
-// Value of --name=v or --name v before `--`; none if absent.
+// Value of --name=v or --name v before `--` (a one-letter name also -n=v, -n v); none if absent. Err on a dash-written or empty name.
 // @since 0.2.0 or earlier
 effect args.option(name: String) -> Option[String]
 
-// Args before `--` that are not flags or values of the named options, then all after `--`.
+// Args before `--` that are not flags or values of the named options, then all after `--`. Err on a dash-written or empty name.
 // @since 0.2.0 or earlier
 effect args.positional(options: List[String]) -> List[String]
 ```
