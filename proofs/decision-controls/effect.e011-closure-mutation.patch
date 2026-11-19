@@ -1,0 +1,14 @@
+# Negative control of effect.e011-closure-mutation (proofs/decision-sites.toml): a mutable binding with no recorded depth is admitted again (#4859)
+# control_test: tests/decision_gap_fixes_test.rs::novel_e011_a_top_level_var_changed_in_a_closure
+diff --git a/crates/almide-frontend/src/check/infer_closure_escape.rs b/crates/almide-frontend/src/check/infer_closure_escape.rs
+--- a/crates/almide-frontend/src/check/infer_closure_escape.rs
++++ b/crates/almide-frontend/src/check/infer_closure_escape.rs
+@@ -19,7 +19,7 @@
+         // A mutable binding with no recorded depth was declared outside every
+         // closure (a top-level `var`, a `mut` parameter): depth 0, never
+         // "not known, so admitted" (#4859).
+-        let decl_depth = self.env.var_lambda_depth.get(&name).copied().unwrap_or(0);
++        let Some(&decl_depth) = self.env.var_lambda_depth.get(&name) else { return };
+         if self.env.lambda_depth > decl_depth {
+             self.emit(super::err(
+                 format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),

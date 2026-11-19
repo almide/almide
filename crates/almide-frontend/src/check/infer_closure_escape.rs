@@ -16,7 +16,10 @@ impl Checker {
         if !self.env.mutable_vars.contains(&name) || self.env.can_call_effect {
             return;
         }
-        let Some(&decl_depth) = self.env.var_lambda_depth.get(&name) else { return };
+        // A mutable binding with no recorded depth was declared outside every
+        // closure (a top-level `var`, a `mut` parameter): depth 0, never
+        // "not known, so admitted" (#4859).
+        let decl_depth = self.env.var_lambda_depth.get(&name).copied().unwrap_or(0);
         if self.env.lambda_depth > decl_depth {
             self.emit(super::err(
                 format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
