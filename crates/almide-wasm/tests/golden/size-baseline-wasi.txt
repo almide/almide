@@ -158,7 +158,7 @@
 4516	spec/wasm_cross/destructure_owned_tuple_release.almd
 4509	spec/wasm_cross/early_return_control_flow.almd
 4251	spec/wasm_cross/edge_closure_matrix.almd
-12940	spec/wasm_cross/edge_float_formatting.almd
+12979	spec/wasm_cross/edge_float_formatting.almd
 8719	spec/wasm_cross/edge_int_boundaries.almd
 8221	spec/wasm_cross/edge_map_order.almd
 30346	spec/wasm_cross/edge_string_unicode.almd
@@ -266,8 +266,8 @@
 5073	spec/wasm_cross/float_round_exact.almd
 5245	spec/wasm_cross/float_round_negzero.almd
 4336	spec/wasm_cross/float_shortest_roundtrip.almd
-6589	spec/wasm_cross/float_sign_minmax_ieee.almd
-5400	spec/wasm_cross/float_signed_zero_minmax.almd
+6426	spec/wasm_cross/float_sign_minmax_ieee.almd
+5329	spec/wasm_cross/float_signed_zero_minmax.almd
 6541	spec/wasm_cross/float_subnormal_preserved.almd
 4686	spec/wasm_cross/float_to_fixed.almd
 3906	spec/wasm_cross/float_to_int_edges.almd
