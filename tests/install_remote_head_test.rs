@@ -6,6 +6,9 @@
 //! first and builds that commit (`go install pkg@latest` semantics); a tag
 //! keeps its immutable cache entry.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -49,14 +52,15 @@ fn commit_version(repo: &Path, version: &str) {
     git(repo, &["commit", "-q", "-m", version]);
 }
 
-/// `almide tool install file://<repo>` with the dependency cache confined to
-/// `home`; answers the installed binary's stdout and the install's stderr.
+/// `almide tool install https://github.com/almide/repo` (served from `repo`
+/// by the in-test git host) with the dependency cache confined to `home`;
+/// answers the installed binary's stdout and the install's stderr.
 fn install_and_run(repo: &Path, home: &Path, bin_dir: &Path) -> (String, String) {
-    let out = Command::new(almide_bin())
-        .args(["tool", "install", &format!("file://{}", repo.display()), "--bin-dir", bin_dir.to_str().unwrap()])
-        .env("HOME", home)
-        .output()
-        .expect("spawn almide");
+    let url = "https://github.com/almide/repo";
+    git_host::shared().serve(url, repo);
+    let mut cmd = Command::new(almide_bin());
+    cmd.args(["tool", "install", url, "--bin-dir", bin_dir.to_str().unwrap()]).env("HOME", home);
+    let out = git_host::shared().env(&mut cmd).output().expect("spawn almide");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(out.status.success(), "install failed:\n{stderr}");
     let run = Command::new(bin_dir.join("hello")).output().expect("run installed binary");

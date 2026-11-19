@@ -2,6 +2,9 @@
 //! Spawns `almide lsp` as a subprocess, sends JSON-RPC over stdin/stdout,
 //! and verifies responses.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::io::{Read, Write, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -96,6 +99,8 @@ impl LspClient {
     fn start_with(home: Option<&Path>, root: Option<&Path>, cwd: Option<&Path>) -> Self {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
         cmd.arg("lsp").env("ALMIDE_LSP_TRACE", "1");
+        // Any fetch would reach the in-test git host, never the network.
+        git_host::shared().env(&mut cmd);
         if let Some(home) = home {
             cmd.env("HOME", home);
         }
@@ -711,8 +716,8 @@ fn lsp_didopen_never_fetches_or_writes_lock() {
     std::fs::write(
         app.join("almide.toml"),
         format!(
-            "[package]\nname = \"lsp_didopen_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
-            repo.display()
+            "[package]\nname = \"lsp_didopen_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"{}\", tag = \"v0.1.0\" }}\n",
+            git_host::shared().url_of(&repo)
         ),
     )
     .unwrap();
@@ -993,8 +998,8 @@ fn lsp_survive_refuses_a_uri_outside_the_workspace_and_never_fetches() {
     std::fs::write(
         app.join("almide.toml"),
         format!(
-            "[package]\nname = \"lsp_survive_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
-            repo.display()
+            "[package]\nname = \"lsp_survive_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"{}\", tag = \"v0.1.0\" }}\n",
+            git_host::shared().url_of(&repo)
         ),
     )
     .unwrap();

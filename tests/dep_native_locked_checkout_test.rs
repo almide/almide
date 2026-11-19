@@ -7,8 +7,11 @@
 //! branch had moved built the head's Rust modules against the locked
 //! commit's `@extern` declarations, with exit 0.
 //!
-//! The dependency is a local git repository reached via `file://`, and `HOME`
-//! is redirected so the dependency cache is this test's own.
+//! The dependency is a local git repository served by `support/git_host.rs`,
+//! and `HOME` is redirected so the dependency cache is this test's own.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,15 +44,14 @@ fn real_home_dir(var: &str, below_home: &str) -> PathBuf {
 /// `almide run src/main.almd` in `app`, with the dependency cache under
 /// `home` and cargo/rustup still found where they really are.
 fn run(root: &Path) -> String {
-    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .current_dir(root.join("app"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.current_dir(root.join("app"))
         .env("CARGO_HOME", real_home_dir("CARGO_HOME", ".cargo"))
         .env("RUSTUP_HOME", real_home_dir("RUSTUP_HOME", ".rustup"))
         .env("HOME", root.join("home"))
         .env("ALMIDE_RUN_PROJECT_DIR", root.join(".run"))
-        .args(["run", "src/main.almd"])
-        .output()
-        .expect("spawn almide");
+        .args(["run", "src/main.almd"]);
+    let out = git_host::shared().env(&mut cmd).output().expect("spawn almide");
     assert!(out.status.success(), "almide run failed\n{}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
@@ -66,7 +68,7 @@ fn a_locked_git_dependency_builds_its_natives_from_the_locked_commit() {
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "one"]);
 
-    let url = format!("file://{}", repo.display());
+    let url = git_host::shared().url_of(&repo);
     write(
         root.join("app/almide.toml"),
         &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nnat = {{ git = \"{url}\" }}\n\n[permissions]\nnative = [\"nat\"]\n"),

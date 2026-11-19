@@ -419,36 +419,22 @@ struct Tree {
 ///   fetched again.
 /// - A fetched tree whose sum is not the lock's is refused outright: the
 ///   remote served other content for the locked commit.
+/// - One fetch per `(source, commit)` at a time (#4529): callers racing on
+///   one commit wait for the first one's fetch under the commit's index
+///   lock and then find its tree.
 fn use_tree(name: &str, src: &GitSource, commit: &CommitId, want: Option<TreeSum>) -> Result<Tree, String> {
-    if let Some(sum) = want.or_else(|| read_index_sum(src, commit)) {
-        let dir = tree_dir(&sum);
-        if dir.exists() {
-            let found = package_tree::sum_on_disk(&dir);
-            if found.as_ref() == Ok(&sum) {
-                return Ok(Tree { dir, commit: commit.clone(), sum });
-            }
-            let why = match found {
-                Ok(other) => format!("its files hash to {other}"),
-                Err(e) => e.to_string(),
-            };
-            let refusal = format!(
-                "the cached tree of dependency `{name}` ({src} at {}) does not match its sum {sum}: {why}\n  \
-                 note: the cache entry {} was changed after it was fetched",
-                commit.short(),
-                dir.display()
-            );
-            if offline() {
-                return Err(format!("error: {refusal}\n  hint: run `almide build` in the project to fetch it again"));
-            }
-            err(&format!("warning: {refusal}; fetching it again"));
-            remove_cache_dir(&dir)?;
-        }
+    if let Some(tree) = cached_tree(name, src, commit, want)? {
+        return Ok(tree);
     }
     if offline() {
         return Err(format!(
             "dependency `{name}` ({src} at {}) is not fetched yet; run `almide build` in the project to fetch it",
             commit.short()
         ));
+    }
+    let _fetching = CacheEntryLock::acquire(&index_commit_file(src, commit))?;
+    if let Some(tree) = cached_tree(name, src, commit, want)? {
+        return Ok(tree);
     }
     err(&format!("Fetching {name} from {src} ({})", commit.short()));
     let tree = fetch::fetch_commit(src, commit).map_err(|e| fetch_failure(name, &e))?;
@@ -467,6 +453,38 @@ fn use_tree(name: &str, src: &GitSource, commit: &CommitId, want: Option<TreeSum
     populate_cache_dir(&dir, |tmp| tree.write_to(tmp))?;
     write_index(&index_commit_file(src, commit), &format!("{sum}\n"));
     Ok(Tree { dir, commit: commit.clone(), sum })
+}
+
+/// The cached tree of `commit` (by the lock's sum, else the index's), when
+/// it is there and hashes to its sum; `Ok(None)` when it is not cached. A
+/// changed entry is an error in cache-only mode, and otherwise removed (so
+/// the caller fetches it again) with a warning.
+fn cached_tree(name: &str, src: &GitSource, commit: &CommitId, want: Option<TreeSum>) -> Result<Option<Tree>, String> {
+    let Some(sum) = want.or_else(|| read_index_sum(src, commit)) else { return Ok(None) };
+    let dir = tree_dir(&sum);
+    if !dir.exists() {
+        return Ok(None);
+    }
+    let found = package_tree::sum_on_disk(&dir);
+    if found.as_ref() == Ok(&sum) {
+        return Ok(Some(Tree { dir, commit: commit.clone(), sum }));
+    }
+    let why = match found {
+        Ok(other) => format!("its files hash to {other}"),
+        Err(e) => e.to_string(),
+    };
+    let refusal = format!(
+        "the cached tree of dependency `{name}` ({src} at {}) does not match its sum {sum}: {why}\n  \
+         note: the cache entry {} was changed after it was fetched",
+        commit.short(),
+        dir.display()
+    );
+    if offline() {
+        return Err(format!("error: {refusal}\n  hint: run `almide build` in the project to fetch it again"));
+    }
+    err(&format!("warning: {refusal}; fetching it again"));
+    remove_cache_dir(&dir)?;
+    Ok(None)
 }
 
 /// Fetch a dependency, optionally pinned to a locked commit (and sum).

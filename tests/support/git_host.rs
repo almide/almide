@@ -48,6 +48,13 @@ pub struct GitHost {
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
+/// One host for a whole test binary. Tests that share it keep their
+/// repositories apart by URL ([`GitHost::url_of`]).
+pub fn shared() -> &'static GitHost {
+    static HOST: std::sync::OnceLock<GitHost> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| GitHost::start(&std::env::temp_dir().join(format!("almide-git-host-{}", std::process::id()))))
+}
+
 /// `git <args>` in `dir`, with a fixed identity; panics on failure.
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -105,6 +112,22 @@ impl GitHost {
         self.shared.repos.lock().unwrap().insert(key_of(url), repo.to_path_buf());
     }
 
+    /// Serve the repository at `dir` under a URL of its own, under the
+    /// default-trusted owner: `https://github.com/almide/<dir name>-<hash of
+    /// the path>`. The same `dir` always gets the same URL.
+    pub fn url_of(&self, dir: &Path) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        dir.hash(&mut h);
+        let name: String = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect())
+            .unwrap_or_else(|| "repo".to_string());
+        let url = format!("https://github.com/almide/{}-{:08x}", name.trim_start_matches(['-', '_']), h.finish() as u32);
+        self.serve(&url, dir);
+        url
+    }
+
     /// Stop serving `url`: it answers 404 from now on.
     pub fn unserve(&self, url: &str) {
         self.shared.repos.lock().unwrap().remove(&key_of(url));
@@ -121,8 +144,10 @@ impl GitHost {
             .env_remove("https_proxy")
             .env_remove("ALL_PROXY")
             .env_remove("all_proxy")
-            .env_remove("NO_PROXY")
-            .env_remove("no_proxy")
+            // A native build's cargo honours the same variable: crates.io
+            // is not this host's to answer.
+            .env("NO_PROXY", "crates.io")
+            .env("no_proxy", "crates.io")
             .env("SSL_CERT_FILE", &self.ca_path)
             .env_remove("SSL_CERT_DIR")
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -229,7 +254,7 @@ fn serve(s: Arc<Shared>, mut tcp: TcpStream) {
         return;
     };
     let key = key_of(&format!("{host}{repo_path}"));
-    let Some(dir) = s.repos.lock().unwrap().get(&key).cloned() else {
+    let Some(dir) = s.repos.lock().unwrap().get(&key).cloned().filter(|d| d.exists()) else {
         respond(&mut tls, 404, "text/plain", b"no such repository");
         return;
     };
