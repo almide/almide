@@ -97,10 +97,12 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     super::phase_lap("package");
     if certify {
         // A component is not the core module the certificate describes
-        // (`almide verify` refuses it the same way): the core module it
-        // packages is judged before it is packaged (#4836).
-        let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
-        if let Err(e) = super::verify::gate_build(file, &emitted, shipped, &[]) {
+        // (`almide verify` refuses it the same way): its sinks are dropped.
+        // Judging the core module it packages is held back until such a
+        // module certifies (#4877).
+        if shape.component {
+            let _ = almide_wasm::witness::take();
+        } else if let Err(e) = super::verify::gate_build(file, &emitted, &bytes, &[]) {
             err(&format!(
                 "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
             ));
@@ -178,6 +180,12 @@ fn refuse_unpackageable(file: &str, host_ops: &[i32], component: bool, js_host: 
 /// serve-shaped — checked in `compile_to_wasm_bytes_surfaced`) builds as
 /// the stock serve export, a `wasi:http/handler@0.3.0` component, with or
 /// without `--component`.
+/// Does `almide build --target wasm` (no `--component`) package a module
+/// with these host ops as a component?
+pub(super) fn packaged_as_component(host_ops: &[i32]) -> bool {
+    serves_http(host_ops) || almide_wasm_run::component_availability::needs_component(host_ops)
+}
+
 fn serves_http(host_ops: &[i32]) -> bool {
     host_ops.iter().any(|op| (70..=72).contains(op))
 }
