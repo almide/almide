@@ -875,7 +875,7 @@ impl BoundedCx<'_, '_> {
         // (B9's one capability) and the assertions (test-position machinery)
         // are admitted, read off the builtin table's own description; an
         // unconditional abort is not.
-        if let Some((_, does)) = super::OUTPUT_ABORT_BUILTINS.iter().find(|(b, _)| *b == n) {
+        if let Some((_, does)) = crate::check::OUTPUT_ABORT_BUILTINS.iter().find(|(b, _)| *b == n) {
             if *does != "aborts the program" {
                 return;
             }
