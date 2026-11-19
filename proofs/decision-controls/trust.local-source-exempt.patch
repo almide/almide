@@ -1,0 +1,14 @@
+# Negative control of trust.local-source-exempt (proofs/decision-sites.toml): a fetched package's path dependency is loaded wherever it points.
+# control_test: tests/decision_lock_gaps_test.rs::novel_a_fetched_packages_path_dependency_outside_it_is_refused
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -1107,7 +1107,7 @@
+     }
+ 
+     if !transitive_deps.is_empty() {
+-        if dep.git.is_some() {
++        if dep.git.is_some() && chain.is_empty() {
+             refuse_escaping_path_deps(&dep.name, &declaring_dir, &transitive_deps, chain)?;
+         }
+         walk.deps(&transitive_deps, chain)?;

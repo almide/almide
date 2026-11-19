@@ -211,6 +211,10 @@ pub(crate) enum Commands {
         /// Report as the --json envelope
         #[arg(long)]
         json: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
     },
     /// Build a binary
     Build {
@@ -374,6 +378,10 @@ pub(crate) enum Commands {
         /// Source file. Omitted inside a package: every `.almd` under `src/`
         /// is checked and named (#2165)
         file: Option<String>,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
         /// Treat warnings as errors
         #[arg(long)]
         deny_warnings: bool,
@@ -693,6 +701,10 @@ pub(crate) enum Commands {
     Emit {
         /// Source file
         file: String,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
         /// Target language (rust, wgsl)
         #[arg(long, default_value = "rust")]
         target: String,

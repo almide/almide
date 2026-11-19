@@ -128,8 +128,8 @@ fn dispatch_check(args: CheckCmd) {
         Some(entries) => entries[0].clone(),
         None => resolve_file(file),
     };
-    if wasm_target && (effects || json) {
-        eprintln!("error: --target wasm is not supported with --effects or --json");
+    if wasm_target && effects {
+        eprintln!("error: --target wasm is not supported with --effects");
         std::process::exit(1);
     }
     if effects {
@@ -140,8 +140,8 @@ fn dispatch_check(args: CheckCmd) {
         cli::cmd_check_effects(&file);
     } else if json {
         match &package_entries {
-            Some(entries) => cli::cmd_check_json_package(entries, critical.as_deref()),
-            None => cli::cmd_check_json(&file, critical.as_deref()),
+            Some(entries) => cli::cmd_check_json_package(entries, critical.as_deref(), wasm_target),
+            None => cli::cmd_check_json(&file, critical.as_deref(), wasm_target),
         }
     } else if let Some(entries) = package_entries {
         cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
@@ -673,7 +673,7 @@ fn dispatch_tooling(command: Commands) {
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
         Commands::TestRunCompile { out, cache, files } => cli::cmd_test_run_compile(&out, cache.as_deref(), &files),
-        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
+        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map, locked: _ } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
         other => dispatch_packages(other),
@@ -900,7 +900,16 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
     let Some(command) = cli.command else { return };
     refuse_invalid_manifest(&command);
     // #4093: `--locked` holds for every fetch this process makes.
-    if matches!(command, Commands::Run { locked: true, .. } | Commands::Build { locked: true, .. } | Commands::Test { locked: true, .. }) {
+    // #4852: every command that resolves dependencies takes it.
+    if matches!(
+        command,
+        Commands::Run { locked: true, .. }
+            | Commands::Build { locked: true, .. }
+            | Commands::Test { locked: true, .. }
+            | Commands::Check { locked: true, .. }
+            | Commands::Bench { locked: true, .. }
+            | Commands::Emit { locked: true, .. }
+    ) {
         project_fetch::set_locked_mode(true);
     }
     // #4093: a command that builds resolves the dependencies first, before
@@ -912,6 +921,9 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         command,
         Commands::Run { .. } | Commands::Test { .. } | Commands::Bench { .. }
             | Commands::Build { print_release_rustflags: false, .. }
+            // #4848: emitted source is a build the user compiles; the
+            // inspection views (AST / IR / dialect) stay available.
+            | Commands::Emit { emit_ast: false, emit_ir: false, emit_dialect: false, .. }
     ) {
         cli::resolve_cwd_deps_or_exit();
     }
@@ -922,7 +934,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Init { json: _ } => cli::cmd_init(),
         Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args }),
-        Commands::Bench { file, runs, target, program_args, json: _ } => {
+        Commands::Bench { file, runs, target, program_args, json: _, locked: _ } => {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
@@ -955,7 +967,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Test { file, run, no_check, locked: _, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
-        Commands::Check { file, deny_warnings, json, explain: _, effects, timings, stamp, profile, allow, target } => {
+        Commands::Check { file, deny_warnings, json, explain: _, effects, timings, stamp, profile, allow, target, locked: _ } => {
             dispatch_check(CheckCmd { file, deny_warnings, json, effects, timings, stamp, profile, allow, target })
         }
         Commands::Fix { file, dry_run, json } => {
