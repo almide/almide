@@ -80,7 +80,17 @@ The v0 source emitter (`--target rust`) spells lists through the same runtime an
 - **`Rc<[T]>` / `Rc<Vec<T>>` from std.** Rejected: there is no thread-share bit (`Arc` everywhere costs atomics on every count change in single-threaded code), two allocations for `Rc<Vec>`, and no static-block form. `AlmideStr` was built for the same reasons.
 - **Borrow inference only** (lend more, own less). Already done as far as it goes. A value that is returned, or stored in a record that outlives the call, must be owned, and owning a `Vec` is a copy.
 
-## Open questions for the owner
+## Owner decisions (2026-11-20)
 
-- Q1: should `Bytes` move in the same series (recommended), or stay `Vec<u8>` until the list series is measured?
-- Q2: should the empty-list static block be shared across element types (a single zero-length block, as the empty string is)? Recommended ○.
+The owner ruled ○ on the direction, then ruled on Q1 and Q2 after a cross-language comparison.
+
+- **Q1 ○: `Bytes` moves to the same block, in the same series.** Conditions:
+  - Before a writable `&mut [u8]` or a raw pointer is handed to FFI or to a runtime operation, the block is made unique (rc == 1). It stays uncloneable while it is lent.
+  - There is no slice-sharing representation for now (no view of part of a block).
+  - Counts are atomic by default on any block that can cross a `fan` thread. A non-atomic fast path comes only after measurement.
+- **Q2 ○: one static empty block, shared by every element type.** Conditions:
+  - It is aligned to 16. An element type aligned above 16 allocates its empty list normally. The first element's offset after the header is checked against the element's alignment as well.
+  - Its count is immortal: never incremented or decremented, never freed, and never reported as unique, so a write to an empty list always allocates.
+  - No free path may reach it. A debug assertion guards every free.
+  - Address comparison is not exposed.
+  - Each of these cases has a Miri test.
