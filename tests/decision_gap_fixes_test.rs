@@ -68,4 +68,18 @@ fn novel_e119_a_region_through_a_destructuring_let() {
     refused("E119", &format!(
         "import ffi\n\nvar {stash}: Option[Region] = none\n\n@export(c, \"{keep}\")\nfn {keep}(r: Region) -> Int = {{\n  let ({a}, _) = (r, 1)\n  {stash} = some({a})\n  0\n}}\n\neffect fn main() -> Unit = println(\"x\")\n"
     ));
+    // c1: the same rule judges every export target
+    novel_e119_judges_every_export_target();
+}
+
+/// ownership.e119-lent-region-escape (c1): an `@export` of a target the rule
+/// does not spell is still lent its Region by an outside caller, so a
+/// returned Region is refused (E119); the target only picks the wording.
+/// Control: the same export returning an Int is not refused with E119.
+#[test]
+fn novel_e119_judges_every_export_target() {
+    let (target, f) = (novel::ident("tgt"), novel::ident("keep"));
+    refused("E119", &format!("import ffi\n\n@export({target}, \"{f}\")\nfn {f}(r: Region) -> Region = r\n\neffect fn main() -> Unit = ()\n"));
+    let good = format!("import ffi\n\n@export({target}, \"{f}\")\nfn {f}(r: Region) -> Int = 0\n\neffect fn main() -> Unit = ()\n");
+    assert!(!check(&good).contains("[E119]"), "control: a non-escaping @export({target}) fn was refused with E119:\n{good}");
 }

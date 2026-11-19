@@ -1,9 +1,18 @@
-# Negative control of ownership.e119-lent-region-escape (proofs/decision-sites.toml): a destructuring binding no longer makes its names lent (#4862)
+# Negative control of ownership.e119-lent-region-escape (proofs/decision-sites.toml): a destructuring binding no longer makes its names lent (#4862), and an export target the rule does not spell is skipped (c1)
 # control_test: tests/decision_gap_fixes_test.rs::novel_e119_a_region_through_a_destructuring_let
 diff --git a/crates/almide-frontend/src/check/lent_region_escape.rs b/crates/almide-frontend/src/check/lent_region_escape.rs
 --- a/crates/almide-frontend/src/check/lent_region_escape.rs
 +++ b/crates/almide-frontend/src/check/lent_region_escape.rs
-@@ -99,6 +99,7 @@
+@@ -43,7 +43,7 @@
+             // caller outside the program, whatever the target spells — an
+             // unknown target is judged, never skipped. The target only picks
+             // the wording.
+-            let Some(target) = export_attrs.iter().map(|a| a.target.as_str()).find(|t| matches!(*t, "c" | "wasm")).or_else(|| export_attrs.first().map(|a| a.target.as_str())) else {
++            let Some(target) = export_attrs.iter().map(|a| a.target.as_str()).find(|t| matches!(*t, "c" | "wasm")) else {
+                 continue;
+             };
+             let host = match target {
+@@ -107,6 +107,7 @@
                          // rules then read each one's own type.
                          if let Stmt::LetDestructure { pattern, value, .. } = s
                              && mentions(value, &lent)
