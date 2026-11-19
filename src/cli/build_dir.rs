@@ -86,7 +86,14 @@ pub(crate) fn shared_run_project_dir() -> std::path::PathBuf {
         Some(dir) => {
             let dir = std::path::PathBuf::from(dir);
             // The override holds binaries that are executed, as the base
-            // does (#4842): one another user could write into is refused.
+            // does (#4842): one another user could write into is refused. A
+            // missing one is created closed (0700), as the base is, so the
+            // next run does not refuse what this one made under the umask.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+            }
             #[cfg(unix)]
             if let Err(e) = owned_and_closed_to_writers(&dir) {
                 crate::err(&format!("error: ALMIDE_RUN_PROJECT_DIR={}: {e}", dir.display()));
@@ -100,8 +107,7 @@ pub(crate) fn shared_run_project_dir() -> std::path::PathBuf {
 
 /// `dir`, when it exists, is a real directory (not a symlink) owned by the
 /// effective uid that no group or other user can write to: the
-/// `ALMIDE_RUN_PROJECT_DIR` override (#4842). A directory that does not exist
-/// yet is the builder's to create.
+/// `ALMIDE_RUN_PROJECT_DIR` override (#4842).
 #[cfg(unix)]
 fn owned_and_closed_to_writers(dir: &std::path::Path) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
