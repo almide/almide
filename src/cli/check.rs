@@ -477,6 +477,19 @@ pub fn cmd_check_effects(file: &str) {
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
+    // #4847: the value gate (E109, E110's flow half) every route that judges
+    // one judges both (effect_value_gate.rs) — over every module when there
+    // are user modules, as `check` runs it.
+    let whole = (!checker.env.user_modules.is_empty()).then(|| crate::compile_driver::whole_program_ir(file)).flatten();
+    let refused = almide::effect_value_gate::effect_value_diagnostics(whole.as_ref().unwrap_or(&ir), file);
+    if !refused.is_empty() {
+        for d in &refused {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
+        }
+        err(&format!("\n{} error(s) found", refused.len()));
+        std::process::exit(1);
+    }
+
     // Run effect inference
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};
     use almide::codegen::pass::NanoPass;
