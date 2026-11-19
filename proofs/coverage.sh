@@ -168,21 +168,35 @@ CLI="$COVDIR/t/release/almide"
 # and 3 minutes of step 4/4 merging them) — the `%Nm` pool merges online
 # across processes, which is also what makes the parallel sweep safe.
 SWEEP_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+# The Rust SOURCE emitter (`almide app.almd --target rust`, almide-codegen's
+# nanopass pipeline and walker) is reached only by that command since native
+# builds and `almide test --target rust` render through the MIR (v1): the
+# `--target rust` test workload below left almide-codegen's passes and walker
+# at 0% (#4499: pass_peephole, pass_borrow_lowering, walker/statements, ...).
+# Same switch as that workload.
+NATIVE_LEG="${ALMIDE_COVERAGE_NATIVE_LEG:-${ALMIDE_COVERAGE_CONDITION:-0}}"
 mkdir -p "$COVDIR/sweep"
 find spec -name '*.almd' | LC_ALL=C sort | while read -r f; do
     if grep -q 'fn main' "$f"; then printf '%s\n' "$f"; fi
 done > "$COVDIR/sweep.list"
 n="$(wc -l < "$COVDIR/sweep.list" | tr -d ' ')"
-nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
+sweep_out="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" NATIVE_LEG="$NATIVE_LEG" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
     out="$COVDIR/sweep/$$"
     if ALMIDE_WASM_SKIP_STOCK_AUDIT=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
          "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
     LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
       "$CLI" verify --mir "$1" --emit "$out.bundle" >/dev/null 2>&1
-    rm -f "$out.wasm" "$out.bundle"
+    if [ "$NATIVE_LEG" = "1" ] && LLVM_PROFILE_FILE="$COVDIR/rustemit-%4m.profraw" \
+         "$CLI" "$1" --target rust >"$out.rs" 2>/dev/null; then echo rust-emitted; fi
+    rm -f "$out.wasm" "$out.bundle" "$out.rs"
     exit 0
-' sh | grep -c emitted || true)"
-echo "  runnable spec programs: $n (structural wasm build emitted $nw; witness producer ran on all; $SWEEP_JOBS jobs)"
+' sh || true)"
+nw="$(printf '%s\n' "$sweep_out" | grep -cx emitted || true)"
+nr="$(printf '%s\n' "$sweep_out" | grep -cx rust-emitted || true)"
+echo "  runnable spec programs: $n (structural wasm build emitted $nw; Rust source emitted $nr; witness producer ran on all; $SWEEP_JOBS jobs)"
+if [ "$NATIVE_LEG" = "1" ] && [ "$nr" -eq 0 ]; then
+    echo "coverage: the Rust source sweep emitted NOTHING — the workload went blind"; exit 1
+fi
 # No vacuous sweep: a CLI that emits nothing (a broken build, a renamed flag)
 # would still leave profraw from the other workloads.
 [ "$nw" -gt 0 ] || { echo "coverage: the structural wasm sweep emitted NOTHING — the workload went blind"; exit 1; }
