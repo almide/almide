@@ -71,6 +71,7 @@ dependencies = [
  "miniz_oxide",
  "proptest",
  "quote",
+ "rcgen",
  "ring",
  "rustls",
  "rustls-native-certs",
