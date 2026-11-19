@@ -209,3 +209,19 @@ fn a_dependency_source_symlink_is_not_followed() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// ADR-0035 (owner ruling 2026-11-19): https is anonymous, so a repository
+/// the host will not show without credentials is refused with the ssh form
+/// to write instead.
+#[test]
+fn a_private_https_repository_is_refused_with_the_ssh_form() {
+    let root = scratch("private");
+    let host = GitHost::start(&root);
+    host.answer_missing_with(401);
+    let dir = root.join("app");
+    app(&dir, "secret = { git = \"https://github.com/almide/secret-pkg.git\", tag = \"v0.1.0\" }\n", "import secret\neffect fn main() -> Unit = println(\"x\")\n");
+    let o = almide(&dir, &root, Some(&host), &["check", "src/main.almd"]);
+    assert!(!o.status.success(), "{}", text(&o));
+    assert!(text(&o).contains("fetch it over ssh: `git = \"git@github.com:almide/secret-pkg\"`"), "{}", text(&o));
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -261,30 +261,40 @@ fn an_ssh_source_runs_one_ssh_with_typed_argv() {
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(
-        app.join("almide.toml"),
-        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[trust]\nowners = [\"git.example.org/team\"]\n\n[dependencies]\nlib = { git = \"git@git.example.org:team/lib.git\", tag = \"v0.1.0\" }\n",
-    )
-    .unwrap();
     std::fs::write(app.join("src/main.almd"), "import lib\neffect fn main() -> Unit = println(lib.word())\n").unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let o = std::process::Command::new(env!("CARGO_BIN_EXE_almide"))
-        .current_dir(&app)
-        .env("HOME", &home)
-        .env("PATH", &path)
-        .args(["run", "src/main.almd", "--target", "wasm"])
-        .output()
+    // The scp-like form keeps git's meaning — a path relative to the remote
+    // user's home, sent without a leading `/` — and its own canonical print;
+    // the `ssh://` form is absolute. Each gets its own home (cache) and lock.
+    for (written, port_args, remote, locked) in [
+        ("git@git.example.org:team/lib.git", &[][..], "git-upload-pack 'team/lib.git'", "git@git.example.org:team/lib"),
+        ("ssh://git@git.example.org:2222/team/lib", &["-p", "2222"][..], "git-upload-pack '/team/lib'", "ssh://git@git.example.org:2222/team/lib"),
+    ] {
+        let _ = std::fs::remove_file(&argv_log);
+        let _ = std::fs::remove_file(app.join("almide.lock"));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::write(
+            app.join("almide.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[trust]\nowners = [\"git.example.org/team\"]\n\n[dependencies]\nlib = {{ git = \"{written}\", tag = \"v0.1.0\" }}\n"),
+        )
         .unwrap();
-    let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-    assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "over-ssh", "{text}");
-    let log = std::fs::read_to_string(&argv_log).unwrap();
-    let first: Vec<&str> = log.split("END\n").next().unwrap().lines().collect();
-    assert_eq!(
-        first,
-        ["-o", "SendEnv=GIT_PROTOCOL", "-l", "git", "--", "git.example.org", "git-upload-pack '/team/lib.git'"],
-        "the launcher's argv"
-    );
-    let lock = std::fs::read_to_string(app.join("almide.lock")).unwrap();
-    assert!(lock.contains("git = \"ssh://git@git.example.org/team/lib\"") && lock.contains("sum = \"h1:"), "{lock}");
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_almide"))
+            .current_dir(&app)
+            .env("HOME", &home)
+            .env("PATH", &path)
+            .args(["run", "src/main.almd", "--target", "wasm"])
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "over-ssh", "{written}: {text}");
+        let log = std::fs::read_to_string(&argv_log).unwrap();
+        let first: Vec<&str> = log.split("END\n").next().unwrap().lines().collect();
+        let mut want = vec!["-o", "SendEnv=GIT_PROTOCOL"];
+        want.extend_from_slice(port_args);
+        want.extend_from_slice(&["-l", "git", "--", "git.example.org", remote]);
+        assert_eq!(first, want, "the launcher's argv for {written}");
+        let lock = std::fs::read_to_string(app.join("almide.lock")).unwrap();
+        assert!(lock.contains(&format!("git = \"{locked}\"")) && lock.contains("sum = \"h1:"), "{written}: {lock}");
+    }
     let _ = std::fs::remove_dir_all(&tmp);
 }

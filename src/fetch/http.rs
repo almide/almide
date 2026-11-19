@@ -164,7 +164,16 @@ pub fn request(src: &GitSource, dot_git: bool, suffix: &str, body: Option<(&str,
                 "{shown} answered with a redirect to `{to}`; a redirect is not followed\n  hint: if the repository moved, write its new URL in the manifest"
             )));
         }
-        401 | 403 | 404 | 410 => return Err(HttpError::NotFound(format!("{shown}: the server answered {status} (no such repository, or it is private)"))),
+        // No credentials are sent over https (ADR-0035): a private
+        // repository is fetched over ssh, so the refusal prints that form.
+        401 | 403 => {
+            return Err(HttpError::NotFound(format!(
+                "{shown}: the server answered {status}: no such repository, or it is private\n  \
+                 hint: almide sends no credentials over https; if the repository is private, fetch it over ssh: `git = \"{}\"`",
+                src.ssh_form()
+            )))
+        }
+        404 | 410 => return Err(HttpError::NotFound(format!("{shown}: the server answered {status} (no such repository)"))),
         s => return Err(failed(format!("{shown}: the server answered {s}"))),
     }
     if header("content-encoding").is_some_and(|e| !e.eq_ignore_ascii_case("identity")) {

@@ -36,6 +36,9 @@ struct Shared {
     requests: AtomicUsize,
     /// Answer as a server that only speaks protocol v0.
     v0_only: std::sync::atomic::AtomicBool,
+    /// The status for a repository that is not served (404, or 401 as a
+    /// forge answers an anonymous request for a private repository).
+    missing_status: AtomicUsize,
     ca_params: rcgen::CertificateParams,
     ca_key: rcgen::KeyPair,
     leaves: Mutex<HashMap<String, Arc<rustls::ServerConfig>>>,
@@ -95,6 +98,7 @@ impl GitHost {
             repos: Mutex::new(HashMap::new()),
             requests: AtomicUsize::new(0),
             v0_only: std::sync::atomic::AtomicBool::new(false),
+            missing_status: AtomicUsize::new(404),
             ca_params,
             ca_key,
             leaves: Mutex::new(HashMap::new()),
@@ -139,6 +143,11 @@ impl GitHost {
     /// From now on, ignore `Git-Protocol: version=2` (an older server).
     pub fn speak_v0_only(&self) {
         self.shared.v0_only.store(true, Ordering::SeqCst);
+    }
+
+    /// Answer a repository that is not served with `status` from now on.
+    pub fn answer_missing_with(&self, status: u16) {
+        self.shared.missing_status.store(status as usize, Ordering::SeqCst);
     }
 
     /// Requests answered so far.
@@ -263,7 +272,7 @@ fn serve(s: Arc<Shared>, mut tcp: TcpStream) {
     };
     let key = key_of(&format!("{host}{repo_path}"));
     let Some(dir) = s.repos.lock().unwrap().get(&key).cloned().filter(|d| d.exists()) else {
-        respond(&mut tls, 404, "text/plain", b"no such repository");
+        respond(&mut tls, s.missing_status.load(Ordering::SeqCst) as u16, "text/plain", b"no such repository");
         return;
     };
     let mut cmd = Command::new("git");

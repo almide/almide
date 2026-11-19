@@ -15,7 +15,8 @@
 //! ```
 //!
 //! Kept: any host, any path depth, a port, `https://`, `ssh://` and the
-//! scp-like `user@host:path` (normalized into the same value), a plain ssh
+//! scp-like `user@host:path` (whose path stays home-relative, as git reads
+//! it: a typed [`PathRoot`], not a spelling), a plain ssh
 //! user, and a `.git` suffix (normalized away from the identity). Refused,
 //! each with its own diagnostic: a component starting with `-`, a query or a
 //! fragment, userinfo on https or a password anywhere, any other scheme,
@@ -41,6 +42,17 @@ pub struct Host(String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Segment(String);
 
+/// Where an ssh source's path starts on the remote host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PathRoot {
+    /// `ssh://host/a/b` (and every https path): `/a/b` on the server.
+    Absolute,
+    /// The scp-like `user@host:a/b`: `a/b` relative to the remote user's
+    /// home, as git reads it. Not the same repository as `ssh://host/a/b`
+    /// on a plain ssh server, so it is part of the identity.
+    HomeRelative,
+}
+
 /// A dependency source on a git host. Equality and hashing are on the
 /// identity: a written `.git` suffix is not part of it.
 #[derive(Debug, Clone)]
@@ -51,6 +63,8 @@ pub struct GitSource {
     /// `None` for the transport's default port (443 / 22).
     pub port: Option<u16>,
     pub path: Vec<Segment>,
+    /// [`PathRoot::HomeRelative`] only for the scp-like form.
+    pub root: PathRoot,
     /// The last segment was written with a `.git` suffix. Not identity: the
     /// fetch asks for that spelling first, since a plain git server may only
     /// serve it.
@@ -317,6 +331,8 @@ impl GitSource {
             Transport::Ssh => 22,
         };
         let port = port.filter(|p| *p != default_port);
+        // scp-like `host:a/b` is home-relative; `host:/a/b` is absolute.
+        let root = if scp && !path.starts_with('/') { PathRoot::HomeRelative } else { PathRoot::Absolute };
         let path_text = path.strip_prefix('/').filter(|_| scp).unwrap_or(path);
         let mut pieces: Vec<&str> = path_text.split('/').collect();
         if pieces.len() > 1 && pieces.last() == Some(&"") && !pieces[..pieces.len() - 1].contains(&"") {
@@ -343,7 +359,7 @@ impl GitSource {
         if segments.is_empty() {
             return Err(refuse("it names no repository path".to_string()));
         }
-        let source = GitSource { transport, user, host, port, path: segments, dot_git };
+        let source = GitSource { transport, user, host, port, path: segments, root, dot_git };
         let why = match canonical_fix {
             None => return Ok(source),
             Some(Fixable::HttpsUser) => "it has a user part; an https source carries no user or credentials",
@@ -369,12 +385,15 @@ impl GitSource {
     }
 
     /// The repository path as the remote `git-upload-pack` is told it:
-    /// `/seg/seg[.git]`. Every segment is a [`Segment`], so the result holds
-    /// no quote, space or shell metacharacter.
+    /// `/seg/seg[.git]`, or `seg/seg[.git]` for a home-relative source.
+    /// Every segment is a [`Segment`], so the result holds no quote, space or
+    /// shell metacharacter and never starts with `-`.
     pub fn remote_path(&self, with_dot_git: bool) -> String {
         let mut s = String::new();
-        for seg in &self.path {
-            s.push('/');
+        for (i, seg) in self.path.iter().enumerate() {
+            if i > 0 || self.root == PathRoot::Absolute {
+                s.push('/');
+            }
             s.push_str(seg.as_str());
         }
         if with_dot_git {
@@ -390,6 +409,14 @@ impl GitSource {
         self.to_string()
     }
 
+    /// The same repository written as an scp-like ssh source,
+    /// `git@host:owner/repo`: what to write for a private repository, which
+    /// the anonymous https fetch cannot reach.
+    pub fn ssh_form(&self) -> String {
+        let path: Vec<&str> = self.path.iter().map(Segment::as_str).collect();
+        format!("git@{}:{}", self.host.as_str(), path.join("/"))
+    }
+
     /// `host/first-segment`: what `almide trust` grants by default.
     pub fn owner(&self) -> TrustPrefix {
         TrustPrefix { host: self.host.clone(), path: vec![self.path[0].clone()] }
@@ -398,7 +425,12 @@ impl GitSource {
 
 impl PartialEq for GitSource {
     fn eq(&self, o: &GitSource) -> bool {
-        self.transport == o.transport && self.user == o.user && self.host == o.host && self.port == o.port && self.path == o.path
+        self.transport == o.transport
+            && self.user == o.user
+            && self.host == o.host
+            && self.port == o.port
+            && self.path == o.path
+            && self.root == o.root
     }
 }
 
@@ -406,13 +438,22 @@ impl Eq for GitSource {}
 
 impl std::hash::Hash for GitSource {
     fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
-        (self.transport, &self.user, &self.host, self.port, &self.path).hash(h)
+        (self.transport, &self.user, &self.host, self.port, &self.path, self.root).hash(h)
     }
 }
 
-/// The canonical form: `https://host[:port]/a/b` or `ssh://[user@]host[:port]/a/b`.
+/// The canonical form: `https://host[:port]/a/b`, `ssh://[user@]host[:port]/a/b`,
+/// or the scp-like `[user@]host:a/b` for a home-relative source.
 impl fmt::Display for GitSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.root == PathRoot::HomeRelative {
+            if let Some(u) = &self.user {
+                write!(f, "{}@", u.as_str())?;
+            }
+            write!(f, "{}:", self.host.as_str())?;
+            let path: Vec<&str> = self.path.iter().map(Segment::as_str).collect();
+            return f.write_str(&path.join("/"));
+        }
         match self.transport {
             Transport::Https => f.write_str("https://")?,
             Transport::Ssh => f.write_str("ssh://")?,
@@ -509,11 +550,22 @@ mod tests {
         assert_eq!(a, ok("HTTPS://GitHub.com/almide/json"));
         assert_eq!(a, ok("https://github.com:443/almide/json"));
         assert_eq!(a.to_string(), "https://github.com/almide/json");
+        // scp-like keeps its meaning: home-relative, printed in its own form,
+        // and not the same source as the absolute `ssh://` spelling.
         let s = ok("git@github.com:almide/json.git");
-        assert_eq!(s, ok("ssh://git@github.com/almide/json"));
-        assert_eq!(s, ok("ssh://git@github.com:22/almide/json"));
-        assert_eq!(s.to_string(), "ssh://git@github.com/almide/json");
+        assert_eq!(s.root, PathRoot::HomeRelative);
+        assert_eq!(s.to_string(), "git@github.com:almide/json");
+        assert_eq!(ok(&s.to_string()), s, "the canonical print reads back as itself");
+        assert_eq!(s.remote_path(true), "almide/json.git");
         assert!(s.dot_git);
+        let abs = ok("ssh://git@github.com/almide/json");
+        assert_eq!(abs, ok("ssh://git@github.com:22/almide/json"));
+        assert_eq!(abs.to_string(), "ssh://git@github.com/almide/json");
+        assert_eq!(abs.remote_path(false), "/almide/json");
+        assert_ne!(s, abs);
+        // `host:/a/b` is the absolute path written scp-like.
+        assert_eq!(ok("git@github.com:/almide/json"), abs);
+        assert_eq!(ok("https://github.com/almide/json.git").ssh_form(), "git@github.com:almide/json");
         let deep = ok("https://gitlab.example.org:8443/group/sub/team/repo");
         assert_eq!(deep.port, Some(8443));
         assert_eq!(deep.path.len(), 4);
