@@ -6,19 +6,25 @@
 //! manifest trusts:
 //!
 //! - `github.com/almide` is trusted by default;
-//! - any other owner, on any host, must be listed as `host/owner` in the root
-//!   `almide.toml`'s `[trust] owners`;
-//! - `path =` dependencies, and git sources on the local filesystem
-//!   (`file://` or a plain path), are exempt: nobody can register a name
-//!   there;
+//! - any other owner, on any host, must be listed as `host/owner` (or a
+//!   deeper path prefix, `gitlab.com/group/sub`) in the root `almide.toml`'s
+//!   `[trust] owners`;
+//! - `path =` dependencies are exempt: nobody can register a name there;
 //! - a dependency's own `[trust]` is never read, so a package cannot grant
 //!   trust on the root's behalf.
+//!
+//! ADR-0035 D1: trust is decided on the typed [`GitSource`] — its host and a
+//! whole-segment prefix of its path ([`TrustPrefix::covers`]) — never on the
+//! source's text, so no spelling can make the trust check read one host
+//! while the fetch contacts another (#4811).
 //!
 //! The check runs before any network access, on `almide add` and on every
 //! fetch (`build` / `run` / `test` / `bench` / `update`), for direct,
 //! transitive and already-locked dependencies alike. There is no flag or
 //! environment variable that trusts everything: a grant always names its
 //! owner, in a file that is reviewed with the rest of the change.
+
+use crate::git_source::{GitSource, TrustPrefix};
 
 /// The owner every project trusts without a grant.
 pub const DEFAULT_TRUSTED_OWNER: &str = "github.com/almide";
@@ -30,149 +36,45 @@ pub const DEFAULT_TRUSTED_OWNER: &str = "github.com/almide";
 /// removal hints send a model to `almide-graphics/nn` (module `nn.kernels`).
 pub const ALMIDE_PROJECT_OWNERS: &[&str] = &["github.com/almide-graphics"];
 
-/// A git source as written, refused unless git can only read it the way
-/// [`source_owner`] does (#4810, #4811): it may not begin with `-` (git reads
-/// that as an option — `--upload-pack=…` runs a command), may hold no
-/// whitespace or control character, no `?` or `#` (a query or fragment ahead
-/// of an `@` made the owner check read the host after it while git contacts
-/// the one before it), and a userinfo part, where there is one, is a plain
-/// user name. Every git invocation is handed only a source that passed here.
-pub fn git_source(url: &str) -> Result<&str, String> {
-    let refuse = |why: &str| {
-        Err(format!(
-            "the git source `{}` {why}\n  hint: write the URL as https://host/owner/repo",
-            url.escape_debug()
-        ))
-    };
-    if url.is_empty() {
-        return refuse("is empty");
-    }
-    if url.starts_with('-') {
-        return refuse("begins with `-`, which git reads as an option");
-    }
-    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return refuse("holds whitespace or a control character");
-    }
-    if url.contains(['?', '#']) {
-        return refuse("holds a `?` or `#`, so the host git contacts cannot be read from its text");
-    }
-    let user_ok = |u: &str| !u.is_empty() && u.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '~'));
-    let host_ok = |h: &str| !h.is_empty() && !h.starts_with('-') && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'));
-    let authority = if let Some((scheme, rest)) = url.split_once("://") {
-        if scheme.eq_ignore_ascii_case("file") {
-            return Ok(url);
-        }
-        Some(rest.split_once('/').map_or(rest, |(a, _)| a))
-    } else {
-        url.split_once(':').filter(|(b, _)| !b.contains('/') && !b.is_empty()).map(|(b, _)| b)
-    };
-    let Some(authority) = authority else { return Ok(url) };
-    let (user, hostport) = match authority.rsplit_once('@') {
-        Some((u, h)) => (Some(u), h),
-        None => (None, authority),
-    };
-    if user.is_some_and(|u| !user_ok(u)) {
-        return refuse("has a user part that is not a plain user name");
-    }
-    let port_ok = |p: &str| p.is_empty() || p.chars().all(|c| c.is_ascii_digit());
-    // A bracketed IPv6 literal (`[::1]`, `[::1]:2222`) is a plain host too.
-    if let Some(rest) = hostport.strip_prefix('[') {
-        let Some((v6, after)) = rest.split_once(']') else { return refuse("has an unclosed `[` in its host") };
-        let port = after.strip_prefix(':');
-        if v6.is_empty() || !v6.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') || !(after.is_empty() || port.is_some_and(port_ok)) {
-            return refuse("has a host that is not a plain host name");
-        }
-        return Ok(url);
-    }
-    let host = match hostport.split_once(':') {
-        Some((h, port)) if url.contains("://") && port_ok(port) => h,
-        Some(_) => return refuse("has a host that is not `host` or `host:port`"),
-        None => hostport,
-    };
-    if !host_ok(host) {
-        return refuse("has a host that is not a plain host name");
-    }
-    Ok(url)
+fn default_owner() -> TrustPrefix {
+    TrustPrefix::parse(DEFAULT_TRUSTED_OWNER).expect("the default owner parses")
 }
 
-/// The `host/owner` a git source belongs to, lowercased.
-///
-/// `Ok(None)` for a source on the local filesystem (`file://…` or a path),
-/// which needs no trust. `Err` for a source [`git_source`] refuses, or a URL
-/// whose owner cannot be read safely: a `.` or `..` path segment or a
-/// percent escape could make the URL fetch from another owner than the one
-/// its text names.
-pub fn source_owner(url: &str) -> Result<Option<String>, String> {
-    git_source(url)?;
-    let (host, path) = if let Some((scheme, rest)) = url.split_once("://") {
-        if scheme.eq_ignore_ascii_case("file") {
-            return Ok(None);
-        }
-        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        (host.split(':').next().unwrap_or(host), path)
-    } else if let Some((before, path)) = url.split_once(':').filter(|(b, _)| !b.contains('/') && !b.is_empty()) {
-        // scp-like `git@host:owner/repo`.
-        (before.rsplit_once('@').map_or(before, |(_, h)| h), path)
-    } else {
-        return Ok(None);
-    };
-    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    if segments.iter().any(|s| *s == "." || *s == ".." || s.contains('%') || s.contains('\\')) || host.contains('%') {
-        return Err(format!(
-            "the source `{url}` has a `.`/`..` segment or an escape in its path, so the owner it fetches from cannot be read from its text\n  \
-             hint: write the URL as https://host/owner/repo"
-        ));
-    }
-    let owner = segments.first().copied().unwrap_or("");
-    if host.is_empty() || owner.is_empty() {
-        return Err(format!("the source `{url}` names no owner\n  hint: write the URL as https://host/owner/repo"));
-    }
-    Ok(Some(format!("{}/{}", host.to_ascii_lowercase(), owner.to_ascii_lowercase())))
-}
-
-/// `[trust] owners` entry spelling: `host/owner`, one `/`, both parts
-/// non-empty. `Err` names the problem.
+/// `[trust] owners` entry spelling: `host/owner[/…]`, read with the source
+/// grammar. `Err` names the problem.
 pub fn validate_owner_entry(entry: &str) -> Result<(), String> {
-    match entry.split_once('/') {
-        Some((host, owner)) if !host.is_empty() && !owner.is_empty() && !owner.contains('/') && host.contains('.') => Ok(()),
-        _ => Err(format!(
-            "[trust].owners entry `{entry}` is not `host/owner`\n  hint: write the host and the owner, like \"github.com/{}\"",
-            entry.rsplit('/').next().unwrap_or(entry)
-        )),
-    }
+    TrustPrefix::parse(entry).map(|_| ())
 }
 
 /// An owner as written on the command line (`--trust`, `almide trust`):
 /// `host/owner`, with an `https://` prefix or a trailing `/` tolerated, or a
-/// bare `owner`, which means `github.com/owner`. Lowercased, like
-/// [`source_owner`].
-pub fn owner_arg(arg: &str) -> String {
-    let t = arg.trim().trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/');
-    let full = if t.contains('/') { t.to_string() } else { format!("github.com/{t}") };
-    full.to_ascii_lowercase()
+/// bare `owner` (no `/`), which means `github.com/owner`.
+pub fn owner_arg(arg: &str) -> Result<TrustPrefix, String> {
+    let t = arg.trim();
+    if t.contains('/') { TrustPrefix::parse(t) } else { TrustPrefix::parse(&format!("github.com/{t}")) }
 }
 
-/// Is `owner` (from [`source_owner`]) trusted by `proj`'s `[trust] owners`
-/// or by default?
-pub fn is_trusted(proj_owners: &[String], owner: &str) -> bool {
-    owner == DEFAULT_TRUSTED_OWNER || proj_owners.iter().any(|o| o.eq_ignore_ascii_case(owner))
+/// Is `source` covered by `proj_owners` (`[trust] owners`, already
+/// validated) or by default?
+pub fn is_trusted(proj_owners: &[String], source: &GitSource) -> bool {
+    default_owner().covers(source) || proj_owners.iter().filter_map(|o| TrustPrefix::parse(o).ok()).any(|o| o.covers(source))
 }
 
 /// The trust refusal for a dependency fetched while building (`chain` is the
 /// path of dependency names from the root, the refused one last).
-pub fn fetch_refusal(chain: &[String], url: &str, owner: &str) -> String {
+pub fn fetch_refusal(chain: &[String], source: &GitSource) -> String {
+    let owner = source.owner();
     let name = chain.last().map(String::as_str).unwrap_or("?");
     let via = if chain.len() > 1 { format!(" (required by {})", chain.join(" → ")) } else { String::new() };
     let mut msg = format!(
         "error: dependency `{name}`{via} is fetched from an owner this project does not trust\n  \
-         source: {url}\n  \
+         source: {source}\n  \
          owner: {owner} (not in [trust] owners)\n  \
          note: models often invent repository names, and attackers register the names models invent\n  \
          hint: if this dependency is expected, run `almide trust {owner}` (it adds \"{owner}\" to [trust] owners in almide.toml)\n  \
          hint: if you chose this name yourself, do not trust it; use a package from github.com/almide or ask the user"
     );
-    if let Some(s) = suggestion(url) {
+    if let Some(s) = suggestion(source) {
         msg.push_str(&format!("\n  {s}"));
     }
     msg
@@ -180,16 +82,17 @@ pub fn fetch_refusal(chain: &[String], url: &str, owner: &str) -> String {
 
 /// The trust refusal for `almide add`. `retry` is the add command line to
 /// rerun with `--trust`.
-pub fn add_refusal(name: &str, url: &str, owner: &str, retry: &str) -> String {
+pub fn add_refusal(name: &str, source: &GitSource, retry: &str) -> String {
+    let owner = source.owner();
     let mut msg = format!(
         "error: refusing to add `{name}`: its owner is not trusted by this project\n  \
-         source: {url}\n  \
+         source: {source}\n  \
          owner: {owner} (not in [trust] owners)\n  \
          note: models often invent repository names, and attackers register the names models invent\n  \
          hint: if the user asked for this exact repository, run:\n          {retry} --trust {owner}\n  \
          hint: if you chose this name yourself, do not trust it; use a package from github.com/almide or ask the user"
     );
-    if let Some(s) = suggestion(url) {
+    if let Some(s) = suggestion(source) {
         msg.push_str(&format!("\n  {s}"));
     }
     msg
@@ -293,24 +196,27 @@ pub fn import_hint(name: &str, dependencies: &[&str]) -> Option<String> {
 /// the name's length); an owner that is
 /// a near miss of `almide` (`almide-lang`, `almlde`). It only suggests; it
 /// never substitutes.
-pub fn suggestion(url: &str) -> Option<String> {
-    let owner = source_owner(url).ok().flatten()?;
-    let (host, owner_name) = owner.split_once('/')?;
-    let repo = url.trim_end_matches('/').rsplit('/').next()?;
+pub fn suggestion(source: &GitSource) -> Option<String> {
+    let owner_prefix = source.owner();
+    let owner = owner_prefix.to_string().to_ascii_lowercase();
+    let host = source.host.as_str();
+    let owner_name = source.path[0].as_str().to_ascii_lowercase();
+    let repo = source.path.last()?.as_str();
     let wanted = fold(repo);
     let packages = almide_packages();
     let line = |pkg: &str, repo: &str| format!("hint: did you mean `almide add {pkg}`?  (github.com/almide/{repo})");
     if ALMIDE_PROJECT_OWNERS.contains(&owner.as_str()) {
         return None;
     }
-    if owner != DEFAULT_TRUSTED_OWNER {
+    let is_default = default_owner().covers(source);
+    if !is_default {
         if let Some((pkg, r)) = packages.iter().find(|(p, r)| fold(p) == wanted || fold(r) == wanted) {
             return Some(line(pkg, r));
         }
     }
     let near = packages
         .iter()
-        .filter(|(_, r)| *r != repo || owner != DEFAULT_TRUSTED_OWNER)
+        .filter(|(_, r)| *r != repo || !is_default)
         .map(|(p, r)| (edit_distance(&fold(p), &wanted).min(edit_distance(&fold(r), &wanted)), p, r))
         // Within 2 edits, and at most a third of the name: `mydfa` is two
         // edits from `dfa` and means nothing by it.
@@ -333,20 +239,24 @@ pub fn suggestion(url: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn owners_are_host_and_first_segment() {
-        assert_eq!(source_owner("https://github.com/Almide/svg").unwrap().as_deref(), Some("github.com/almide"));
-        assert_eq!(source_owner("https://x@GitLab.com:443/alice/lib.git").unwrap().as_deref(), Some("gitlab.com/alice"));
-        assert_eq!(source_owner("git@github.com:bob/util.git").unwrap().as_deref(), Some("github.com/bob"));
-        assert_eq!(source_owner("ssh://git@github.com/bob/util").unwrap().as_deref(), Some("github.com/bob"));
-        assert_eq!(source_owner("file:///srv/git/x").unwrap(), None);
-        assert_eq!(source_owner("/srv/git/x").unwrap(), None);
-        assert!(source_owner("https://github.com/almide/../evil/x").is_err());
-        assert!(source_owner("https://github.com/almide/%2e%2e/evil/x").is_err());
+    fn src(s: &str) -> GitSource {
+        GitSource::parse(s).unwrap_or_else(|e| panic!("{s}: {e}"))
     }
 
-    /// #4810 / #4811: a source git could read as an option, or whose host git
-    /// reads differently from the owner check, is refused before any git runs.
+    #[test]
+    fn owners_are_host_and_first_segment() {
+        assert_eq!(src("https://github.com/Almide/svg").owner().to_string(), "github.com/Almide");
+        assert!(is_trusted(&[], &src("https://github.com/Almide/svg")));
+        assert_eq!(src("https://GitLab.com:443/alice/lib.git").owner().to_string(), "gitlab.com/alice");
+        assert_eq!(src("git@github.com:bob/util.git").owner().to_string(), "github.com/bob");
+        assert_eq!(src("ssh://git@github.com/bob/util").owner().to_string(), "github.com/bob");
+        assert!(GitSource::parse("https://github.com/almide/../evil/x").is_err());
+        assert!(GitSource::parse("https://github.com/almide/%2e%2e/evil/x").is_err());
+    }
+
+    /// #4810 / #4811: a source git could read as an option, or whose host
+    /// another reader would read differently, never reaches the trust check
+    /// as anything but a refusal.
     #[test]
     fn option_shaped_and_ambiguous_sources_are_refused() {
         for bad in [
@@ -358,30 +268,39 @@ mod tests {
             "https://github.com /almide/json",
             "ssh://-oProxyCommand=x/almide/json",
             "git@-oProxyCommand=x:almide/json",
+            "file:///srv/git/x",
+            "../local/repo",
         ] {
-            assert!(source_owner(bad).is_err(), "{bad} was not refused");
+            assert!(GitSource::parse(bad).is_err(), "{bad} was not refused");
         }
-        assert_eq!(source_owner("https://github.com:443/almide/json").unwrap().as_deref(), Some("github.com/almide"));
-        assert_eq!(source_owner("../local/repo").unwrap(), None);
-        // Any git host's ordinary forms stay usable: subgroups, ports, ssh.
-        assert_eq!(source_owner("https://gitlab.com/group/sub/repo.git").unwrap().as_deref(), Some("gitlab.com/group"));
-        assert_eq!(source_owner("ssh://git@git.example.org:2222/team/repo").unwrap().as_deref(), Some("git.example.org/team"));
-        assert_eq!(source_owner("git@gitlab.com:group/sub/repo.git").unwrap().as_deref(), Some("gitlab.com/group"));
-        assert!(git_source("ssh://git@[::1]:2222/team/repo").is_ok());
+        let owners = vec!["gitlab.com/group".to_string(), "git.example.org/team".to_string()];
+        assert!(is_trusted(&owners, &src("https://gitlab.com/group/sub/repo.git")));
+        assert!(is_trusted(&owners, &src("ssh://git@git.example.org:2222/team/repo")));
+        assert!(is_trusted(&owners, &src("git@gitlab.com:group/sub/repo.git")));
+        assert!(!is_trusted(&owners, &src("https://gitlab.com/groupx/repo")));
+        assert!(!is_trusted(&owners, &src("https://github.com.evil.io/almide/json")));
+    }
+
+    #[test]
+    fn owner_args_read_with_the_source_grammar() {
+        assert_eq!(owner_arg("someone").unwrap().to_string(), "github.com/someone");
+        assert_eq!(owner_arg("https://gitlab.com/group/sub/").unwrap().to_string(), "gitlab.com/group/sub");
+        assert!(owner_arg("-x").is_err());
+        assert!(owner_arg("github.com/a b").is_err());
     }
 
     #[test]
     fn near_names_suggest_and_never_substitute() {
-        assert!(suggestion("https://github.com/almide-lang/csv").unwrap().contains("almide add csv"));
-        assert!(suggestion("https://github.com/almide/csvv").unwrap().contains("almide add csv"));
-        assert!(suggestion("https://github.com/alice/almide-bindgen").unwrap().contains("almide add bindgen"));
-        assert!(suggestion("https://github.com/almlde/whatever").unwrap().contains("github.com/almide/whatever"));
-        assert_eq!(suggestion("https://github.com/alice/totally-unrelated-thing"), None);
-        assert_eq!(suggestion("https://github.com/alice/mydfa"), None, "two edits on a five-letter name is noise");
+        assert!(suggestion(&src("https://github.com/almide-lang/csv")).unwrap().contains("almide add csv"));
+        assert!(suggestion(&src("https://github.com/almide/csvv")).unwrap().contains("almide add csv"));
+        assert!(suggestion(&src("https://github.com/alice/almide-bindgen")).unwrap().contains("almide add bindgen"));
+        assert!(suggestion(&src("https://github.com/almlde/whatever")).unwrap().contains("github.com/almide/whatever"));
+        assert_eq!(suggestion(&src("https://github.com/alice/totally-unrelated-thing")), None);
+        assert_eq!(suggestion(&src("https://github.com/alice/mydfa")), None, "two edits on a five-letter name is noise");
         // A sibling Almide owner is not a lookalike: the epoch-14/15 removal
         // hints name almide-graphics/nn.
-        assert_eq!(suggestion("https://github.com/almide-graphics/nn"), None);
-        assert!(!is_trusted(&[], "github.com/almide-graphics"), "a sibling owner still needs a grant");
+        assert_eq!(suggestion(&src("https://github.com/almide-graphics/nn")), None);
+        assert!(!is_trusted(&[], &src("https://github.com/almide-graphics/nn")), "a sibling owner still needs a grant");
     }
 
     #[test]
