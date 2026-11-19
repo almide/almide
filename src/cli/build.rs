@@ -505,7 +505,7 @@ pub(crate) fn alloc_count_armed() -> bool {
 pub(crate) fn inject_fs_scope(rs_code: String, roots: Option<Vec<String>>) -> String {
     let Some(roots) = roots else { return rs_code };
     // The certified renderer installs its scope before the artifact is bound.
-    if !almide_codegen::rust_idents::identifiers(&rs_code).any(|id| id.starts_with("almide_rt_fs_")) || rs_code.starts_with(almide_codegen::fs_scope::SCOPE_MARKER) {
+    if rs_code.starts_with(almide_codegen::fs_scope::SCOPE_MARKER) || !almide_codegen::fs_scope::FsScope::applies_to(&rs_code) {
         return rs_code;
     }
     let marker = almide::codegen::RT_BOUNDARY_MARKER;
@@ -519,7 +519,10 @@ pub(crate) fn inject_fs_scope(rs_code: String, roots: Option<Vec<String>>) -> St
         let m = almide::codegen::RUNTIME_MODULE;
         (format!("crate::{m}::"), format!("use crate::{m}::*;\n"))
     };
-    let scope = almide_codegen::fs_scope::FsScope::new(&roots, &rt_path, &rt_use, user);
+    let scope = almide_codegen::fs_scope::FsScope::new(&roots, &rt_path, &rt_use, user).unwrap_or_else(|e| {
+        err(&format!("error: {e}"));
+        std::process::exit(1)
+    });
     let user = scope.wrap_calls(user);
     if head.is_empty() {
         splice_after_inner_attrs(&user, &scope.prelude)

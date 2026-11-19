@@ -80,6 +80,16 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Starts a child process; names the parameter carrying the command
     // (#4817): `[permissions] proc` charges every fn reaching one (src/cli/proc_spawn.rs)
     "spawns_process",
+    // A runtime intrinsic's path operand under `[permissions] fs` (C-393,
+    // #4825 #4832): `@fs_path(p)` / `@fs_path(src, dst)` a path the call
+    // touches, `@fs_glob(p)` a pattern judged by its literal base,
+    // `@fs_temp(p)` a call that creates in the temp dir, `@fs_root(p)` a
+    // rooted call's root. The native guards are read off these
+    // (crates/almide-codegen fs_scope.rs)
+    "fs_path",
+    "fs_glob",
+    "fs_temp",
+    "fs_root",
     // Decodes untrusted input into its `Decode`-bounded type parameters
     // (row 22, C-436): each must bind an input type — a `: Decode` record
     // that is not also `Encode` — or the call is E110 (crates/almide-frontend

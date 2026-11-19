@@ -90,10 +90,12 @@ local fn __raw(f: Fd) -> Int = match f {
 
 // ── The runtime leaves (the descriptor's raw OS number) ──
 @intrinsic("almide_rt_unix___os_connect")
+@fs_path(path)
 @category("Net.fetch")
 effect fn __os_connect(path: String) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_listen")
+@fs_path(path)
 @category("Net.listen")
 effect fn __os_listen(path: String) -> Result[Int, String] = _
 

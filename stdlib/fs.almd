@@ -20,6 +20,7 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 // directory keeps its EISDIR. A bigger file streams through fold_lines.
 /// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 @intrinsic("almide_rt_fs_read_text")
+@fs_path(path)
 effect fn read_text(path: String) -> Result[String, String] = _
 
 // Whole-file access is the matrix {read, write, append} x {text, bytes}
@@ -27,23 +28,27 @@ effect fn read_text(path: String) -> Result[String, String] = _
 // one byte container (R-fs-01).
 /// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
+@fs_path(path)
 effect fn read_bytes(path: String) -> Result[Bytes, String] = _
 
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
+@fs_path(path)
 @category("FS.write")
 effect fn write_text(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
 @intrinsic("almide_rt_fs_write_bytes")
+@fs_path(path)
 @category("FS.write")
 effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
+@fs_path(path)
 @category("FS.write")
 effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 
@@ -55,21 +60,25 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 /// Appends data verbatim; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append_bytes")
+@fs_path(path)
 @category("FS.write")
 effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
 @intrinsic("almide_rt_fs_mkdir_p")
+@fs_path(path)
 @category("FS.write")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
 /// False if missing or a dangling symlink.
 @intrinsic("almide_rt_fs_exists")
+@fs_path(path)
 effect fn exists(path: String) -> Bool = _
 
 /// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 @intrinsic("almide_rt_fs_read_lines")
+@fs_path(path)
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
 // Streaming line readers: walk the file line-by-line without materializing a
@@ -91,10 +100,12 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 // omission the family gate pins.
 /// Streamed fold over lines; err if missing.
 @intrinsic("almide_rt_fs_fold_lines")
+@fs_path(path)
 effect fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 /// Calls f per line, streamed; may err mid-file.
 @intrinsic("almide_rt_fs_for_each_line")
+@fs_path(path)
 effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String] = _
 
 // The ADR-0006 fallible carriers. NOT spellings: the checker rewrites
@@ -106,9 +117,11 @@ effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, Strin
 // user error type — so a callback here is checked against a `String` channel
 // (ADR-0021 D1-1) and a typed `!` in it erases to its Debug text.
 @intrinsic("almide_rt_fs_fold_lines_effect")
+@fs_path(path)
 effect fn __fallible_fold_lines[A](path: String, init: A, f: (A, String) -> Result[A, String]) -> Result[A, String] = _
 
 @intrinsic("almide_rt_fs_for_each_line_effect")
+@fs_path(path)
 effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = _
 
 // The chunk worker's walker: fold exactly the lines owned by the byte range
@@ -117,6 +130,7 @@ effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, Str
 // exactly once, and per-chunk partials merge afterwards.
 /// Folds lines starting in bytes [start, end).
 @intrinsic("almide_rt_fs_fold_lines_range")
+@fs_path(path)
 effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 // Chunk-PARALLEL fold: N workers each fold their byte-range partition on
@@ -128,6 +142,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 /// Parallel chunk partials, in order; [] if empty.
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
+@fs_path(path)
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path
@@ -140,53 +155,64 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 // over 1 GiB is an err, never none (#4201, the plain readers' bound).
 /// Text, or none if missing; err if not UTF-8.
 @intrinsic("almide_rt_fs_read_text_if_exists")
+@fs_path(path)
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
 /// File Bytes, or none if missing.
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
+@fs_path(path)
 effect fn read_bytes_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// read_lines result, or none if missing.
 @intrinsic("almide_rt_fs_read_lines_if_exists")
+@fs_path(path)
 effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove")
+@fs_path(path)
 @category("FS.write")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
 /// Sorted names (not paths); err if not a dir.
 @intrinsic("almide_rt_fs_list_dir")
+@fs_path(path)
 effect fn list_dir(path: String) -> Result[List[String], String] = _
 
 /// True for a dir; follows symlinks.
 @intrinsic("almide_rt_fs_is_dir")
+@fs_path(path)
 effect fn is_dir(path: String) -> Bool = _
 
 /// True for a regular file; follows symlinks.
 @intrinsic("almide_rt_fs_is_file")
+@fs_path(path)
 effect fn is_file(path: String) -> Bool = _
 
 /// Copies src to dst; overwrites dst.
 @ordered
 @intrinsic("almide_rt_fs_copy")
+@fs_path(src, dst)
 @category("FS.read", "FS.write")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
 @ordered
 @intrinsic("almide_rt_fs_rename")
+@fs_path(src, dst)
 @category("FS.write")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Sorted paths below dir; links listed, not followed.
 @intrinsic("almide_rt_fs_walk")
+@fs_path(dir)
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
 /// Deletes a tree or file; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove_all")
+@fs_path(path)
 @category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
@@ -198,26 +224,31 @@ effect fn temp_dir() -> String = _
 
 /// Size, kind and mtime; err if missing.
 @intrinsic("almide_rt_fs_stat")
+@fs_path(path)
 effect fn stat(path: String) -> Result[FileStat, String] = _
 
 /// Sorted * and ** matches; links not followed.
 @intrinsic("almide_rt_fs_glob")
+@fs_glob(pattern)
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
 /// New private file, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
+@fs_temp(prefix)
 @category("FS.write")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New private dir, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
+@fs_temp(prefix)
 @category("FS.write")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
 /// True for a symlink, even a dangling one.
 @intrinsic("almide_rt_fs_is_symlink")
+@fs_path(path)
 effect fn is_symlink(path: String) -> Bool = _
 
 // Rooted access (#4022, R-fs-06): the analogue of Go 1.24's `os.Root`. A
@@ -284,23 +315,29 @@ local fn __root_answer[A](r: Result[A, String], path: String) -> Result[A, Strin
 // the plain call on `<root>/<segments>` answers, or `fs: path escapes root`
 // for a symlink anywhere on the way.
 @intrinsic("almide_rt_fs___root_read_text")
+@fs_root(at)
 effect fn __root_read_text(at: String) -> Result[String, String] = _
 
 @intrinsic("almide_rt_fs___root_read_bytes")
+@fs_root(at)
 effect fn __root_read_bytes(at: String) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_fs___root_list_dir")
+@fs_root(at)
 effect fn __root_list_dir(at: String) -> Result[List[String], String] = _
 
 // One byte when the entry exists, none when it does not.
 @intrinsic("almide_rt_fs___root_exists")
+@fs_root(at)
 effect fn __root_exists(at: String) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_fs___root_write_text")
+@fs_root(at)
 @category("FS.write")
 effect fn __root_write_text(at: String, content: String) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_fs___root_remove")
+@fs_root(at)
 @category("FS.write")
 effect fn __root_remove(at: String) -> Result[Unit, String] = _
 
