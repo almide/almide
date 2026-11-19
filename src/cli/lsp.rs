@@ -55,8 +55,13 @@ impl AnalyzedDoc {
         // Cross-file import resolution against the caller-provided dep list —
         // analyze itself never fetches.
         let resolved = file_path.map(|fp| resolve_imports_cached(fp, &program, deps));
-        let imports_unresolved = matches!(resolved, Some(None));
-        let resolved_modules = resolved.flatten().unwrap_or_default();
+        let imports_unresolved = matches!(resolved, Some(Err(_)));
+        // #4869: a refused import is published, as `check` reports it.
+        let refusals = match (&resolved, file_path) {
+            (Some(Err(e)), Some(fp)) => import_refusal_diagnostics(fp, &program, deps, e),
+            _ => Vec::new(),
+        };
+        let resolved_modules = resolved.and_then(Result::ok).unwrap_or_default();
 
         let canon = crate::canonicalize::canonicalize_program(
             &program,
@@ -75,6 +80,7 @@ impl AnalyzedDoc {
         let check_diags = checker.infer_program(&mut program);
         let is_stdlib = file_path.map_or(false, |fp| fp.contains("/stdlib/"));
         let mut diags = parse_errors;
+        diags.extend(refusals.iter().map(|d| diag_from_almide(d, &src_lines)));
         for d in &check_diags {
             // Suppress E015 (reimpl-lint) for stdlib source files
             if is_stdlib && d.code.as_deref() == Some("E015") { continue; }

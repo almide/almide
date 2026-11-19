@@ -1028,3 +1028,91 @@ fn lsp_survive_refuses_a_uri_outside_the_workspace_and_never_fetches() {
     let cloned = std::fs::read_dir(&cache).map(|mut d| d.next().is_some()).unwrap_or(false);
     assert!(!cloned, "almide/survive cloned into the dependency cache ({})", cache.display());
 }
+
+/// The probe project of #4869: a path dependency whose `src/ext` is a link
+/// out of the package (`linked`), or the same files with `src/ext` a real
+/// directory inside it (the control).
+#[cfg(unix)]
+fn symlinked_submodule_project(root: &Path, linked: bool) -> std::path::PathBuf {
+    let _ = std::fs::remove_dir_all(root);
+    let proj = root.join("proj");
+    for d in ["src", "dep/src", "outside"] {
+        std::fs::create_dir_all(proj.join(d)).unwrap();
+    }
+    std::fs::write(proj.join("almide.toml"), "[package]\nname = \"probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = { path = \"dep\" }\n").unwrap();
+    std::fs::write(proj.join("dep/almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(proj.join("dep/src/mod.almd"), "fn hello() -> String = \"hi\"\n").unwrap();
+    let evil = "fn evil() -> String = \"outside the package\"\n";
+    if linked {
+        std::fs::write(proj.join("outside/evil.almd"), evil).unwrap();
+        std::os::unix::fs::symlink("../../outside", proj.join("dep/src/ext")).unwrap();
+    } else {
+        std::fs::create_dir_all(proj.join("dep/src/ext")).unwrap();
+        std::fs::write(proj.join("dep/src/ext/evil.almd"), evil).unwrap();
+    }
+    let main = proj.join("src/main.almd");
+    std::fs::write(&main, MAIN_THROUGH_SUBMODULE).unwrap();
+    main
+}
+
+#[cfg(unix)]
+const MAIN_THROUGH_SUBMODULE: &str = "import dep.ext.evil\n\neffect fn main() -> Unit = println(evil.evil())\n";
+
+/// The diagnostics the editor publishes for `main`, with the server started in `cwd`.
+#[cfg(unix)]
+fn published_for(main: &Path, cwd: &Path) -> Vec<Value> {
+    let mut c = LspClient::start_with(None, None, Some(cwd));
+    let uri = file_uri(main);
+    c.open_file(&uri, MAIN_THROUGH_SUBMODULE);
+    let msg = c.recv();
+    c.shutdown();
+    assert_eq!(msg["method"].as_str(), Some("textDocument/publishDiagnostics"), "{msg}");
+    msg["params"]["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
+/// #4869: an import through a symlinked sub-module of a path dependency is
+/// refused by every compile route (`sub-module 'dep.ext.evil' not found`); the
+/// editor ran the same loader and dropped its refusal, so the file showed
+/// clean. It now publishes the refusal on the import, whether the server runs
+/// inside the project or outside it, and the text is the one `check` prints.
+/// The control is the same project with `src/ext` a real directory: it loads,
+/// and nothing is published, so the refusal is the link's and not the path's.
+#[cfg(unix)]
+#[test]
+fn lsp_publishes_the_loader_refusal_of_a_symlinked_submodule() {
+    let base = std::env::temp_dir().join(format!("almide_lsp_4869_{}", std::process::id()));
+    let main = symlinked_submodule_project(&base.join("linked"), true);
+    let proj = main.parent().unwrap().parent().unwrap().to_path_buf();
+    let check = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["check", "src/main.almd"])
+        .current_dir(&proj)
+        .output()
+        .unwrap();
+    let check_err = String::from_utf8_lossy(&check.stderr).to_string();
+    assert!(!check.status.success(), "check must refuse the linked sub-module: {check_err}");
+    assert!(check_err.contains("sub-module 'dep.ext.evil' not found"), "{check_err}");
+    for cwd in [proj.clone(), std::env::temp_dir()] {
+        let diags = published_for(&main, &cwd);
+        let refusal = diags.iter()
+            .find(|d| d["message"].as_str().is_some_and(|m| m.contains("sub-module 'dep.ext.evil' not found")))
+            .unwrap_or_else(|| panic!("no refusal published (server cwd {}): {:?}", cwd.display(), diags));
+        assert_eq!(refusal["severity"].as_i64(), Some(1), "the refusal is an error: {refusal}");
+        assert_eq!(refusal["range"]["start"]["line"].as_i64(), Some(0), "the refusal sits on the import: {refusal}");
+        // The paths it lists are as the route was handed the file (absolute
+        // from a URI, relative from the command line); the refusal line is one.
+        let message = refusal["message"].as_str().unwrap().lines().next().unwrap();
+        assert!(check_err.lines().any(|l| l.contains(message)), "the editor's text {message:?} is not check's: {check_err}");
+    }
+
+    let control = symlinked_submodule_project(&base.join("control"), false);
+    let control_proj = control.parent().unwrap().parent().unwrap().to_path_buf();
+    let checked = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["check", "src/main.almd"])
+        .current_dir(&control_proj)
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "the control must load: {}", String::from_utf8_lossy(&checked.stderr));
+    let diags = published_for(&control, &control_proj);
+    assert!(diags.iter().all(|d| d["severity"].as_i64() != Some(1)), "the control published an error: {diags:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}
