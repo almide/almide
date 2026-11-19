@@ -23,7 +23,11 @@ PkgId { name: String, major: u64 }
 
 ## 3. Version Resolution: MVS
 
-When multiple dependents request the same package (same name, same major):
+A package is its **origin** — the typed git source and the directory in it
+(`subdir`), or the canonical local directory of a `path` dependency — not the
+name it declares for itself (#4834). MVS selects among versions of one
+origin. When multiple dependents request the same package (same origin, same
+major):
 
 ```text
 B requires D >= 1.2.0
@@ -39,6 +43,25 @@ C requires D v2.x (major=2)
 → both coexist as separate modules (D_v1, D_v2)
 → D_v1.Logger ≠ D_v2.Logger (different types)
 ```
+
+Two different origins that declare the same `[package] name` (at any major)
+are refused, naming both origins and the chain that asked for each: `import
+<name>` can name only one package, and a selection between two sources would
+put one in the other's place without a word (before #4834 a transitive
+package from another source that declared the root's dependency's name at a
+higher version replaced it, and `[permissions] native` followed the name).
+A native grant covers the origin the root manifest declares under that name.
+
+```text
+error: two sources declare the package `codec`
+  path /work/jsona (required by app → codec)
+  path /work/jsonb (required by app → util → jsonfork)
+  note: `import codec` can name only one of them; almide never picks one over the other
+```
+
+Tests: `tests/mvs_resolution_test.rs` (one repository at two tags, both
+declaration orders), `tests/dep_package_identity_test.rs` (two path origins,
+and two git origins under a native grant, each refused naming both).
 
 ## 4. Module Boundaries
 
@@ -510,7 +533,10 @@ Segment   = [A-Za-z0-9_] [A-Za-z0-9._-]{0,99}   -- never starts with "-" or ".",
 ```
 
 Any git host, any path depth, a port, `https://`, `ssh://` and the scp-like
-`user@host:owner/repo` (normalized to `ssh://user@host/owner/repo`) are kept;
+`user@host:owner/repo` are kept. The scp-like form keeps git's meaning — a
+path relative to the remote user's home, a typed `root: HomeRelative` that is
+part of the identity — and is printed in its own form; `user@host:/a/b` is
+the absolute `ssh://user@host/a/b`;
 a `.git` suffix is not part of the identity. Refused, each on its manifest
 line with a diagnostic that prints the canonical form when there is one: a
 component starting with `-`; a `?` or `#`; a password or token in the user
@@ -528,7 +554,8 @@ tree is bound to the commit id. It honours `HTTPS_PROXY` / `NO_PROXY` and
 `SSL_CERT_FILE` / `SSL_CERT_DIR`, follows no redirect (a moved repository is
 reported with its new location) and sends no credentials. An ssh source
 starts exactly one program, `ssh -o SendEnv=GIT_PROTOCOL [-p PORT] [-l USER]
--- HOST git-upload-pack '/a/b'`, built only from typed fields; host-key
+-- HOST git-upload-pack '/a/b'` (`'a/b'` for a home-relative source), built
+only from typed fields; host-key
 checking is the user's ssh configuration. Nothing else on the fetch path
 starts a process.
 
@@ -573,7 +600,10 @@ removes them.
 Open in the ADR's trust boundary: TLS and its roots, the user's ssh host
 keys, the in-process client, sha256, the host on the first fetch, and the
 package author (held by `[permissions]`, not here). A private https
-repository is not reachable (no credentials are sent); fetch it over ssh.
+repository is not reachable (no credentials are sent): an https answer of
+401 or 403 is refused with the ssh form to write instead
+(`` git = "git@github.com:owner/repo" ``). Reading `~/.netrc` keyed by the
+exact `(transport, host, port)` is a later step.
 
 Tests: `tests/dep_source_hardening_test.rs` (every refused form in the root
 and in a dependency's manifest; a non-hash lock commit and sum),
@@ -583,7 +613,8 @@ naming the entry with nothing cached; a cache entry edited, extended, emptied
 or given a link, refused cache-only and fetched again online; a lock sum that
 does not match; `--locked` and a lock without sums),
 `tests/fetch_spawn_gate_test.rs` (the spawn gate and its negative controls,
-and an ssh source fetched through a stub `ssh` whose argv is checked), the
+and an scp-like and an `ssh://` source fetched through a stub `ssh`, each
+argv checked exactly), the
 `git_source`, `package_tree` and `fetch` unit tests. Every dependency test is
 served by `tests/support/git_host.rs`, an in-test https git host reached
 through `HTTPS_PROXY` and `SSL_CERT_FILE`.
