@@ -221,7 +221,6 @@ call:float.nan
 call:float.parse
 call:float.pow
 call:float.round
-call:float.sign
 call:float.to_bits
 call:float.to_fixed
 call:float.to_string
@@ -328,7 +327,6 @@ call:int.__almd_mono4_from__UInt8
 call:int.abs
 call:int.band
 call:int.bit_reverse
-call:int.bit_width
 call:int.bor
 call:int.bshl
 call:int.bshr
@@ -346,7 +344,6 @@ call:int.min_value
 call:int.next_power_of_two
 call:int.parse
 call:int.parse_radix
-call:int.pop_count
 call:int.pow
 call:int.prev_power_of_two
 call:int.rotate_left
