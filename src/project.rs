@@ -929,7 +929,10 @@ pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
     let mut dir = start;
     while let Some(d) = dir {
         let candidate = d.join("almide.toml");
-        if candidate.is_file() {
+        // Whatever stands there governs — a link to a device, a dangling
+        // link, a directory — and the reader refuses what is not a regular
+        // file; skipping it would build under the manifest above, or none.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             return Some(candidate);
         }
         dir = d.parent().map(std::path::Path::to_path_buf);
