@@ -7,6 +7,7 @@ pub mod env;
 pub mod budget;
 pub mod names;
 pub mod profile;
+pub mod private_dir;
 pub mod fs_errno;
 /// C-418's one escaper for user data in runtime error texts (#4126).
 pub mod err_text;
