@@ -909,6 +909,18 @@ impl BoundedCx<'_, '_> {
             );
             return;
         };
+        // #4840: a receiver the checker typed as a VALUE (a parameter or local,
+        // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
+        // through that value: indirect, never a stdlib member.
+        if self.checker.type_map.get(&object.id).is_some() {
+            self.err(
+                "an indirect call is not admissible in a @bounded function",
+                "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
+                "E074",
+                call.span,
+            );
+            return;
+        }
         let m0 = module.as_str();
         let resolved = self
             .checker

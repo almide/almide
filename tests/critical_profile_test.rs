@@ -245,3 +245,16 @@ fn a_selectively_imported_print_named_fn_is_judged_by_its_target() {
         assert!(err.contains("E074") || err.contains("E076"), "`{f}`: {err}");
     }
 }
+
+/// #4840: a receiver named like a pure stdlib module (`math`) but bound to a
+/// value made `math.run(n)` read as a stdlib member; it is an indirect call
+/// through the value's field, E074 under the profile.
+#[test]
+fn a_value_named_like_a_module_is_an_indirect_callee() {
+    let src = "type Box = { run: (Int) -> Int }\n\nfn go(math: Box, n: Int) -> Int = math.run(n)\n\nfn main() -> Unit = {\n  let b = Box { run: (x) => x + 1 }\n  println(int.to_string(go(b, 1)))\n}\n";
+    let (crit, err) = check(src, "shadow_math.almd", &["--profile", "critical"]);
+    assert!(!crit, "`math.run(n)` through a value passed --profile critical:\n{err}");
+    assert!(err.contains("E074"), "{err}");
+    let (normal, err) = check(src, "shadow_math.almd", &[]);
+    assert!(normal, "the normal check rejected the program:\n{err}");
+}
