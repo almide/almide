@@ -254,7 +254,7 @@ fn a_value_named_like_a_module_is_an_indirect_callee() {
     let src = "type Box = { run: (Int) -> Int }\n\nfn go(math: Box, n: Int) -> Int = math.run(n)\n\nfn main() -> Unit = {\n  let b = Box { run: (x) => x + 1 }\n  println(int.to_string(go(b, 1)))\n}\n";
     let (crit, err) = check(src, "shadow_math.almd", &["--profile", "critical"]);
     assert!(!crit, "`math.run(n)` through a value passed --profile critical:\n{err}");
-    assert!(err.contains("E074"), "{err}");
+    assert!(err.contains("indirect call") && err.contains("shadow_math.almd:3:"), "no E074 at `math.run(n)` (line 3):\n{err}");
     let (normal, err) = check(src, "shadow_math.almd", &[]);
     assert!(normal, "the normal check rejected the program:\n{err}");
 }
