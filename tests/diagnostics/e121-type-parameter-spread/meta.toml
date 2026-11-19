@@ -1,4 +1,4 @@
 expects_code = "E121"
 expects_error = "cannot spread a value of type parameter 'A': its fields are not known here"
 hint_substring = "bound it with a record shape, `[A: { .. }]`"
-expects_line_col = "6:25"
+expects_line_col = "6:30"
