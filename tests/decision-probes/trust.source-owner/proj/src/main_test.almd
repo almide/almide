@@ -1,0 +1,6 @@
+// The probe of trust.source-owner: a dependency from an owner [trust] does not name.
+import untrusted
+
+test "an untrusted owner" {
+  assert_eq(untrusted.hello(), "x")
+}

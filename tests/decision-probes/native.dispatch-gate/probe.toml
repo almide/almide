@@ -1,0 +1,2 @@
+# A dependency that brings native code the manifest does not grant.
+expect = "brings native code"

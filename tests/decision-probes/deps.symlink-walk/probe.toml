@@ -1,0 +1,3 @@
+# An import through a link under a dependency's src/ is not followed (#4813):
+# the module behind it exists and would load if the link were followed.
+expect = "sub-module 'dep.ext.evil' not found"

@@ -1,0 +1,7 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+codec = { path = "one", version = "1.0.0" }
+util = { path = "util" }

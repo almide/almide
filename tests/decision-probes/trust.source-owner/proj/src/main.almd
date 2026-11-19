@@ -1,0 +1,4 @@
+// The probe of trust.source-owner: a dependency from an owner [trust] does not name.
+import untrusted
+
+effect fn main() -> Unit = println(untrusted.hello())

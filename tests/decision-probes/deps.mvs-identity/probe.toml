@@ -1,0 +1,2 @@
+# Two origins declaring one package name are refused, naming both (#4834).
+expect = "two sources declare the package"

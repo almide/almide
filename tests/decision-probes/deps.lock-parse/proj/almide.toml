@@ -1,0 +1,9 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+locked = { git = "https://probe-lock.invalid/probe-owner/pkg", tag = "v0.1.0" }
+
+[trust]
+owners = ["probe-lock.invalid/probe-owner"]

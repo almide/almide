@@ -1,0 +1,3 @@
+# A git dependency from an owner no grant names is refused before any fetch
+# (the host is under .invalid: a fetch would fail with a different message).
+expect = "an owner this project does not trust"

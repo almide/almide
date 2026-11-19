@@ -35,17 +35,30 @@ fn project(manifest_extra: &str, files: &[(&str, String)]) -> (tempfile::TempDir
 /// effect.fan-ordered-reach (#4856): fan arms that call fresh fns through fn
 /// VALUES — the walk cannot see which fn each value holds — run in arm order:
 /// the reader in arm 1 sees what the writer in arm 0 wrote after a sleep.
+/// Two shapes: the fn values as parameters of the fan's own fn (an `Rc`
+/// capture, so the arms ran inline even before #4856), and the fn values read
+/// from a top-level `let` inside a helper the arms call (no capture: before
+/// #4856 the arms ran on threads and the reader saw `old`).
 #[test]
 fn novel_fan_arms_through_fn_values_run_in_order() {
     let (w, r, go) = (novel::ident("write_late"), novel::ident("read_early"), novel::ident("both"));
-    let prog = format!(
-        "import env\nimport fs\n\neffect fn {w}(path: String) -> Result[String, String] = {{\n  env.sleep_ms(80)\n  fs.write_text(path, \"new\")!\n  ok(\"wrote\")\n}}\n\neffect fn {r}(path: String) -> Result[String, String] = ok(fs.read_text(path)!)\n\neffect fn {go}(a: (String) -> Result[String, String], b: (String) -> Result[String, String], p: String) -> Unit = {{\n  let (x, y) = fan {{\n    a(p)!\n    b(p)!\n  }}\n  println(\"${{x}} ${{y}}\")\n}}\n\neffect fn main() -> Unit = {{\n  let d = fs.create_temp_dir(\"novelFan\")!\n  let p = d + \"/f.txt\"\n  fs.write_text(p, \"old\")!\n  {go}({w}, {r}, p)!\n  fs.remove_all(d)!\n}}\n"
+    let (ops, call) = (novel::ident("ops"), novel::ident("call_op"));
+    let writer_reader = format!(
+        "import env\nimport fs\n\neffect fn {w}(path: String) -> Result[String, String] = {{\n  env.sleep_ms(80)\n  fs.write_text(path, \"new\")!\n  ok(\"wrote\")\n}}\n\neffect fn {r}(path: String) -> Result[String, String] = ok(fs.read_text(path)!)\n\n"
     );
-    let (_t, proj) = project("", &[("src/main.almd", prog)]);
-    for target in [&[][..], &["--target", "wasm"][..]] {
-        let o = run(&proj, &[&["run", "src/main.almd"][..], target].concat());
-        let t = text(&o);
-        assert!(t.contains("wrote new"), "{target:?}: fan arms called through fn values did not run in order:\n{t}");
+    let through_params = format!(
+        "{writer_reader}effect fn {go}(a: (String) -> Result[String, String], b: (String) -> Result[String, String], p: String) -> Unit = {{\n  let (x, y) = fan {{\n    a(p)!\n    b(p)!\n  }}\n  println(\"${{x}} ${{y}}\")\n}}\n\neffect fn main() -> Unit = {{\n  let d = fs.create_temp_dir(\"novelFan\")!\n  let p = d + \"/f.txt\"\n  fs.write_text(p, \"old\")!\n  {go}({w}, {r}, p)!\n  fs.remove_all(d)!\n}}\n"
+    );
+    let through_a_top_level_let = format!(
+        "{writer_reader}let {ops}: List[(String) -> Result[String, String]] = [{w}, {r}]\n\neffect fn {call}(i: Int, p: String) -> Result[String, String] = {{\n  let f = list.get({ops}, i) ?? ((q) => ok(q))\n  f(p)\n}}\n\neffect fn main() -> Unit = {{\n  let d = fs.create_temp_dir(\"novelFan\")!\n  let p = d + \"/f.txt\"\n  fs.write_text(p, \"old\")!\n  let (x, y) = fan {{\n    {call}(0, p)!\n    {call}(1, p)!\n  }}\n  println(\"${{x}} ${{y}}\")\n  fs.remove_all(d)!\n}}\n"
+    );
+    for prog in [through_params, through_a_top_level_let] {
+        let (_t, proj) = project("", &[("src/main.almd", prog.clone())]);
+        for target in [&[][..], &["--target", "wasm"][..]] {
+            let o = run(&proj, &[&["run", "src/main.almd"][..], target].concat());
+            let t = text(&o);
+            assert!(t.contains("wrote new"), "{target:?}: fan arms called through fn values did not run in order:\n{prog}\n{t}");
+        }
     }
 }
 

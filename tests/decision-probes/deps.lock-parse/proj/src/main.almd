@@ -1,0 +1,4 @@
+// The probe of deps.lock-parse: almide.lock pins the dependency to a path, not a commit.
+import locked
+
+effect fn main() -> Unit = println(locked.hello())

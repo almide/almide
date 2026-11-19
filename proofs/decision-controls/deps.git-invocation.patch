@@ -1,0 +1,19 @@
+# Negative control of deps.git-invocation (proofs/decision-sites.toml): a source with an unknown scheme is read as https and fetched instead of refused
+# control_test: tests/decision_deps_novel_test.rs::novel_source_a_fresh_scheme_helper_or_option_shape_never_reaches_a_fetch
+diff --git a/src/git_source.rs b/src/git_source.rs
+--- a/src/git_source.rs
++++ b/src/git_source.rs
+@@ -301,12 +301,7 @@
+             let transport = match scheme.to_ascii_lowercase().as_str() {
+                 "https" => Transport::Https,
+                 "ssh" => Transport::Ssh,
+-                other => {
+-                    return Err(refuse(format!(
+-                        "its scheme `{}://` is not fetched; only https:// and ssh:// are (a local package is a `path =` dependency)",
+-                        other.escape_debug()
+-                    )))
+-                }
++                _ => Transport::Https,
+             };
+             let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+             (transport, authority, path, false)

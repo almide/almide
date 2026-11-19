@@ -1,0 +1,14 @@
+# Negative control of deps.ref-into-cache-path (proofs/decision-sites.toml): a tag / branch is admitted whatever its components (GitRef::parse checks none), so a path-shaped ref reaches the fetch
+# control_test: tests/decision_deps_novel_test.rs::novel_ref_a_fresh_path_shaped_tag_or_branch_is_refused_on_its_line
+diff --git a/src/git_source.rs b/src/git_source.rs
+--- a/src/git_source.rs
++++ b/src/git_source.rs
+@@ -83,7 +83,7 @@
+         if s.is_empty() {
+             return Err("it is empty".to_string());
+         }
+-        for piece in s.split('/') {
++        for piece in s.split('/').filter(|_| false) {
+             Segment::parse(piece).map_err(|e| e.replace("path segment", "ref component").replace("it has an empty ref component", "it has an empty component (a leading, trailing or doubled `/`)"))?;
+         }
+         Ok(GitRef(s.to_string()))

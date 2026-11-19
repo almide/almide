@@ -3,4 +3,4 @@ name = "probe"
 version = "0.1.0"
 
 [dependencies]
-noveldep = { git = "file:///almide-decision-probe-no-such-repo", tag = "v0.1.0" }
+noveldep = { git = "https://github.com/almide/almide-decision-probe-no-such-repo", tag = "v0.1.0" }

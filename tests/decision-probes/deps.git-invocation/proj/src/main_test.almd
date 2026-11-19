@@ -1,0 +1,6 @@
+// The probe of deps.git-invocation: a source git would read as an option.
+import optsrc
+
+test "an option-shaped source" {
+  assert_eq(optsrc.hello(), "x")
+}

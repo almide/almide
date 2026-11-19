@@ -1,0 +1,4 @@
+// The probe of deps.ref-into-cache-path: a tag that is an absolute path.
+import pathref
+
+effect fn main() -> Unit = println(pathref.hello())

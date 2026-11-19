@@ -448,6 +448,7 @@ impl Checker {
         // one fn because a callee had a `var arms` (#2242). Restore the set
         // the fn entered with (top-level `var`s) on the way out.
         let outer_mutable = self.env.mutable_vars.clone();
+        let outer_mutable_decl = self.env.mutable_decl.clone();
         // `param_vars` is keyed by name the same way: a parameter of one fn
         // must not make a `let` of the same name in the next fn read as a
         // parameter (the E009/E032 hints tell the two apart).
@@ -473,7 +474,10 @@ impl Checker {
             ));
             self.env.define_var(&p.name, ty.clone());
             self.env.param_vars.insert(sym(&p.name));
-            if p.is_mut { self.env.mutable_vars.insert(sym(&p.name)); }
+            if p.is_mut {
+                self.env.mutable_vars.insert(sym(&p.name));
+                self.env.mutable_decl.insert(sym(&p.name), crate::type_env::MutableDecl::Param);
+            }
             if let Some(ref mut default_expr) = p.default {
                 let dty = self.infer_expr(default_expr);
                 // #3185: a default is a value position of the parameter's type.
@@ -551,6 +555,7 @@ impl Checker {
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
         self.env.mutable_vars = outer_mutable;
+        self.env.mutable_decl = outer_mutable_decl;
         self.env.param_vars = outer_params;
         self.env.pop_scope();
     }
@@ -650,6 +655,7 @@ impl Checker {
         let wcs = where_clauses.clone();
         self.env.push_scope();
         let outer_mutable = self.env.mutable_vars.clone();
+        let outer_mutable_decl = self.env.mutable_decl.clone();
         let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
         let prev_test = self.env.in_test_block; self.env.in_test_block = true;
         let mut seen_binds = std::collections::HashMap::new();
@@ -658,6 +664,7 @@ impl Checker {
         self.env.in_test_block = prev_test;
         self.env.can_call_effect = prev_call;
         self.env.mutable_vars = outer_mutable;
+        self.env.mutable_decl = outer_mutable_decl;
         self.env.pop_scope();
     }
 
@@ -665,7 +672,10 @@ impl Checker {
     // declared annotation (pins e.g. an empty-collection element, #…), then
     // refresh `env.top_lets` under both the bare and module-prefixed keys.
     fn check_decl_top_let(&mut self, name: &Sym, ty: &Option<ast::TypeExpr>, value: &mut ast::Expr, mutable: bool) {
-        if mutable { self.env.mutable_vars.insert(sym(name)); }
+        if mutable {
+            self.env.mutable_vars.insert(sym(name));
+            self.env.mutable_decl.insert(sym(name), crate::type_env::MutableDecl::TopLevel);
+        }
         let ity = self.infer_expr(value);
         // A declared type annotation on a top-level `let`/`var` is the
         // source of truth — flow it into the value so an annotated empty

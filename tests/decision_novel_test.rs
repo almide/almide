@@ -205,7 +205,7 @@ fn novel_mcp_check_does_not_fetch_a_fresh_dependency() {
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(
         app.join("almide.toml"),
-        format!("[package]\nname = \"novel_app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ git = \"file:///{src}\", tag = \"v0.1.0\" }}\n"),
+        format!("[package]\nname = \"novel_app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ git = \"https://github.com/almide/{src}\", tag = \"v0.1.0\" }}\n"),
     )
     .unwrap();
     std::fs::write(app.join("main.almd"), format!("import {dep}\n\neffect fn main() -> Unit = println(\"x\")\n")).unwrap();

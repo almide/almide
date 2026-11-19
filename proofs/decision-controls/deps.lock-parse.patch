@@ -1,0 +1,14 @@
+# Negative control of deps.lock-parse (proofs/decision-sites.toml): a lock commit is admitted whatever its text (CommitId::parse accepts anything), so a name, an option or a path pins the fetch
+# control_test: tests/decision_deps_novel_test.rs::novel_lock_a_fresh_commit_or_source_is_refused_at_read_time
+diff --git a/src/git_source.rs b/src/git_source.rs
+--- a/src/git_source.rs
++++ b/src/git_source.rs
+@@ -202,7 +202,7 @@
+ impl CommitId {
+     /// 40 (sha1) or 64 (sha256) lowercase hex digits; nothing else.
+     pub fn parse(s: &str) -> Result<CommitId, String> {
+-        if (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
++        if true || (s.len() == 40 || s.len() == 64) && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+             Ok(CommitId(s.to_string()))
+         } else {
+             Err(format!("`{}` is not a hex commit hash (40 or 64 lowercase hex digits)", s.escape_debug()))

@@ -18,6 +18,7 @@
 //!   [argv] <column> = [...]  replaces a column's default command line
 //!   [expect_by] <column> = "" replaces `expect` for one column (the test
 //!                            route reports a passing refusal-asserting test)
+//!   [mcp] <key> = "..."      extra `almide_check` arguments (`target = "wasm"`)
 //!
 //! For every route cell the row marks `runs`, the probe is driven from INSIDE
 //! the project (cwd = proj, `src/main.almd`) and from OUTSIDE it (cwd = its
@@ -63,6 +64,7 @@ struct Probe {
     main: String,
     test: String,
     expect_by: BTreeMap<String, String>,
+    mcp_args: BTreeMap<String, String>,
 }
 
 fn strs(v: Option<&toml::Value>) -> Vec<String> {
@@ -98,6 +100,11 @@ fn load_probe(id: &str, dir: &Path) -> Probe {
             .and_then(|v| v.as_table())
             .map(|a| a.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
             .unwrap_or_default(),
+        mcp_args: t
+            .get("mcp")
+            .and_then(|v| v.as_table())
+            .map(|a| a.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -109,6 +116,12 @@ fn rows() -> Vec<(Probe, BTreeMap<String, String>)> {
     for r in t.get("site").and_then(|v| v.as_array()).into_iter().flatten() {
         let Some(p) = r.get("probe").and_then(|v| v.as_str()) else { continue };
         let id = r.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // `DECISION_PROBES=a,b` narrows the observer to the named rows.
+        if let Ok(only) = std::env::var("DECISION_PROBES") {
+            if !only.split(',').any(|o| o == id) {
+                continue;
+            }
+        }
         let cells = r
             .get("routes")
             .and_then(|v| v.as_table())
@@ -339,7 +352,11 @@ fn mcp(p: &Probe, at: &Place) -> Result<String, String> {
     {
         let stdin = child.stdin.as_mut().unwrap();
         let init = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"decision_route_matrix","version":"1"}}});
-        let call = serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"almide_check","arguments":{"file":main.to_string_lossy()}}});
+        let mut arguments = serde_json::json!({"file":main.to_string_lossy()});
+        for (k, v) in &p.mcp_args {
+            arguments[k.as_str()] = serde_json::Value::String(v.clone());
+        }
+        let call = serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"almide_check","arguments":arguments}});
         let _ = writeln!(stdin, "{init}");
         let _ = writeln!(stdin, "{call}");
     }

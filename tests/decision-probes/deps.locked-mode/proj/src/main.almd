@@ -1,0 +1,3 @@
+import lockless
+
+effect fn main() -> Unit = println("x")

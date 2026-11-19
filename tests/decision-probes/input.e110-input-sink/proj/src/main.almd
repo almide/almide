@@ -1,0 +1,12 @@
+// The probe of input.e110-input-sink: a request body decoded into a list of a
+// type that is also sent out (E110, #4861).
+import http
+
+type Acct: Codec = { name: String, admin: Bool }
+
+effect fn handle(req: HttpRequest) -> Int = match http.decode_json[List[Acct]](req) {
+  ok(xs) => list.len(xs),
+  err(_) => 0,
+}
+
+effect fn main() -> Unit = println("x")

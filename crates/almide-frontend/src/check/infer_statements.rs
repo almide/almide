@@ -288,7 +288,7 @@ impl Checker {
         self.check_collection_element_types(&final_ty);
         self.env.define_var(name, final_ty);
         self.env.mutable_vars.insert(sym(name));
-        self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+        self.env.mutable_decl.insert(sym(name), crate::type_env::MutableDecl::Local { lambda_depth: self.env.lambda_depth });
         if let Some(target) = effect_target {
             self.env.record_effect_alias(name, target);
         }
@@ -714,7 +714,7 @@ impl Checker {
                 self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
             }
             self.env.mutable_vars.insert(sym(name));
-            self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+            self.env.mutable_decl.insert(sym(name), crate::type_env::MutableDecl::Local { lambda_depth: self.env.lambda_depth });
         }
     }
 

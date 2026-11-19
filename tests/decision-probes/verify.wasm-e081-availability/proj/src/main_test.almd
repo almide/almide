@@ -1,0 +1,9 @@
+import unix
+
+effect fn grab() -> Unit = {
+  let _ = unix.shm_create(64)
+}
+
+test "a call the wasm host does not serve" {
+  grab()!
+}

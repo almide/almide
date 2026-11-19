@@ -1,0 +1,4 @@
+# A lock entry whose commit is a path, not a 40/64 hex id, is refused when the
+# lock is read (the host is under .invalid and trusted: a fetch would fail
+# with a different message).
+expect = "is not a hex commit hash"

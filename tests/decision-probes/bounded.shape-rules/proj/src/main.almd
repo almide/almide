@@ -1,0 +1,12 @@
+// The probe of bounded.shape-rules: a @bounded fn builds a String per
+// iteration through a member no name table listed (E071, #4855).
+@bounded
+fn shape() -> Int = {
+  var n = 0
+  for i in 0..<4 {
+    n = n + string.len(int.to_string(i))
+  }
+  n
+}
+
+effect fn main() -> Unit = println(int.to_string(shape()))

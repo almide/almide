@@ -1,0 +1,6 @@
+// The probe of deps.symlink-walk: dep/src/ext links out of the package.
+import dep.ext.evil
+
+test "a module behind a link" {
+  assert_eq(evil.evil(), "x")
+}

@@ -20,12 +20,27 @@ fn refused(code: &str, prog: &str) {
     assert!(out.contains(&format!("[{code}]")), "a fresh program was admitted ({code} expected):\n{prog}\n{out}");
 }
 
-/// #4859: a closure in a pure fn that changes a top-level `var`.
+fn admitted(prog: &str) {
+    let out = check(prog);
+    assert!(out.contains("exit Some(0)"), "a program the language admits was refused:\n{prog}\n{out}");
+}
+
+/// #4859 (ruled by-design for globals): E011 decides from how the mutated
+/// binding was DECLARED. A fresh local `var` a closure in a pure fn changes is
+/// refused; a fresh module-level `var` and a fresh `mut` parameter changed the
+/// same way are admitted by the language rule (#3317, C-187 family).
 #[test]
-fn novel_e011_a_top_level_var_changed_in_a_closure() {
-    let (g, apply, tally) = (novel::ident("total"), novel::ident("apply"), novel::ident("tally"));
+fn novel_e011_by_declaration_kind() {
+    let (l, apply, f) = (novel::ident("acc"), novel::ident("apply"), novel::ident("tally"));
+    let helper = format!("fn {apply}(ws: List[Int], g: (Int) -> Int) -> Int = list.fold(ws, 0, (a, w) => a + g(w))\n\n");
     refused("E011", &format!(
-        "var {g} = 0\n\nfn {apply}(ws: List[Int], f: (Int) -> Int) -> Int = list.fold(ws, 0, (a, w) => a + f(w))\n\nfn {tally}(ws: List[Int]) -> Int = {apply}(ws, (w) => {{ {g} = {g} + w; w }})\n\neffect fn main() -> Unit = println(int.to_string({tally}([1, 2, 3])))\n"
+        "{helper}fn {f}(ws: List[Int]) -> Int = {{\n  var {l} = 0\n  {apply}(ws, (w) => {{ {l} = {l} + w; w }}) + {l}\n}}\n\neffect fn main() -> Unit = println(int.to_string({f}([1, 2, 3])))\n"
+    ));
+    admitted(&format!(
+        "var {l} = 0\n\n{helper}fn {f}(ws: List[Int]) -> Int = {apply}(ws, (w) => {{ {l} = {l} + w; w }})\n\neffect fn main() -> Unit = println(int.to_string({f}([1, 2, 3])))\n"
+    ));
+    admitted(&format!(
+        "{helper}fn {f}(mut {l}: Int, ws: List[Int]) -> Int = {apply}(ws, (w) => {{ {l} = {l} + w; w }})\n\neffect fn main() -> Unit = {{\n  var n = 0\n  println(int.to_string({f}(n, [1, 2, 3])))\n}}\n"
     ));
 }
 
