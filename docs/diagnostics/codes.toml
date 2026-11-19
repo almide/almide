@@ -12,425 +12,536 @@
 #            and the earliest final tag containing that commit). A new code
 #            takes the version it will ship in.
 #
+# decision — the property a code REFUSES for, when it is one: the domain
+#            (`effect`, `bounded`, `verify`, ...) or `"no"`. A code with a
+#            domain is a decision-site signal: every item that emits it must be
+#            a row of proofs/decision-sites.toml (tests/decision_sites_test.rs).
+#            A new code is classified once, here.
+#
 # One row per documented code; tests/explain_list_test.rs keeps the rows equal
 # to the set of codes the compiler emits.
 
 [E001]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E002]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E003]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E004]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E005]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E006]
 severity = "error"
 since = "0.6.1"
+decision = "effect"
 
 [E007]
 severity = "error"
 since = "0.6.1"
+decision = "effect"
 
 [E008]
 severity = "error"
 since = "0.6.1"
+decision = "effect"
 
 [E009]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E010]
 severity = "error"
 since = "0.6.1"
+decision = "no"
 
 [E011]
 severity = "error"
 since = "0.9.1"
+decision = "effect"
 
 [E012]
 severity = "error"
 since = "0.14.4"
+decision = "no"
 
 [E013]
 severity = "error"
 since = "0.14.5"
+decision = "no"
 
 [E014]
 severity = "error"
 since = "0.15.0"
+decision = "no"
 
 [E015]
 severity = "warning"
 since = "0.15.0"
+decision = "no"
 
 [E016]
 severity = "error"
 since = "0.24.0"
+decision = "no"
 
 [E017]
 severity = "error"
 since = "0.25.0"
+decision = "no"
 
 [E018]
 severity = "error"
 since = "0.25.0"
+decision = "no"
 
 [E019]
 severity = "error"
 since = "0.26.0"
+decision = "no"
 
 [E020]
 severity = "error"
 since = "0.26.8"
+decision = "no"
 
 [E021]
 severity = "error"
 since = "0.26.20"
+decision = "no"
 
 [E022]
 severity = "error"
 since = "0.27.6"
+decision = "no"
 
 [E023]
 severity = "error"
 since = "0.27.6"
+decision = "no"
 
 [E024]
 severity = "error"
 since = "0.27.6"
+decision = "no"
 
 [E025]
 severity = "error"
 since = "0.27.6"
+decision = "no"
 
 [E026]
 severity = "error"
 since = "0.28.0"
+decision = "no"
 
 [E027]
 severity = "error"
 since = "0.29.0"
+decision = "no"
 
 [E028]
 severity = "error"
 since = "0.32.0"
+decision = "no"
 
 [E029]
 severity = "error"
 since = "0.32.0"
+decision = "no"
 
 [E030]
 severity = "error"
 since = "0.32.0"
+decision = "no"
 
 [E031]
 severity = "error"
 since = "0.39.0"
+decision = "no"
 
 [E032]
 severity = "error"
 since = "0.54.0"
+decision = "no"
 
 [E033]
 severity = "error"
 since = "0.54.0"
+decision = "access"
 
 [E034]
 severity = "error"
 since = "0.54.0"
+decision = "no"
 
 [E035]
 severity = "warning"
 since = "0.54.0"
+decision = "no"
 
 [E036]
 severity = "warning"
 since = "0.54.0"
+decision = "no"
 
 [E037]
 severity = "error"
 since = "0.54.0"
+decision = "no"
 
 [E038]
 severity = "error"
 since = "0.54.0"
+decision = "no"
 
 [E041]
 severity = "error"
 since = "0.54.0"
+decision = "no"
 
 [E042]
 severity = "error"
 since = "0.55.0"
+decision = "no"
 
 [E043]
 severity = "error"
 since = "0.55.0"
+decision = "no"
 
 [E044]
 severity = "error"
 since = "0.57.0"
+decision = "no"
 
 [E045]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E046]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E047]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E048]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E049]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E050]
 severity = "error"
 since = "0.57.1"
+decision = "no"
 
 [E051]
 severity = "error"
 since = "0.57.1"
+decision = "front"
 
 [E052]
 severity = "warning"
 since = "0.57.1"
+decision = "no"
 
 [E053]
 severity = "error|warning"
 since = "0.57.1"
+decision = "no"
 
 [E054]
 severity = "error"
 since = "0.57.2"
+decision = "no"
 
 [E055]
 severity = "error"
 since = "0.57.2"
+decision = "no"
 
 [E056]
 severity = "warning"
 since = "0.57.2"
+decision = "no"
 
 [E057]
 severity = "error"
 since = "0.57.2"
+decision = "no"
 
 [E058]
 severity = "error"
 since = "0.58.0"
+decision = "no"
 
 [E059]
 severity = "error"
 since = "0.58.0"
+decision = "no"
 
 [E060]
 severity = "warning"
 since = "0.58.0"
+decision = "no"
 
 [E061]
 severity = "error"
 since = "0.60.0"
+decision = "no"
 
 [E062]
 severity = "warning"
 since = "0.63.0"
+decision = "no"
 
 [E070]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E071]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E072]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E073]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E074]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E075]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E076]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E077]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E078]
 severity = "error"
 since = "0.60.0"
+decision = "bounded"
 
 [E080]
 severity = "error"
 since = "0.60.0"
+decision = "no"
 
 [E081]
 severity = "error"
 since = "0.60.0"
+decision = "verify"
 
 [E082]
 severity = "error"
 since = "0.62.0"
+decision = "verify"
 
 [E083]
 severity = "error"
 since = "0.62.0"
+decision = "verify"
 
 [E084]
 severity = "error"
 since = "0.63.0"
+decision = "no"
 
 [E085]
 severity = "error"
 since = "0.63.0"
+decision = "prim"
 
 [E086]
 severity = "error"
 since = "0.63.0"
+decision = "ownership"
 
 [E087]
 severity = "error"
 since = "0.63.0"
+decision = "ownership"
 
 [E088]
 severity = "error"
 since = "0.63.0"
+decision = "ownership"
 
 [E089]
 severity = "error"
 since = "0.63.0"
+decision = "no"
 
 [E090]
 severity = "error"
 since = "0.66.0"
+decision = "ffi"
 
 [E092]
 severity = "error"
 since = "0.67.0"
+decision = "purity"
 
 [E093]
 severity = "error"
 since = "0.67.0"
+decision = "no"
 
 [E094]
 severity = "error"
 since = "0.67.0"
+decision = "no"
 
 [E095]
 severity = "error"
 since = "0.67.0"
+decision = "effect"
 
 [E096]
 severity = "error"
 since = "0.67.0"
+decision = "no"
 
 [E097]
 severity = "error"
 since = "0.67.0"
+decision = "no"
 
 [E098]
 severity = "error"
 since = "0.68.0"
+decision = "no"
 
 [E099]
 severity = "error"
 since = "0.68.0"
+decision = "no"
 
 [E100]
 severity = "error"
 since = "0.69.0"
+decision = "critical"
 
 [E101]
 severity = "error"
 since = "0.69.0"
+decision = "front"
 
 [E102]
 severity = "error"
 since = "0.69.0"
+decision = "no"
 
 [E103]
 severity = "error"
 since = "0.69.0"
+decision = "secret"
 
 [E104]
 severity = "error"
 since = "0.69.0"
+decision = "no"
 
 [E109]
 severity = "error"
 since = "0.69.0"
+decision = "effect"
 
 [E110]
 severity = "error"
 since = "0.69.0"
+decision = "input"
 
 [E111]
 severity = "error"
 since = "0.69.0"
+decision = "front"
 
 [E112]
 severity = "error"
 since = "0.69.0"
+decision = "front"
 
 [E113]
 severity = "error"
 since = "0.69.0"
+decision = "front"
 
 [E114]
 severity = "error"
 since = "0.69.0"
+decision = "front"
 
 [E116]
 severity = "error"
 since = "0.69.0"
+decision = "media"
 
 [E117]
 severity = "error"
 since = "0.69.0"
+decision = "media"
 
 [E118]
 severity = "error"
 since = "0.69.0"
+decision = "media"
 
 [E119]
 severity = "error"
 since = "0.69.0"
+decision = "ownership"
 
 [E120]
 severity = "error"
 since = "0.69.1"
+decision = "no"
 
 [E420]
 severity = "error"
 since = "0.13.3"
+decision = "access"
