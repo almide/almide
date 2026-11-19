@@ -29,7 +29,7 @@ struct FnLoop<'a> {
     chains: crate::render_native_interp::Chains,
     printed: std::collections::BTreeSet<usize>,
     scalar_defs: std::collections::BTreeSet<usize>,
-    scalar_prints: BTreeMap<usize, (ValueId, bool)>,
+    scalar_prints: BTreeMap<usize, (ValueId, bool, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
     /// The slot snapshots released right after each op (`snapshot_releases`).
@@ -349,17 +349,18 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
             writeln!(st.out, $($arg)*).unwrap();
         }};
     }
-    let Some(&(n, is_bool)) = st.scalar_prints.get(&i) else { return Ok(false) };
+    let Some(&(n, is_bool, stderr)) = st.scalar_prints.get(&i) else { return Ok(false) };
+    let sink = if stderr { "rt_eprintln_fmt" } else { "rt_println_fmt" };
     if st.tys.get(&n) != Some(&NTy::I64) {
         return Err(wall("native: a printed number that is not an Int"));
     }
     st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
     if is_bool {
-        line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
+        line!("{sink}(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
         // By value: a reference would pin the local to memory. Through
         // `AlmideIntText`, the runtime's digit writer (render_native_interp).
-        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
+        line!("{sink}(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
     }
     Ok(true)
 }
@@ -379,10 +380,9 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
     // Printed by the next op and read by nothing else: one println!,
     // the macro `rt_print_str` prints through (a fan program's glue
     // routes that same macro).
-    if let (Some(j), Some(code)) = (
-        crate::render_native_interp::printed_by(func, i, dst),
-        crate::render_native_interp::render_print(pieces, &st.tys),
-    ) {
+    if let Some((j, code)) = crate::render_native_interp::printed_by(func, i, dst)
+        .and_then(|(j, stderr)| Some((j, crate::render_native_interp::render_print(pieces, &st.tys, stderr)?)))
+    {
         st.printed.insert(j);
         st.tys.insert(dst, NTy::Str);
         st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);

@@ -1,0 +1,12 @@
+// ALS-B4 (ADR-0038): a record hole has no fixed text form, so this line builds
+// a string per iteration and is not an output line.
+type Pose = { pos: Int, vel: Int }
+
+@bounded
+effect fn trace(p: Pose) -> Unit = {
+  for t in 0..<4 {
+    println("t=${t} ${p}")
+  }
+}
+
+effect fn main() -> Unit = trace(Pose { pos: 3, vel: 1 })!

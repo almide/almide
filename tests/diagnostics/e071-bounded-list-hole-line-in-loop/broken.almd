@@ -1,0 +1,10 @@
+// ALS-B4 (ADR-0038): a list hole has no direct sink writer, so this line
+// builds a string per iteration and is not an output line.
+@bounded
+effect fn trace(xs: List[Int]) -> Unit = {
+  for t in 0..<4 {
+    println("t=${t} ${xs}")
+  }
+}
+
+effect fn main() -> Unit = trace([3, 1, 4])!

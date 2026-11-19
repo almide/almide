@@ -1,0 +1,10 @@
+// ALS-B4 (ADR-0038): print a scalar read from the list as an output line; it
+// builds no string.
+@bounded
+effect fn trace(xs: List[Int]) -> Unit = {
+  for t in 0..<4 {
+    println("t=${t} len=${list.len(xs)}")
+  }
+}
+
+effect fn main() -> Unit = trace([3, 1, 4])!

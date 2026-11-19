@@ -36,6 +36,8 @@ fn novel_unlisted_members_are_judged_by_their_types() {
     assert!(ok, "control: Int-only members in a counted loop pass:\n{control}\n{out}");
     // #4871: the same rules reach through a callee
     novel_a_callee_allocation_is_followed_by_reach();
+    // ADR-0038: an output line is judged by its hole types
+    novel_an_output_line_of_scalars_is_admitted_by_its_hole_types();
 }
 
 /// #4871: E071 follows a callee by reach. A fresh @bounded helper that
@@ -79,4 +81,80 @@ fn check_critical(prog: &str) -> (bool, String) {
     std::fs::write(&f, prog).unwrap();
     let o = Command::new(env!("CARGO_BIN_EXE_almide")).arg("check").arg(&f).args(["--profile", "critical"]).current_dir(td.path()).output().expect("almide runs");
     (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+
+/// The verdict of one program under `@bounded` (as written) and under
+/// `--profile critical` with the attribute removed.
+fn both(prog: &str) -> [(bool, String); 2] {
+    [check(prog), check_critical(&prog.replace("@bounded\n", ""))]
+}
+
+/// ADR-0038 (bounded.output-line): an OUTPUT LINE — `println` / `eprintln`
+/// whose single argument is an interpolated string, every hole's type having
+/// a direct sink writer — builds no String, so E071 admits it inside a
+/// counted loop; decided from position and types, never from a name.
+///
+/// Novel items: a fresh fn and fresh user types; and every builtin type head
+/// the resolver's registry declares, enumerated at run time, so a type added
+/// later is covered without editing this test. A head whose type is a Copy
+/// scalar with a value text (not heap, not Unit / Never / Handle) must be
+/// admitted as a hole, except the heads whose sink writer does not exist yet
+/// (stage 1 of the ADR: the Floats, whose wasm printer still returns a String
+/// block, and UInt64, whose native text is still a String); every other head
+/// must be refused, String included. The refusals: a record hole, a variant
+/// hole, a list hole, the same interpolation bound with `let`,
+/// `println(int.to_string(i))`, and a String hole.
+#[test]
+fn novel_an_output_line_of_scalars_is_admitted_by_its_hole_types() {
+    let g = novel::ident("line");
+    let rec = format!("R{}", &novel::ident("t")[2..]);
+    let var = format!("V{}", &novel::ident("t")[2..]);
+    // admitted: Int, sized-int and Bool holes in a counted loop of a fresh fn
+    let admitted = format!(
+        "@bounded\nfn {g}(x: Int32, b: Bool) -> Unit = {{\n  for i in 0..<4 {{\n    println(\"t=${{i}} v=${{x}} ok=${{b}}\")\n    eprintln(\"${{i}}\")\n  }}\n}}\n\nfn main() -> Unit = {g}(int32.max_value(), true)\n"
+    );
+    for (ok, out) in both(&admitted) {
+        assert!(ok, "an output line of Int, Int32 and Bool holes was refused:\n{admitted}\n{out}");
+    }
+    // every registry head: admitted iff it is a Copy scalar with a value text
+    use almide_frontend::canonicalize::resolve::{BuiltinArity, BUILTIN_TYPE_HEADS};
+    use almide_types::types::Ty;
+    let mut scalars = 0;
+    for head in BUILTIN_TYPE_HEADS.iter().filter(|h| matches!(h.arity, BuiltinArity::Bare)) {
+        let ty = (head.build)(&[]);
+        let scalar = !almide_types::types::is_heap_ty(&ty) && !matches!(ty, Ty::Unit | Ty::Never | Ty::RawPtr);
+        // ADR-0038 stage 1: no allocation-free writer on every target yet
+        let deferred = matches!(ty, Ty::Float | Ty::Float64 | Ty::Float32 | Ty::UInt64);
+        let scalar = scalar && !deferred;
+        let prog = format!(
+            "@bounded\nfn {g}(x: {}) -> Unit = {{\n  for i in 0..<4 {{\n    println(\"t=${{i}} v=${{x}}\")\n  }}\n}}\n\nfn main() -> Unit = println(\"x\")\n",
+            head.name
+        );
+        for (ok, out) in both(&prog) {
+            if scalar {
+                assert!(ok, "a `{}` hole (a Copy scalar) was refused in an output line:\n{prog}\n{out}", head.name);
+            } else {
+                assert!(!ok, "a `{}` hole (no direct sink writer) was admitted in an output line:\n{prog}\n{out}", head.name);
+            }
+        }
+        scalars += usize::from(scalar);
+    }
+    assert!(scalars >= 9, "the registry enumeration found only {scalars} admissible scalar heads");
+    // refused: no direct sink writer, or not an output line
+    let in_loop = |sig: &str, call: &str, stmt: &str, pre: &str| {
+        format!("{pre}@bounded\nfn {g}({sig}) -> Unit = {{\n  for i in 0..<4 {{\n    {stmt}\n  }}\n}}\n\nfn main() -> Unit = {g}({call})\n")
+    };
+    let refused = [
+        in_loop(&format!("p: {rec}"), &format!("{rec} {{ a: 1, b: 2 }}"), "println(\"t=${i} ${p}\")", &format!("type {rec} = {{ a: Int, b: Int }}\n\n")),
+        in_loop(&format!("v: {var}"), "On", "println(\"t=${i} ${v}\")", &format!("type {var} =\n  | On\n  | Off\n\n")),
+        in_loop("xs: List[Int]", "[1, 2]", "println(\"t=${i} ${xs}\")", ""),
+        in_loop("n: Int", "3", "let s = \"${i} ${n}\"\n    println(s)", ""),
+        in_loop("n: Int", "3", "println(int.to_string(i + n))", ""),
+        in_loop("s: String", "\"a\"", "println(\"t=${i} ${s}\")", ""),
+    ];
+    for prog in &refused {
+        for (ok, out) in both(prog) {
+            assert!(!ok && out.contains("E071"), "a line that builds a String was admitted in a counted loop:\n{prog}\n{out}");
+        }
+    }
 }
