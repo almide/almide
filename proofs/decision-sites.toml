@@ -795,9 +795,9 @@ tests = [
   "tests/critical_profile_test.rs::a_violation_is_seen_through_every_expression_kind",
 ]
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
-issues = [4855]
+issues = [4855, 4871]
 status = "UNSTAMPED"
-reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)"]
+reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)", "c2:fail-open (#4871, probed: an allocating user fn called inside a counted loop is not followed)"]
 note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities."
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
