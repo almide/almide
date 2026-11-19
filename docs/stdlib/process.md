@@ -134,26 +134,33 @@ effect fn main() -> Unit = {
 
 ## Run on this terminal
 
-### `process.run(c: ProcessCommand) -> Result[Int, String]`
+### `process.run(c: ProcessCommand) -> Result[Unit, String]`
 
 Run `c` ON this program's terminal: the child inherits stdout and stderr (and
 stdin too, unless `c.stdin` is set) and stays in this program's process group,
 so pagers, editors, `stty` and anything else that reads or reconfigures the
 terminal work, and a long build streams its output as it runs. This program's
-stdout is flushed before the child starts. Nothing is captured; the answer is
-the exit code (`-1` if the child was killed by a signal). Any exit code is
-`ok`; the `err` cases are a child that cannot start (the err names both `dir`
-and `cmd` when `dir` does not exist) and a passed `timeout_ms`.
+stdout is flushed before the child starts. Nothing is captured. The answer is
+`ok` when the child exits 0, and an `err` naming the call otherwise:
 
-`output` captures the output and returns it; `run` attaches to the terminal
-and returns the exit code.
+- a non-zero exit: `process.run("make"): exited with status 2`;
+- a signal: `process.run("make"): ended by a signal`;
+- a child that cannot start (the err names both `dir` and `cmd` when `dir`
+  does not exist), and a passed `timeout_ms`.
+
+So `process.run(c)!` stops on a failed command, as `process.exec(cmd, args)!`
+does (#4148; before 0.70.0 any exit code was `ok`). To read the exit code
+itself, use `process.output(c)!.code`.
+
+`output` captures the output and returns it with the exit code; `run` attaches
+to the terminal and succeeds or fails.
 
 ```almd check
 import process
 
 effect fn main() -> Unit = {
-  let code = process.run(process.ProcessCommand { cmd: "cargo", args: ["build"], dir: "." })!
-  println("cargo build exited ${code}")
+  process.run(process.ProcessCommand { cmd: "cargo", args: ["test"], dir: "." })!
+  println("tests passed")
 }
 ```
 

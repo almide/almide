@@ -37,15 +37,31 @@ effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_outp
   c.timeout_ms,
 )
 
-/// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+/// Runs c on this terminal (its stdin too, unless c.stdin is set); ok on exit 0, err on any other exit, a signal, a failed start or the deadline.
 @ordered
-effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+effect fn run(c: ProcessCommand) -> Result[Unit, String] = match __os_run(
   c.cmd,
   c.args,
   c.dir,
   c.stdin,
   c.timeout_ms,
-)
+) {
+  ok(0) => ok(()),
+  ok(code) => err("process.run(${__run_operand(c)}): ${__run_ended(code)}"),
+  err(e) => err(e),
+}
+
+// #4148: `process.run(c)!` stops on a failed command, as `exec(cmd, args)!`
+// does. It answered `ok(code)` for any exit, so `process.run(test)!` followed
+// by a deploy deployed after failing tests. The exit code itself is
+// `process.output(c)!.code`. The err names the call the way its spawn errs
+// do (C-214's quoting): `process.run("make"): exited with status 2`.
+local fn __run_ended(code: Int) -> String = if code == -1 then "ended by a signal" else "exited with status ${code}"
+
+local fn __run_operand(c: ProcessCommand) -> String = if c.dir == "" then __quoted(c.cmd)
+else "${__quoted(c.dir)}, ${__quoted(c.cmd)}"
+
+local fn __quoted(s: String) -> String = "\"${string.__err_text(s)}\""
 
 /// Starts c in its own process group and returns at once; its output is captured.
 @ordered

@@ -1436,7 +1436,7 @@ epoch 15; use `hash.sha256`.
 - `net.tcp_read(s, n)` / `net.tcp_read_exact` / `net.tcp_write` / `net.tcp_close` / `net.tcp_close_listener` → **WRONG** (removed). A `net.TcpStream` is an io handle: `io.read(s, n)!`, `io.read_exact(s, n)!`, `io.write(s, data)!`, `io.close(s)!` — `import io` beside `import net`
 - `net.unix_connect` / `net.unix_send` / `net.shm_create` / … → **WRONG** (moved). `import unix`: `unix.connect`, `unix.write_fds`, `unix.select` (was `unix_wait`), `unix.shm_create`; bytes via `io.read` / `io.write` / `io.close` on the `unix.Fd`
 - `process.exec_status` / `exec_status_timeout` / `exec_in` / `exec_with_stdin` → **WRONG** (removed). One record: `process.output(process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo", stdin: "", timeout_ms: 5000 })!` → `{code, stdout, stderr}`; write the type name so `dir` / `stdin` / `timeout_ms` can be left out
-- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` returns the exit code
+- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` runs it on this terminal and stops on a failed command (any non-zero exit is an err); read an exit code with `process.output(c)!.code`
 - a background child: `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
 - `process.exec("sh", ["-c", "git status | head"])` to get a shell → avoid. Programs take argv lists: `process.exec("git", ["status"])!`, and do the piping in Almide
 
