@@ -118,31 +118,50 @@ pub(crate) fn judge(rustc: &str, out: &str) -> Result<(), String> {
     }
 }
 
-/// Checks the build's rustc once per process: the one `find_rustc` runs and,
-/// when set, `$RUSTC` (the one cargo runs). A rustc that cannot be run at all
-/// is not judged here: the spawn that follows reports it as before.
+/// The rustc cargo runs for a native build (#4839): `$RUSTC`, else
+/// `$CARGO_BUILD_RUSTC`, else the one `find_rustc` runs. [`cargo_command`]
+/// hands it to cargo explicitly, so a cargo config's `build.rustc` cannot
+/// pick another.
+fn cargo_rustc() -> String {
+    ["RUSTC", "CARGO_BUILD_RUSTC"]
+        .iter()
+        .find_map(|k| std::env::var_os(k).filter(|r| !r.is_empty()))
+        .map(|r| r.to_string_lossy().into_owned())
+        .unwrap_or_else(locate_rustc)
+}
+
+/// The wrapper settings that would put another program in front of the
+/// judged rustc (#4839). [`cargo_command`] sets each to empty, which turns
+/// the wrapper off whether it came from the environment or a cargo config.
+const RUSTC_WRAPPERS: &[&str] = &["RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"];
+
+/// Checks the build's rustc once per process: the one `find_rustc` runs and
+/// the one cargo runs ([`cargo_rustc`]). A rustc whose version cannot be
+/// read is refused, never skipped (#4839).
 pub(crate) fn require() -> Result<(), String> {
     static VERDICT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
     VERDICT
         .get_or_init(|| {
-            let mut candidates = vec![locate_rustc()];
-            if let Some(r) = std::env::var_os("RUSTC").filter(|r| !r.is_empty()) {
-                candidates.push(r.to_string_lossy().into_owned());
-            }
+            let mut candidates = vec![locate_rustc(), cargo_rustc()];
+            candidates.dedup();
             for rustc in candidates {
-                if let Some(version) = version_output(&rustc) {
-                    judge(&rustc, &version)?;
-                }
+                judge(&rustc, &version_output(&rustc).unwrap_or_default())?;
             }
             Ok(())
         })
         .clone()
 }
 
-/// `cargo`, after the rustc floor holds.
+/// `cargo`, after the rustc floor holds, running exactly the judged rustc:
+/// `RUSTC` names it and every wrapper is off (#4839).
 pub(crate) fn cargo_command() -> Result<std::process::Command, String> {
     require()?;
-    Ok(std::process::Command::new("cargo"))
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.env("RUSTC", cargo_rustc()).env_remove("CARGO_BUILD_RUSTC");
+    for w in RUSTC_WRAPPERS {
+        cmd.env(w, "");
+    }
+    Ok(cmd)
 }
 
 #[cfg(test)]

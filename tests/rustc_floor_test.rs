@@ -135,3 +135,45 @@ fn a_rustc_below_the_floor_is_refused_and_the_floor_itself_builds() {
     let run = Command::new(&out).output().unwrap();
     assert!(String::from_utf8_lossy(&run.stdout).starts_with("floor "), "the accepted build does not run");
 }
+
+/// `almide build` of a fresh program with `envs` set and the real toolchain
+/// first on PATH: (succeeded, stderr).
+fn build_env(envs: &[(&str, &std::ffi::OsStr)]) -> (bool, String) {
+    let tmp = tempfile::tempdir().unwrap();
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let src = tmp.path().join("p.almd");
+    std::fs::write(&src, format!("effect fn main() -> Unit = {{\n  println(\"floor {nonce}\")\n}}\n")).unwrap();
+    let out = tmp.path().join(format!("p{}", std::env::consts::EXE_SUFFIX));
+    let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
+    c.args(["build", src.to_str().unwrap(), "-o", out.to_str().unwrap()])
+        .env("ALMIDE_REAL_RUSTC", real_rustc())
+        .env("ALMIDE_VERSION_PROBES", tmp.path().join("version-probes"))
+        .env("ALMIDE_FAKE_RUSTC_VERSION", "1.70.0")
+        .env_remove("RUSTC")
+        .env_remove("CARGO_BUILD_RUSTC")
+        .current_dir(tmp.path());
+    for (k, v) in envs {
+        c.env(k, v);
+    }
+    let o = c.output().unwrap();
+    (o.status.success(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+
+/// #4839: the rustc cargo would run is judged too, whichever spelling names
+/// it, and a rustc whose version cannot be read is refused, not skipped.
+#[test]
+fn every_spelling_of_the_build_rustc_is_judged() {
+    let stub = tempfile::tempdir().unwrap();
+    fake_rustc(stub.path());
+    let old = stub.path().join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+    for key in ["RUSTC", "CARGO_BUILD_RUSTC"] {
+        let (ok, err) = build_env(&[(key, old.as_os_str())]);
+        assert!(!ok, "{key}=<rustc 1.70.0> was accepted:\n{err}");
+        assert!(err.contains("rustc 1.70.0 is too old"), "{key}: no refusal naming 1.70.0:\n{err}");
+    }
+    // A program that is no rustc at all: its version cannot be read.
+    let not_rustc = stub.path().join("fake_rustc.rs");
+    let (ok, err) = build_env(&[("RUSTC", not_rustc.as_os_str())]);
+    assert!(!ok, "a RUSTC whose version cannot be read was accepted:\n{err}");
+    assert!(err.contains("could not read the rustc version"), "{err}");
+}
