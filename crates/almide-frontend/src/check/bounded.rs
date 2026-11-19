@@ -248,6 +248,32 @@ fn ty_allocates(t: &Ty) -> bool {
     }
 }
 
+/// ADR-0038: does a value of this type have a DIRECT SINK WRITER — can an
+/// output line write it to the stream as it is, without first building a
+/// String, on every target? A closed predicate over the type constructors,
+/// admitting only what both lowerings write with no allocation per line
+/// (measured: the native ALMIDE_ALLOC_COUNT and wasm ALMIDE_WASM_ALLOC_COUNT
+/// counters): the signed ints, the unsigned ints up to 32 bits, and `Bool`.
+/// Every other type answers false (fail closed): a record, a variant, a
+/// container, an `Option`, a type variable, an unknown type, and — until
+/// their sink writers exist — `String` (the gathered write), `UInt64` (its
+/// native text is still built as a String) and the Floats (the wasm float
+/// printer still returns a String block).
+pub(crate) fn ty_has_sink_writer(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::Bool
+    )
+}
+
 /// Run-time-length heap constructors (ALS-B8): fn -> the size-argument slots
 /// that must be compile-time constants.
 const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
@@ -650,8 +676,21 @@ impl BoundedCx<'_, '_> {
             }
             ast::ExprKind::Call { callee, args, .. } => {
                 self.check_call(e, callee, args);
-                for a in args {
-                    self.walk_expr(a);
+                match self.output_line_holes(callee, args) {
+                    // ADR-0038: an output line writes its parts to the sink
+                    // and builds no String, so the interpolation's own E071
+                    // is not raised; every hole is still walked under every
+                    // rule (a hole that computes or allocates is refused).
+                    Some(holes) => {
+                        for h in holes {
+                            self.walk_expr(h);
+                        }
+                    }
+                    None => {
+                        for a in args {
+                            self.walk_expr(a);
+                        }
+                    }
                 }
                 // walk the callee only when it is not a plain name (a lambda
                 // callee must be flagged by its own arm)
@@ -868,6 +907,40 @@ impl BoundedCx<'_, '_> {
                 );
             }
         }
+    }
+
+    /// ADR-0038 §2: is this call an OUTPUT LINE? Decided from position and
+    /// types only: the bare callee resolves to an output builtin (one the
+    /// builtin table describes as writing to stdout or stderr, and no user fn
+    /// of that name), its single argument is written directly as an
+    /// interpolated string, and every hole's checked type has a direct sink
+    /// writer ([`ty_has_sink_writer`]). Returns the hole expressions, which
+    /// the caller still walks under every rule; `None` = not an output line.
+    fn output_line_holes<'e>(&self, callee: &ast::Expr, args: &'e [ast::Expr]) -> Option<Vec<&'e ast::Expr>> {
+        let ast::ExprKind::Ident { name } = &callee.kind else { return None };
+        let n = name.as_str();
+        if self.fns.contains_key(n) {
+            return None;
+        }
+        let writes = crate::check::OUTPUT_ABORT_BUILTINS
+            .iter()
+            .any(|(b, does)| *b == n && matches!(*does, "writes to stdout" | "writes to stderr"));
+        if !writes {
+            return None;
+        }
+        let [arg] = args else { return None };
+        let ast::ExprKind::InterpolatedString { parts, .. } = &arg.kind else { return None };
+        let holes: Vec<&ast::Expr> = parts
+            .iter()
+            .filter_map(|p| match p {
+                ast::StringPart::Expr { expr } => Some(expr.as_ref()),
+                _ => None,
+            })
+            .collect();
+        holes
+            .iter()
+            .all(|h| self.checker.type_map.get(&h.id).is_some_and(ty_has_sink_writer))
+            .then_some(holes)
     }
 
     /// A bare callee: a @bounded fn, the print family, the assert macros, or

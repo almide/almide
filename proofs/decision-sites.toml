@@ -808,7 +808,7 @@ note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: 
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
 novel = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
-control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871): base green, patched red (scripts/run-decision-controls.sh); the #4871 hunk alone turns novel_a_callee_allocation_is_followed_by_reach red"
+control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871): base green, patched red (scripts/run-decision-controls.sh); the #4871 hunk alone turns novel_a_callee_allocation_is_followed_by_reach red; 2026-11-20 ds-2 (tree = 03f7cb5877 + ADR-0038 stage 1): base green, patched red, and the ADR-0038 hunk alone (ty_has_sink_writer -> true) turns novel_an_output_line_of_scalars_is_admitted_by_its_hole_types red"
 probe = "tests/decision-probes/bounded.shape-rules"
 
 [[site]]
