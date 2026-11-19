@@ -92,7 +92,7 @@ Two rules apply to every gate:
 - **Fail closed.** An error inside a gate is a `Refusal`. The `.ok()` / `if let Some` admit paths that #4829 and #4839 found are not allowed inside `admit`.
 - **Same verdict on every route.** A route may skip a gate only when its artifact type has no meaning for that gate: A5 on `RustSource`, or A4 on `Verdict`. The table above is the complete list of such omissions. Each one appears as `n.a.` with a reason in the ledger's route columns.
 
-**No verifier installed.** A5 keeps today's documented behaviour (`proven-vs-trusted.md`: a build without `almide-verify` is not checked). The difference is that `Admitted` records this as `certified: false`, and every route that prints a build receipt says so. Whether a missing verifier should become a refusal is left open. It changes what an installed toolchain needs, and that is a separate decision.
+**No verifier installed.** A missing `almide-verify` is a refusal, like every other gate that cannot run. The release archives already ship `almide-verify` next to `almide`, so only hand-built or partially copied installs are affected. The refusal says where `almide-verify` was looked for and how to install it. This replaces the documented exception in `proven-vs-trusted.md` (a build without the verifier was not checked), which is updated in the same change.
 
 **Cost.** A5 on `run` and `test` adds a verifier pass per module. `Admitted<WasmCore>` is cached by the module's bytes, next to the existing wasm run cache. The VM phase measures the overhead on the spec corpus before A5 is enabled on `test`.
 
