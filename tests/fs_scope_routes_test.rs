@@ -125,3 +125,45 @@ fn emitted_rust_carries_the_projects_fs_scope() {
         assert!(src.contains("__almide_fs_path!("), "`almide {}` emitted an unguarded fs call", args.join(" "));
     }
 }
+
+/// #4842: the wasmtime CLI test route preopens the granted roots, not `/`:
+/// under `fs = ["data"]` a read outside `data` is refused there as on the
+/// embedded lane. Skips without wasmtime unless `ALMIDE_EXPECT_TOOLS` is set.
+#[test]
+fn the_wasmtime_test_runner_is_bounded_by_the_fs_scope() {
+    let has = Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !has {
+        assert!(std::env::var_os("ALMIDE_EXPECT_TOOLS").is_none(), "ALMIDE_EXPECT_TOOLS is set but wasmtime is not on PATH");
+        return;
+    }
+    let td = tempfile::TempDir::new().unwrap();
+    project(td.path());
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .current_dir(td.path().join("fsp"))
+        .args(["test", "src/r_test.almd", "--target", "wasm"])
+        .env("ALMIDE_TEST_WASM_RUNNER", "wasmtime")
+        .output()
+        .expect("spawn almide");
+    assert!(o.status.success(), "the wasmtime runner read outside [permissions] fs:\n{}", text(&o));
+}
+
+/// #4842: an `ALMIDE_RUN_PROJECT_DIR` other users can write to is refused:
+/// it holds the binaries a native run executes.
+#[cfg(unix)]
+#[test]
+fn a_run_project_dir_others_can_write_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let td = tempfile::TempDir::new().unwrap();
+    let shared = td.path().join("shared");
+    std::fs::create_dir(&shared).unwrap();
+    std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o777)).unwrap();
+    std::fs::write(td.path().join("m.almd"), "effect fn main() -> Unit = println(\"ran\")\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .current_dir(td.path())
+        .args(["build", "m.almd", "-o", "m-bin"])
+        .env("ALMIDE_RUN_PROJECT_DIR", &shared)
+        .output()
+        .expect("spawn almide");
+    assert!(!o.status.success(), "a world-writable ALMIDE_RUN_PROJECT_DIR was used:\n{}", text(&o));
+    assert!(text(&o).contains("ALMIDE_RUN_PROJECT_DIR="), "{}", text(&o));
+}

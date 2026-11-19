@@ -646,7 +646,16 @@ fn run_mainless(file: &str, wasm_leg: bool, no_check: bool) {
 /// `$TMPDIR ?? "/tmp"`, C-189 — the explicit `--env` wins over inherit-env,
 /// which on Windows would carry no TMPDIR at all). Shared by `cmd_run_wasm`
 /// and the wasm test harness so both legs see one filesystem contract.
-pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
+///
+/// Under `[permissions] fs` (`scope`), the preopens are exactly the granted
+/// roots instead (#4842: `--dir=/` turned the scope off on this route).
+pub(crate) fn wasmtime_fs_args(cmd: &mut Command, scope: Option<&[String]>) {
+    if let Some(roots) = scope {
+        for root in roots {
+            cmd.arg(format!("--dir={root}"));
+        }
+        return;
+    }
     if cfg!(windows) {
         cmd.arg("--dir=.");
         // GetTempPath answers with a trailing separator; wasmtime's
