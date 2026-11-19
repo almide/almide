@@ -86,8 +86,8 @@ fn manifest_allow() -> Option<Vec<String>> {
     if !path.exists() {
         return None;
     }
-    let proj = crate::project::parse_toml(path).ok()?;
-    proj.permissions
+    // #4829: a manifest that does not parse is refused, never "no allow".
+    crate::project::governing_manifest(path).permissions
 }
 
 /// What the bundle is pinned to: the shipped file, if one is named or

@@ -269,7 +269,8 @@ fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
 /// parses — the same lookup every command makes.
 pub(crate) fn cwd_project() -> Option<project::Project> {
     let path = std::path::Path::new("almide.toml");
-    if path.exists() { project::parse_toml(path).ok() } else { None }
+    // #4829: one that exists but does not parse is refused, never "none".
+    path.exists().then(|| project::governing_manifest(path))
 }
 
 /// The post-lowering pipeline every build route runs: the driver's optimize

@@ -578,14 +578,9 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
         let candidate = file_dir.join("almide.toml");
         if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
     };
-    let parsed = toml_path.exists().then(|| {
-        // A broken almide.toml must not be SILENT: dropping it here also drops
-        // [native-deps]/native/ injection, and the build then fails later as an
-        // opaque E0433 on the native module.
-        crate::project::parse_toml(&toml_path)
-            .map_err(|e| err(&format!("warning: {} ignored: {}", toml_path.display(), e)))
-            .ok()
-    }).flatten();
+    // A broken almide.toml is refused (#4829): ignoring it with a warning
+    // dropped its [permissions] and [native-deps] alike.
+    let parsed = toml_path.exists().then(|| crate::project::governing_manifest(&toml_path));
     let native_deps = parsed.as_ref().map(|p| p.native_deps.clone()).unwrap_or_default();
     let toml_dir = toml_path.parent()
         .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })

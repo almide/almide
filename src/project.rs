@@ -854,11 +854,23 @@ pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
     cwd.is_file().then(|| cwd.to_path_buf())
 }
 
-/// The project [`manifest_for_entry`] names, parsed (`None` when there is
-/// none or it does not parse — the manifest gate in `main` has already
-/// refused a broken one in the working directory).
+/// The project [`manifest_for_entry`] names, parsed; `None` only when there
+/// is no manifest. A manifest that exists but does not parse governs the
+/// command all the same (#4829: read as "no manifest", its `[permissions]`
+/// were dropped), so the command is refused with its error.
 pub fn permissions_project_for(entry: &str) -> Option<Project> {
-    manifest_for_entry(entry).and_then(|p| parse_toml(&p).ok())
+    manifest_for_entry(entry).map(|p| governing_manifest(&p))
+}
+
+/// `path`, an `almide.toml` that exists and governs the command, read by the
+/// one reader every route uses: the gate's checks (`check_manifest`) and
+/// `parse_toml`; any error ends the command (#4829).
+pub fn governing_manifest(path: &Path) -> Project {
+    let read = read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path));
+    read.unwrap_or_else(|e| {
+        eprintln!("error: {}: {e}", path.display());
+        std::process::exit(1)
+    })
 }
 
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
@@ -877,7 +889,9 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
-    Ok(())
+    // #4829: everything `parse_toml` refuses is refused here too, so the gate
+    // and the readers cannot accept different manifests.
+    parse_toml(path).map(|_| ())
 }
 
 // ── Unknown keys (#3382) ────────────────────────────────────────────
