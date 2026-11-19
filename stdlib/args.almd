@@ -21,12 +21,12 @@ effect fn has_flag(name: String) -> Bool = {
 // holds — so the mistake shows on the first run, not only when the option
 // is passed.
 @category
-fn __name_ok(reader: String, name: String) -> Result[Unit, String] = {
-  let bare = __undash(name)
-  if bare == "" then err("${reader}: the name is empty: write it without dashes, as in \"out\"")
-  else if bare != name then err("${reader}: write the name without its dashes: \"${bare}\"")
-  else ok(())
-}
+fn __name_ok(reader: String, name: String) -> Result[Unit, String] =
+  if not string.starts_with(name, "-") and name != "" then ok(())
+  else match __undash(name) {
+    "" => err("${reader}: the name is empty: write it without dashes, as in \"out\""),
+    bare => err("${reader}: write the name without its dashes: \"${bare}\""),
+  }
 
 @category
 fn __undash(s: String) -> String = if string.starts_with(s, "-") then __undash(string.drop(s, 1)) else s
@@ -42,10 +42,10 @@ fn __names_ok(reader: String, names: List[String], i: Int) -> Result[Unit, Strin
   }
 
 // The short comparand of a name: `-n` for a one-letter name, which is how a
-// program declares a short form, else the long form again (no short form is
-// derived from a long name, #4144).
+// program declares a short form, else the long form `long` again (no short
+// form is derived from a long name, #4144), so a long name allocates none.
 @category
-fn __short(name: String) -> String = if string.len(name) == 1 then "-" + name else "--" + name
+fn __short(name: String, long: String) -> String = if string.len(name) == 1 then "-" + name else long
 
 // No short spelling is DERIVED from a long name (#4144: `-d` used to set both
 // --dry-run and --delete). A long name's "short" comparand is "--" + name
@@ -56,7 +56,8 @@ fn __has(args: List[String], name: String) -> Bool = {
   // Recursion instead of `list.any` with a CAPTURING lambda: a capture inside
   // a BUNDLED module mislowers on wasm (#892). The recursion carries the two
   // comparands as parameters, so nothing is captured.
-  __flag_at(args, "--" + name, __short(name), 0)
+  let long = "--" + name
+  __flag_at(args, long, __short(name, long), 0)
 }
 
 // The arguments before the first `--` (#4144): `--` ends option parsing, so
@@ -97,9 +98,11 @@ effect fn option(name: String) -> String? = {
 @category
 fn __option(args: List[String], name: String) -> String? = {
   let long = "--" + name
-  let short = __short(name)
+  let short = __short(name, long)
+  let long_eq = long + "="
+  let short_eq = if string.len(name) == 1 then short + "=" else long_eq
   // Recursion, not `list.find` with a CAPTURING lambda — see `__has` (#892).
-  match __find_either_prefixed(args, long + "=", short + "=", 0) {
+  match __find_either_prefixed(args, long_eq, short_eq, 0) {
     some(v) => some(v),
     none => match __index_either(args, long, short, 0) {
       some(i) => list.get(args, i + 1),
@@ -168,7 +171,7 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
   else {
     let a = list.get(args, i) ?? ""
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
-    else if __names_value(options, a, 0) then __positional_at(
+    else if __names_value(options, a) then __positional_at(
       args,
       options,
       i + 2,
@@ -180,10 +183,6 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
 // Does `a` stand before a named option's value: `--name`, or `-n` for a
 // one-letter name (#4866, the same forms `option` reads)?
 @category
-fn __names_value(options: List[String], a: String, i: Int) -> Bool =
-  if i >= list.len(options) then false
-  else {
-    let name = list.get(options, i) ?? ""
-    if a == "--" + name or a == __short(name) then true
-    else __names_value(options, a, i + 1)
-  }
+fn __names_value(options: List[String], a: String) -> Bool =
+  if string.starts_with(a, "--") then list.contains(options, string.drop(a, 2))
+  else string.len(a) == 2 and list.contains(options, string.drop(a, 1))
