@@ -19,8 +19,14 @@ almide run app.almd -- --verbose --output=out.txt input.csv
 ### `args.option(name: String) -> Option[String]`
 
 The value of `--name`, accepting both spellings — `--name=value` and
-`--name value`, before `--`. `none` when the flag is absent or has no value
-after it.
+`--name value`, before `--`. A one-letter name also reads `-n=value` and
+`-n value`, the short form `args.has_flag` answers to. `none` when the flag is
+absent or has no value after it.
+
+Every reader takes a name WITHOUT its dashes: `args.option("output")`, not
+`args.option("--output")`. A dash-written or empty name is an err naming the
+dash-free form (`args.option: write the name without its dashes: "output"`),
+whatever the arguments are, so the mistake shows on the first run.
 
 ```almd check
 import args
@@ -39,7 +45,7 @@ effect fn main() -> Unit = {
 
 Arguments from `env.args()` (which already excludes argv[0]) that are not flags, followed by every argument
 after `--`. `options` names every option the program reads with `args.option`:
-the argument after `--name` is that option's value, not a positional, so
+the argument after `--name` (or `-n` for a one-letter name) is that option's value, not a positional, so
 `--out report.txt input.txt` with `["out"]` gives `["input.txt"]`. Pass `[]`
 when the program reads no options.
 
