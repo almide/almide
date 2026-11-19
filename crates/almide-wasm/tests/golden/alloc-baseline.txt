@@ -43,7 +43,7 @@
 65920	spec/wasm_cross/branch_lift_in_loop.almd
 66672	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 66064	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-66272	spec/wasm_cross/bundled_pure_modules.almd
+66448	spec/wasm_cross/bundled_pure_modules.almd
 66192	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 131664	spec/wasm_cross/bytes_array_count_domain.almd
 66176	spec/wasm_cross/bytes_clear_mut_param.almd
@@ -493,6 +493,7 @@
 99504	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 66000	spec/wasm_cross/list_product_overflow.almd
 131728	spec/wasm_cross/list_push_field_in_place.almd
+146768	spec/wasm_cross/list_push_field_reads_root.almd
 67008	spec/wasm_cross/list_push_on_record_field.almd
 67520	spec/wasm_cross/list_range_step_extremes.almd
 72400	spec/wasm_cross/list_reduce_fused_fold_release.almd
