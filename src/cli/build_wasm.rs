@@ -97,10 +97,10 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     super::phase_lap("package");
     if certify {
         // A component is not the core module the certificate describes
-        // (`almide verify` refuses it the same way): its sinks are dropped.
-        if shape.component {
-            let _ = almide_wasm::witness::take();
-        } else if let Err(e) = super::verify::gate_build(file, &emitted, &bytes) {
+        // (`almide verify` refuses it the same way): the core module it
+        // packages is judged before it is packaged (#4836).
+        let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
+        if let Err(e) = super::verify::gate_build(file, &emitted, shipped) {
             err(&format!(
                 "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
             ));

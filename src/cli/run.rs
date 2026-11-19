@@ -735,7 +735,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
+    let (bytes, host_ops) = match super::verify::certified(file, || super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true)) {
         Ok(b) => b,
         Err(()) => return 1,
     };

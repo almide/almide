@@ -188,10 +188,23 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     };
     // The ONE rendering of a test module — proofs/structural-wall.sh's
     // stdlib-test leg judges exactly these bytes.
-    let routed = almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(test_file), run_filter, declared_tests > 0, &gate);
+    // #4836: judged by the installed verifier like the module `build` writes.
+    let mut walled: Option<(&'static str, String)> = None;
+    let routed = super::verify::certified(test_file, || {
+        match almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(test_file), run_filter, declared_tests > 0, &gate) {
+            Ok(r) => Ok((r.bytes, r.host_ops)),
+            Err(w) => {
+                walled = Some(w);
+                Err(())
+            }
+        }
+    });
     let (bytes, host_ops) = match routed {
-        Ok(r) => (r.bytes, r.host_ops),
-        Err((stage, detail)) => { wall(stage, detail); return None; }
+        Ok(r) => r,
+        Err(()) => {
+            if let Some((stage, detail)) = walled { wall(stage, detail); }
+            return None;
+        }
     };
     // The abort-site ops are test-only and embedded-only (ADR-0029): they are
     // not a wall of the leg, and there is no stock artifact to rewrite.
@@ -873,7 +886,12 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir) {
         return Err(format!("matrix.{op} is native-only"));
     }
-    let (bytes, host_ops) = almide_wasm::emit_program_with_ops(&ir).map_err(|e| format!("emit: {e:?}"))?;
+    // #4836: judged by the installed verifier like the module `build` writes.
+    let mut emit_err = String::new();
+    let (bytes, host_ops) = super::verify::certified(&batch[0], || {
+        almide_wasm::emit_program_with_ops(&ir).map_err(|e| emit_err = format!("emit: {e:?}"))
+    })
+    .map_err(|()| emit_err.clone())?;
     wasmparser::validate(&bytes).map_err(|e| format!("validate: {e}"))?;
     t.lap("wasm emit");
     if let Some(op) = host_ops

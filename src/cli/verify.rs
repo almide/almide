@@ -172,6 +172,30 @@ pub(super) fn verifier_present() -> bool {
     locate_verifier().is_some()
 }
 
+/// The build gate on a route that RUNS the module it makes instead of
+/// writing it (#4836): `run`, `bench` and `test` on wasm judged nothing, so a
+/// module `almide build` refuses ran. With a verifier installed, the witness
+/// sinks are armed for `make`, and the module is run only when
+/// [`gate_build`] accepts it; a rejection exits 1. The sinks are process-wide,
+/// so a parallel test lane makes and judges one module at a time while a
+/// verifier is installed; without one nothing changes.
+pub(super) fn certified<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    if !verifier_present() {
+        return make();
+    }
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
+    almide_wasm::witness::start_collecting();
+    let (bytes, rest) = make()?;
+    if let Err(e) = gate_build(file, &bytes, &bytes) {
+        err(&format!(
+            "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"
+        ));
+        std::process::exit(1);
+    }
+    Ok((bytes, rest))
+}
+
 /// The build gate (#4011, row 3 of the security table): the certificate of
 /// the build that just ran — the witness sinks were armed before it — pinned
 /// to the exact bytes about to be written, judged by the installed
