@@ -98,6 +98,8 @@ fn novel_check_json_and_mcp_report_e081_for_a_fresh_program() {
     let fresh = novel::ident("target");
     let unknown = call(&fresh);
     assert!(unknown.contains("unknown target") && unknown.contains(&fresh), "an unknown target was not refused:\n{unknown}");
+    // ruling A: the test lane and the run route make one embedded-host decision
+    novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host();
 }
 
 /// native.grant-survey / native.dispatch-gate (#4848): `almide emit --target
@@ -130,4 +132,31 @@ fn novel_emit_refuses_an_ungranted_native_dependency() {
     write(app.join("almide.toml"), manifest(&format!("\n[permissions]\nnative = [\"{dep}\"]\n")));
     let o = run(&app, &["emit", "src/main.almd", "--target", "rust"]);
     assert!(o.status.success(), "control: the granted dependency emits:\n{}", text(&o));
+}
+
+/// verify.wasm-e081-availability (#4857, ruling A): `almide test --target
+/// wasm` runs a file on the embedded host exactly when `almide run --target
+/// wasm` runs the same program there. A fresh fn reaching an op the embedded
+/// host serves and the stock p1 shim does not (`unix.shm_create`) runs on both
+/// routes; before, the test lane walled it (exit 5) on the shim's audit, a
+/// decision the run route does not make. The stock artifact is still refused
+/// where there is none (`build --target wasm`, E081: the control).
+#[test]
+fn novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host() {
+    let f = novel::ident("grab");
+    let body = format!("import unix\n\neffect fn {f}() -> Unit = {{\n  let _ = unix.shm_create(64)\n}}\n");
+    let (_t, proj) = project(
+        "",
+        &[
+            ("src/main.almd", format!("{body}\neffect fn main() -> Unit = {{\n  {f}()!\n  println(\"ran\")\n}}\n")),
+            ("src/main_test.almd", format!("{body}\ntest \"a call the embedded host serves\" {{\n  {f}()!\n  assert(true)\n}}\n")),
+        ],
+    );
+    let r = run(&proj, &["run", "src/main.almd", "--target", "wasm"]);
+    assert!(r.status.success() && text(&r).contains("ran"), "run --target wasm did not run the program:\n{}", text(&r));
+    let t = run(&proj, &["test", "src/main_test.almd", "--target", "wasm"]);
+    let tt = text(&t);
+    assert!(t.status.success() && tt.contains("1 passed"), "test --target wasm did not run what run --target wasm runs:\n{tt}");
+    let b = run(&proj, &["build", "src/main.almd", "--target", "wasm", "-o", "out.wasm"]);
+    assert!(!b.status.success() && text(&b).contains("E081"), "control: the stock artifact was not refused:\n{}", text(&b));
 }

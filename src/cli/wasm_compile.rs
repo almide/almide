@@ -382,6 +382,22 @@ fn check_wasm_availability(
     Err(())
 }
 
+/// #4857: the embedded leg's availability verdict — the one `almide run
+/// --target wasm` gives the same program — as the refusal text, for the
+/// `almide test` wasm lane (the embedded host is that lane's host: C-374,
+/// "the wasm leg of `almide test`"). `package` names the program's own
+/// modules (#2865); an empty set is the stricter reading.
+pub(crate) fn embedded_leg_availability(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let (verdict, rows) = capturing_route_refusals(|| check_wasm_availability(ir_program, package, true, &Ok(())));
+    match verdict {
+        Ok(_) => Ok(()),
+        Err(()) => Err(rows.into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n")),
+    }
+}
+
 /// Whether any reachable body calls `http.serve` — the measurement escape's
 /// stand-in for the availability scan's hit.
 fn reaches_http_serve(ir_program: &almide::ir::IrProgram) -> bool {
