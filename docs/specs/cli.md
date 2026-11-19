@@ -1336,6 +1336,8 @@ almide app.almd --emit-ast              # AST を JSON で出力
 almide app.almd --emit-ir               # 型付き IR を JSON で出力
 ```
 
+`--target rust` の出力は、使う標準ライブラリのランタイムを含む 1 本の Rust ソースで、`rustc` 単体でコンパイルできる。ただし外部クレートに頼るモジュール（`zlib` は `flate2`）を使うプログラムはそのクレートが要るため、`almide build` / `almide run`（cargo 経由）でビルドする（#4750）。
+
 ---
 
 ## Exit Codes
