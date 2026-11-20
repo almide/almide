@@ -1,0 +1,5 @@
+scoped fn same_size(a: Int, b: Int) -> Bool = int.abs(a) == int.abs(b)
+
+effect fn main() -> Unit = println(bool.to_string(scoped {
+  same_size(-12, 12)
+}))

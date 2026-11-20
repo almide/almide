@@ -1,0 +1,7 @@
+import random
+
+scoped fn nudge(x: Int) -> Int = int.clamp(int.abs(x) + random.int(0, 3), 0, 6)
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  nudge(-1)
+}))

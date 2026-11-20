@@ -1,0 +1,8 @@
+import random
+
+scoped fn nudge(x: Int, step: Int) -> Int = int.clamp(int.abs(x) + step, 0, 6)
+
+effect fn main() -> Unit = {
+  let step = random.int(0, 3)
+  println(int.to_string(scoped { nudge(-1, step) }))
+}

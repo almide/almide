@@ -1,0 +1,3 @@
+expects_code = "E087"
+expects_error = "signature is not scalar and effect-free"
+contract = "C-364"
