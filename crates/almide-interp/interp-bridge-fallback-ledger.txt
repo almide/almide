@@ -23,9 +23,10 @@ env.sleep_ms  env_sleep_pause  env.sleep_ms: no lowered body
 float.is_infinite  codec_int_float_boundaries  floor: consumed inside a self-hosted body
 float.is_nan  codec_int_float_boundaries  floor: consumed inside a self-hosted body
 float.to_string  codec_int_float_boundaries  floor: consumed inside a self-hosted body
-int.__from_int16  sized_display_matrix  floor: consumed inside a self-hosted body
+int.__from_int16  output_line_int_bool  floor: consumed inside a self-hosted body
 int.__from_int32  int_pow_operator_negative_base  floor: consumed inside a self-hosted body
-int.__from_int8  sized_display_matrix  floor: consumed inside a self-hosted body
+int.__from_int64  output_line_int_bool  floor: consumed inside a self-hosted body
+int.__from_int8  output_line_int_bool  floor: consumed inside a self-hosted body
 int.__from_uint16  declaration_literal_domain  floor: consumed inside a self-hosted body
 int.__from_uint32  declaration_literal_domain  floor: consumed inside a self-hosted body
 int.__from_uint64  checked_conversion_exact_bounds  floor: consumed inside a self-hosted body
