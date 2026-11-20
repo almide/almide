@@ -1,0 +1,11 @@
+// A spread copies a record's fields. A type parameter with no record shape
+// has none known here, and an instance may be a record whose fields are
+// closed outside its module: `copy(secret.new("pw"))` copied a Secret.
+import secret
+
+fn copy[A](x: A) -> A = { ...x }
+
+fn main() -> Unit = {
+  let s = copy(secret.new("pw"))
+  println("${s}")
+}

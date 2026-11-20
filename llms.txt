@@ -104,6 +104,9 @@ read here is what the current compiler accepts.
   takes the `!` before a default:
   `args.option("in")! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
+  A failed child process is an err: `process.exec(cmd, args)!` and
+  `process.run(c)!` stop on a non-zero exit (dialect epoch 17); read an exit
+  code with `process.output(c)!.code`.
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms are a compile error (E010).
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
@@ -432,7 +435,7 @@ prefix: `Read` / `Write` / `Close` (`effect fn T.read(self, max: Int)`,
 `T.write(self, data: Bytes)`, `T.close(self)`), `HttpMessage` (`T.header`,
 `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`,
 `set_body_bytes`) and `Body` (`fn T.media_type(self) -> String` as a literal,
-`fn T.to_text(self) -> String`).
+`fn T.to_bytes(self) -> Bytes`, the body on the wire).
 
 ```almide check
 import html
@@ -588,6 +591,7 @@ context-specific rules in [E022](docs/diagnostics/E022.md) and
 | [E119](docs/diagnostics/E119.md) | a Region lent to an `@export(c)` fn escapes its call |
 | [E120](docs/diagnostics/E120.md) | a `??` whose grouping changed at dialect 16 |
 | [E121](docs/diagnostics/E121.md) | an import name that is both a local module and a dependency |
+| [E121](docs/diagnostics/E121.md) | a spread of a type parameter without a record shape |
 | [E420](docs/diagnostics/E420.md) | Function visibility violation |
 
 Retired codes: **E039** (`result.collect` / `collect_map`) and **E040**

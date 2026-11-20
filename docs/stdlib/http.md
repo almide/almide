@@ -259,8 +259,8 @@ A body of any other media type. The type is written as a literal and read at
 check time (E117): a computed one, a malformed one, or one a browser runs
 script in — HTML and XHTML (owned by `html`), SVG (a granted package's), XML
 and `+xml` types — is refused, so a String never reaches a browser as markup
-except through a safe type. A built body is held as text today, so bytes that
-are not UTF-8 are decoded lossily (#4311).
+except through a safe type. The bytes are kept exactly: `http.body_bytes`
+answers them and `http.serve` sends them byte for byte (#4311).
 
 ```almd run
 import http
@@ -547,9 +547,8 @@ final
 Replace the body with `Bytes`. A request keeps the bytes exactly:
 `http.body_bytes` answers them and `http.send` / `http.start` send them byte
 for byte, so it is a lossless binary upload; `http.body` is their lossy UTF-8
-decoding. A built response still holds its body as text (#4311), so on a
-response the bytes are decoded as lossy UTF-8 and its `Content-Type` becomes
-`application/octet-stream`.
+decoding. A response keeps them exactly too (#4311): `http.serve` sends them
+unchanged, and its `Content-Type` becomes `application/octet-stream`.
 
 ```almd run
 import http

@@ -227,9 +227,9 @@ fn bind_env(side: &mut FnArgOut, name: &str, (blk, t): (ValueId, NTy), slots: Op
 
 /// One call expression prefix; the dynamic index is read and checked once
 /// in the call's prelude, before the runtime invokes the callback.
-fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> String {
-    if let Some(lambda) = lambda { return format!("{}(&{env}", crate::render_native::mangle(lambda)); }
-    let key = if handed.contains(&true) { clo::demand_handed_dispatch(ps, handed, ret) }
+fn callback_head(lambda: Option<&str>, env: &str, ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> Option<String> {
+    if let Some(lambda) = lambda { return Some(format!("{}(&{env}", crate::render_native::mangle(lambda))); }
+    let key = if handed.contains(&true) { clo::demand_handed_dispatch(ps, handed, ret)? }
         else { clo::sig_key(ps, &[], ret).unwrap_or_else(|| ps.len().to_string()) };
-    format!("__almd_ci_{key}({env}_index, &{env}")
+    Some(format!("__almd_ci_{key}({env}_index, &{env}"))
 }

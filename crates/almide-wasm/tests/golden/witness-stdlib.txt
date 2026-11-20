@@ -2,6 +2,11 @@
 # loaded bundled module whole (ALMIDE_KEEP_BUNDLED_FNS=1). Every row must stay witnessed; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 __selfhost_.__almd_lift_0
+__selfhost_.__almd_lift_2
+__selfhost_.__almd_lift_3
+__selfhost_.__almd_lift_7
+__selfhost_.__almd_lift_8
+__selfhost_.__almd_lift_9
 __selfhost_.__alpha_table
 __selfhost_.__arr_f16le
 __selfhost_.__arr_f32be
@@ -163,12 +168,16 @@ __selfhost_.__hq_quote_char
 __selfhost_.__hq_raw
 __selfhost_.__hq_set
 __selfhost_.__hr_all
+__selfhost_.__hr_body_cells
+__selfhost_.__hr_cell_status
 __selfhost_.__hr_ci_at
 __selfhost_.__hr_ci_eq
 __selfhost_.__hr_find
 __selfhost_.__hr_fold
 __selfhost_.__hr_lower
+__selfhost_.__hr_raw_hex
 __selfhost_.__hr_set
+__selfhost_.__hr_status
 __selfhost_.__hvf_at
 __selfhost_.__hvl_none
 __selfhost_.__hvl_set_append
@@ -563,6 +572,7 @@ __selfhost_.http_req_with_path
 __selfhost_.http_resp_repr
 __selfhost_.http_response_flat
 __selfhost_.http_set_body
+__selfhost_.http_set_body_bytes
 __selfhost_.http_set_header
 __selfhost_.http_status
 __selfhost_.http_status_code
@@ -890,13 +900,21 @@ __selfhost_.zlib_gunzip_max
 __selfhost_.zlib_gzip
 __selfhost_.zlib_inflate
 __selfhost_.zlib_inflate_max
+args.__find_either_prefixed
 args.__find_prefixed
 args.__flag_at
 args.__has
+args.__index_either
+args.__name_ok
+args.__names_ok
+args.__names_value
 args.__operands
+args.__option
 args.__options
 args.__positional
 args.__positional_at
+args.__short
+args.__undash
 args.has_flag
 args.option
 args.positional
@@ -986,7 +1004,7 @@ bigint.twos
 bool.parse
 bool.to_string
 bytes.__bytes_media_type
-bytes.__bytes_to_text
+bytes.__bytes_to_bytes
 bytes.all
 bytes.any
 bytes.append_bytes
@@ -1196,7 +1214,7 @@ html.__html_attr_value
 html.__html_blank
 html.__html_blocked_url
 html.__safe_html_media_type
-html.__safe_html_to_text
+html.__safe_html_to_bytes
 html.concat
 html.empty
 html.escape
@@ -1259,7 +1277,7 @@ http.__route_covers
 http.__segment_ok
 http.__table
 http.__typed_body_media_type
-http.__typed_body_to_text
+http.__typed_body_to_bytes
 http.new_request
 http.query_params
 http.redirect
@@ -1505,6 +1523,9 @@ path.stays_inside
 path.stem
 path.trim_end_slashes
 path.with_extension
+process.__quoted
+process.__run_ended
+process.__run_operand
 random.next_float
 random.next_int
 random.rng_below
@@ -1518,7 +1539,6 @@ regex.compile
 regex.escape
 regex.find
 regex.find_all
-regex.full_match
 regex.index_of
 regex.is_full_match
 regex.is_match
@@ -1569,7 +1589,7 @@ set.__almd_mono_sort__Int
 set.__almd_mono_sort___nBigInt
 string.__join
 string.__string_media_type
-string.__string_to_text
+string.__string_to_bytes
 string.byte_len
 string.chunk
 string.count
@@ -1708,7 +1728,7 @@ value.__set_path_pure
 value.__set_steps
 value.__step_at
 value.__value_media_type
-value.__value_to_text
+value.__value_to_bytes
 value.get
 value.get_array
 value.get_bool

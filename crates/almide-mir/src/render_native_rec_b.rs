@@ -332,7 +332,7 @@ impl Derive<'_> {
             let before = set.len();
             set = set.iter().filter(|n| self.fields_of(n).iter().all(|t| self.kind(t, &set).is_some()) && self.res_free(n, &set)
                 && (!self.maps.contains(*n) || matches!(self.decls[*n].1[0].1[0], almide_lang::types::Ty::Float32) || self.exact_eq_type(&self.decls[*n].1[0].1[0], &mut Default::default()))
-                && (!self.sets.contains(*n) || set_element_kind(&self.decls[*n].1[0].1[0]).is_some() || self.set_element_type(&self.decls[*n].1[0].1[0]))).cloned().collect();
+                && (!self.sets.contains(*n) || set_element_kind(&self.decls[*n].1[0].1[0]).is_some() || self.set_element_type(&self.decls[*n].1[0].1[0]).is_ok())).cloned().collect();
             if set.len() == before {
                 break;
             }
@@ -576,15 +576,19 @@ pub(crate) fn set_element_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
     }
 }
 
-/// Exact runtime representations admitted as a Set element, recursively.
-fn native_set_element_type(t: &almide_lang::types::Ty) -> bool {
+/// Exact runtime representations admitted as a Set element, recursively;
+/// any other element is refused (#4799: a `wall`, not a bare `false`).
+fn native_set_element_type(t: &almide_lang::types::Ty) -> Result<(), crate::lower::LowerError> {
     use almide_lang::types::{Ty, constructor::TypeConstructorId};
     match t {
-        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => true,
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => Ok(()),
         Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a) if a.len() == 1 => native_set_element_type(&a[0]),
-        Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => RECS.with(|r|
-            r.borrow().iter().any(|d| d.name == block_key(t) && d.eq_safe)),
-        _ => false,
+        Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if RECS.with(|r| r.borrow().iter().any(|d| d.name == block_key(t) && d.eq_safe)) {
+            Ok(())
+        } else {
+            Err(crate::render_native::wall("native: a Set element type with no exact runtime representation"))
+        },
+        _ => Err(crate::render_native::wall("native: a Set element type with no exact runtime representation")),
     }
 }
 

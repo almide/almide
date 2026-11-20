@@ -16,8 +16,43 @@
 // just written under a different spelling silently got `none`.
 // The lean constructor (ADR-0032): exactly the given pairs, which the caller
 // writes once each, after the status and body.
+import hex
+
 @implements("http.__http_response_flat")
-fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
+fn http_response_flat(status: Int, body: Bytes, flat: List[String]) -> List[String] = __hr_body_cells(
+  int.to_string(status),
+  body,
+) + flat
+
+// A Body's bytes, exactly (#4311). UTF-8 bytes are the body cell's text
+// itself. Other bytes keep their lossy text in the body cell and their hex
+// after the status, `<status>/<hex>` — the request rep's raw-cell rule
+// (#4744), in the one cell no header pair or reader of the pairs sees — so
+// `body` decodes them the lossy way native does, `body_bytes` answers them
+// exactly and the serve loop sends them unchanged. A lossy decoding here
+// turned the 256 byte values into 512.
+fn __hr_body_cells(status: String, body: Bytes) -> List[String] = match bytes.to_string(body) {
+  ok(text) => [status, text],
+  err(_) => [status + "/" + hex.encode(body), bytes.to_string_lossy(body)],
+}
+
+// The status cell's status, and the hex of a raw body when it holds one.
+// The readers that go on to write `resp` take the cell, never the list:
+// handing the list to a helper shares it, and the write then copies it.
+fn __hr_status(resp: List[String]) -> String = __hr_cell_status(list.get(resp, 0) ?? "0")
+
+fn __hr_cell_status(cell: String) -> String = match string.index_of(cell, "/") {
+  some(i) => string.slice(cell, 0, i),
+  none => cell,
+}
+
+fn __hr_raw_hex(resp: List[String]) -> String? = {
+  let cell = list.get(resp, 0) ?? "0"
+  match string.index_of(cell, "/") {
+    some(i) => some(string.drop(cell, i + 1)),
+    none => none,
+  }
+}
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
@@ -54,7 +89,7 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 // spelling and slot it was first stored under and takes the LAST value given
 // for it — __hr_set per entry, through two lowercased-name indexes instead of
 // a scan per entry (O(n²)).
-fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
+fn http_with_headers(status: Int, body: Bytes, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
   let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
@@ -66,7 +101,7 @@ fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[Stri
     (m, (i, low, _)) => if map.contains(m, low) then m
     else map.set(m, low, i),
   )
-  [st, body] + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
+  __hr_body_cells(st, body) + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
     k,
     map.get(last, low) ?? ""
   ]
@@ -74,18 +109,30 @@ fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[Stri
 }
 
 // Overwrite slot 0 in place: `[st] + list.drop(resp, 1)` built a fresh list
-// of every header on each call, so a status rebind loop was O(n) per step.
-fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
-  resp,
-  0,
-  int.to_string(code),
-)
+// of every header on each call, so a status rebind loop was O(n) per step. A
+// raw body's hex rides along (#4311).
+// The new cell is read off the old one alone: handing `resp` itself to a
+// helper here shared it, and the set then copied every header.
+fn http_status(resp: List[String], code: Int) -> List[String] = {
+  let cell = list.get(resp, 0) ?? "0"
+  let next = match string.index_of(cell, "/") {
+    some(i) => int.to_string(code) + "/" + string.drop(cell, i + 1),
+    none => int.to_string(code),
+  }
+  list.set(resp, 0, next)
+}
 
 // The body cell holds a fetched body's bytes as the host wrote them, so
 // `body` decodes them the lossy way native does and `body_bytes` copies them.
 fn http_body(resp: List[String]) -> String = bytes.to_string_lossy(http_body_bytes(resp))
 
-fn http_body_bytes(resp: List[String]) -> Bytes = bytes.from_string(list.get(resp, 1) ?? "")
+fn http_body_bytes(resp: List[String]) -> Bytes = {
+  let text = bytes.from_string(list.get(resp, 1) ?? "")
+  match __hr_raw_hex(resp) {
+    some(h) => hex.decode(h) ?? text,
+    none => text,
+  }
+}
 
 fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
 
@@ -106,7 +153,7 @@ fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[Stri
   else __hr_set(resp, i + 2, key, value)
 
 // ── Read side (#1791) — the self-hosted twins of the native accessors. ──
-fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? "0") ?? 0
+fn http_status_code(resp: List[String]) -> Int = int.parse(__hr_status(resp)) ?? 0
 
 // Every value of one field, in slot order (the native Vec keeps wire order).
 fn http_header_values(resp: List[String], key: String) -> List[String] = __hr_all(resp, 2, key, [])
@@ -131,5 +178,17 @@ fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_f
 // Every header flat, in slot order (the native Vec keeps wire order), repeats kept.
 fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
-// http.set_body; also the router's HEAD answer (#2588) drops the body.
-fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
+// http.set_body; also the router's HEAD answer (#2588) drops the body. Both
+// cells are overwritten in place, so a raw body's hex leaves with it (#4311)
+// and the header pairs are never copied.
+fn http_set_body(resp: List[String], body: String) -> List[String] = {
+  let status = __hr_cell_status(list.get(resp, 0) ?? "0")
+  list.set(list.set(resp, 0, status), 1, body)
+}
+
+// `with_body` / `set_body_bytes`: a Body's bytes, exactly (#4311).
+@implements("http.__http_response_put_body_bytes")
+fn http_set_body_bytes(resp: List[String], body: Bytes) -> List[String] = {
+  let cells = __hr_body_cells(__hr_cell_status(list.get(resp, 0) ?? "0"), body)
+  list.set(list.set(resp, 0, list.get(cells, 0) ?? ""), 1, list.get(cells, 1) ?? "")
+}

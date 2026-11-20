@@ -43,7 +43,7 @@
 65920	spec/wasm_cross/branch_lift_in_loop.almd
 66672	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 66064	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-66272	spec/wasm_cross/bundled_pure_modules.almd
+66448	spec/wasm_cross/bundled_pure_modules.almd
 66192	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 131664	spec/wasm_cross/bytes_array_count_domain.almd
 66176	spec/wasm_cross/bytes_clear_mut_param.almd
@@ -150,7 +150,7 @@
 67088	spec/wasm_cross/datetime_pre_epoch.almd
 68080	spec/wasm_cross/declaration_forms.almd
 67856	spec/wasm_cross/declaration_literal_domain.almd
-73968	spec/wasm_cross/decode_strict_unknown_key_escape.almd
+74144	spec/wasm_cross/decode_strict_unknown_key_escape.almd
 66032	spec/wasm_cross/deep_eq_heap.almd
 66992	spec/wasm_cross/deep_eq_nested_distinct.almd
 65712	spec/wasm_cross/default_param_ref.almd
@@ -378,9 +378,9 @@
 66448	spec/wasm_cross/hof_closure_string_tail.almd
 72368	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-72800	spec/wasm_cross/http_decode_json_input_type.almd
+72960	spec/wasm_cross/http_decode_json_input_type.almd
 68032	spec/wasm_cross/http_query_params_decoder.almd
-68272	spec/wasm_cross/http_response_headers.almd
+68640	spec/wasm_cross/http_response_headers.almd
 65648	spec/wasm_cross/i64_min_literal.almd
 65776	spec/wasm_cross/if_block_forms.almd
 65760	spec/wasm_cross/if_let_forms.almd
@@ -493,6 +493,7 @@
 99504	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 66000	spec/wasm_cross/list_product_overflow.almd
 131728	spec/wasm_cross/list_push_field_in_place.almd
+146768	spec/wasm_cross/list_push_field_reads_root.almd
 67008	spec/wasm_cross/list_push_on_record_field.almd
 67520	spec/wasm_cross/list_range_step_extremes.almd
 72400	spec/wasm_cross/list_reduce_fused_fold_release.almd
@@ -816,8 +817,8 @@
 66496	spec/wasm_cross/result_uoe_float.almd
 66960	spec/wasm_cross/result_value_int_tuple.almd
 66976	spec/wasm_cross/result_wall_escalations.almd
-70960	spec/wasm_cross/runtime_backed_value_repr.almd
-67872	spec/wasm_cross/runtime_backed_variant_repr.almd
+71168	spec/wasm_cross/runtime_backed_value_repr.almd
+68048	spec/wasm_cross/runtime_backed_variant_repr.almd
 65888	spec/wasm_cross/scalar_if_arm_effects.almd
 66240	spec/wasm_cross/scan_heap_acc.almd
 98320	spec/wasm_cross/scoped_region_value.almd
@@ -851,7 +852,7 @@
 68256	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 69008	spec/wasm_cross/stdlib_opaque_shadow.almd
 81120	spec/wasm_cross/stdlib_type_eq.almd
-81632	spec/wasm_cross/stdlib_type_shadow.almd
+81872	spec/wasm_cross/stdlib_type_shadow.almd
 66176	spec/wasm_cross/str_result_heap_bind.almd
 67136	spec/wasm_cross/string_bidi_controls_literal.almd
 65840	spec/wasm_cross/string_bool_ordering.almd

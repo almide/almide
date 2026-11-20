@@ -123,10 +123,10 @@ test "float.clamp above" {
   assert_eq(float.clamp(15.0, 0.0, 10.0), 10.0)
 }
 
-test "float.sign positive value" {
-  assert_eq(float.sign(42.0), 1.0)
+test "float.signum positive value" {
+  assert_eq(float.signum(42.0), 1.0)
 }
 
-test "float.sign negative value" {
-  assert_eq(float.sign(-42.0), -1.0)
+test "float.signum negative value" {
+  assert_eq(float.signum(-42.0), -1.0)
 }

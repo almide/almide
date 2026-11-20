@@ -387,7 +387,7 @@ way, with plain method names (never a `__` prefix):
 | `Write` | `effect fn T.write(self, data: Bytes) -> Result[Unit, String]` |
 | `Close` | `effect fn T.close(self) -> Result[Unit, String]` |
 | `HttpMessage` | `header`, `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`, `set_body_bytes` |
-| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_text(self) -> String` |
+| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_bytes(self) -> Bytes` (the body on the wire, kept exactly) |
 
 `io.read` / `io.write` / `io.close`, `http.header` / `http.body` and
 `http.response` then take your type. A `Body` whose media type runs script
@@ -599,6 +599,9 @@ User { name: "alice" }     // named record construction — canonical form
 User(name: "alice")        // alias: named-argument call syntax, normalized to the brace form
 User("alice")              // WRONG: records take named fields, not positional (E021)
 ```
+A spread's base is a record. In a generic fn, bound the type parameter with a
+record shape: `fn copy[A: { .. }](x: A) -> A = { ...x }`. A spread of a bare
+`A` (or one with only a protocol bound) is E121.
 The paren alias also works for matching a plain record type (`User(name) => ...`).
 It does **not** work for a variant's record-payload case — `Circle { radius }` (a
 case of `type Shape = Circle { radius: Float } | ...`) only matches as
@@ -1433,7 +1436,7 @@ epoch 15; use `hash.sha256`.
 - `net.tcp_read(s, n)` / `net.tcp_read_exact` / `net.tcp_write` / `net.tcp_close` / `net.tcp_close_listener` → **WRONG** (removed). A `net.TcpStream` is an io handle: `io.read(s, n)!`, `io.read_exact(s, n)!`, `io.write(s, data)!`, `io.close(s)!` — `import io` beside `import net`
 - `net.unix_connect` / `net.unix_send` / `net.shm_create` / … → **WRONG** (moved). `import unix`: `unix.connect`, `unix.write_fds`, `unix.select` (was `unix_wait`), `unix.shm_create`; bytes via `io.read` / `io.write` / `io.close` on the `unix.Fd`
 - `process.exec_status` / `exec_status_timeout` / `exec_in` / `exec_with_stdin` → **WRONG** (removed). One record: `process.output(process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo", stdin: "", timeout_ms: 5000 })!` → `{code, stdout, stderr}`; write the type name so `dir` / `stdin` / `timeout_ms` can be left out
-- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` returns the exit code
+- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` runs it on this terminal and stops on a failed command (any non-zero exit is an err); read an exit code with `process.output(c)!.code`
 - a background child: `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
 - `process.exec("sh", ["-c", "git status | head"])` to get a shell → avoid. Programs take argv lists: `process.exec("git", ["status"])!`, and do the piping in Almide
 

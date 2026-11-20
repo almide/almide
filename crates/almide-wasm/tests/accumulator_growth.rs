@@ -12,6 +12,11 @@
 //! on wasm where native finished in milliseconds (fuzz seed 668978797297
 //! index 615). They go through the same window now.
 //!
+//! #4790 — a pushed element that READS the root (`list.push(h.ps, (i, h.n))`)
+//! was refused by the window, so it took the copying write: O(n²) on wasm
+//! (n = 40000 ran out of memory). It is evaluated before the place is
+//! unshared now, and grows linearly like the rows above.
+//!
 //! The aliasing shapes that must NOT be extended in place — a copy of the
 //! record or of the field taken before the loop, a right side that reads the
 //! place again, the place not first, a nested path with an alias at the
@@ -33,7 +38,7 @@ fn counts(src: &str) -> (String, u64, u64, u64) {
     (r.stdout, c.bytes, c.allocs, c.frees)
 }
 
-const PRELUDE: &str = r#"type Buf = { text: String, xs: List[Int], n: Int }
+const PRELUDE: &str = r#"type Buf = { text: String, xs: List[Int], n: Int, ps: List[(Int, Int)] }
 type Outer = { tag: Int, buf: Buf }
 "#;
 
@@ -43,8 +48,8 @@ fn program(body: &str, n: u32) -> String {
         "{PRELUDE}
 effect fn main() -> Unit = {{
   var s = \"\"
-  var b = Buf {{ text: \"\", xs: [], n: 0 }}
-  var o = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0 }} }}
+  var b = Buf {{ text: \"\", xs: [], n: 0, ps: [] }}
+  var o = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0, ps: [] }} }}
   for i in 0..<{n} {{
     {body}
   }}
@@ -58,8 +63,8 @@ effect fn main() -> Unit = {{
 fn global_program(body: &str, n: u32) -> String {
     format!(
         "{PRELUDE}
-var g = Buf {{ text: \"\", xs: [], n: 0 }}
-var go = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0 }} }}
+var g = Buf {{ text: \"\", xs: [], n: 0, ps: [] }}
+var go = Outer {{ tag: 0, buf: Buf {{ text: \"\", xs: [], n: 0, ps: [] }} }}
 
 fn fill(n: Int) -> Unit = {{
   for i in 0..<n {{
@@ -75,7 +80,7 @@ effect fn main() -> Unit = {{
     )
 }
 
-const SHAPES: [(&str, &str); 7] = [
+const SHAPES: [(&str, &str); 10] = [
     ("interpolation into a var", "s = \"${s}-${i}\""),
     ("concat into a string field", "b.text = b.text + \"ab\""),
     ("interpolation into a string field", "b.text = \"${b.text}-${i}\""),
@@ -83,14 +88,19 @@ const SHAPES: [(&str, &str); 7] = [
     ("push into a list field", "list.push(b.xs, i)"),
     ("push into a nested list field", "list.push(o.buf.xs, i)"),
     ("string push into a field", "string.push(b.text, \"ab\")"),
+    // #4790: the element reads the root.
+    ("push into a list field reading the root", "list.push(b.xs, i + b.n)"),
+    ("push a tuple reading the root", "list.push(b.ps, (i, b.n))"),
+    ("concat into a list field reading the root", "b.xs = b.xs + [i + b.n]"),
 ];
 
 /// #4475: the field shapes over a module-level `var`.
-const GLOBAL_SHAPES: [(&str, &str); 4] = [
+const GLOBAL_SHAPES: [(&str, &str); 5] = [
     ("push into a global's list field", "list.push(g.xs, i)"),
     ("push into a global's nested list field", "list.push(go.buf.xs, i)"),
     ("concat into a global's list field", "g.xs = g.xs + [i]"),
     ("string push into a global's field", "string.push(g.text, \"ab\")"),
+    ("push a tuple reading the global", "list.push(g.ps, (i, g.n))"),
 ];
 
 #[test]
@@ -229,6 +239,29 @@ fn produced_parts(n: Int) -> String = {
   "${s} ${b.text} ${nm.all} ${first.all}"
 }
 
+// #4790: elements that read the root. `old` keeps the pre-loop record; the
+// `list.len` row reads through a call and keeps the copying write; a pushed
+// string read from the root is shared, so the next append to it copies.
+fn root_reads(n: Int) -> String = {
+  var b = Buf { text: "q", xs: [1], n: 4 }
+  let old = b
+  for i in 0..<n {
+    list.push(b.xs, i + b.n)
+    b.xs = b.xs + [list.len(b.xs)]
+    b.n = b.n + 1
+  }
+  "${old.xs} ${old.n} ${b.xs} ${b.n}"
+}
+
+fn root_strings(n: Int) -> String = {
+  var nm = Names { all: [], keep: "k" }
+  for i in 0..<n {
+    list.push(nm.all, nm.keep)
+    nm.keep = nm.keep + "${i}"
+  }
+  "${nm.all} ${nm.keep}"
+}
+
 effect fn main() -> Unit = {
   println(produced_parts(3))
   println(record_copy(3))
@@ -239,6 +272,8 @@ effect fn main() -> Unit = {
   println(var_interp(3))
   println(field_push(3))
   println(global_push(3))
+  println(root_reads(3))
+  println(root_strings(3))
 }
 "#;
 
@@ -251,6 +286,8 @@ n [] n0.1.2. [0, 1, 2] 1
 v v012 wv0v01v012
 [3] p [3] [3, 0, 1, 2] p+++
 [5] g [5] [5, 0, 2, 4, 18, 20] g+++
+[1] 4 [1, 4, 2, 6, 4, 8, 6] 7
+[\"k\", \"k0\", \"k01\"] k012
 ";
 
 #[test]
@@ -277,6 +314,8 @@ fn the_window_frames_certify() {
         "var_interp",
         "field_push",
         "global_push",
+        "root_reads",
+        "root_strings",
     ] {
         let cert = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed; got {:?}", w.keys()));
         assert!(

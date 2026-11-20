@@ -15,7 +15,7 @@ fn main() -> Unit = {
   println(float.to_fixed(1.005, 2))
   let p = float.parse("3.14159") ?? 0.0
   println(f2s(p * 2.0))
-  println("${f2s(float.sign(mz))} ${f2s(float.sign(z))}")
+  println("${f2s(float.signum(mz))} ${f2s(float.signum(z))}")
   // int/float boundary
   println(int.to_string(int.from_saturating(2.99)))
   println(int.to_string(int.from_saturating(0.0 - 2.99)))

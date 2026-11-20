@@ -72,7 +72,7 @@ impl Emitter<'_> {
         }
         // The http.serve loop's leaves (#2650): bind (port text), next (the
         // request as a List[String] of frames), reply (the response's cells
-        // in a).
+        // in a, its body's bytes in b).
         let t = match (name, args) {
             ("__http_serve_bind", [p]) => {
                 self.fs_call_1(p, OP_HTTP_SERVE_BIND)?;
@@ -82,8 +82,9 @@ impl Emitter<'_> {
                 self.fs_call_0(OP_HTTP_SERVE_NEXT)?;
                 self.fs_result_string_list()?
             }
-            ("__http_serve_reply", [r]) => {
-                self.fs_call_1(r, OP_HTTP_SERVE_REPLY)?;
+            // The body crosses as Bytes in b, exactly (#4311).
+            ("__http_serve_reply", [r, body]) => {
+                self.fs_call_two((r, STR), (body, crate::bytes::BYTES), OP_HTTP_SERVE_REPLY)?;
                 self.fs_result_unit()?
             }
             // The contained loop (#4203): the step closure's env pointer in

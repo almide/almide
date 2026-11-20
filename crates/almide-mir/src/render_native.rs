@@ -411,6 +411,13 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     // definitions, whether or not a body operates on them (#4514).
     let aliased = crate::native_floor::runtime_items_named_by(&crate::render_native_rec::alias_targets()).map_err(wall)?;
     used_shims.extend(aliased);
+    // #4787: the key bytes of the generated Set element / Map key types, and
+    // the runtime items they name (the trait, the registration fn).
+    let key_defs = crate::render_native_rec::key_encode_defs();
+    if !key_defs.is_empty() {
+        used_shims.extend(crate::native_floor::runtime_items_named_by(&key_defs).map_err(wall)?);
+    }
+    let bodies = crate::render_native_rec::place_key_registration(&bodies, &key_defs);
     used_shims.extend(crate::native_foreign::runtime_items()?);
     used_shims.extend(crate::native_callbacks::runtime_items()?);
     let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies).map_err(wall)?;
@@ -459,6 +466,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     }
     let user_start = out.len();
     out.push_str(&crate::render_native_rec::struct_defs());
+    out.push_str(&key_defs);
     out.push_str(&crate::render_native_rec::closure_env_defs());
     for s in glue {
         out.push_str(s);

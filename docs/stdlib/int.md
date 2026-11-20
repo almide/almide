@@ -283,7 +283,7 @@ has `min_value()`/`max_value()`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (47 functions)
+## Signature index (45 functions)
 
 ```
 // Decimal digits, with - when negative.
@@ -355,10 +355,6 @@ int.count_leading_zeros(x: Int) -> Int
 int.count_trailing_zeros(x: Int) -> Int
 
 // Number of set bits; 64 for -1.
-// @since 0.16.0 or earlier
-int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)
-
-// Number of set bits; 64 for -1.
 // @since unreleased
 int.count_ones(x: Int) -> Int
 
@@ -369,10 +365,6 @@ int.bit_reverse(x: Int) -> Int
 // The 8 bytes in reverse order (endian flip).
 // @since 0.16.0 or earlier
 int.byte_swap(x: Int) -> Int
-
-// Bits needed to hold n; 0 for 0, 64 if negative.
-// @since 0.16.0 or earlier
-int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)
 
 // Bits needed to hold x; 0 for 0, 64 if negative.
 // @since unreleased

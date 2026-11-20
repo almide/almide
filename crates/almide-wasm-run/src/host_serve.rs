@@ -116,6 +116,7 @@ pub(crate) fn dispatch(
     live: Option<&LiveOut>,
     op: i32,
     a: &str,
+    b: &[u8],
     frames: fn(&[String]) -> Vec<u8>,
     parse_cells: ParseCells,
 ) -> (i64, Vec<u8>) {
@@ -161,14 +162,15 @@ pub(crate) fn dispatch(
             let Some(stream) = st.pending.take() else {
                 return err_s("http.serve: no request pending".to_string());
             };
-            let (status, body, headers) = match parse_cells(a) {
+            // The cells' body is empty: the body crosses as bytes in `b` (#4311).
+            let (status, _, headers) = match parse_cells(a) {
                 Ok(p) => p,
                 Err(m) => return err_s(m),
             };
             let status: i64 = status.parse().unwrap_or(0);
             // A client that hung up before the response is native's
             // `let _ = write_response(..)`: ignored, the loop goes on.
-            let _ = almide_rt_core::http_server_core::http_server_write(stream, status, &headers, &body);
+            let _ = almide_rt_core::http_server_core::http_server_write(stream, status, &headers, b);
             (pack(0, 0), Vec::new())
         }
     }

@@ -523,12 +523,45 @@ mod dep_cache_tests {
     }
 }
 
-/// The imported modules, or `None` when their resolution failed (the program
-/// is then checked alone, and no import may be judged unused, #4589).
-fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Option<Vec<(String, crate::ast::Program, bool)>> {
+/// The imported modules, or the refusal when their resolution failed (the
+/// program is then checked alone, and no import may be judged unused, #4589).
+/// The resolution is the module loader every CLI route runs
+/// (`resolve_imports_with_deps`), so the editor refuses what `check` refuses.
+fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Result<Vec<(String, crate::ast::Program, bool)>, String> {
     crate::resolve::resolve_imports_with_deps(file_path, program, deps)
-        .ok()
         .map(|r| r.modules.into_iter().map(|(n, p, _, s)| (n, p, s)).collect())
+}
+
+/// #4869: the loader's refusal as a diagnostic on the importing file, at each
+/// import that the loader refuses when it is resolved on its own. The loader
+/// reports a refusal as text with no position, so the import it belongs to is
+/// found by resolving each import alone, never by reading names out of the
+/// message. When no single import is refused alone (a refusal that needs two
+/// imports together), the diagnostic sits on the first import.
+fn import_refusal_diagnostics(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)], refusal: &str) -> Vec<crate::diagnostic::Diagnostic> {
+    let at = |span: Option<crate::ast::Span>, message: &str| {
+        let mut d = crate::diagnostic::Diagnostic::error(message.to_string(), "", "import resolution");
+        if let Some(s) = span {
+            d.line = Some(s.line);
+            d.col = Some(s.col);
+            d.end_col = (s.end_col > s.col).then_some(s.end_col);
+        }
+        d
+    };
+    let span_of = |decl: &crate::ast::Decl| match decl {
+        crate::ast::Decl::Import { span, .. } => *span,
+        _ => None,
+    };
+    let refused: Vec<crate::diagnostic::Diagnostic> = program.imports.iter().filter_map(|import| {
+        let alone = crate::ast::Program { imports: vec![import.clone()], ..empty_program() };
+        crate::resolve::resolve_imports_with_deps(file_path, &alone, deps)
+            .err()
+            .map(|e| at(span_of(import), &e))
+    }).collect();
+    if !refused.is_empty() {
+        return refused;
+    }
+    vec![at(program.imports.first().and_then(span_of), refusal)]
 }
 
 fn type_to_module(type_name: &str) -> Option<String> {

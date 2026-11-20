@@ -55,20 +55,27 @@ fn an_ordinary_child_still_completes_under_the_timeout() {
 }
 
 #[test]
-fn run_shares_the_parents_stdio_and_returns_the_exit_code() {
+fn run_shares_the_parents_stdio_and_errs_on_a_failed_command() {
     let (stdout, stderr, _) = run(r#"  println("before")
-  let code = process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "echo child-out; echo child-err >&2; exit 3"] })!
-  println("code " + int.to_string(code))
+  match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "echo child-out; echo child-err >&2; exit 3"] }) {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
+  process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "echo zero"] })!
+  println("after ok")
   let missing = process.run(process.ProcessCommand { cmd: "almide-no-such-binary-2540", args: [] })
   match missing {
-    ok(c) => println("unexpected ok " + int.to_string(c)),
+    ok(_) => println("unexpected ok"),
     err(e) => println(e),
   }"#);
     // Inherited, in order: the parent's buffered line is flushed before the child runs.
     let mut lines = stdout.lines();
     assert_eq!(lines.next(), Some("before"));
     assert_eq!(lines.next(), Some("child-out"));
-    assert_eq!(lines.next(), Some("code 3"));
+    // #4148: a non-zero exit is an err naming the call, not `ok(3)`.
+    assert_eq!(lines.next(), Some("process.run(\"sh\"): exited with status 3"));
+    assert_eq!(lines.next(), Some("zero"));
+    assert_eq!(lines.next(), Some("after ok"));
     assert!(
         lines.next().unwrap_or("").starts_with("process.run(\"almide-no-such-binary-2540\"): "),
         "{stdout}"
@@ -79,18 +86,43 @@ fn run_shares_the_parents_stdio_and_returns_the_exit_code() {
 #[test]
 fn run_runs_the_child_in_the_given_directory() {
     let (stdout, _, _) = run(r#"  println("before")
-  let code = process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "pwd; exit 5"], dir: "/" })!
-  println("code " + int.to_string(code))
+  match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "pwd; exit 5"], dir: "/" }) {
+    ok(_) => println("unexpected ok"),
+    err(e) => println(e),
+  }
   match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 0"], dir: "/almide-no-such-dir-3379" }) {
-    ok(c) => println("unexpected ok " + int.to_string(c)),
+    ok(_) => println("unexpected ok"),
     err(e) => println(e),
   }"#);
     let mut lines = stdout.lines();
     assert_eq!(lines.next(), Some("before"));
     assert_eq!(lines.next(), Some("/"));
-    assert_eq!(lines.next(), Some("code 5"));
+    assert_eq!(lines.next(), Some("process.run(\"/\", \"sh\"): exited with status 5"));
     assert!(
         lines.next().unwrap_or("").starts_with("process.run(\"/almide-no-such-dir-3379\", \"sh\"): "),
         "{stdout}"
     );
+}
+
+/// #4148: `process.run(c)!` stops the program on a failed command, the shape
+/// `process.run(test)!` then a deploy is written in. Before, the `!` passed
+/// `ok(1)` and the next line ran.
+#[test]
+fn a_failed_run_stops_the_program_at_its_bang() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("deploy.almd");
+    let app = dir.path().join("deploy");
+    std::fs::write(
+        &source,
+        "import process\neffect fn main() -> Unit = {\n  process.run(process.ProcessCommand { cmd: \"false\", args: [] })!\n  println(\"deployed\")\n}\n",
+    )
+    .unwrap();
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").into());
+    let built = Command::new(bin).arg("build").arg(&source).arg("-o").arg(&app).output().expect("build");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let out = Command::new(&app).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "", "the line after the failed run ran");
+    assert!(stderr.contains("process.run(\"false\"): exited with status 1"), "{stderr}");
+    assert_eq!(out.status.code(), Some(1));
 }

@@ -8,7 +8,7 @@ fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
 fn string.__quote(s: String) -> String
 fn string.__string_media_type(s: String) -> String
-fn string.__string_to_text(s: String) -> String
+fn string.__string_to_bytes(s: String) -> Bytes
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String
@@ -293,7 +293,6 @@ fn int.accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bo
 fn int.band(a: Int, b: Int) -> Int
 fn int.bit_length(x: Int) -> Int
 fn int.bit_reverse(x: Int) -> Int
-fn int.bit_width(n: Int) -> Int
 fn int.bnot(x: Int) -> Int
 fn int.bor(a: Int, b: Int) -> Int
 fn int.bshl(a: Int, n: Int) -> Int
@@ -326,7 +325,6 @@ fn int.modulo(a: Int, b: Int) -> Int
 fn int.next_power_of_two(x: Int) -> Int
 fn int.parse(s: String) -> Result[Int, String]
 fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]
-fn int.pop_count(n: Int) -> Int
 fn int.pow(base: Int, exp: Int) -> Int
 fn int.prefix_radix(b: Int) -> Int
 fn int.prev_power_of_two(x: Int) -> Int

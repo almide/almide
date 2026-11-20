@@ -16,6 +16,11 @@ fn show(r: Result[String, String]) -> String = match r {
   err(e) => "err ${e}",
 }
 
+fn show_run(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "run ok",
+  err(e) => "run err ${e}",
+}
+
 fn show_status(r: Result[ProcessStatus, String]) -> String = match r {
   ok(st) => "code=${st.code} out=[${st.stdout}] err=[${st.stderr}]",
   err(e) => "err ${e}",
@@ -37,19 +42,18 @@ effect fn main() -> Unit = {
   println(show_status(process.output(process.ProcessCommand { cmd: "almide-no-such-binary-2589", args: [] })))
   println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "printf fast"], timeout_ms: 30000 })))
   println(show_status(process.output(process.ProcessCommand { cmd: "sleep", args: ["5"], timeout_ms: 100 })))
-  match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 7"] }) {
-    ok(code) => println("run code=${code}"),
-    err(e) => println("run err ${e}"),
-  }
-  // The exit code is 9 only when the child's working directory is `/`.
-  match process.run(process.ProcessCommand {
+  // `run` is ok on exit 0 and an err naming the call on any other exit or a
+  // signal (#4148): `process.run(c)!` stops on a failed command.
+  println(show_run(process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 7"] })))
+  println(show_run(process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 0"] })))
+  println(show_run(process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "kill -9 $$"] })))
+  // The child exits 0 only when its working directory is `/`.
+  println(show_run(process.run(process.ProcessCommand {
     cmd: "sh",
-    args: ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"],
+    args: ["-c", "test \"$(pwd)\" = / && exit 0; exit 1"],
     dir: "/",
-  }) {
-    ok(code) => println("run_in code=${code}"),
-    err(e) => println("run_in err ${e}"),
-  }
+  })))
+  println(show_run(process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 3"], dir: "/" })))
   // The handle family uses the same core on native and the embedded host.
   // Compare only stable outcomes, never the actual pid or scheduler timing.
   let child = process.start(process.ProcessCommand { cmd: "sh", args: ["-c", "printf child; printf err >&2; exit 4"] })!

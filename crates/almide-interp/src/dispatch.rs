@@ -187,7 +187,7 @@ impl<'a> Interpreter<'a> {
         //     the program) spell a `to_string`. The program root (space 0)
         //     has no owner and keeps the flat-table order below.
         // 2d. The executing module's own `@intrinsic` sibling (a `Hole`
-        //     body: `to_string_lossy(b)` inside `bytes.__bytes_to_text`): the
+        //     body a sibling in the same module calls bare): the
         //     same call spelled `module.f`, resolved through the module
         //     dispatch a qualified call takes, keyed on the declaration.
         if let Some(module) = self.own_module_intrinsic(name) {
