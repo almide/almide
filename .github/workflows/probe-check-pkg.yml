@@ -1,0 +1,44 @@
+name: Probe — check output of the package fixture
+# A one-off: print what `almide check` says about three fixtures. Not a gate.
+on:
+  push:
+    branches: [probe/check-pkg]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Print the check output
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Build the CLI
+        run: cargo build -q --bin almide
+      - name: The three fixtures, as the manifest generator runs them
+        run: |
+          set +e
+          grep -n 'ORACLE"\|--raw-json\|cd ' scripts/gen-check-manifest.sh | head -20
+          for f in spec/wasm_cross_pkg/main.almd spec/wasm_cross_pkg/src/ease.almd spec/wasm_cross_pkg/src/rec.almd; do
+            echo "=== $f (--raw-json)"
+            target/debug/almide check "$f" --raw-json; echo "exit=$?"
+            echo "=== $f (--raw-json | sha256)"
+            target/debug/almide check "$f" --raw-json 2>/dev/null | sha256sum
+            echo "=== $f (plain)"
+            target/debug/almide check "$f"; echo "exit=$?"
+          done
+          echo "=== from inside the package"
+          (cd spec/wasm_cross_pkg && ../../target/debug/almide check main.almd; echo "exit=$?")
+      - name: What changed in the package's handling since the last green develop
+        run: git log --oneline a02ca8f780..HEAD -- crates/almide-frontend/src/import_table.rs crates/almide-frontend/src/resolve* src/cli crates/almide-driver | head -40
