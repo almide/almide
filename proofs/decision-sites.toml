@@ -41,9 +41,9 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "133"
+# unstamped_ceiling     = "127"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "189"
+# skipped_route_ceiling = "204"
 # failopen_ceiling      = "46"
 #
 # History:
@@ -82,6 +82,21 @@
 #               outside the project; falls with #4830/#4829. (Measured 216
 #               before merging bugs-final 14227f2082; its #4829 reader fix
 #               turned 14 of those cells to `runs`.)
+#   2026-11-20  batch 1a (ds-2, ceae3afc9d): 24 stamped, ceilings lowered to
+#               133 unstamped / 189 skipped / 46 fail-open.
+#   2026-11-20  skipped ceiling raised 189 -> 205 by owner ruling 2026-11-20:
+#               16 cells observed admitting from outside the project are
+#               recorded honestly (manifest.compiler-version-pin 8 cells #4846,
+#               deps.dep-manifest-swallow 7 cells #4830, front.nesting-budget
+#               test #4880); falls again when those issues land.
+#   2026-11-20  #4880 fixed on decision-sites: front.nesting-budget's test cell
+#               runs again; skipped 205 -> 204.
+#   2026-11-20  #4878 fixed (the bounded profile decides a bare callee by the
+#               checker's binding; the call graph follows pipe stages and UFCS,
+#               #4882/#4883): front.nesting-budget and bounded.bare-callee (one
+#               combined control) STAMPED; perm.proc-signal-kill, effect.foreign-top,
+#               manifest.parse-failure-dropped, front.e101-hidden-chars re-observed
+#               (cells written) and STAMPED. 30 stamped, 127 not, 204 skipped.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -306,18 +321,19 @@ decides = "a @signals_process stdlib fn (call or value) needs `kill` on [permiss
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the signalling set is the stdlib's @signals_process declarations (is_signals_process_stdlib_fn, crates/almide-types/src/stdlib_info.rs:682-684): a newly declared fn is covered with no code change. The call arm is reached for a CallTarget::Module whose module is `process` (mod.rs:230-233); a @signals_process fn declared in another module would pass — none exists, and the novel test enumerates every declaration"
-routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces and runs no code and judges no [permissions] list (observed 2026-11-20, route matrix ds-2: the probe is not refused there)", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
 tests = ["tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list", "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"]
 control_note = "NONE"
 issues = [4815]
-status = "UNSTAMPED"
-reasons = ["c3: lsp cell is `n.a.` without a reason (observe did not judge the LSP)"]
+status = "STAMPED"
+reasons = []
 note = "mod.rs:230-266. #4815 closed: check --json / --effects run it."
 novel = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"
 control_test = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"
 control_patch = "proofs/decision-controls/perm.proc-signal-kill.patch"
 probe = "tests/decision-probes/perm.proc-signal-kill"
 control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "perm.proc-grant-without-list"
@@ -392,18 +408,19 @@ decides = "an @extern fn, and an @inline_rust fn outside the stdlib, carries eve
 from = "declaration"
 unknown = "refuse"
 unknown_note = "@extern and @inline_rust are declarations (pass_effect_inference.rs:53-58). `in_stdlib` (is_stdlib_module, :68-70) is the stdlib's own module by identity: no versioned_name (every dependency carries one) and a stdlib module name, which `import` always resolves to the bundled stdlib, never to a user file (resolve.rs:241-249). A new foreign-body attribute would have to be added to the compiler (an unknown attribute is E053, attr_vocab.rs:179)"
-routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces and runs no code and judges no capability (observed 2026-11-20, route matrix ds-2: the probe is not refused there)", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
 tests = ["crates/almide-codegen/src/pass_effect_inference.rs::an_extern_fn_is_every_category", "crates/almide-codegen/src/pass_effect_inference.rs::an_inline_rust_fn_outside_the_stdlib_is_every_category", "tests/inline_rust_authority_test.rs::a_granted_template_is_every_capability", "tests/effect_permissions_test.rs::a_plain_fn_extern_is_every_category", "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"]
 control_note = "security-by-construction.md row 17 (inline Rust): dropping the effect rule fails inline_rust_authority_test (exit 101)"
 issues = [4815]
-status = "UNSTAMPED"
-reasons = ["c3: lsp cell is `n.a.` without a reason"]
+status = "STAMPED"
+reasons = []
 note = "#4815 closed (check --json / --effects run the whole-program gate). `from` reclassified mixed:declaration+name -> declaration: the stdlib test is module identity, not spelling — a judgment, confirm."
 novel = "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"
 control_patch = "proofs/decision-controls/effect.foreign-top.patch"
 probe = "tests/decision-probes/effect.foreign-top"
 control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "effect.e006-isolation"
@@ -649,7 +666,7 @@ stamp = "3ac0714c94 2026-11-19"
 
 [[site]]
 id = "bounded.bare-callee"
-at = "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident"
+at = "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call (by the checker's binding, Checker::value_callees) / BoundedCx::check_call_ident / user_call_cycle"
 items = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident",
 ]
@@ -657,21 +674,23 @@ keys = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident::S1::E071",
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident::S1::E074",
 ]
-decides = "a bare callee is admitted if it is an entry fn of the profile, or its name starts with print/eprint, or is assert/assert_eq; else E074"
+decides = "a bare callee the checker bound to a local value (parameter, let, lambda parameter) is an indirect call, E074; one bound to a top-level fn is admitted if that fn is in the profile and is a call-graph edge; a builtin is read off the builtin table; a selective import is judged as its module.member; else E074"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a bare callee is a profile fn (self.fns, bounded.rs:876-898), else a builtin read off the builtin table (bounded.rs:905-908), else a selective import judged as its module.member (import_table.resolve_direct, bounded.rs:909-916), else E074 (bounded.rs:917-923). UNVERIFIED GAP: a fn-typed parameter or local shadowing a profile fn is looked up by its spelling first (bounded.rs:876) although the checker resolved it to the local (check/calls.rs:161-183)"
+unknown_note = "the checker records each bare callee (call and pipe stage) it binds to a local value (Checker::note_value_callee, check/calls.rs and infer_calls_closures.rs; per program, bracketed like type_map); bounded.rs::check_call refuses those as indirect (E074) and user_call_cycle draws no edge for them (#4878). Otherwise: a profile fn (self.fns), a builtin from the builtin table, a selective import judged as its module.member, else E074"
 routes = { check = "runs", check_json = "runs", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs for @bounded (front end)", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
-tests = ["tests/diagnostics/e074-bounded-unbounded-callee", "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target", "tests/critical_profile_test.rs::a_selectively_imported_print_named_fn_is_judged_by_its_target"]
+tests = ["tests/diagnostics/e074-bounded-unbounded-callee", "tests/decision_batch1a_test.rs::novel_a_value_spelled_like_a_profile_fn_is_an_indirect_callee", "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target", "tests/critical_profile_test.rs::a_selectively_imported_print_named_fn_is_judged_by_its_target"]
 control_note = "NONE"
-issues = [4823]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4878, probed 2026-11-20: a fn-typed parameter named like a profile fn is judged as that fn's direct call; critical admits recursion through it)"]
-note = "#4823 closed (f6145c1eb0, a36f02c73e). `from` name -> declaration (the callee is decided by what it resolves to) and unknown allow -> refuse (a bare name the profile does not know is E074, bounded.rs:917-923; failopen count -1); the shadowing case is the open c2 reason."
-novel = "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target"
-control_test = "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target"
+issues = [4823, 4878, 4882]
+status = "STAMPED"
+reasons = []
+note = "#4823 closed (f6145c1eb0, a36f02c73e). #4878 and #4882 (one root) fixed on decision-sites: a bare callee is decided by the checker's binding, not its spelling — the bounded profile refuses a value-bound callee (E074, the same text a value callee always got) and the checker types a pipe stage spelled like a Fn-typed local through that local (pipe_through_fn_typed_local), as the direct call form and lowering do. One novel test, one control over both halves (each half alone also turned the test red, q24 2026-11-20). The import case stays covered by novel_a_selectively_imported_fresh_fn_is_judged_by_its_target."
+novel = "tests/decision_batch1a_test.rs::novel_a_value_spelled_like_a_profile_fn_is_an_indirect_callee"
+control_test = "tests/decision_batch1a_test.rs::novel_a_value_spelled_like_a_profile_fn_is_an_indirect_callee"
 control_patch = "proofs/decision-controls/bounded.bare-callee.patch"
 probe = "tests/decision-probes/bounded.bare-callee"
+control_seen = "ceae3afc9d 2026-11-20 ds-2 (tree = ceae3afc9d + the #4878/#4882 fix): base green, patched red (scripts/run-decision-controls.sh, the combined control); probe driven on every route inside and outside the project (decision_route_matrix_test)"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "bounded.member-module-gate"
@@ -745,6 +764,7 @@ unknown = "allow"
 unknown_note = "E071 / E077 now judge a member from its checked types (a heap result or a mut heap parameter allocates; a Float result computes; an unknown type counts as both), and E075 refuses a collection built from a run-time Int with no heap input (#4855). Left open: a String- or heap-input amplifier (string.repeat-like) is still known only from BOUNDED_SIZED_CTORS"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
+  "tests/decision_batch1a_test.rs::novel_recursion_through_every_direct_call_form_is_refused",
   "tests/diagnostics/e070-*",
   "tests/diagnostics/e071-*",
   "tests/diagnostics/e072-*",
@@ -756,7 +776,7 @@ tests = [
   "tests/critical_profile_test.rs::a_violation_is_seen_through_every_expression_kind",
 ]
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
-issues = [4855, 4871]
+issues = [4855, 4871, 4883]
 status = "UNSTAMPED"
 reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)"]
 note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates); the probe allocates only through a @bounded callee in a counted loop, observed refused on all 14 routes inside and outside the project (2026-11-20 ds-2)."
@@ -782,7 +802,7 @@ tests = ["tests/critical_profile_test.rs::critical_clean_program_passes_both_mod
 control_note = "NONE"
 issues = [4823]
 status = "UNSTAMPED"
-reasons = ["c3: twelve cells are bare `n.a.` without a reason"]
+reasons = ["c3: OBSERVED 2026-11-20 (route matrix ds-2): `--profile critical` is refused only by check / check_json; run, build, test, bench, native, wasm, wasi, component, lsp, mcp, emit ADMIT the probe (run and the --target runs exit 0 with the flag) \u2014 find whether those routes accept the flag without applying it (a fail-open) or reject it, then write each cell"]
 note = "#4823 closed. Every route but check / check --json is n.a. (--profile is a check flag; check --effects refuses it as a usage error). The probe passes --profile critical as `args`."
 novel = "tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee"
 control_test = "tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee"
@@ -2019,18 +2039,19 @@ decides = "a project manifest that parses governs [permissions]/deps; one that d
 from = "declaration"
 unknown = "refuse"
 unknown_note = "permissions_project_for -> governing_manifest ends the command with the manifest's error (project.rs:925-938); compile_driver::cwd_project likewise (compile_driver.rs:270-274). The `.ok()` readers left read ./almide.toml, which the dispatch gate has already refused (cli/mod.rs:551, wasm_compile.rs:83, compile.rs:101, test_wasm.rs:136), or a dependency manifest the fetch walk has already refused (#4820; native_grant.rs:100, crate_inputs.rs:72); compile_driver.rs:360 parses ./almide.toml only when manifest_for_entry found none, so none exists. The editor (lsp_code_actions.rs:412) never fetches"
-routes = { check = "runs:fail-open #4829", check_json = "runs:fail-open", check_effects = "runs:fail-open", run = "runs:fail-open", build = "runs:fail-open", test = "runs:fail-open", bench = "runs:fail-open", native = "runs:fail-open", wasm = "runs:fail-open", wasi = "runs:fail-open", component = "runs:fail-open", lsp = "unknown", mcp = "runs:fail-open", emit = "runs:fail-open" }
+routes = { check = "runs:fail-open #4829", check_json = "runs:fail-open", check_effects = "runs:fail-open", run = "runs:fail-open", build = "runs:fail-open", test = "runs:fail-open", bench = "runs:fail-open", native = "runs:fail-open", wasm = "runs:fail-open", wasi = "runs:fail-open", component = "runs:fail-open", lsp = "n.a.: the LSP produces and runs no code and reads no manifest (observed 2026-11-20, route matrix ds-2: the probe is not refused there)", mcp = "runs:fail-open", emit = "runs:fail-open" }
 tests = ["tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside", "tests/permissions_routes_test.rs::a_manifest_that_does_not_parse_refuses_every_route"]
 control_note = "NONE"
 issues = [4829]
-status = "UNSTAMPED"
-reasons = ["c3: lsp cell is `unknown`"]
+status = "STAMPED"
+reasons = []
 note = "#4829 closed (5129b9f467). unknown was `allow`; now `refuse` (failopen count -1)."
 novel = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside"
 control_test = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside"
 control_patch = "proofs/decision-controls/manifest.parse-failure-dropped.patch"
 probe = "tests/decision-probes/manifest.parse-failure-dropped"
 control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "manifest.reader-split"
@@ -2326,15 +2347,16 @@ decides = "a package whose [package].almide minimum is newer than the running co
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a pin semver cannot parse is refused (project.rs:1177-1181); a manifest that does not parse is refused before the pin is read (check_manifest ends with parse_toml, so dispatch.rs:791 `let Ok` never takes its else arm); ALMIDE_SKIP_VERSION_CHECK honoured in a release build only with --allow-switch"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped: #4846 exempt", mcp = "runs", emit = "runs" }
+routes = { check = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", check_json = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", check_effects = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", run = "runs", build = "runs", test = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", bench = "runs", native = "runs", wasm = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", wasi = "runs", component = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", lsp = "skipped: #4846 exempt", mcp = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)", emit = "skipped: #4846 this route does not read the [package].almide pin from outside the project (observed 2026-11-20, route matrix ds-2, from outside the project)" }
 tests = ["tests/switch_lock_test.rs", "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"]
 control_note = "row 25: with lock_engaged_by_default false a release build honoured ALMIDE_SKIP_VERSION_CHECK and check-release-switch-lock.sh exited 1 (covers the bypass, not the pin itself)"
 issues = [4829, 4846]
 status = "UNSTAMPED"
-reasons = ["c3: skipped #4846: from outside the project the pin is read only by the native compile driver (compile_driver.rs:363-366)", "c3: OBSERVED 2026-11-20 (route matrix, ds-2): check, check_json, check_effects, test, wasm, component, mcp, emit do not refuse as the cells say (#4846); the honest cells are `skipped: #4846` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+reasons = ["c3: skipped #4846 on check, check_json, check_effects, test, wasm, component, mcp, emit (observed 2026-11-20, route matrix ds-2): from outside the project the pin is read only by the native compile driver (compile_driver.rs:363-366); cells set by owner ruling 2026-11-20 (skipped ceiling 189 -> 205)"]
 note = "#4829's part closed. The novel test asserts inside the project only."
 novel = "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"
+probe = "tests/decision-probes/manifest.compiler-version-pin"
 control_patch = "proofs/decision-controls/manifest.compiler-version-pin.patch"
 
 [[site]]
@@ -2645,15 +2667,16 @@ decides = "a fetched dependency's almide.toml that parse_toml refuses is read as
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a fetched dependency's almide.toml is read by parse_toml and any refusal ends the walk naming the dependency and its chain (project_fetch.rs:920-930, #4820)"
-routes = { check = "runs:swallows", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs", emit = "runs" }
+routes = { check = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", check_json = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", check_effects = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", wasi = "runs", component = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", emit = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)" }
 tests = ["tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed", "tests/hidden_char_inputs_test.rs::a_dependency_manifest_with_a_hidden_character_is_refused"]
 control_note = "NONE"
 issues = [4820]
 status = "UNSTAMPED"
-reasons = ["c3: the walk runs inside the project (dispatch gate) and from outside only in the native compile driver; outside, check / check_json / check_effects / test / wasm / component / emit / mcp read ./almide.toml only (#4830)", "c3: OBSERVED 2026-11-20 (route matrix, ds-2): check, check_json, check_effects, wasm, component, mcp, emit do not refuse as the cells say (#4830); the honest cells are `skipped: #4830` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+reasons = ["c3: skipped #4830 on check, check_json, check_effects, wasm, component, mcp, emit (observed 2026-11-20, route matrix ds-2): the walk runs inside the project (dispatch gate) and from outside only in the native compile driver; cells set by owner ruling 2026-11-20 (skipped ceiling 189 -> 205)"]
 note = "#4820 closed. native_grant.rs:100 and crate_inputs.rs:72 `.ok()` read a manifest the walk has already accepted. unknown was `allow`; now `refuse` (failopen count -1)."
 novel = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
+probe = "tests/decision-probes/deps.dep-manifest-swallow"
 control_patch = "proofs/decision-controls/deps.dep-manifest-swallow.patch"
 
 [[site]]
@@ -3660,18 +3683,19 @@ decides = "a raw hidden character (bidi control, U+2028/2029, Cf, Tags block, C0
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the set is C-418's table by Unicode class (lexer.rs:505-520, err_text.rs); a raw one anywhere in a source file is E101 (diagnostics.rs:156-175), in an imported module too (resolve.rs:75-77), and in any string or key of an AST .json entry (#4820, compile_driver.rs:16-30, 43-49)"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (lsp.rs:29-51 parser errors)", mcp = "runs: check --json", emit = "runs; skipped for an AST .json entry #4820" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (lsp.rs:29-51 parser errors)", mcp = "runs: check --json", emit = "runs (observed 2026-11-20, route matrix ds-2, inside and outside the project)" }
 tests = ["tests/diagnostics/e101-bidi-control", "tests/diagnostics/e101-zero-width-in-string", "tests/diagnostics/e101-tag-characters-in-string", "tests/diagnostics/e101-line-separator-in-comment", "tests/diagnostics/e101-bidi-isolate-in-raw-string", "crates/almide-syntax/src/lexer.rs::tests::hidden_characters_beyond_bidi_are_found_raw", "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry", "tests/hidden_char_inputs_test.rs::an_ast_entry_with_a_hidden_character_is_refused"]
 control_note = "tests/diagnostic_harness_test.rs over tests/diagnostics/e101-* (broken must fail with E101, fixed must pass)"
 issues = [4820]
-status = "UNSTAMPED"
-reasons = ["c3: emit cell says `runs; skipped for an AST .json entry #4820` — needs re-observation and a clean cell"]
+status = "STAMPED"
+reasons = []
 note = "#4820 closed (4a16b84fae): the .json entry is refused. The probe holds a raw U+202E in a comment."
 novel = "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry"
 control_test = "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry"
 control_patch = "proofs/decision-controls/front.e101-hidden-chars.patch"
 probe = "tests/decision-probes/front.e101-hidden-chars"
 control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "front.e101-confusables"
@@ -3709,14 +3733,14 @@ keys = []
 decides = "hidden characters reaching compiler output are escaped"
 from = "declaration"
 unknown = "allow"
-unknown_note = "#4819 escaped the terminal and JSON sinks: message, hint, notes, context and the echoed line (diagnostic_render.rs:25-29 and its callers), the JSON rows (json_escape, diagnostic_render.rs:259-283), the --json envelope (envelope.rs:61-80), MCP (mcp.rs:155-159), test names (test_report.rs:379, 805; test_output.rs:90). Each sink escapes on its own: a new sink is raw by default, and the LSP still sends the message raw (lsp_code_actions.rs:367)"
-routes = { check = "partial #4819", check_json = "partial #4819", check_effects = "partial", run = "partial", build = "partial", test = "skipped for test names #4819", bench = "partial", native = "partial", wasm = "partial", wasi = "partial", component = "partial", lsp = "unknown", mcp = "partial", emit = "partial" }
-tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped"]
+unknown_note = "#4819 escaped the terminal and JSON sinks: message, hint, notes, context and the echoed line (diagnostic_render.rs:25-29 and its callers), the JSON rows (json_escape, diagnostic_render.rs:259-283), the --json envelope (envelope.rs:61-80), MCP (mcp.rs:155-159), test names (test_report.rs:379, 805; test_output.rs:90). Each sink escapes on its own: a new sink is raw by default; the LSP escapes its diagnostics, code-action titles and hover since #4879"
+routes = { check = "partial #4819", check_json = "partial #4819", check_effects = "partial", run = "partial", build = "partial", test = "skipped for test names #4819", bench = "partial", native = "partial", wasm = "partial", wasi = "partial", component = "partial", lsp = "partial: the published diagnostics, the repair code-action titles and hover escape (#4879, tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw)", mcp = "partial", emit = "partial" }
+tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw"]
 control_note = "NONE"
-issues = [4819]
+issues = [4819, 4879]
 status = "UNSTAMPED"
-reasons = ["c2: a new output sink is unescaped by default (each sink escapes on its own; no one constructor)", "c3: lsp sends the diagnostic message and hint raw (lsp_code_actions.rs:367; issue draft issue-lsp-hidden-message)", "c3: no probe (an expected substring cannot say `not raw`)"]
-note = "#4819 closed (34c782c767, a5699adbd0) for every sink but the LSP."
+reasons = ["c2: a new output sink is unescaped by default (each sink escapes on its own; no one constructor)", "c3: no probe (an expected substring cannot say `not raw`)"]
+note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879)."
 novel = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
 control_test = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
 control_patch = "proofs/decision-controls/front.diagnostic-echo.patch"
@@ -3732,16 +3756,19 @@ decides = "expression and type nesting deeper than the `nesting` budget (500) is
 from = "type"
 unknown = "refuse"
 unknown_note = "every recursive production nests through parse_expr, parse_type or parse_pattern, and each counts against the one budget (expressions.rs:9, types.rs:21, patterns.rs:21, #4818); an interpolation hole's sub-parser starts at the enclosing depth (primary.rs:725, #4841); an AST .json entry is bounded by serde_json's recursion limit. A future production that recursed without entering one of the three would be uncounted"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs; .json entry bounded by serde_json depth" }
-tests = ["tests/compile_budget_test.rs (nesting shape)", "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget", "tests/compile_budget_test.rs::deep_interpolation_nesting_ends_at_the_nesting_budget", "tests/compile_budget_test.rs::deep_pattern_nesting_ends_at_the_nesting_budget"]
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs (#4880 fixed 2026-11-20: the test lane workers run on the compiler stack, so the budget refuses instead of the stack aborting)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs: the .json entry is bounded by serde_json depth" }
+tests = ["tests/compile_budget_test.rs (nesting shape)", "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget", "tests/compile_budget_test.rs::deep_interpolation_nesting_ends_at_the_nesting_budget", "tests/compile_budget_test.rs::deep_pattern_nesting_ends_at_the_nesting_budget", "tests/compile_budget_test.rs::almide_test_ends_deep_nesting_at_the_budget_on_every_lane"]
 control_note = "tests/compile_budget_test.rs::nesting (parenthesised depth past the budget must refuse)"
-issues = [4818, 4841]
-status = "UNSTAMPED"
-reasons = ["c3: OBSERVED 2026-11-20 (route matrix, ds-2): test do not refuse as the cells say (#4880); the honest cells are `skipped: #4880` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+issues = [4818, 4841, 4880]
+status = "STAMPED"
+reasons = []
 note = "#4841 closed (7b513b4959), #4818 closed (5681412c7f). unknown was `allow`; now `refuse` (failopen count -1) — a judgment on the three entry points, confirm."
 novel = "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget"
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget"
+probe = "tests/decision-probes/front.nesting-budget"
 control_patch = "proofs/decision-controls/front.nesting-budget.patch"
+control_seen = "ceae3afc9d 2026-11-20 ds-2 (tree = ceae3afc9d + the #4878/#4880 fixes): base green, patched red (scripts/run-decision-controls.sh); probe driven on every route inside and outside the project (decision_route_matrix_test)"
+stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "front.checker-budgets"
@@ -4002,11 +4029,11 @@ decides = "untrusted input (a request body) is decoded only into an input type, 
 from = "mixed:declaration+name"
 unknown = "refuse"
 status = "UNSTAMPED"
-reasons = ["c1:name fallbacks (rsplit('.') bare names, `?` prefix)"]
+reasons = ["c1:name fallbacks remain where no nominal key exists (the checker's bare-name lookup when a type has no entry under its own name; `?` prefix; is_source compares last segments)", "c4/#4884: the #4884 fix (flow half keyed by (module, name) and the checker-typed decode result; checker half no longer unions bare and qualified protocols) has its own control (scratchpad e110-4884.patch), run by hand; the row's control stays the #4861 one", "c2/#4884 remaining: the checker half reads an entry type's protocols under its bare key, which a module's same-named type also registers (registration_decls.rs protocol_keys), so `http.decode_json` into an entry `User: Decode` is refused when a module declares `User: Codec` (over-refusal, observed 2026-11-20)"]
 unknown_note = "a sink type argument is judged through every container (List / Option / Result / tuple / union / record fields / a named type's arguments) down to the named types it holds (#4861); the flow half still matches the spelled call name and runs from the CLI callers only"
 routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "runs", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e110-codec-at-request-sink", "tests/diagnostics/e110-hand-decoded-request-body"]
-issues = [4861, 4847]
+tests = ["tests/diagnostics/e110-codec-at-request-sink", "tests/diagnostics/e110-hand-decoded-request-body", "tests/decision_batch1a_test.rs::novel_a_decoded_type_is_judged_by_its_own_declaration_not_its_name"]
+issues = [4861, 4847, 4884]
 note = "input_sink.rs:87-136; effect_value_gate.rs:39-73 (flow half, check --effects gap is #4847)."
 novel = "tests/decision_gap_fixes_test.rs::novel_e110_a_sent_out_type_inside_a_list"
 control_patch = "proofs/decision-controls/input.e110-input-sink.patch"

@@ -65,6 +65,8 @@ impl Checker {
         let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
         self.type_map.clear();
+        // #4878: the value-bound callees are per program, like the type map.
+        let saved_value_callees = std::mem::take(&mut self.value_callees);
 
         // Build module's import table
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -127,6 +129,7 @@ impl Checker {
         self.constraints = saved_constraints;
         self.result_slot_defaults = saved_slot_defaults;
         self.uf = saved_uf;
+        self.value_callees = saved_value_callees;
         self.env.import_table = saved_import_table;
         self.env.restore_keys(snapshot);
     }

@@ -62,7 +62,7 @@ impl Checker {
             }
             // ALS-B6 / E073: the reachable call graph must be a DAG — a DFS
             // from this fn over user-fn edges that revisits it is recursion
-            if user_call_cycle(name.as_str(), &fns) {
+            if user_call_cycle(name.as_str(), &fns, self) {
                 diags.push(bounded_err(
                     "recursion is not admissible in a @bounded function",
                     "the reachable call graph must be a DAG — replace the recursion with a counted loop",
@@ -334,19 +334,44 @@ fn bounded_err(
 fn user_call_cycle<'a>(
     start: &str,
     fns: &std::collections::HashMap<&'a str, (bool, Option<&'a ast::Expr>)>,
+    ck: &Checker,
 ) -> bool {
+    // The edges are the calls BoundedCx::check_call judges as direct calls of
+    // a user fn, in every form it judges them: a call, a pipe stage (`x |> f`
+    // is `f(x)`; `x |> f(a)` is itself a Call node) and UFCS through a value
+    // receiver (`p.f()` is `f(p)`, check_call_member).
     fn edges<'a>(
         body: &'a ast::Expr,
         fns: &std::collections::HashMap<&'a str, (bool, Option<&'a ast::Expr>)>,
+        ck: &Checker,
         out: &mut Vec<&'a str>,
     ) {
         ast::visit_expr(body, &mut |e| {
-            if let ast::ExprKind::Call { callee, .. } = &e.kind {
-                if let ast::ExprKind::Ident { name } = &callee.kind {
-                    if let Some((k, _)) = fns.get_key_value(name.as_str()) {
-                        out.push(k);
-                    }
+            let mut callee = match &e.kind {
+                ast::ExprKind::Call { callee, .. } => &**callee,
+                ast::ExprKind::Pipe { right, .. } => &**right,
+                _ => return,
+            };
+            while let ast::ExprKind::Unwrap { expr } | ast::ExprKind::Try { expr } = &callee.kind {
+                callee = &**expr;
+            }
+            // #4878: an edge is a callee the checker bound to a top-level
+            // fn; one bound to a local value is an indirect call (E074).
+            if ck.value_callees.contains(&callee.id) {
+                return;
+            }
+            let name = match &callee.kind {
+                ast::ExprKind::Ident { name } => name.as_str(),
+                ast::ExprKind::Member { object, field }
+                    if matches!(object.kind, ast::ExprKind::Ident { .. })
+                        && ck.type_map.get(&object.id).is_some() =>
+                {
+                    field.as_str()
                 }
+                _ => return,
+            };
+            if let Some((k, _)) = fns.get_key_value(name) {
+                out.push(k);
             }
         });
     }
@@ -364,7 +389,7 @@ fn user_call_cycle<'a>(
         seen.push(f);
         if let Some((_, Some(body))) = fns.get(f) {
             let mut es = Vec::new();
-            edges(body, fns, &mut es);
+            edges(body, fns, ck, &mut es);
             for e in es {
                 if e == start {
                     return true;
@@ -891,6 +916,21 @@ impl BoundedCx<'_, '_> {
 
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) {
         match &callee.kind {
+            // #4878: decided by what the checker bound the callee to, never
+            // by its spelling — a parameter, `let` or lambda parameter that
+            // shares a profile fn's name is a function value, so the call is
+            // an indirect call even though a top-level fn is spelled the same.
+            // The text is the one a value callee with no same-named fn always
+            // got (the unknown-bare-callee arm below), so only the shadowing
+            // case changes verdict.
+            ast::ExprKind::Ident { .. } if self.checker.value_callees.contains(&callee.id) => {
+                self.err(
+                    "calling a function outside the profile is not admissible in a @bounded function",
+                    "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+                    "E074",
+                    call.span,
+                );
+            }
             ast::ExprKind::Ident { name } => self.check_call_ident(call, name.as_str(), args),
             ast::ExprKind::Member { object, field } => self.check_call_member(call, object, field.as_str(), args),
             // ALS-B7 (#2297): a variant constructor application builds a

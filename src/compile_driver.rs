@@ -671,7 +671,17 @@ pub(crate) fn plan_test_run(ctx: &TestRunContext, files: &[String], module_less_
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(files.len().max(1));
     let chunk = files.len().div_ceil(threads).max(1);
     let all: Vec<Option<Owners>> = std::thread::scope(|s| {
-        let handles: Vec<_> = files.chunks(chunk).map(|c| (c.len(), s.spawn(move || c.iter().map(facts).collect::<Vec<_>>()))).collect();
+        // #4880: each chunk parses user source, so it runs on the compiler's stack.
+        let handles: Vec<_> = files
+            .chunks(chunk)
+            .map(|c| {
+                let h = std::thread::Builder::new()
+                    .stack_size(crate::compiler_stack_size())
+                    .spawn_scoped(s, move || c.iter().map(facts).collect::<Vec<_>>())
+                    .expect("failed to spawn a test planning thread");
+                (c.len(), h)
+            })
+            .collect();
         // A chunk whose thread panicked builds its files alone.
         handles.into_iter().flat_map(|(n, h)| h.join().unwrap_or_else(|_| vec![None; n])).collect()
     });

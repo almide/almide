@@ -1581,6 +1581,20 @@ impl Checker {
         }
     }
 
+    /// A pipe stage spelled like a Fn-typed local (a parameter, a `let`) is a
+    /// call THROUGH that local, as the direct call form is
+    /// (`check_call_with_type_args`, SHADOWING FIRST) and as lowering emits
+    /// it: typed against the same-named top-level fn, `n |> f` was checked
+    /// as one function and run as another.
+    fn pipe_through_fn_typed_local(&mut self, callee: &mut ast::Expr, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let local = self.env.lookup_var(name).map(|t| resolve_ty(t, &self.uf))?;
+        if !matches!(local, Ty::Fn { .. }) {
+            return None;
+        }
+        let _ = self.infer_expr(callee);
+        self.call_fn_typed_local(name, &local, arg_tys)
+    }
+
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         // ADR-0006 D1 (#1108 Phase 2a): the pipe path bypasses `infer_call`,
         // so the fallible-callback normalization runs here too
@@ -1652,6 +1666,7 @@ impl Checker {
             ExprKind::Ident { .. } | ExprKind::Member { .. } => self.reject_unopted_memory_unsafe_callee(right),
             _ => {}
         }
+        let right_id = right.id;
         match &mut right.kind {
             ExprKind::Call { callee, args, .. } => {
                 // #1521: the pipe path inferred its args BARE, without #653's
@@ -1698,10 +1713,16 @@ impl Checker {
                 self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 let callee_span = callee.span;
+                let callee_id = callee.id;
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => {
+                        self.note_value_callee(callee_id, name);
                         self.check_effect_alias_call(name);
-                        self.check_named_call(name, &all_arg_tys)
+                        let name = name.clone();
+                        if let Some(ret) = self.pipe_through_fn_typed_local(callee, &name, &all_arg_tys) {
+                            return ret;
+                        }
+                        self.check_named_call(&name, &all_arg_tys)
                     }
                     ExprKind::Member { object, field, .. } if self.local_shadows_module(object) => {
                         let written: Vec<ast::Expr> = std::iter::once((**left).clone()).chain(args.iter().cloned()).collect();
@@ -1727,10 +1748,15 @@ impl Checker {
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
             ExprKind::Ident { name, .. } => {
+                self.note_value_callee(right_id, name);
                 self.check_effect_alias_call(name);
                 let all_arg_tys = vec![left_ty];
                 self.arg_spans = vec![left_span];
-                self.check_named_call(name, &all_arg_tys)
+                let name = name.clone();
+                if let Some(ret) = self.pipe_through_fn_typed_local(right, &name, &all_arg_tys) {
+                    return ret;
+                }
+                self.check_named_call(&name, &all_arg_tys)
             }
             // `xs |> list.len` with a local `list` (#4254): the written call
             // `list.len(xs)`, which goes THROUGH the local (#2345 / #2348).

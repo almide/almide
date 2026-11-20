@@ -658,23 +658,88 @@ fn novel_a_selectively_imported_fresh_fn_is_judged_by_its_target() {
     admitted("a local @bounded callee under critical", &inside(&t, &["check", "--profile", "critical", "{main}"]));
 }
 
-/// GAP (scratchpad issue-bounded-bare-shadow.md, unverified): a fn-typed
-/// PARAMETER named like a profile fn is called through the parameter (the
-/// checker resolves locals first, check/calls.rs:161-183), but the bounded
-/// check looks the bare name up among the profile's fns first
-/// (bounded.rs:876) and admits it as that direct call — an indirect call, and
-/// a recursion through `spin` the call graph does not see. Expected RED until
-/// that is fixed; ignored so CI stays green.
+/// bounded.bare-callee (#4878): a bare callee is decided by what the checker
+/// BOUND it to, never by its spelling. A fresh fn-typed parameter, a `let`
+/// and a lambda parameter, each spelled like a fresh profile fn, called
+/// directly and as a pipe stage, are indirect callees: E074 under `--profile
+/// critical` and in a `@bounded` fn, although a top-level fn of that name
+/// exists. Through the parameter, `spin` recurses (`spin` -> `go` -> `id` =
+/// `spin`), which the call graph never saw. Controls: the same files check
+/// clean without the profile, and a direct call of the top-level fn is
+/// admitted under it. #4882 (same root): the checker types a pipe stage by
+/// the same binding, so a parameter whose type differs from the top-level
+/// fn's checks and runs as the parameter (it checked clean as the top-level
+/// fn, then failed in codegen: native invalid Rust, wasm E082).
 #[test]
-#[ignore = "gap: a fn-typed parameter shadowing a profile fn is admitted as a direct call (issue draft issue-bounded-bare-shadow)"]
-fn gap_a_parameter_shadowing_a_profile_fn_is_an_indirect_callee() {
-    let (id, go, spin) = (novel::ident("id"), novel::ident("go"), novel::ident("spin"));
-    let src = fill(
-        "fn @I@(n: Int) -> Int = n\n\nfn @G@(@I@: (Int) -> Int, n: Int) -> Int = @I@(n)\n\nfn @S@(n: Int) -> Int = @G@(@S@, n + 1)\n\nfn main() -> Unit = println(int.to_string(@G@(@I@, 1)))\n",
-        &[("@I@", &id), ("@G@", &go), ("@S@", &spin)],
+fn novel_a_value_spelled_like_a_profile_fn_is_an_indirect_callee() {
+    let (id, go, spin, h) = (novel::ident("id"), novel::ident("go"), novel::ident("spin"), novel::ident("h"));
+    let subs = [("@I@", id.as_str()), ("@G@", go.as_str()), ("@S@", spin.as_str()), ("@H@", h.as_str())];
+    let shapes = [
+        ("a parameter", "fn @G@(@I@: (Int) -> Int, n: Int) -> Int = @I@(n)\n\nfn @S@(n: Int) -> Int = @G@(@S@, n + 1)\n\nfn main() -> Unit = println(int.to_string(@G@(@I@, 1)))\n"),
+        ("a parameter as a pipe stage", "fn @G@(@I@: (Int) -> Int, n: Int) -> Int = n |> @I@\n\nfn main() -> Unit = println(int.to_string(@G@(@I@, 1)))\n"),
+        ("a parameter as a pipe call", "fn @G@(@I@: (Int, Int) -> Int, n: Int) -> Int = n |> @I@(1)\n\nfn @H@(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = println(int.to_string(@G@(@H@, 1)))\n"),
+        ("a let", "fn @G@(n: Int) -> Int = {\n  let @I@ = @H@\n  @I@(n)\n}\n\nfn @H@(n: Int) -> Int = n + 2\n\nfn main() -> Unit = println(int.to_string(@G@(1)))\n"),
+    ];
+    for (what, body) in shapes {
+        let src = fill(&format!("fn @I@(n: Int) -> Int = n\n\n{body}"), &subs);
+        let t = tree(&manifest(""), &[("src/main.almd", src.clone())]);
+        admitted(&format!("{what}: without the profile"), &inside(&t, &["check", "{main}"]));
+        for a in [&["check", "--profile", "critical", "{main}"][..], &["check", "--json", "--profile", "critical", "{main}"][..]] {
+            refused(&format!("{what} spelled like a profile fn: almide {}", a.join(" ")), &inside(&t, a), &["E074"]);
+        }
+        let bounded = src.replacen(&format!("fn {go}("), &format!("@bounded\nfn {go}("), 1);
+        let t = tree(&manifest(""), &[("src/main.almd", bounded)]);
+        refused(&format!("{what} spelled like a profile fn, @bounded"), &inside(&t, &["check", "{main}"]), &["E074"]);
+    }
+    let ok = fill("fn @I@(n: Int) -> Int = n\n\nfn @G@(n: Int) -> Int = @I@(n) + (n |> @I@)\n\nfn main() -> Unit = println(int.to_string(@G@(1)))\n", &subs);
+    let t = tree(&manifest(""), &[("src/main.almd", ok)]);
+    admitted("the top-level fn called directly under critical", &inside(&t, &["check", "--profile", "critical", "{main}"]));
+    // #4882, the same root: a pipe stage spelled like a fn-typed parameter
+    // is typed by the PARAMETER (its result and arity differ from the
+    // same-named top-level fn's) and runs it, natively and on wasm.
+    let pipe_subs = [("@F@", novel::ident("f")), ("@G@", novel::ident("go")), ("@K@", novel::ident("go2")), ("@S@", novel::ident("sh"))];
+    let pipe_subs: Vec<(&str, &str)> = pipe_subs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let pipe_src = fill(
+        "fn @F@(n: Int) -> Int = n + 100\n\nfn @G@(@F@: (Int) -> String, n: Int) -> String = n |> @F@\n\nfn @K@(@F@: (Int, Int) -> Int, n: Int) -> Int = n |> @F@(1)\n\nfn @S@(n: Int) -> String = \"s${int.to_string(n)}\"\n\nfn main() -> Unit = {\n  println(@G@(@S@, 5))\n  println(int.to_string(@K@((a, b) => a * 10 + b, 5)))\n  println(int.to_string(@F@(1)))\n}\n",
+        &pipe_subs,
     );
-    let t = tree(&manifest(""), &[("src/main.almd", src)]);
-    refused("a parameter named like a profile fn, under critical", &inside(&t, &["check", "--profile", "critical", "{main}"]), &["E074"]);
+    let t = tree(&manifest(""), &[("src/main.almd", pipe_src)]);
+    admitted("#4882 check", &inside(&t, &["check", "{main}"]));
+    for a in [&["run", "{main}"][..], &["run", "{main}", "--target", "wasm"][..]] {
+        let o = inside(&t, a);
+        admitted(&a.join(" "), &o);
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "s5\n51\n101\n", "{}", a.join(" "));
+    }
+}
+
+/// E073 (bounded.shape-rules): recursion is found through every form the
+/// profile judges as a direct call of a user fn — a call, a pipe stage, a
+/// pipe call, an unwrapped pipe stage and UFCS through a value receiver —
+/// self and mutual, with fresh names. The call graph used to follow call
+/// nodes only, so `n |> spin` recursed under `--profile critical`. Control:
+/// the same forms without a cycle are admitted.
+#[test]
+fn novel_recursion_through_every_direct_call_form_is_refused() {
+    let (a, b) = (novel::ident("a"), novel::ident("b"));
+    let subs = [("@A@", a.as_str()), ("@B@", b.as_str())];
+    let forms = [
+        ("a call", "@B@(n)"),
+        ("a pipe stage", "n |> @B@"),
+        ("a pipe call", "n |> @B@()"),
+        ("UFCS through a value", "n.@B@()"),
+    ];
+    for (what, call) in forms {
+        let self_rec = fill(&format!("fn @B@(n: Int) -> Int = if n > 0 then {call} else 0\n\nfn main() -> Unit = println(int.to_string(@B@(1)))\n"), &subs);
+        let mutual = fill(&format!("fn @A@(n: Int) -> Int = if n > 0 then {} else 0\n\nfn @B@(n: Int) -> Int = @A@(n - 1)\n\nfn main() -> Unit = println(int.to_string(@A@(1)))\n", call), &subs);
+        for (shape, src) in [("self", self_rec), ("mutual", mutual)] {
+            let t = tree(&manifest(""), &[("src/main.almd", src)]);
+            admitted(&format!("{what}, {shape}: without the profile"), &inside(&t, &["check", "{main}"]));
+            refused(&format!("{what}, {shape} recursion under critical"), &inside(&t, &["check", "--profile", "critical", "{main}"]), &["E073"]);
+        }
+        let acyclic = fill(&format!("fn @B@(n: Int) -> Int = n + 1\n\nfn @A@(n: Int) -> Int = {call}\n\nfn main() -> Unit = println(int.to_string(@A@(1)))\n"), &subs);
+        let t = tree(&manifest(""), &[("src/main.almd", acyclic)]);
+        admitted(&format!("{what}, acyclic, under critical"), &inside(&t, &["check", "--profile", "critical", "{main}"]));
+    }
 }
 
 /// bounded.member-module-gate (#4840): a receiver the checker typed as a
@@ -908,4 +973,51 @@ fn novel_a_fresh_mix_of_nesting_ends_at_the_budget() {
     std::fs::write(dir.join(&file), mix(60)).unwrap();
     let o = run(dir, &["check", file.as_str()]);
     assert!(!text(&o).contains("nesting too deep"), "control: 60 levels hit the budget:\n{}", text(&o));
+}
+
+/// input.e110-input-sink (#4884): a request-decoded type is judged by its
+/// nominal identity, never by a same-named type of another module. The entry
+/// and a fresh module each declare a fresh type name, every pairing of
+/// `: Decode` / `: Codec`; request data is decoded in the module (through the
+/// `http.decode_json` sink and by hand, `T.decode(json.parse(..)!)`) and in
+/// the entry. E110 fires exactly where the decoding side's own type is
+/// `Codec`.
+#[test]
+fn novel_a_decoded_type_is_judged_by_its_own_declaration_not_its_name() {
+    let (m, t) = (novel::module(), novel::ident("T"));
+    let t = format!("{}{}", t[..1].to_uppercase(), &t[1..]);
+    let decoders = [
+        ("decode_json", "effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[@T@](req) {\n  ok(u) => http.response(201, \"${u.name} ${u.is_admin}\"),\n  err(bad) => bad,\n}\n"),
+        ("hand decode", "effect fn create(req: HttpRequest) -> HttpResponse = {\n  let u = @T@.decode(json.parse(http.body(req))!)!\n  http.response(201, \"${u.name} ${u.is_admin}\")\n}\n"),
+    ];
+    for root_p in ["Decode", "Codec"] {
+        for mod_p in ["Decode", "Codec"] {
+            for (how, dec) in decoders {
+                // decoding in the module
+                let module = fill(&format!("import http\nimport json\n\ntype @T@: {mod_p} = {{ name: String, is_admin: Bool = false }}\n\n{dec}"), &[("@T@", &t)]);
+                let main = fill(&format!("import http\nimport self.@M@\n\ntype @T@: {root_p} = {{ name: String, is_admin: Bool = false }}\n\nfn mk() -> @T@ = @T@ {{ name: \"r\" }}\n\neffect fn main() -> Unit = {{\n  println(mk().name)\n  println(http.body(@M@.create(http.new_request(\"POST\", \"/u\", \"{{}}\", []))!))\n}}\n"), &[("@T@", &t), ("@M@", &m)]);
+                let tr = tree(&manifest(""), &[("src/main.almd", main), (format!("src/{m}.almd").as_str(), module)]);
+                let o = inside(&tr, &["check", "{main}"]);
+                let what = format!("{how} in the module: entry {root_p}, module {mod_p}");
+                if mod_p == "Codec" { refused(&what, &o, &["E110"]) } else { admitted(&what, &o) }
+                // decoding in the entry
+                let module = fill(&format!("type @T@: {mod_p} = {{ name: String, is_admin: Bool = false }}\n\nfn mk() -> @T@ = @T@ {{ name: \"m\" }}\n\nfn name(u: @T@) -> String = u.name\n"), &[("@T@", &t)]);
+                let main = fill(&format!("import http\nimport json\nimport self.@M@\n\ntype @T@: {root_p} = {{ name: String, is_admin: Bool = false }}\n\n{dec}\neffect fn main() -> Unit = {{\n  println(@M@.name(@M@.mk()))\n  println(http.body(create(http.new_request(\"POST\", \"/u\", \"{{}}\", []))!))\n}}\n"), &[("@T@", &t), ("@M@", &m)]);
+                let tr = tree(&manifest(""), &[("src/main.almd", main), (format!("src/{m}.almd").as_str(), module)]);
+                let o = inside(&tr, &["check", "{main}"]);
+                let what = format!("{how} in the entry: entry {root_p}, module {mod_p}");
+                // Remaining part of #4884: the checker half reads an ENTRY
+                // type's protocols under its bare key, which a module's
+                // same-named type also registers (registration_decls.rs
+                // protocol_keys), so the entry's `Decode` type is still read
+                // as `Codec` there. Over-refusal only; the row says so.
+                // The flow half also still reads the entry's bare `T.decode`
+                // as the module's type in this pairing (observed 2026-11-20).
+                if root_p == "Decode" && mod_p == "Codec" {
+                    continue;
+                }
+                if root_p == "Codec" { refused(&what, &o, &["E110"]) } else { admitted(&what, &o) }
+            }
+        }
+    }
 }
