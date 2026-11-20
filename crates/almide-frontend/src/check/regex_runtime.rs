@@ -6,6 +6,8 @@
 #![allow(dead_code, unused, clippy::all, clippy::pedantic)]
 
 pub(crate) type AlmideString = String;
+/// The checker only parses patterns; the lists the runtime answers are plain vectors here (ADR-0037).
+pub(crate) type AlmideList<T> = Vec<T>;
 
 pub(crate) trait IntoAlmide<T> {
     fn into_almide(self) -> T;

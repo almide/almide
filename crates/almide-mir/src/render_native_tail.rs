@@ -142,7 +142,7 @@ fn native_ret_expr(v: ValueId, t: NTy) -> String {
         NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
         NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
-        NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
+        NTy::VecRef | NTy::VecStrRef => format!("{}.to_list()", var(v)),
     }
 }
 
@@ -780,11 +780,11 @@ pub(crate) fn render_dup(
         NTy::VecRef => {
             // Dup of a borrowed list param mints a fresh owned Vec.
             tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+            line!("let mut {} = {}.to_list();", var(*dst), var(*src));
         }
         NTy::VecStrRef => {
             tys.insert(*dst, NTy::VecStr);
-            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+            line!("let mut {} = {}.to_list();", var(*dst), var(*src));
         }
         NTy::Rec(i) | NTy::RecRef(i) => {
             tys.insert(*dst, NTy::Rec(i));

@@ -268,7 +268,7 @@ mod almide_fs_beneath_sys {
     /// The entry names (`.` and `..` left out) of the directory `fd` holds,
     /// in the order the system answers them, from the start whatever a
     /// duplicate of the descriptor read before. The descriptor is consumed.
-    pub fn list_fd(fd: Handle) -> std::io::Result<Vec<std::ffi::OsString>> {
+    pub fn list_fd(fd: Handle) -> std::io::Result<std::vec::Vec<std::ffi::OsString>> {
         let raw = std::os::fd::IntoRawFd::into_raw_fd(fd);
         // SAFETY: `raw` is a directory descriptor this call owns; on success
         // the stream owns it and closedir closes it, on failure it is closed
@@ -283,7 +283,7 @@ mod almide_fs_beneath_sys {
         // before left it at the end, so the stream starts over.
         // SAFETY: `dir` is the live stream opened above.
         unsafe { rewinddir(dir) };
-        let mut names = Vec::new();
+        let mut names = std::vec::Vec::new();
         let result = loop {
             set_errno(0);
             // SAFETY: `dir` is the live stream opened above, read on this
@@ -605,11 +605,11 @@ mod almide_fs_beneath_sys {
     /// or a Win32 wildcard is refused, so a call never names a parent, an
     /// absolute or prefixed path (drive, UNC, `\\?\`, device) or an
     /// alternate data stream.
-    fn nt_name(name: &str) -> std::io::Result<Vec<u16>> {
+    fn nt_name(name: &str) -> std::io::Result<std::vec::Vec<u16>> {
         if name.is_empty() || name == "." || name == ".." || name.chars().any(|c| c < ' ' || "\\/:*?\"<>|".contains(c)) {
             return Err(std::io::Error::from_raw_os_error(ERROR_INVALID_NAME));
         }
-        let w: Vec<u16> = name.encode_utf16().collect();
+        let w: std::vec::Vec<u16> = name.encode_utf16().collect();
         if w.len() * 2 > usize::from(u16::MAX) {
             return Err(std::io::Error::from_raw_os_error(ERROR_FILENAME_EXCED_RANGE));
         }
@@ -760,8 +760,8 @@ mod almide_fs_beneath_sys {
         let h = nt_open(from_dir, from, DELETE, FILE_OPEN, 0)?;
         let at = std::mem::offset_of!(RenameHead, name_len) + 4;
         let len = std::cmp::max(at + w.len() * 2, std::mem::size_of::<RenameHead>());
-        let build = |flags: u32| -> Vec<u64> {
-            let mut buf = vec![0u64; len.div_ceil(8)];
+        let build = |flags: u32| -> std::vec::Vec<u64> {
+            let mut buf = ::std::vec![0u64; len.div_ceil(8)];
             let p = buf.as_mut_ptr().cast::<RenameHead>();
             // SAFETY: `buf` holds at least `len` bytes, 8-aligned, so the head
             // fits at its start and the name at `at` (an even offset) after
@@ -795,9 +795,9 @@ mod almide_fs_beneath_sys {
     /// The entry names (`.` and `..` left out) of the directory `fd` holds,
     /// in the order the system answers them, from the start whatever a
     /// duplicate of the handle read before. The handle is consumed.
-    pub fn list_fd(fd: Handle) -> std::io::Result<Vec<std::ffi::OsString>> {
-        let mut buf = vec![0u64; 8192];
-        let mut names = Vec::new();
+    pub fn list_fd(fd: Handle) -> std::io::Result<std::vec::Vec<std::ffi::OsString>> {
+        let mut buf = ::std::vec![0u64; 8192];
+        let mut names = std::vec::Vec::new();
         let mut class = FILE_FULL_DIRECTORY_RESTART_INFO;
         loop {
             let size = (buf.len() * 8) as u32;
@@ -812,14 +812,14 @@ mod almide_fs_beneath_sys {
                 return Err(e);
             }
             class = FILE_FULL_DIRECTORY_INFO;
-            let bytes: Vec<u8> = buf.iter().flat_map(|w| w.to_ne_bytes()).collect();
+            let bytes: std::vec::Vec<u8> = buf.iter().flat_map(|w| w.to_ne_bytes()).collect();
             let mut at = 0usize;
             loop {
                 let bad = || std::io::Error::from(std::io::ErrorKind::InvalidData);
                 let next = u32_at(&bytes, at + DIR_NEXT).ok_or_else(bad)? as usize;
                 let len = u32_at(&bytes, at + DIR_NAME_LEN).ok_or_else(bad)? as usize;
                 let raw_name = bytes.get(at + DIR_NAME..at + DIR_NAME + len).ok_or_else(bad)?;
-                let wide: Vec<u16> = raw_name.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect();
+                let wide: std::vec::Vec<u16> = raw_name.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect();
                 if wide != [0x2E] && wide != [0x2E, 0x2E] {
                     names.push(<std::ffi::OsString as std::os::windows::ffi::OsStringExt>::from_wide(&wide));
                 }

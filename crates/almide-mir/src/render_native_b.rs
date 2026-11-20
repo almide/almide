@@ -537,7 +537,7 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
                 let head = match (left, taken) {
                     (true, _) => format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a)),
                     (false, Some(take)) => format!("let mut r: {ty} = {take}"),
-                    (false, None) => format!("let mut r: {ty} = Vec::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})"),
+                    (false, None) => format!("let mut r: {ty} = AlmideList::with_capacity({sa}.len() + {b}.len()); r.extend_from_slice({sa})"),
                 };
                 let tail = if right {
                     format!("r.extend({})", crate::render_native_move::take_expr(&b))
@@ -555,7 +555,7 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
     }
     writeln!(
         out,
-        "let mut {}: {ty} = {{ let mut r: {ty} = Vec::with_capacity({sa}.len() + {sb}.len()); r.extend_from_slice({sa}); r.extend_from_slice({sb}); r }};",
+        "let mut {}: {ty} = {{ let mut r: {ty} = AlmideList::with_capacity({sa}.len() + {sb}.len()); r.extend_from_slice({sa}); r.extend_from_slice({sb}); r }};",
         var(*d)
     )
     .expect("writing to a String cannot fail");
@@ -755,8 +755,8 @@ fn render_closed_shim_call(
             tys.insert(*d, t);
             let ty_name = match t {
                 NTy::Str => "AlmideString",
-                NTy::Vec => "Vec<i64>",
-                NTy::VecStr => "Vec<AlmideString>",
+                NTy::Vec => "AlmideList<i64>",
+                NTy::VecStr => "AlmideList<AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, call);

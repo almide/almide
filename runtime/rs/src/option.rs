@@ -11,8 +11,8 @@ pub fn almide_rt_option_unwrap_or_else<T>(o: Option<T>, f: std::rc::Rc<dyn Fn() 
 pub fn almide_rt_option_filter<T: Clone>(o: Option<T>, f: std::rc::Rc<dyn Fn(T) -> bool>) -> Option<T> { let f = move |a| f(a); o.filter(|x| f(x.clone())) }
 pub fn almide_rt_option_zip<T, U>(a: Option<T>, b: Option<U>) -> Option<(T, U)> { a.zip(b) }
 pub fn almide_rt_option_or_else<T>(o: Option<T>, f: std::rc::Rc<dyn Fn() -> Option<T>>) -> Option<T> { let f = move || f(); o.or_else(f) }
-pub fn almide_rt_option_to_list<T>(o: Option<T>) -> Vec<T> {
-    match o { Some(v) => vec![v], None => vec![] }
+pub fn almide_rt_option_to_list<T: Clone>(o: Option<T>) -> AlmideList<T> {
+    match o { Some(v) => almide_list![v], None => almide_list![] }
 }
 
 // Note: `collect` / `collect_map` are bundled Almide bodies in

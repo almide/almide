@@ -222,7 +222,7 @@ fn fan_rust_type(ty: &DTy) -> Option<String> {
         DTy::Var(v) => v.clone(),
         DTy::Str => "AlmideString".into(),
         DTy::Bool => "bool".into(),
-        DTy::List(e) => format!("Vec<{}>", fan_rust_type(e)?),
+        DTy::List(e) => format!("AlmideList<{}>", fan_rust_type(e)?),
         DTy::Result(a, b) => format!("Result<{},{}>", fan_rust_type(a)?, fan_rust_type(b)?),
         DTy::Fn(ps, r) => format!("Fn({})->{}", ps.iter().map(fan_rust_type).collect::<Option<Vec<_>>>()?.join(","), fan_rust_type(r)?),
         _ => return None,

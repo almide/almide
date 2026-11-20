@@ -63,7 +63,7 @@ fn a_loop_that_is_not_one_scalar_reduction_stays() {
     same(SUM.replace("        v7 = v14;\n", "        v7 = v14;\n        v5 = v13;\n"));
     same(SUM.replace("let mut v9: i64 = 1i64;", "let mut v9: i64 = 2i64;"));
     // A heap accumulator, an edit of an outside value, a borrow for writing.
-    same(SUM.replace("let mut v7: i64 = 0i64;", "let mut v7: Vec<i64> = Vec::new();"));
+    same(SUM.replace("let mut v7: i64 = 0i64;", "let mut v7: AlmideList<i64> = AlmideList::new();"));
     same(SUM.replace("        v7 = v14;\n", "        v7 = v14;\n        v3.push(v13);\n"));
     same(SUM.replace("        v7 = v14;\n", "        v7 = v14;\n        grow(&mut v3);\n"));
     // A signed test is the list form `render_native_loops` owns.

@@ -359,6 +359,11 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // ADR-0013: the Almide String (the shared buffer `AlmideStr`), its
     // boundary conversion and the `AlmideConcat` trait (prelude_string.rs).
     s.push_str(&prelude_string::string_prelude(vis));
+    // ADR-0037 step order: the runtime spells an Almide list `AlmideList<T>`;
+    // the v1 native header binds it to the counted block. This v0 source
+    // emitter switches in its own step (ADR-0037 D6) and until then binds the
+    // name to its `Vec`, so the shared runtime text serves both routes.
+    s.push_str(&format!("#[allow(dead_code)]\n{vis}type AlmideList<T> = Vec<T>;\n{macro_attr}#[allow(unused_macros)]\nmacro_rules! almide_list {{ ($($t:tt)*) => {{ vec![$($t)*] }}; }}\n"));
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
     // whose `Stdout` is line-buffered whatever it is attached to — one write

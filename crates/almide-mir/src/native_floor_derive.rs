@@ -168,7 +168,7 @@ fn derive_for(call: &str, str_elems: bool) -> Result<FloorFn, String> {
 /// (`&…` = by reference), for the kinds whose mode the runtime decides.
 fn with_runtime_mode(p: FloorParam, r: &str) -> FloorParam {
     match p {
-        FloorParam::List(elem) if squash(r).starts_with("Vec<") => FloorParam::ListOwned(elem),
+        FloorParam::List(elem) if squash(r).starts_with("AlmideList<") => FloorParam::ListOwned(elem),
         FloorParam::Elem(_) => FloorParam::Elem(squash(r).starts_with('&')),
         FloorParam::Value(_) => FloorParam::Value(squash(r).starts_with('&')),
         FloorParam::Runtime(t, _) => FloorParam::Runtime(t, squash(r).starts_with('&')),

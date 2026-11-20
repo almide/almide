@@ -20,11 +20,11 @@
 pub struct AlmideHttpResponse {
     pub status: i64,
     pub body: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: AlmideList<(String, String)>,
     /// The fetched body's bytes when they are not valid UTF-8, so `body` holds
     /// their lossy decoding and `body_bytes` answers these. `None` whenever
     /// `body` IS the body: a built response, or a fetched UTF-8 one.
-    pub body_raw: Option<Vec<u8>>,
+    pub body_raw: Option<AlmideList<u8>>,
 }
 
 // A record may hold any of the http types, and a record's repr calls each field's
@@ -37,10 +37,10 @@ impl AlmideRepr for AlmideHttpResponse {
 
 impl AlmideHttpResponse {
     pub fn new(status: i64, body: String) -> Self {
-        Self { status, body, headers: vec![("Content-Type".into(), "text/plain".into())], body_raw: None }
+        Self { status, body, headers: almide_list![("Content-Type".into(), "text/plain".into())], body_raw: None }
     }
     pub fn json(status: i64, body: String) -> Self {
-        Self { status, body, headers: vec![("Content-Type".into(), "application/json".into())], body_raw: None }
+        Self { status, body, headers: almide_list![("Content-Type".into(), "application/json".into())], body_raw: None }
     }
     /// EXACTLY the caller's headers — no seeded `Content-Type` (#1352). Entries
     /// are upserted in map order, so the list carries at most one entry per
@@ -54,7 +54,7 @@ impl AlmideHttpResponse {
     /// `upsert_header` per entry, through an index of the lowercased names
     /// already stored: the per-entry scan made building n headers O(n²).
     fn from_headers(status: i64, body: String, headers: &[(String, String)]) -> Self {
-        let mut list: Vec<(String, String)> = Vec::with_capacity(headers.len());
+        let mut list: AlmideList<(String, String)> = AlmideList::with_capacity(headers.len());
         let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::with_capacity(headers.len());
         for (k, v) in headers.iter() {
             match at.entry(k.to_ascii_lowercase()) {
@@ -69,11 +69,11 @@ impl AlmideHttpResponse {
     }
     /// A fetched response: the body text is the lossy decoding of `raw`,
     /// which is kept only when that decoding lost bytes.
-    fn fetched(status: i64, headers: Vec<(String, String)>, raw: Vec<u8>) -> Self {
-        match String::from_utf8(raw) {
+    fn fetched(status: i64, headers: AlmideList<(String, String)>, raw: AlmideList<u8>) -> Self {
+        match String::from_utf8(raw.into()) {
             Ok(body) => Self { status, body, headers, body_raw: None },
             Err(e) => {
-                let raw = e.into_bytes();
+                let raw = AlmideList::from(e.into_bytes());
                 Self { status, body: String::from_utf8_lossy(&raw).into_owned(), headers, body_raw: Some(raw) }
             }
         }
@@ -90,7 +90,7 @@ impl AlmideHttpResponse {
 /// `set_header` matched case-SENSITIVELY, so setting `content-type` on a
 /// response holding `Content-Type` appended a SECOND entry that the
 /// case-insensitive `get_header` then shadowed — the write vanished.
-fn upsert_header(headers: &mut Vec<(String, String)>, key: &str, value: &str) {
+fn upsert_header(headers: &mut AlmideList<(String, String)>, key: &str, value: &str) {
     for slot in headers.iter_mut() {
         if slot.0.eq_ignore_ascii_case(key) {
             slot.1 = value.to_string();
@@ -103,7 +103,7 @@ fn upsert_header(headers: &mut Vec<(String, String)>, key: &str, value: &str) {
 // ── Response builders ──
 
 pub fn almide_http_redirect(url: &str, code: i64) -> AlmideHttpResponse {
-    AlmideHttpResponse { status: code, body: String::new(), headers: vec![("Location".into(), url.to_string())], body_raw: None }
+    AlmideHttpResponse { status: code, body: String::new(), headers: almide_list![("Location".into(), url.to_string())], body_raw: None }
 }
 
 pub fn almide_rt_http_not_found(body: &str) -> AlmideHttpResponse {
@@ -121,14 +121,14 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
 /// and the bytes themselves are kept in `body_raw` when that decoding lost
 /// any — the fetched response's rule (`AlmideHttpResponse::fetched`), so
 /// `body_bytes` and `http.serve` answer them exactly.
-fn body_from_bytes(body: &[u8]) -> (String, Option<Vec<u8>>) {
+fn body_from_bytes(body: &[u8]) -> (String, Option<AlmideList<u8>>) {
     match std::str::from_utf8(body) {
         Ok(text) => (text.to_string(), None),
-        Err(_) => (String::from_utf8_lossy(body).into_owned(), Some(body.to_vec())),
+        Err(_) => (String::from_utf8_lossy(body).into_owned(), Some(AlmideList::from(body))),
     }
 }
 
-pub fn almide_rt_http___with_headers(status: i64, body: &Vec<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
+pub fn almide_rt_http___with_headers(status: i64, body: &AlmideList<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
     let (text, raw) = body_from_bytes(body);
     let mut resp = AlmideHttpResponse::from_headers(status, text, &header_pairs(flat));
     resp.body_raw = raw;
@@ -138,7 +138,7 @@ pub fn almide_rt_http___with_headers(status: i64, body: &Vec<u8>, flat: &[Almide
 /// `http.__http_response_flat`: the pairs as given, each name written once by its
 /// caller (`response`, `redirect`), so it is `__with_headers` without a merge
 /// to do.
-pub fn almide_rt_http___http_response_flat(status: i64, body: &Vec<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
+pub fn almide_rt_http___http_response_flat(status: i64, body: &AlmideList<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
     almide_rt_http___with_headers(status, body, flat)
 }
 
@@ -158,8 +158,8 @@ pub fn almide_http_get_body(resp: &AlmideHttpResponse) -> AlmideString { let __a
 
 /// `http.body_bytes` on a response: the bytes the server sent, never the
 /// lossy text `body` answers.
-pub fn almide_http_get_body_bytes(resp: &AlmideHttpResponse) -> Vec<u8> {
-    resp.body_raw.clone().unwrap_or_else(|| resp.body.as_bytes().to_vec())
+pub fn almide_http_get_body_bytes(resp: &AlmideHttpResponse) -> AlmideList<u8> {
+    resp.body_raw.clone().unwrap_or_else(|| AlmideList::from(resp.body.as_bytes()))
 }
 
 pub fn almide_http_set_header(mut resp: AlmideHttpResponse, key: &str, value: &str) -> AlmideHttpResponse {
@@ -179,17 +179,17 @@ pub fn almide_http_status_code(resp: &AlmideHttpResponse) -> i64 {
 
 /// EVERY value of one field, in wire order — the accessor that keeps a
 /// repeated field (`Set-Cookie`) whole where `get_header` answers the first.
-pub fn almide_http_header_values(resp: &AlmideHttpResponse, key: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_http_header_values(resp: &AlmideHttpResponse, key: &str) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = (|| {
     resp.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone()).collect()
 })(); __almide_v.into_almide() }
 
 /// Every header as flat `[k1, v1, k2, v2, …]`, wire spelling and order,
 /// a repeated field kept (R-http-09) — the Almide side pairs it up.
-pub fn almide_http_headers_flat(resp: &AlmideHttpResponse) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_http_headers_flat(resp: &AlmideHttpResponse) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = (|| {
     flat_pairs(&resp.headers)
 })(); __almide_v.into_almide() }
 
-fn flat_pairs(headers: &[(String, String)]) -> Vec<String> {
+fn flat_pairs(headers: &[(String, String)]) -> AlmideList<String> {
     headers.iter().flat_map(|(k, v)| [k.clone(), v.clone()]).collect()
 }
 
@@ -202,7 +202,7 @@ pub fn almide_http_set_body(mut resp: AlmideHttpResponse, body: &str) -> AlmideH
 }
 
 /// `with_body` / `set_body` / `set_body_bytes` on a response: a `Body`'s bytes, kept exactly (#4311).
-pub fn almide_http_set_body_bytes(mut resp: AlmideHttpResponse, body: &Vec<u8>) -> AlmideHttpResponse {
+pub fn almide_http_set_body_bytes(mut resp: AlmideHttpResponse, body: &AlmideList<u8>) -> AlmideHttpResponse {
     (resp.body, resp.body_raw) = body_from_bytes(body);
     resp
 }
@@ -224,15 +224,15 @@ pub struct AlmideHttpRequest {
     pub method: AlmideString,
     pub path: AlmideString,
     pub body: AlmideString,
-    pub headers: Vec<(String, String)>,
+    pub headers: AlmideList<(String, String)>,
     /// Path parameters bound by `http.router` (#2588): `{id}` in the route
     /// pattern → `("id", "42")`. Empty for a request the listener parsed.
-    pub params: Vec<(String, String)>,
+    pub params: AlmideList<(String, String)>,
     /// The body's bytes when `set_body_bytes` was given bytes that are not
     /// valid UTF-8, so `body` holds their lossy decoding while `body_bytes`
     /// and `http.send` / `http.start` carry these exactly (#4744) — the
     /// response's `body_raw` rule. `None` whenever `body` IS the body.
-    pub body_raw: Option<Vec<u8>>,
+    pub body_raw: Option<AlmideList<u8>>,
 }
 
 /// `http.new_request` (#2588): a request built in code, so a handler or a
@@ -244,7 +244,7 @@ pub fn almide_rt_http___new_request(method: AlmideString, target: AlmideString, 
         path: target,
         body,
         headers: header_pairs(flat),
-        params: Vec::new(),
+        params: AlmideList::new(),
         body_raw: None,
     }
 }
@@ -258,7 +258,7 @@ pub fn almide_http_param(req: &AlmideHttpRequest, name: &str) -> Option<AlmideSt
 /// the ones an enclosing `mount` bound, so `param` finds the innermost first
 /// and `{org}` of `mount("/orgs/{org}", sub)` stays visible inside `sub`.
 pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[AlmideString]) -> AlmideHttpRequest {
-    let mut params: Vec<(String, String)> =
+    let mut params: AlmideList<(String, String)> =
         flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].to_string(), c[1].to_string())).collect();
     params.append(&mut req.params);
     req.params = params;
@@ -312,11 +312,11 @@ pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<Almi
 
 /// The request twins of the response's header readers and writers (R-http-12):
 /// the same case-insensitive rules over the request's header list.
-pub fn almide_http_req_header_values(req: &AlmideHttpRequest, key: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_http_req_header_values(req: &AlmideHttpRequest, key: &str) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = (|| {
     req.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone()).collect()
 })(); __almide_v.into_almide() }
 
-pub fn almide_http_req_headers_flat(req: &AlmideHttpRequest) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_http_req_headers_flat(req: &AlmideHttpRequest) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = (|| {
     flat_pairs(&req.headers)
 })(); __almide_v.into_almide() }
 
@@ -335,7 +335,7 @@ pub fn almide_http_req_set_body(mut req: AlmideHttpRequest, body: &str) -> Almid
 /// UTF-8 is held as the text itself; anything else keeps its exact bytes in
 /// `body_raw` beside the lossy text `body` answers — the fetched response's
 /// rule (`AlmideHttpResponse::fetched`).
-pub fn almide_http_req_set_body_bytes(mut req: AlmideHttpRequest, body: &Vec<u8>) -> AlmideHttpRequest {
+pub fn almide_http_req_set_body_bytes(mut req: AlmideHttpRequest, body: &AlmideList<u8>) -> AlmideHttpRequest {
     match std::str::from_utf8(body) {
         Ok(text) => {
             req.body = text.into();
@@ -351,8 +351,8 @@ pub fn almide_http_req_set_body_bytes(mut req: AlmideHttpRequest, body: &Vec<u8>
 
 /// `http.body_bytes` on a request: the bytes `set_body_bytes` was given,
 /// never the lossy text `body` answers.
-pub fn almide_http_req_body_bytes(req: &AlmideHttpRequest) -> Vec<u8> {
-    req.body_raw.clone().unwrap_or_else(|| req.body.as_bytes().to_vec())
+pub fn almide_http_req_body_bytes(req: &AlmideHttpRequest) -> AlmideList<u8> {
+    req.body_raw.clone().unwrap_or_else(|| AlmideList::from(req.body.as_bytes()))
 }
 
 pub fn almide_http_get(url: &str) -> Result<AlmideString, AlmideString> {
@@ -370,7 +370,7 @@ include!("../../../crates/almide-rt-core/src/http_client_core.rs");
 
 /// Headers cross from Almide flat (`[k1, v1, k2, v2, …]`, R-http-09) and into
 /// the shared core as a plain pair slice; an odd trailing name is dropped.
-fn header_pairs(flat: &[AlmideString]) -> Vec<(String, String)> {
+fn header_pairs(flat: &[AlmideString]) -> AlmideList<(String, String)> {
     flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].to_string(), c[1].to_string())).collect()
 }
 
@@ -388,12 +388,12 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &[Almid
 // the shared core, so the three shapes cannot drift apart.
 
 pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, AlmideString> {
-    almide_http_request_response("GET", url, &Vec::new(), &[])
+    almide_http_request_response("GET", url, &AlmideList::new(), &[])
 }
 
 /// `http.send`: the request body is its bytes (`http.body_bytes`), sent
 /// exactly as given (#4744).
-pub fn almide_http_request_response(method: &str, url: &str, body: &Vec<u8>, headers: &[AlmideString]) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
+pub fn almide_http_request_response(method: &str, url: &str, body: &AlmideList<u8>, headers: &[AlmideString]) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
     request_response_bytes(method, url, body, &header_pairs(headers))
         .map(|(status, headers, raw)| AlmideHttpResponse::fetched(status, headers, raw))
 })(); __almide_r.map_err(Into::into) }
@@ -464,7 +464,7 @@ pub fn almide_http_call_start(
     total_ms: i64,
     idle_ms: i64,
 ) -> Result<AlmideHttpCall, String> {
-    let shared = http_call_spawn(method, url, body, header_pairs(headers), total_ms, idle_ms)?;
+    let shared = http_call_spawn(method, url, body, header_pairs(headers).into(), total_ms, idle_ms)?;
     Ok(AlmideHttpCall { inner: std::sync::Arc::new(AlmideHttpCallOwner { shared }) })
 }
 
@@ -474,7 +474,7 @@ pub fn almide_http_call_start(
 pub fn almide_rt_http___call_start(
     method: &str,
     url: &str,
-    body: &Vec<u8>,
+    body: &AlmideList<u8>,
     headers: &[AlmideString],
     total_ms: i64,
     idle_ms: i64,
@@ -540,7 +540,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // a division by zero no longer ends the server.
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
-        let req = AlmideHttpRequest { method: method.into(), path: path.into(), body: body.into(), headers, params: Vec::new(), body_raw: None };
+        let req = AlmideHttpRequest { method: method.into(), path: path.into(), body: body.into(), headers, params: AlmideList::new(), body_raw: None };
         almide_request_hooks(0);
         almide_containment(true);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));

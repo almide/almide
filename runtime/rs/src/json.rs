@@ -216,7 +216,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             // Sized for the common small container: a Vec that grows from 0 reallocates
             // at 4 and 8 on the way to a typical 8-field object (#1678 follow-up, measured
             // 3-8% on the parse benchmark).
-            let mut items = Vec::with_capacity(8);
+            let mut items = AlmideList::with_capacity(8);
             if *pos < b.len() && b[*pos] == b']' { *pos += 1; return Ok(AlmideValue::Array(items)); }
             loop {
                 items.push(parse_value(t, pos, depth)?);
@@ -304,14 +304,14 @@ pub fn almide_json_as_bool(j: &AlmideValue) -> Option<bool> {
     match j { AlmideValue::Bool(b) => Some(*b), _ => None }
 }
 
-pub fn almide_json_as_array(j: &AlmideValue) -> Option<Vec<AlmideValue>> {
+pub fn almide_json_as_array(j: &AlmideValue) -> Option<AlmideList<AlmideValue>> {
     match j { AlmideValue::Array(a) => Some(a.clone()), _ => None }
 }
 
 // ── Object operations ──
 
-pub fn almide_json_keys(j: &AlmideValue) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
-    match j { AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => vec![] }
+pub fn almide_json_keys(j: &AlmideValue) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = (|| {
+    match j { AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => almide_list![] }
 })(); __almide_v.into_almide() }
 
 
@@ -350,12 +350,12 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
         AlmideValue::Str(s) => json_quote(s),
         AlmideValue::Array(items) => {
             if items.is_empty() { return "[]".into(); }
-            let parts: Vec<String> = items.iter().map(|v| format!("{}{}", ind1, stringify_value(v, depth + 1))).collect();
+            let parts: AlmideList<String> = items.iter().map(|v| format!("{}{}", ind1, stringify_value(v, depth + 1))).collect();
             format!("[\n{}\n{}]", parts.join(",\n"), ind)
         }
         AlmideValue::Object(entries) => {
             if entries.is_empty() { return "{}".into(); }
-            let parts: Vec<String> = entries.iter().map(|(k, v)| format!("{}{}: {}", ind1, json_quote(k), stringify_value(v, depth + 1))).collect();
+            let parts: AlmideList<String> = entries.iter().map(|(k, v)| format!("{}{}: {}", ind1, json_quote(k), stringify_value(v, depth + 1))).collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), ind)
         }
     }

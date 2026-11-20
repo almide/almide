@@ -333,3 +333,62 @@ fn owned_iteration_and_slice_writes_count_their_copies() {
     assert_eq!(a.into_iter().count(), 4);
     assert_eq!(clones.get(), 12, "iterating the only owner by value moves the elements");
 }
+
+/// An FFI-style foreign write (ADR-0037 Q1): the runtime hands a callee a raw
+/// pointer and length taken from a writable view. The view makes a shared or
+/// static block unique first, so the foreign write lands in a block no other
+/// owner reads, and the borrow keeps the list from being cloned while lent.
+unsafe extern "C" fn foreign_fill(p: *mut u8, n: usize, byte: u8) {
+    for i in 0..n {
+        // SAFETY: the caller lends `n` writable bytes at `p`.
+        unsafe { p.add(i).write(byte) };
+    }
+}
+
+#[test]
+fn a_foreign_write_through_a_pointer_never_reaches_another_owner() {
+    let mut a: AlmideList<u8> = vec![1, 2, 3, 4].into();
+    let b = a.clone();
+    let shared_at = b.as_ptr();
+    let view = a.as_mut_slice();
+    let (p, n) = (view.as_mut_ptr(), view.len());
+    assert_ne!(p.cast_const(), shared_at, "a shared block is copied before it is lent for writing");
+    // SAFETY: `p` and `n` come from the unique writable view above.
+    unsafe { foreign_fill(p, n, 9) };
+    assert_eq!(&*a, &[9, 9, 9, 9]);
+    assert_eq!(&*b, &[1, 2, 3, 4], "the other owner never sees the foreign write");
+    assert!(a.is_unique() && b.is_unique());
+
+    // The static empty block is never lent writable: an empty view has no bytes to write.
+    let mut e: AlmideList<u8> = AlmideList::new();
+    assert!(e.as_mut_slice().is_empty());
+    // A unique block is lent in place.
+    let before = a.as_ptr();
+    let view = a.as_mut_slice();
+    // SAFETY: as above.
+    unsafe { foreign_fill(view.as_mut_ptr(), view.len(), 7) };
+    assert_eq!(a.as_ptr(), before, "a unique block is written in place");
+    assert_eq!(&*a, &[7, 7, 7, 7]);
+}
+
+#[test]
+fn try_reserve_resize_and_swap_remove_agree_with_vec_and_copy_on_write() {
+    let mut a: AlmideList<i64> = vec![1, 2, 3].into();
+    let b = a.clone();
+    a.try_reserve_exact(10).expect("room for ten more");
+    assert!(a.capacity() >= 13 && a.is_unique());
+    assert_eq!(&*b, &[1, 2, 3]);
+    assert!(a.try_reserve_exact(usize::MAX).is_err(), "an impossible reservation is an error, not an abort");
+    a.resize(5, 0);
+    assert_eq!(&*a, &[1, 2, 3, 0, 0]);
+    a.resize(2, 0);
+    assert_eq!(&*a, &[1, 2]);
+    let c = a.clone();
+    assert_eq!(a.swap_remove(0), 1);
+    assert_eq!(&*a, &[2]);
+    assert_eq!(&*c, &[1, 2]);
+    let v: Vec<i64> = vec![4, 5];
+    let moved: AlmideList<i64> = v.into();
+    assert_eq!(&*moved, &[4, 5]);
+    assert_eq!(moved.to_vec().ref_count(), 2, "to_vec shares the block");
+}

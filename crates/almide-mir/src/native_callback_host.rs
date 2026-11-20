@@ -95,7 +95,7 @@ pub(crate) fn canon(ty: &str) -> String {
 fn lends(theirs: &str, owned: &str) -> bool {
     let (theirs, owned) = (canon(theirs), canon(owned));
     let Some(lent) = theirs.strip_prefix('&') else { return false };
-    let elem = owned.strip_prefix("Vec<").and_then(|o| o.strip_suffix('>'));
+    let elem = owned.strip_prefix("AlmideList<").and_then(|o| o.strip_suffix('>'));
     lent == owned
         || (owned == "AlmideString" && lent == "str")
         || elem.is_some_and(|e| lent.strip_prefix('[').and_then(|l| l.strip_suffix(']')) == Some(e))
@@ -219,10 +219,10 @@ mod tests {
     fn a_borrow_is_of_the_owned_host_type_or_its_slice() {
         assert!(lends("&str", "AlmideString"));
         assert!(lends("&AlmideString", "AlmideString"));
-        assert!(lends("&[i64]", "Vec<i64>"));
+        assert!(lends("&[i64]", "AlmideList<i64>"));
         assert!(lends("&Option<AlmideString>", "Option<AlmideString>"));
-        assert!(!lends("&[AlmideString]", "Vec<i64>"));
-        assert!(!lends("Vec<i64>", "Vec<i64>"));
+        assert!(!lends("&[AlmideString]", "AlmideList<i64>"));
+        assert!(!lends("AlmideList<i64>", "AlmideList<i64>"));
         assert!(!lends("&Point", "AlmideString"));
         assert!(lends("&(i64, AlmideString)", "(i64, AlmideString,)"));
     }

@@ -20,7 +20,7 @@ mod almide_str {
 }
 
 pub use almide_str::{almide_str_mark_reachable, AlmideStr, AlmideStrHeader, AlmideStrStatic, AlmideUniqueStr, AlmideIntText, AlmideIntoStrList, almide_str_list};
-pub use almide_str::{AlmideList, AlmideListHeader};
+pub use almide_str::{AlmideList, AlmideListHeader, AlmideToList};
 
 /// The source text of `almide_str.rs`, which every generated native program
 /// splices in as its Almide String.
@@ -29,3 +29,12 @@ pub const SOURCE: &str = include_str!("almide_str.rs");
 /// The source text of `almide_list.rs` (ADR-0037), spliced after [`SOURCE`]
 /// once the native renderer spells lists with it.
 pub const LIST_SOURCE: &str = include_str!("almide_list.rs");
+
+/// `almide_list![a, b, c]`, `almide_list![]` and `almide_list![x; n]`: the `vec!` forms, building an `AlmideList`.
+#[macro_export]
+macro_rules! almide_list {
+    () => { $crate::AlmideList::new() };
+    ($x:expr; $n:expr) => { $crate::AlmideList::from(::std::vec![$x; $n]) };
+    ($($x:expr),+ $(,)?) => { $crate::AlmideList::from(::std::vec![$($x),+]) };
+}
+

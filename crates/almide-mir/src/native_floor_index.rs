@@ -587,7 +587,7 @@ mod thread_local_item_tests {
     use super::*;
     #[test]
     fn macro_statics_share_one_complete_declaration_and_keep_conditional_gates() {
-        let src = "thread_local! { static A: Cell<i64> = Cell::new(0); static B: RefCell<Vec<i64>> = RefCell::new(Vec::new()); } fn after() {}";
+        let src = "thread_local! { static A: Cell<i64> = Cell::new(0); static B: RefCell<AlmideList<i64>> = RefCell::new(AlmideList::new()); } fn after() {}";
         let items = top_level_items(src);
         assert_eq!(items.iter().map(|(_, n, _, c)| (*n, *c)).collect::<Vec<_>>(), [("A", false), ("B", false), ("after", false)]);
         assert_eq!(items[0].2, items[1].2);

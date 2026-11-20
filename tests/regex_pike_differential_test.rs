@@ -29,6 +29,7 @@
 #[allow(dead_code, clippy::all, clippy::pedantic)]
 mod rt {
     pub type AlmideString = String;
+    pub type AlmideList<T> = Vec<T>;
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
         panic!("{msg}")
     }

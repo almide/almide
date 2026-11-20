@@ -39,41 +39,41 @@ fn window(pos: i64, width: usize, len: usize) -> Option<usize> {
 /// 2 GiB `ALMIDE_REPEAT_MAX_BYTES` (string.rs) and the same `268435456` the
 /// self-host `list_make.almd` already uses — one limit, one message.
 
-pub fn almide_rt_bytes_len(b: &Vec<u8>) -> i64 { b.len() as i64 }
+pub fn almide_rt_bytes_len(b: &AlmideList<u8>) -> i64 { b.len() as i64 }
 pub fn almide_rt_bytes_eq(a: &[u8], b: &[u8]) -> bool { a == b }
-pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
-#[inline(always)] pub fn almide_rt_bytes_get(b: &Vec<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
-pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
+pub fn almide_rt_bytes_is_empty(b: &AlmideList<u8>) -> bool { b.is_empty() }
+#[inline(always)] pub fn almide_rt_bytes_get(b: &AlmideList<u8>, i: i64) -> Option<i64> { b.get(i as usize).map(|&x| x as i64) }
+pub fn almide_rt_bytes_set(b: &AlmideList<u8>, i: i64, val: i64) -> AlmideList<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 // The point write (#3577): `b = bytes.set(b, i, v)` copied the whole buffer
 // every step; the twin writes into the source it owns. A Bytes value is an
 // `AlmideRcCow` in generated code, so the source arrives as whatever becomes
 // the raw buffer: the wrapper hands its buffer over (moved when it is the
 // only holder, copied when shared), a raw `Vec<u8>` is itself.
-pub fn almide_rt_bytes_set_owned(b: impl Into<Vec<u8>>, i: i64, val: i64) -> Vec<u8> { let mut b = b.into(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
+pub fn almide_rt_bytes_set_owned(b: impl Into<AlmideList<u8>>, i: i64, val: i64) -> AlmideList<u8> { let mut b = b.into(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 // `bytes.drop_end` (#4756): b without its last n bytes, a negative n is 0.
 // The owned twin (`@reuse(b)`) truncates a sole owner in place, so a rebind
 // loop that trims one byte per step is O(1) per step, as list.drop_end.
-pub fn almide_rt_bytes_drop_end(b: &Vec<u8>, n: i64) -> Vec<u8> { let k = (n.max(0) as u64).min(b.len() as u64) as usize; b[..b.len() - k].to_vec() }
-pub fn almide_rt_bytes_drop_end_owned(b: impl Into<Vec<u8>>, n: i64) -> Vec<u8> { let mut b = b.into(); let k = (n.max(0) as u64).min(b.len() as u64) as usize; let end = b.len() - k; b.truncate(end); b }
-pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_drop_end(b: &AlmideList<u8>, n: i64) -> AlmideList<u8> { let k = (n.max(0) as u64).min(b.len() as u64) as usize; AlmideList::from(&b[..b.len() - k]) }
+pub fn almide_rt_bytes_drop_end_owned(b: impl Into<AlmideList<u8>>, n: i64) -> AlmideList<u8> { let mut b = b.into(); let k = (n.max(0) as u64).min(b.len() as u64) as usize; let end = b.len() - k; b.truncate(end); b }
+pub fn almide_rt_bytes_slice(b: &AlmideList<u8>, start: i64, end: i64) -> AlmideList<u8> {
     // Range bounds clamp into [0, len]; a negative bound is 0 (#4147).
     let s = (start.max(0) as usize).min(b.len());
     let e = (end.max(0) as usize).min(b.len());
-    if s >= e { Vec::new() } else { b[s..e].to_vec() }
+    if s >= e { AlmideList::new() } else { AlmideList::from(&b[s..e]) }
 }
 // Takes a slice (not `&Vec`) so a `List[Int]` function PARAMETER — emitted as
 // `&[i64]` — passes directly, while a local `Vec<i64>` still deref-coerces. The
 // `&Vec` form rejected the param with E0308 (#665).
-pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
-pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { almide_rt_bytes_to_list_iter(b).collect() }
+pub fn almide_rt_bytes_from_list(xs: &[i64]) -> AlmideList<u8> { xs.iter().map(|&x| x as u8).collect() }
+pub fn almide_rt_bytes_to_list(b: &AlmideList<u8>) -> AlmideList<i64> { almide_rt_bytes_to_list_iter(b).collect() }
 // The streaming twin of `to_list` (native render, `render_native_loops`): the
 // same Ints in the same order, read off the bytes; a loop over the list that
 // dies at the loop walks this and builds no list.
-pub fn almide_rt_bytes_to_list_iter(b: &Vec<u8>) -> impl Iterator<Item = i64> + '_ { b.iter().map(|&x| x as i64) }
-pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
+pub fn almide_rt_bytes_to_list_iter(b: &AlmideList<u8>) -> impl Iterator<Item = i64> + '_ { b.iter().map(|&x| x as i64) }
+pub fn almide_rt_bytes_concat(a: &AlmideList<u8>, b: &AlmideList<u8>) -> AlmideList<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
 /// `bytes.__join` (the Text requirement `list.join` reads): the parts with `sep` between them.
-pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = Vec<u8>>>(xs: &[B], sep: &Vec<u8>) -> Vec<u8> {
-    let mut r: Vec<u8> = Vec::new();
+pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = AlmideList<u8>> + Clone>(xs: &[B], sep: &AlmideList<u8>) -> AlmideList<u8> {
+    let mut r: AlmideList<u8> = AlmideList::new();
     for (i, x) in xs.iter().enumerate() {
         if i > 0 { r.extend_from_slice(sep); }
         r.extend_from_slice(x);
@@ -98,16 +98,16 @@ pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = Vec<u8>>>(xs: &[B], sep:
 /// ../almide-references/RESEARCH-allocation-ceilings.md found zero precedent
 /// for a chosen cross-target cap — the cohort unifies the failure form and
 /// lets the threshold stay structural per target).
-fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
-    let mut v: Vec<T> = Vec::new();
+fn alloc_elems_or_oom<T: Clone>(n: usize) -> AlmideList<T> {
+    let mut v: AlmideList<T> = AlmideList::new();
     if v.try_reserve_exact(n).is_err() {
         almide_abort_oom();
     }
     v
 }
 
-fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
-    let mut v: Vec<u8> = Vec::new();
+fn alloc_bytes_or_oom(n: usize) -> AlmideList<u8> {
+    let mut v: AlmideList<u8> = AlmideList::new();
     if v.try_reserve_exact(n).is_err() {
         almide_abort_oom();
     }
@@ -117,11 +117,11 @@ fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
 /// (C-054/C-161), declared here because the runtime is flattened per program
 /// and string.rs is not always linked beside this module.
 pub const ALMIDE_BYTES_REPEAT_MAX_BYTES: i64 = 1 << 31;
-pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_repeat(b: &AlmideList<u8>, n: i64) -> AlmideList<u8> {
     // An EMPTY base is empty at ANY count (#2690): the extend loop below
     // runs `n` times whatever `b.len()` is, so `repeat(empty, i64::MAX)`
     // never returned.
-    if b.is_empty() { return Vec::new(); }
+    if b.is_empty() { return AlmideList::new(); }
     let n = n.max(0);
     // The repeat family's shared 2^31-byte ceiling (C-054/C-161), the
     // `string.repeat` guard verbatim: `bytes.repeat([1, 2], 2^30 + 1)` built
@@ -138,7 +138,7 @@ pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
     for _ in 0..n { v.extend_from_slice(b); }
     v
 }
-pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_zeros(len: i64) -> AlmideList<u8> {
     let n = len.max(0) as usize;
     let mut v = alloc_bytes_or_oom(n);
     v.resize(n, 0);
@@ -149,7 +149,7 @@ pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
 // holds when that is large enough. `bytes.clear(buf)` reaches the certified
 // render as `buf = bytes.zeros(0)`; built afresh, a line buffer cleared per
 // line was freed and regrown per line. Not an Almide-visible function.
-pub fn almide_rt_bytes_zeros_into(b: &mut Vec<u8>, len: i64) {
+pub fn almide_rt_bytes_zeros_into(b: &mut AlmideList<u8>, len: i64) {
     let n = len.max(0) as usize;
     if n > b.capacity() {
         *b = almide_rt_bytes_zeros(len);
@@ -158,13 +158,13 @@ pub fn almide_rt_bytes_zeros_into(b: &mut Vec<u8>, len: i64) {
         b.resize(n, 0);
     }
 }
-pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
+pub fn almide_rt_bytes_push(b: &mut AlmideList<u8>, val: i64) { b.push(val as u8); }
 // The functional push (`bytes.__append`): a fresh copy of `b` with `val`'s low 8 bits appended.
-pub fn almide_rt_bytes_append_fresh(b: &Vec<u8>, val: i64) -> Vec<u8> { let mut r = Vec::with_capacity(b.len() + 1); r.extend_from_slice(b); r.push(val as u8); r }
+pub fn almide_rt_bytes_append_fresh(b: &AlmideList<u8>, val: i64) -> AlmideList<u8> { let mut r = AlmideList::with_capacity(b.len() + 1); r.extend_from_slice(b); r.push(val as u8); r }
 // Its owned twin (`@reuse(b)`): the source at its last use grows in place.
-#[inline(always)] pub fn almide_rt_bytes_append_fresh_owned(b: impl Into<Vec<u8>>, val: i64) -> Vec<u8> { let mut b = b.into(); b.push(val as u8); b }
+#[inline(always)] pub fn almide_rt_bytes_append_fresh_owned(b: impl Into<AlmideList<u8>>, val: i64) -> AlmideList<u8> { let mut b = b.into(); b.push(val as u8); b }
 // The checked `b[pos]` (`bytes.__index`): out of range aborts as every index read does.
-pub fn almide_rt_bytes_index_checked(b: &Vec<u8>, pos: i64) -> i64 { if pos < 0 || pos as usize >= b.len() { eprintln!("Error: index out of bounds"); std::process::exit(1); } b[pos as usize] as i64 }
+pub fn almide_rt_bytes_index_checked(b: &AlmideList<u8>, pos: i64) -> i64 { if pos < 0 || pos as usize >= b.len() { eprintln!("Error: index out of bounds"); std::process::exit(1); } b[pos as usize] as i64 }
 // C-213: `copy_within` moves only when the source range is non-empty AND the
 // destination window fits; a window that does not fit — past the end, or a
 // NEGATIVE offset — is a silent no-op. The guard used to cast `dst as usize`
@@ -176,7 +176,7 @@ pub fn almide_rt_bytes_index_checked(b: &Vec<u8>, pos: i64) -> i64 { if pos < 0 
 // test now runs BEFORE any cast, and the fit test is the same `window()` the
 // `set_*` writers use (#1408), so no offset can reach the move unless
 // `[d, d + (e - s))` lies inside `[0, len)`.
-pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64, dst: i64) {
+pub fn almide_rt_bytes_copy_within(b: &mut AlmideList<u8>, src_start: i64, src_end: i64, dst: i64) {
     let len = b.len();
     let Ok(s) = usize::try_from(src_start) else { return; };
     // A negative `src_end` is enormous as `usize` and clamps to the length —
@@ -187,32 +187,32 @@ pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64
         b.copy_within(s..e, d);
     }
 }
-pub fn almide_rt_bytes_clear(b: &mut Vec<u8>) { b.clear(); }
-pub fn almide_rt_bytes_from_string(s: &str) -> Vec<u8> { s.as_bytes().to_vec() }
+pub fn almide_rt_bytes_clear(b: &mut AlmideList<u8>) { b.clear(); }
+pub fn almide_rt_bytes_from_string(s: &str) -> AlmideList<u8> { AlmideList::from(s.as_bytes()) }
 
 // ── i16 / u16 BE single-value reads ──
 
-pub fn almide_rt_bytes_read_i16_le(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i16_le(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     i16::from_le_bytes([b[p], b[p+1]]) as i64
 }
-pub fn almide_rt_bytes_read_i16_be(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i16_be(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     i16::from_be_bytes([b[p], b[p+1]]) as i64
 }
-pub fn almide_rt_bytes_read_u16_be(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_u16_be(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     u16::from_be_bytes([b[p], b[p+1]]) as i64
 }
-pub fn almide_rt_bytes_read_i32_be(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i32_be(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     i32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as i64
 }
-pub fn almide_rt_bytes_read_f32_be(b: &Vec<u8>, pos: i64) -> f64 {
+pub fn almide_rt_bytes_read_f32_be(b: &AlmideList<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as f64
@@ -223,7 +223,7 @@ pub fn almide_rt_bytes_read_f32_be(b: &Vec<u8>, pos: i64) -> f64 {
 // Keep the entry points as ordinary declarations: the native runtime index
 // reads their signatures and dependency closure without expanding Rust macros.
 #[inline]
-fn almide_bytes_read_16_array(b: &Vec<u8>, pos: i64, count: i64, read: fn([u8; 2]) -> i64) -> Vec<i64> {
+fn almide_bytes_read_16_array(b: &AlmideList<u8>, pos: i64, count: i64, read: fn([u8; 2]) -> i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054), and there
     // is no chosen ceiling. Allocation failure uses C-197's common abort.
@@ -237,72 +237,72 @@ fn almide_bytes_read_16_array(b: &Vec<u8>, pos: i64, count: i64, read: fn([u8; 2
     out
 }
 
-pub fn almide_rt_bytes_read_i16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i16_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     almide_bytes_read_16_array(b, pos, count, |v| i16::from_le_bytes(v) as i64)
 }
-pub fn almide_rt_bytes_read_u16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_u16_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     almide_bytes_read_16_array(b, pos, count, |v| u16::from_le_bytes(v) as i64)
 }
-pub fn almide_rt_bytes_read_i16_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i16_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     almide_bytes_read_16_array(b, pos, count, |v| i16::from_be_bytes(v) as i64)
 }
-pub fn almide_rt_bytes_read_u16_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_u16_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     almide_bytes_read_16_array(b, pos, count, |v| u16::from_be_bytes(v) as i64)
 }
 
 // ── i16 append + set i16/BE writers ──
 
-pub fn almide_rt_bytes_append_i16_le(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i16_le(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as i16).to_le_bytes()));
 }
-pub fn almide_rt_bytes_append_i16_be(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i16_be(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as i16).to_be_bytes()));
 }
-pub fn almide_rt_bytes_set_i16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i16_le(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as i16).to_le_bytes();
     if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_u16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_u16_be(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as u16).to_be_bytes();
     if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_i16_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i16_be(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as i16).to_be_bytes();
     if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_u32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_u32_be(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as u32).to_be_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_i32_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i32_be(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as i32).to_be_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_i64_be(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i64_be(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = val.to_be_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_f32_be(b: &mut Vec<u8>, pos: i64, val: f64) {
+pub fn almide_rt_bytes_set_f32_be(b: &mut AlmideList<u8>, pos: i64, val: f64) {
     let bytes = canonical_f32(val).to_be_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
+pub fn almide_rt_bytes_set_f64_be(b: &mut AlmideList<u8>, pos: i64, val: f64) {
     let bytes = canonical_f64(val).to_be_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
 // ── XOR / pad / copy ──
 
-pub fn almide_rt_bytes_xor(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> {
+pub fn almide_rt_bytes_xor(a: &AlmideList<u8>, b: &AlmideList<u8>) -> AlmideList<u8> {
     let n = a.len().min(b.len());
-    let mut out = Vec::with_capacity(n);
+    let mut out = AlmideList::with_capacity(n);
     for i in 0..n {
         out.push(a[i] ^ b[i]);
     }
     out
 }
 
-pub fn almide_rt_bytes_pad_left(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_pad_left(b: &AlmideList<u8>, target_len: i64, val: i64) -> AlmideList<u8> {
     // `target_len as usize` made a NEGATIVE target ~1.8e19, so `b.len() >= target` was false
     // and the pad allocation then aborted the process — where the other leg read the same
     // negative target as "already long enough" and returned the input unchanged.
@@ -319,7 +319,7 @@ pub fn almide_rt_bytes_pad_left(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u
     out
 }
 
-pub fn almide_rt_bytes_pad_right(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_pad_right(b: &AlmideList<u8>, target_len: i64, val: i64) -> AlmideList<u8> {
     // `target_len as usize` made a NEGATIVE target ~1.8e19, so `b.len() >= target` was false
     // and the pad allocation then aborted the process — where the other leg read the same
     // negative target as "already long enough" and returned the input unchanged.
@@ -337,8 +337,8 @@ pub fn almide_rt_bytes_pad_right(b: &Vec<u8>, target_len: i64, val: i64) -> Vec<
 }
 
 pub fn almide_rt_bytes_copy_from(
-    dst: &mut Vec<u8>,
-    src: &Vec<u8>,
+    dst: &mut AlmideList<u8>,
+    src: &AlmideList<u8>,
     dst_off: i64,
     src_off: i64,
     len: i64,
@@ -361,32 +361,32 @@ pub fn almide_rt_bytes_copy_from(
 
 // ── Transform / split ──
 
-pub fn almide_rt_bytes_reverse(b: &Vec<u8>) -> Vec<u8> {
+pub fn almide_rt_bytes_reverse(b: &AlmideList<u8>) -> AlmideList<u8> {
     let mut out = b.clone();
     out.reverse();
     out
 }
 
-pub fn almide_rt_bytes_fill(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_fill(b: &mut AlmideList<u8>, val: i64) {
     let v = val as u8;
     for byte in b.iter_mut() {
         *byte = v;
     }
 }
 
-pub fn almide_rt_bytes_map_each(b: &Vec<u8>, f: std::rc::Rc<dyn Fn(i64) -> i64>) -> Vec<u8> {
+pub fn almide_rt_bytes_map_each(b: &AlmideList<u8>, f: std::rc::Rc<dyn Fn(i64) -> i64>) -> AlmideList<u8> {
     let f = move |a| f(a);
     b.iter().map(|x| f(*x as i64) as u8).collect()
 }
 
-pub fn almide_rt_bytes_insert(b: &Vec<u8>, pos: i64, val: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_insert(b: &AlmideList<u8>, pos: i64, val: i64) -> AlmideList<u8> {
     let mut out = b.clone();
     let p = (pos.max(0) as usize).min(out.len());
     out.insert(p, val as u8);
     out
 }
 
-pub fn almide_rt_bytes_remove_at(b: &Vec<u8>, pos: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_remove_at(b: &AlmideList<u8>, pos: i64) -> AlmideList<u8> {
     let p = pos as usize;
     if p >= b.len() {
         return b.clone();
@@ -396,21 +396,21 @@ pub fn almide_rt_bytes_remove_at(b: &Vec<u8>, pos: i64) -> Vec<u8> {
     out
 }
 
-pub fn almide_rt_bytes_chunks(b: &Vec<u8>, size: i64) -> Vec<Vec<u8>> {
+pub fn almide_rt_bytes_chunks(b: &AlmideList<u8>, size: i64) -> AlmideList<AlmideList<u8>> {
     if size <= 0 {
-        return vec![];
+        return almide_list![];
     }
     b.chunks(size as usize).map(|c| c.to_vec()).collect()
 }
 
-pub fn almide_rt_bytes_split(b: &Vec<u8>, sep: &Vec<u8>) -> Vec<Vec<u8>> {
+pub fn almide_rt_bytes_split(b: &AlmideList<u8>, sep: &AlmideList<u8>) -> AlmideList<AlmideList<u8>> {
     if sep.is_empty() {
-        return vec![b.clone()];
+        return almide_list![b.clone()];
     }
     // Non-overlapping, left to right: each search resumes where the last
     // separator ended, so the whole split is one linear pass (#4206).
     let fail = almide_bytes_kmp_table(sep);
-    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut out: AlmideList<AlmideList<u8>> = AlmideList::new();
     let mut start = 0usize;
     while let Some(i) = almide_bytes_kmp_find(b, sep, &fail, start) {
         out.push(b[start..i].to_vec());
@@ -432,8 +432,8 @@ pub fn almide_rt_bytes_split(b: &Vec<u8>, sep: &Vec<u8>) -> Vec<Vec<u8>> {
 
 /// `fail[q]`: the length of the longest proper prefix of `pat[..=q]` that is
 /// also its suffix. `pat` is non-empty.
-fn almide_bytes_kmp_table(pat: &[u8]) -> Vec<usize> {
-    let mut fail = vec![0usize; pat.len()];
+fn almide_bytes_kmp_table(pat: &[u8]) -> AlmideList<usize> {
+    let mut fail = almide_list![0usize; pat.len()];
     let mut k = 0usize;
     for q in 1..pat.len() {
         while k > 0 && pat[k] != pat[q] {
@@ -467,11 +467,11 @@ fn almide_bytes_kmp_find(hay: &[u8], pat: &[u8], fail: &[usize], from: usize) ->
     None
 }
 
-pub fn almide_rt_bytes_contains(b: &Vec<u8>, pat: &Vec<u8>) -> bool {
+pub fn almide_rt_bytes_contains(b: &AlmideList<u8>, pat: &AlmideList<u8>) -> bool {
     almide_rt_bytes_index_of(b, pat).is_some()
 }
 
-pub fn almide_rt_bytes_index_of(b: &Vec<u8>, pat: &Vec<u8>) -> Option<i64> {
+pub fn almide_rt_bytes_index_of(b: &AlmideList<u8>, pat: &AlmideList<u8>) -> Option<i64> {
     if pat.is_empty() { return Some(0); }
     if pat.len() > b.len() { return None; }
     almide_bytes_kmp_find(b, pat, &almide_bytes_kmp_table(pat), 0).map(|i| i as i64)
@@ -483,7 +483,7 @@ pub fn almide_rt_bytes_index_of(b: &Vec<u8>, pat: &Vec<u8>) -> Option<i64> {
 /// idioms (bcmp/memcmp, MergeICmps) nor a future pass can turn the walk back
 /// into an early exit on the first difference.
 #[inline(never)]
-pub fn almide_rt_bytes_is_equal_constant_time(a: &Vec<u8>, b: &Vec<u8>) -> bool {
+pub fn almide_rt_bytes_is_equal_constant_time(a: &AlmideList<u8>, b: &AlmideList<u8>) -> bool {
     if a.len() != b.len() { return false; }
     let mut acc: u8 = 0;
     for i in 0..a.len() {
@@ -492,15 +492,15 @@ pub fn almide_rt_bytes_is_equal_constant_time(a: &Vec<u8>, b: &Vec<u8>) -> bool 
     core::hint::black_box(acc) == 0
 }
 
-pub fn almide_rt_bytes_starts_with(b: &Vec<u8>, prefix: &Vec<u8>) -> bool {
+pub fn almide_rt_bytes_starts_with(b: &AlmideList<u8>, prefix: &AlmideList<u8>) -> bool {
     b.starts_with(prefix.as_slice())
 }
 
-pub fn almide_rt_bytes_ends_with(b: &Vec<u8>, suffix: &Vec<u8>) -> bool {
+pub fn almide_rt_bytes_ends_with(b: &AlmideList<u8>, suffix: &AlmideList<u8>) -> bool {
     b.ends_with(suffix.as_slice())
 }
 
-pub fn almide_rt_bytes_cmp(a: &Vec<u8>, b: &Vec<u8>) -> i64 {
+pub fn almide_rt_bytes_cmp(a: &AlmideList<u8>, b: &AlmideList<u8>) -> i64 {
     use std::cmp::Ordering;
     match a.as_slice().cmp(b.as_slice()) {
         Ordering::Less => -1,
@@ -509,7 +509,7 @@ pub fn almide_rt_bytes_cmp(a: &Vec<u8>, b: &Vec<u8>) -> i64 {
     }
 }
 
-pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<AlmideString, AlmideString> {
+pub fn almide_rt_bytes_to_string(b: &AlmideList<u8>) -> Result<AlmideString, AlmideString> {
     let __almide_v: Result<String, AlmideString> = {
         let __almide_r: Result<String, String> = (|| {
             std::str::from_utf8(b)
@@ -521,73 +521,73 @@ pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<AlmideString, AlmideStri
     __almide_v.into_almide()
 }
 
-pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> AlmideString { let __almide_out: String = String::from_utf8_lossy(b).into_owned(); __almide_out.into() }
+pub fn almide_rt_bytes_to_string_lossy(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = String::from_utf8_lossy(b).into_owned(); __almide_out.into() }
 
-pub fn almide_rt_bytes_is_valid_utf8(b: &Vec<u8>) -> bool {
+pub fn almide_rt_bytes_is_valid_utf8(b: &AlmideList<u8>) -> bool {
     std::str::from_utf8(b).is_ok()
 }
 
 // ── Bridge protocol: big-endian pack/unpack ──
 
-pub fn almide_rt_bytes_write_bool(b: &mut Vec<u8>, val: bool) { b.push(if val { 1 } else { 0 }); }
+pub fn almide_rt_bytes_write_bool(b: &mut AlmideList<u8>, val: bool) { b.push(if val { 1 } else { 0 }); }
 
-pub fn almide_rt_bytes_read_i64_be(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i64_be(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
     i64::from_be_bytes(bytes_fixed::<8>(b, p))
 }
-pub fn almide_rt_bytes_read_f64_be(b: &Vec<u8>, pos: i64) -> f64 {
+pub fn almide_rt_bytes_read_f64_be(b: &AlmideList<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f64::from_be_bytes(bytes_fixed::<8>(b, p))
 }
-pub fn almide_rt_bytes_read_u32_be(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_u32_be(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     u32::from_be_bytes(bytes_fixed::<4>(b, p)) as i64
 }
-pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
+pub fn almide_rt_bytes_read_bool(b: &AlmideList<u8>, pos: i64) -> bool {
     b.get(pos as usize).map(|&x| x != 0).unwrap_or(false)
 }
 // ── In-place little-endian writes ──
 
-pub fn almide_rt_bytes_set_f32_le(b: &mut Vec<u8>, pos: i64, val: f64) {
+pub fn almide_rt_bytes_set_f32_le(b: &mut AlmideList<u8>, pos: i64, val: f64) {
     let bytes = canonical_f32(val).to_le_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_u16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_u16_le(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as u16).to_le_bytes();
     if let Some(p) = window(pos, 2, b.len()) { b[p..p+2].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_u8(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_u8(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let p = pos as usize;
     if p < b.len() { b[p] = (val as u8) & 0xFF; }
 }
-pub fn almide_rt_bytes_set_u32_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_u32_le(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as u32).to_le_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_i32_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i32_le(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = (val as i32).to_le_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_i64_le(b: &mut Vec<u8>, pos: i64, val: i64) {
+pub fn almide_rt_bytes_set_i64_le(b: &mut AlmideList<u8>, pos: i64, val: i64) {
     let bytes = val.to_le_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
-pub fn almide_rt_bytes_set_f64_le(b: &mut Vec<u8>, pos: i64, val: f64) {
+pub fn almide_rt_bytes_set_f64_le(b: &mut AlmideList<u8>, pos: i64, val: f64) {
     let bytes = canonical_f64(val).to_le_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
 // ── Cursor family ──
 
-pub fn almide_rt_bytes_skip(b: &Vec<u8>, pos: i64, n: i64) -> i64 {
+pub fn almide_rt_bytes_skip(b: &AlmideList<u8>, pos: i64, n: i64) -> i64 {
     let np = (pos + n) as i64;
     if np > b.len() as i64 { b.len() as i64 } else { np }
 }
 
-pub fn almide_rt_bytes_eof(b: &Vec<u8>, pos: i64) -> bool {
+pub fn almide_rt_bytes_eof(b: &AlmideList<u8>, pos: i64) -> bool {
     (pos as usize) >= b.len()
 }
 
@@ -607,7 +607,7 @@ pub fn almide_rt_bytes_eof(b: &Vec<u8>, pos: i64) -> bool {
 
 macro_rules! cursor_read_int {
     ($name:ident, $width:expr, $convert:expr) => {
-        pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<i64>) {
+        pub fn $name(b: &AlmideList<u8>, pos: i64) -> (i64, Option<i64>) {
             let Some(p) = window(pos, $width, b.len()) else { return (pos, None); };
             let bytes = &b[p..p + $width];
             (pos + $width, Some($convert(bytes)))
@@ -617,7 +617,7 @@ macro_rules! cursor_read_int {
 
 macro_rules! cursor_read_float {
     ($name:ident, $width:expr, $convert:expr) => {
-        pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<f64>) {
+        pub fn $name(b: &AlmideList<u8>, pos: i64) -> (i64, Option<f64>) {
             let Some(p) = window(pos, $width, b.len()) else { return (pos, None); };
             let bytes = &b[p..p + $width];
             (pos + $width, Some($convert(bytes)))
@@ -643,7 +643,7 @@ cursor_read_float!(almide_rt_bytes_read_f64_le_at, 8, |b: &[u8]| f64::from_le_by
 cursor_read_float!(almide_rt_bytes_read_f32_be_at, 4, |b: &[u8]| f32::from_be_bytes([b[0], b[1], b[2], b[3]]) as f64);
 cursor_read_float!(almide_rt_bytes_read_f64_be_at, 8, |b: &[u8]| f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
 
-pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>) {
+pub fn almide_rt_bytes_read_bool_at(b: &AlmideList<u8>, pos: i64) -> (i64, Option<bool>) {
     let Some(p) = window(pos, 1, b.len()) else { return (pos, None); };
     (pos + 1, Some(b[p] != 0))
 }
@@ -653,7 +653,7 @@ pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>
 // but only by accident of the cast (a negative `pos` or `n` became huge and the
 // `checked_add` then failed); the two sign tests are written out so the rule is
 // visible where it is applied (#2479).
-pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
+pub fn almide_rt_bytes_take_at(b: &AlmideList<u8>, pos: i64, n: i64) -> (i64, Option<AlmideList<u8>>) {
     let Ok(nn) = usize::try_from(n) else { return (pos, None); };
     let Some(p) = window(pos, nn, b.len()) else { return (pos, None); };
     (pos + n, Some(b[p..p + nn].to_vec()))
@@ -661,16 +661,16 @@ pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Ve
 
 // ── Big-endian appenders ──
 
-pub fn almide_rt_bytes_append_u16_be(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_u16_be(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as u16).to_be_bytes()));
 }
-pub fn almide_rt_bytes_append_u32_be(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_u32_be(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as u32).to_be_bytes()));
 }
-pub fn almide_rt_bytes_append_i32_be(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i32_be(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as i32).to_be_bytes()));
 }
-pub fn almide_rt_bytes_append_i64_be(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i64_be(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&val.to_be_bytes());
 }
 // Every bytes float writer — `append_f*`, `set_f*`, `set_float32`,
@@ -685,16 +685,16 @@ fn canonical_f64(val: f64) -> f64 {
 fn canonical_f32(val: f64) -> f32 {
     if val.is_nan() { f32::from_bits(0x7FC0_0000) } else { val as f32 }
 }
-pub fn almide_rt_bytes_append_f32_be(b: &mut Vec<u8>, val: f64) {
+pub fn almide_rt_bytes_append_f32_be(b: &mut AlmideList<u8>, val: f64) {
     b.extend_from_slice(&canonical_f32(val).to_be_bytes());
 }
-pub fn almide_rt_bytes_append_f64_be(b: &mut Vec<u8>, val: f64) {
+pub fn almide_rt_bytes_append_f64_be(b: &mut AlmideList<u8>, val: f64) {
     b.extend_from_slice(&canonical_f64(val).to_be_bytes());
 }
 
 // ── Big-endian bulk readers ──
 
-pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_u32_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -711,7 +711,7 @@ pub fn almide_rt_bytes_read_u32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     }
     out
 }
-pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i32_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -728,7 +728,7 @@ pub fn almide_rt_bytes_read_i32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     }
     out
 }
-pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i64_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -745,7 +745,7 @@ pub fn almide_rt_bytes_read_i64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     }
     out
 }
-pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+pub fn almide_rt_bytes_read_f32_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<f64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -762,7 +762,7 @@ pub fn almide_rt_bytes_read_f32_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     }
     out
 }
-pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+pub fn almide_rt_bytes_read_f64_be_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<f64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -782,38 +782,38 @@ pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
 
 // ── Little-endian reads (match stdlib/defs/bytes.toml) ──
 
-pub fn almide_rt_bytes_read_i32_le(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i32_le(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     i32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
 }
-pub fn almide_rt_bytes_read_u32_le(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_u32_le(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     u32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
 }
-pub fn almide_rt_bytes_read_u16_le(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_u16_le(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
     u16::from_le_bytes(bytes_fixed::<2>(b, p)) as i64
 }
-pub fn almide_rt_bytes_read_i64_le(b: &Vec<u8>, pos: i64) -> i64 {
+pub fn almide_rt_bytes_read_i64_le(b: &AlmideList<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
     i64::from_le_bytes(bytes_fixed::<8>(b, p))
 }
-pub fn almide_rt_bytes_read_f32_le(b: &Vec<u8>, pos: i64) -> f64 {
+pub fn almide_rt_bytes_read_f32_le(b: &AlmideList<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f32::from_le_bytes(bytes_fixed::<4>(b, p)) as f64
 }
-pub fn almide_rt_bytes_read_f64_le(b: &Vec<u8>, pos: i64) -> f64 {
+pub fn almide_rt_bytes_read_f64_le(b: &AlmideList<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
     f64::from_le_bytes(bytes_fixed::<8>(b, p))
 }
 // F16 → F32: reassemble the u16 bits and expand.
-pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
+pub fn almide_rt_bytes_read_f16_le(b: &AlmideList<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0.0; }
     let bits = u16::from_le_bytes(bytes_fixed::<2>(b, p));
@@ -823,7 +823,7 @@ pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
 
 // Bulk array reads: avoid per-element Almide-side loops.
 
-pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i32_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -841,7 +841,7 @@ pub fn almide_rt_bytes_read_i32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     out
 }
 
-pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_i64_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -859,7 +859,7 @@ pub fn almide_rt_bytes_read_i64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     out
 }
 
-pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<i64> {
+pub fn almide_rt_bytes_read_u32_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<i64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -877,7 +877,7 @@ pub fn almide_rt_bytes_read_u32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     out
 }
 
-pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+pub fn almide_rt_bytes_read_f64_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<f64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -895,7 +895,7 @@ pub fn almide_rt_bytes_read_f64_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     out
 }
 
-pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+pub fn almide_rt_bytes_read_f32_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<f64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -913,7 +913,7 @@ pub fn almide_rt_bytes_read_f32_le_array(b: &Vec<u8>, pos: i64, count: i64) -> V
     out
 }
 
-pub fn almide_rt_bytes_read_f16_le_array(b: &Vec<u8>, pos: i64, count: i64) -> Vec<f64> {
+pub fn almide_rt_bytes_read_f16_le_array(b: &AlmideList<u8>, pos: i64, count: i64) -> AlmideList<f64> {
     let mut p = pos as usize;
     // `count` is the OUTPUT size: negative reads NOTHING (C-054 — `count as usize`
     // used to turn -1 into ~1.8e19 iterations), and there is NO chosen ceiling
@@ -952,30 +952,30 @@ fn f16_bits_to_f64(bits: u16) -> f32 {
 }
 
 
-pub fn almide_rt_bytes_append_f64_le(b: &mut Vec<u8>, val: f64) {
+pub fn almide_rt_bytes_append_f64_le(b: &mut AlmideList<u8>, val: f64) {
     b.extend_from_slice(&canonical_f64(val).to_le_bytes());
 }
 
-pub fn almide_rt_bytes_append_f32_le(b: &mut Vec<u8>, val: f64) {
+pub fn almide_rt_bytes_append_f32_le(b: &mut AlmideList<u8>, val: f64) {
     b.extend_from_slice(&canonical_f32(val).to_le_bytes());
 }
 
-pub fn almide_rt_bytes_append_u8(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_u8(b: &mut AlmideList<u8>, val: i64) {
     b.push((val as u8) & 0xFF);
 }
 
-pub fn almide_rt_bytes_append_u16_le(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_u16_le(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as u16).to_le_bytes()));
 }
 
-pub fn almide_rt_bytes_append_u32_le(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_u32_le(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as u32).to_le_bytes()));
 }
 
-pub fn almide_rt_bytes_append_i32_le(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i32_le(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&((val as i32).to_le_bytes()));
 }
 
-pub fn almide_rt_bytes_append_i64_le(b: &mut Vec<u8>, val: i64) {
+pub fn almide_rt_bytes_append_i64_le(b: &mut AlmideList<u8>, val: i64) {
     b.extend_from_slice(&val.to_le_bytes());
 }

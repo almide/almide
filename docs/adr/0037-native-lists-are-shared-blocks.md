@@ -94,3 +94,10 @@ The owner ruled ○ on the direction, then ruled on Q1 and Q2 after a cross-lang
   - No free path may reach it. A debug assertion guards every free.
   - Address comparison is not exposed.
   - Each of these cases has a Miri test.
+
+## Implementation notes (2026-11-20)
+
+- **Spelling.** The v1 native header splices the `AlmideList` block after `AlmideStr` and exports `AlmideList` and an `almide_list!` macro (the `vec!` forms). The renderer's emitted text and its signature matchers spell a list `AlmideList<T>` explicitly; `Vec` is never rebound, so a `Vec` in emitted or spliced code always means std's.
+- **Host plumbing stays `Vec`.** What is not an Almide value keeps std's vector, spelled `std::vec::Vec` in the shared runtime text: every almide-rt-core file, the socket / process / hook tables, the map and set storage, key bytes and index, the regex machine's stacks and the zlib buffers. A runtime wrapper converts with `AlmideList::from` where a host result becomes an Almide value.
+- **v0 until its step.** The runtime text is shared with the v0 source emitter, which switches in its own step (D6). Until then the v0 prelude binds `AlmideList<T>` to its `Vec<T>` (and `almide_list!` to `vec!`), as do the checker's regex copy and the three tests that include runtime files.
+- **Bytes** flips with List on v1 (Q1). A writable view (`make_mut`, `as_mut_slice`, `DerefMut`) copies a shared block first, so a `&mut [u8]` or pointer handed to foreign code always addresses a unique block; `a_foreign_write_through_a_pointer_never_reaches_another_owner` runs that hand-off under Miri.

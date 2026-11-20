@@ -31,6 +31,8 @@
 // code below is not in this module and is linted normally.
 #[allow(dead_code, clippy::all, clippy::pedantic)]
 mod runtime_random {
+    // ADR-0037: the runtime spells a list `AlmideList`; here a plain vector.
+    type AlmideList<T> = Vec<T>;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"

@@ -18,11 +18,11 @@
 // effect-main termination path (`Error: <msg>` + exit 1), byte-identical to
 // the wasm `__main_runner`.
 pub fn almide_rt_fan_map<A, B>(
-    items: Vec<A>,
+    items: AlmideList<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
-) -> Result<Vec<B>, AlmideString> {
-    let __almide_r: Result<Vec<B>, AlmideString> = (|| {
-        let mut out = Vec::with_capacity(items.len());
+) -> Result<AlmideList<B>, AlmideString> {
+    let __almide_r: Result<AlmideList<B>, AlmideString> = (|| {
+        let mut out = AlmideList::with_capacity(items.len());
         let mut first_err: Option<AlmideString> = None;
         for item in items {
             match (f(item), &first_err) {
@@ -66,15 +66,15 @@ pub fn almide_rt_fan_map<A, B>(
 // than sequential). Every element runs, so no Err cuts the group: a trap in
 // element k waits for the blocks below its own and discards everything above
 // (ADR-0024 D6, #3779).
-pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, AlmideString> + Send + Sync>(
-    items: Vec<A>,
+pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send + Clone, F: Fn(A) -> Result<B, AlmideString> + Send + Sync>(
+    items: AlmideList<A>,
     f: F,
-) -> Result<Vec<B>, AlmideString> {
+) -> Result<AlmideList<B>, AlmideString> {
     items.almide_share();
     // The slots cross threads, so an element's error is held as an owned
     // `String` (Send) and converted once at the boundary.
-    let __almide_r: Result<Vec<B>, String> = (|| {
-        let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
+    let __almide_r: Result<AlmideList<B>, String> = (|| {
+        let mut slots: std::vec::Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
         if items.len() < 2 || almide_rt_list_par_sequential() {
             for (slot, item) in slots.iter_mut().zip(items) {
                 *slot = Some(f(item).map_err(String::from));
@@ -84,7 +84,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
         // site's last measured time per element whether this offer is worth a
         // parallel run; every offer records what its elements took.
-        let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, AlmideString> as usize;
+        let site = almide_rt_fan_map_par::<A, B, F> as fn(AlmideList<A>, F) -> Result<AlmideList<B>, AlmideString> as usize;
         let n = items.len();
         let (workers, clock) = AlmideFanClock::offer(site, n);
         if workers < 2 {
@@ -101,7 +101,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         // The group flushes this thread's stdout first: a runtime abort on a worker
         // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
         // One timeline per BLOCK, dealt in list order (list.rs `almide_fan_deal`).
-        let blocks: Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+        let blocks: std::vec::Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
         let group = almide_fan_group(blocks.len());
         almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
             for (b, (chunk, out)) in blocks {
@@ -120,8 +120,8 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
 
 // The map's result from its filled slots: the ok values in list order, or the
 // LOWEST-INDEX Err (every element ran — ADR-0024 D1).
-fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Result<Vec<B>, String> {
-    let mut out = Vec::with_capacity(slots.len());
+fn almide_fan_map_settle_slots<B: Clone>(slots: std::vec::Vec<Option<Result<B, String>>>) -> Result<AlmideList<B>, String> {
+    let mut out = AlmideList::with_capacity(slots.len());
     for slot in slots {
         match slot {
             Some(Ok(v)) => out.push(v),
@@ -139,7 +139,7 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
 // lowers in the frontend to the least-(spend, index) fold, so they never call
 // this function. Kept only until the runtime registry drops it.
 pub fn almide_rt_fan_race<T>(
-    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+    thunks: std::vec::Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
     let __almide_r: Result<T, AlmideString> = (|| {
         match thunks.into_iter().next() {
@@ -155,7 +155,7 @@ pub fn almide_rt_fan_race<T>(
 // a defined `Err`, never panicking or trapping. Later thunks are never started.
 // (`fan.min` is a different selection: least compute spent, tie -> list order.)
 pub fn almide_rt_fan_any<T>(
-    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+    thunks: std::vec::Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
     let __almide_r: Result<T, AlmideString> = (|| {
         for thunk in &thunks {
@@ -173,7 +173,7 @@ pub fn almide_rt_fan_any<T>(
 // All-fail (and the empty list) is the ledger-constant Err. Deterministic --
 // the early cut is structural (later elements are never evaluated).
 pub fn almide_rt_fan_any_map<A, B>(
-    items: Vec<A>,
+    items: AlmideList<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
 ) -> Result<B, AlmideString> {
     let __almide_r: Result<B, AlmideString> = (|| {
@@ -191,13 +191,13 @@ pub fn almide_rt_fan_any_map<A, B>(
 // `list.map`, both sequential. One output timeline per thunk, flushed in list order (ADR-0024 D5). The
 // group flushes this thread's stdout first: a runtime abort on a worker exits
 // without reaching this thread's buffer (C-197, see rust.toml fan_expr).
-pub fn almide_rt_fan_settle<T: Send + 'static>(
-    thunks: Vec<impl Fn() -> Result<T, AlmideString> + Send + Sync>,
-) -> Vec<Result<T, AlmideString>> {
+pub fn almide_rt_fan_settle<T: Send + 'static + Clone>(
+    thunks: std::vec::Vec<impl Fn() -> Result<T, AlmideString> + Send + Sync>,
+) -> AlmideList<Result<T, AlmideString>> {
     let group = almide_fan_group(thunks.len());
     let group = &group;
     std::thread::scope(|s| {
-        let handles: Vec<_> = thunks
+        let handles: std::vec::Vec<_> = thunks
             .iter()
             .enumerate()
             .map(|(i, thunk)| s.spawn(move || {

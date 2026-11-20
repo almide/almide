@@ -5,7 +5,7 @@ use std::process::Command;
 fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     let _guard = crate::render_native_rec::install(vec![crate::render_native_rec::RecDecl {
         name: crate::render_native_rec::BYTES_KEY.into(),
-        alias: Some("Vec<u8>"),
+        alias: Some("AlmideList<u8>"),
         ..Default::default()
     }]);
     let mut st = AddrState::new(&MirFunction::default(), &Default::default());
@@ -32,7 +32,7 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
         crate::render_native_bounds::reset();
         tys.insert(base, NTy::Rec(0));
         source.push_str(&format!(
-            "{{ let mut {} = vec![0u8; 10]; let {}: i64 = -81985529216486896;\n",
+            "{{ let mut {} = almide_list![0u8; 10]; let {}: i64 = -81985529216486896;\n",
             var(base),
             var(value)
         ));

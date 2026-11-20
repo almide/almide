@@ -52,7 +52,7 @@ fn shared_thread_boundary(vis: &str) -> String {
 const INTO_IMPLS: &str = "\
 impl AlmideIntoStr for String { type Out = AlmideStr; #[inline(always)] fn into_almide(self) -> AlmideStr { AlmideStr::from(self) } }
 impl AlmideIntoStr for AlmideStr { type Out = AlmideStr; #[inline(always)] fn into_almide(self) -> AlmideStr { self } }
-impl<T: AlmideIntoStr> AlmideIntoStr for Vec<T> { type Out = Vec<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.into_iter().map(AlmideIntoStr::into_almide).collect() } }
+impl<T: AlmideIntoStr + Clone> AlmideIntoStr for AlmideList<T> where T::Out: Clone { type Out = AlmideList<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.into_iter().map(AlmideIntoStr::into_almide).collect() } }
 impl<T: AlmideIntoStr> AlmideIntoStr for Option<T> { type Out = Option<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.map(AlmideIntoStr::into_almide) } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for Result<A, B> { type Out = Result<A::Out, B::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { match self { Ok(a) => Ok(a.into_almide()), Err(b) => Err(b.into_almide()) } } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for (A, B) { type Out = (A::Out, B::Out); #[inline(always)] fn into_almide(self) -> Self::Out { (self.0.into_almide(), self.1.into_almide()) } }

@@ -258,7 +258,7 @@ pub(crate) fn deep_drop_impls() -> String {
         for (tag, edges) in rows {
             for (_, e) in edges {
                 match e {
-                    DeepEdge::List(j) => items.insert(format!("V{j}(Vec<{}>)", struct_name(*j))),
+                    DeepEdge::List(j) => items.insert(format!("V{j}(AlmideList<{}>)", struct_name(*j))),
                     DeepEdge::Opt(j) | DeepEdge::Boxed(j, _) => items.insert(format!("N{j}({})", struct_name(*j))),
                     DeepEdge::InPlace(_) => false,
                 };
@@ -307,8 +307,8 @@ pub(crate) fn deep_drop_impls() -> String {
     let nones = vec!["None"; DEEP_NEAR].join(", ");
     out.push_str(&format!(
         "/// A value detached from a recursive type's cycle, released in a loop (#4676).\nenum __AlmdDeep {{\n{variants}}}\n\n\
-         /// The detached values not yet released: the first few inline, the rest in a list.\nstruct __AlmdWork {{\n    near: [Option<__AlmdDeep>; {DEEP_NEAR}],\n    n: usize,\n    far: Vec<__AlmdDeep>,\n}}\n\n\
-         impl __AlmdWork {{\n    #[inline]\n    fn new() -> Self {{\n        Self {{ near: [{nones}], n: 0, far: Vec::new() }}\n    }}\n    #[inline]\n    fn push(&mut self, x: __AlmdDeep) {{\n        if self.n < {DEEP_NEAR} {{\n            self.near[self.n] = Some(x);\n            self.n += 1;\n        }} else {{\n            self.far.push(x);\n        }}\n    }}\n    #[inline]\n    fn pop(&mut self) -> Option<__AlmdDeep> {{\n        if let Some(x) = self.far.pop() {{\n            return Some(x);\n        }}\n        if self.n == 0 {{\n            return None;\n        }}\n        self.n -= 1;\n        self.near[self.n].take()\n    }}\n}}\n\n\
+         /// The detached values not yet released: the first few inline, the rest in a list.\nstruct __AlmdWork {{\n    near: [Option<__AlmdDeep>; {DEEP_NEAR}],\n    n: usize,\n    far: AlmideList<__AlmdDeep>,\n}}\n\n\
+         impl __AlmdWork {{\n    #[inline]\n    fn new() -> Self {{\n        Self {{ near: [{nones}], n: 0, far: AlmideList::new() }}\n    }}\n    #[inline]\n    fn push(&mut self, x: __AlmdDeep) {{\n        if self.n < {DEEP_NEAR} {{\n            self.near[self.n] = Some(x);\n            self.n += 1;\n        }} else {{\n            self.far.push(x);\n        }}\n    }}\n    #[inline]\n    fn pop(&mut self) -> Option<__AlmdDeep> {{\n        if let Some(x) = self.far.pop() {{\n            return Some(x);\n        }}\n        if self.n == 0 {{\n            return None;\n        }}\n        self.n -= 1;\n        self.near[self.n].take()\n    }}\n}}\n\n\
          #[inline(never)]\nfn __almd_deep_drain(w: &mut __AlmdWork) {{\n    while let Some(it) = w.pop() {{\n        match it {{\n{arms}        }}\n    }}\n}}\n\n"
     ));
     out

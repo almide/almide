@@ -488,7 +488,7 @@ fn record(shape: &Shape, kind: NTy, to_host: bool) -> Result<String, LowerError>
     }
     let parts = parts.join(", ");
     Ok(if to_host { format!("{} {{ {parts} }}", shape.host) }
-        else if slots { format!("vec![{parts}]") }
+        else if slots { format!("almide_list![{parts}]") }
         else { format!("{} {{ {parts} }}", rec::owned_ty(kind)) })
 }
 

@@ -138,10 +138,10 @@ fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
     if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() {
         return Some(almide_rt_map_hash_pair(*x as u64, almide_rt_map_hash_bytes(y.as_bytes())));
     }
-    if let Some(xs) = a.downcast_ref::<Vec<i64>>() {
+    if let Some(xs) = a.downcast_ref::<AlmideList<i64>>() {
         return xs.as_slice().almide_key_hash();
     }
-    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
+    if let Some(xs) = a.downcast_ref::<AlmideList<AlmideString>>() {
         return xs.as_slice().almide_key_hash();
     }
     almide_map_key_hash_sized_int(a).or_else(|| almide_map_key_registered(a).map(|b| almide_rt_map_hash_bytes(&b)))
@@ -169,7 +169,7 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 pub trait AlmideMapKey {
     fn almide_key_hash(&self) -> Option<u64>;
     /// The key's canonical bytes for the ordered fallback index (#4104).
-    fn almide_key_bytes(&self) -> Option<Vec<u8>>;
+    fn almide_key_bytes(&self) -> Option<std::vec::Vec<u8>>;
 }
 impl<T: 'static> AlmideMapKey for T {
     #[inline]
@@ -177,7 +177,7 @@ impl<T: 'static> AlmideMapKey for T {
         almide_rt_map_key_hash(self)
     }
     #[inline]
-    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+    fn almide_key_bytes(&self) -> Option<std::vec::Vec<u8>> {
         almide_rt_map_key_bytes(self)
     }
 }
@@ -187,7 +187,7 @@ impl AlmideMapKey for str {
         Some(almide_rt_map_hash_bytes(self.as_bytes()))
     }
     #[inline]
-    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+    fn almide_key_bytes(&self) -> Option<std::vec::Vec<u8>> {
         Some(self.as_bytes().to_vec())
     }
 }
@@ -206,13 +206,13 @@ impl<T: 'static> AlmideMapKey for [T] {
         }
         None
     }
-    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+    fn almide_key_bytes(&self) -> Option<std::vec::Vec<u8>> {
         use std::any::{Any, TypeId};
         if TypeId::of::<T>() == TypeId::of::<i64>() {
             return Some(self.iter().flat_map(|x| (x as &dyn Any).downcast_ref::<i64>().unwrap().to_le_bytes()).collect());
         }
         if TypeId::of::<T>() == TypeId::of::<AlmideString>() {
-            let mut bytes = Vec::new();
+            let mut bytes = std::vec::Vec::new();
             for x in self {
                 let s = (x as &dyn Any).downcast_ref::<AlmideString>().unwrap();
                 bytes.extend_from_slice(&(s.len() as u64).to_le_bytes());
@@ -229,7 +229,7 @@ impl<T: 'static> AlmideMapKey for [T] {
 /// bytes are. Covers the same types as [`almide_rt_map_key_hash`]; a String
 /// and its `str` borrow encode the same way. Used only by the ordered
 /// fallback, never on the fast path.
-pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
+pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<std::vec::Vec<u8>> {
     let a = k as &dyn std::any::Any;
     let le = |x: i64| x.to_le_bytes().to_vec();
     let lp = |b: &[u8]| {
@@ -239,20 +239,20 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
     };
     if let Some(x) = a.downcast_ref::<i64>() { return Some(le(*x)); }
     if let Some(s) = a.downcast_ref::<AlmideString>() { return Some(s.as_bytes().to_vec()); }
-    if let Some(b) = a.downcast_ref::<bool>() { return Some(vec![*b as u8]); }
+    if let Some(b) = a.downcast_ref::<bool>() { return Some(almide_list![*b as u8]); }
     if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() { return Some([le(*x), le(*y)].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() { return Some([lp(x.as_bytes()), y.as_bytes().to_vec()].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() { return Some([lp(x.as_bytes()), le(*y)].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() { return Some([le(*x), y.as_bytes().to_vec()].concat()); }
-    if let Some(xs) = a.downcast_ref::<Vec<i64>>() { return xs.as_slice().almide_key_bytes(); }
-    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() { return xs.as_slice().almide_key_bytes(); }
+    if let Some(xs) = a.downcast_ref::<AlmideList<i64>>() { return xs.as_slice().almide_key_bytes(); }
+    if let Some(xs) = a.downcast_ref::<AlmideList<AlmideString>>() { return xs.as_slice().almide_key_bytes(); }
     if let Some(x) = a.downcast_ref::<i32>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<i16>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<i8>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u64>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u32>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u16>() { return Some(x.to_le_bytes().to_vec()); }
-    if let Some(x) = a.downcast_ref::<u8>() { return Some(vec![*x]); }
+    if let Some(x) = a.downcast_ref::<u8>() { return Some(almide_list![*x]); }
     if let Some(s) = a.downcast_ref::<String>() { return Some(s.as_bytes().to_vec()); }
     almide_map_key_registered(a)
 }
@@ -272,31 +272,31 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
 /// scalar and runtime types a registered key's fields can hold; the generated
 /// program implements it for its own types, field by field.
 pub trait AlmideKeyEncode {
-    fn almide_key_encode(&self, out: &mut Vec<u8>);
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>);
 }
-impl AlmideKeyEncode for i64 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for i32 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for i16 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for i8 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for u64 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for u32 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for u16 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
-impl AlmideKeyEncode for u8 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.push(*self); } }
-impl AlmideKeyEncode for bool { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.push(*self as u8); } }
+impl AlmideKeyEncode for i64 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i32 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i16 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i8 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u64 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u32 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u16 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u8 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.push(*self); } }
+impl AlmideKeyEncode for bool { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.push(*self as u8); } }
 impl AlmideKeyEncode for AlmideString {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         out.extend_from_slice(&(self.len() as u64).to_le_bytes());
         out.extend_from_slice(self.as_bytes());
     }
 }
-impl<T: AlmideKeyEncode> AlmideKeyEncode for Vec<T> {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+impl<T: AlmideKeyEncode> AlmideKeyEncode for AlmideList<T> {
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         out.extend_from_slice(&(self.len() as u64).to_le_bytes());
         for x in self { x.almide_key_encode(out); }
     }
 }
 impl<T: AlmideKeyEncode> AlmideKeyEncode for Option<T> {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         match self {
             None => out.push(0),
             Some(x) => { out.push(1); x.almide_key_encode(out); }
@@ -304,7 +304,7 @@ impl<T: AlmideKeyEncode> AlmideKeyEncode for Option<T> {
     }
 }
 impl<T: AlmideKeyEncode, E: AlmideKeyEncode> AlmideKeyEncode for Result<T, E> {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         match self {
             Ok(x) => { out.push(0); x.almide_key_encode(out); }
             Err(e) => { out.push(1); e.almide_key_encode(out); }
@@ -312,26 +312,26 @@ impl<T: AlmideKeyEncode, E: AlmideKeyEncode> AlmideKeyEncode for Result<T, E> {
     }
 }
 impl<A: AlmideKeyEncode, B: AlmideKeyEncode> AlmideKeyEncode for (A, B) {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); }
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); }
 }
 impl<A: AlmideKeyEncode, B: AlmideKeyEncode, C: AlmideKeyEncode> AlmideKeyEncode for (A, B, C) {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); self.2.almide_key_encode(out); }
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); self.2.almide_key_encode(out); }
 }
 impl<A: AlmideKeyEncode, B: AlmideKeyEncode, C: AlmideKeyEncode, D: AlmideKeyEncode> AlmideKeyEncode for (A, B, C, D) {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         self.0.almide_key_encode(out); self.1.almide_key_encode(out); self.2.almide_key_encode(out); self.3.almide_key_encode(out);
     }
 }
 impl<T: AlmideKeyEncode + ?Sized> AlmideKeyEncode for Box<T> {
-    fn almide_key_encode(&self, out: &mut Vec<u8>) { (**self).almide_key_encode(out); }
+    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { (**self).almide_key_encode(out); }
 }
 
 /// The registered key encoders, by type: written at start-up, read on every
 /// hash of a key no fixed lane above answers.
-static ALMIDE_KEY_ENCODERS: std::sync::RwLock<Vec<(std::any::TypeId, fn(&dyn std::any::Any, &mut Vec<u8>) -> bool)>> =
-    std::sync::RwLock::new(Vec::new());
+static ALMIDE_KEY_ENCODERS: std::sync::RwLock<std::vec::Vec<(std::any::TypeId, fn(&dyn std::any::Any, &mut std::vec::Vec<u8>) -> bool)>> =
+    std::sync::RwLock::new(std::vec::Vec::new());
 
-fn almide_map_key_encode_as<T: AlmideKeyEncode + 'static>(a: &dyn std::any::Any, out: &mut Vec<u8>) -> bool {
+fn almide_map_key_encode_as<T: AlmideKeyEncode + 'static>(a: &dyn std::any::Any, out: &mut std::vec::Vec<u8>) -> bool {
     match a.downcast_ref::<T>() {
         Some(x) => { x.almide_key_encode(out); true }
         None => false,
@@ -350,10 +350,10 @@ pub fn almide_map_register_key<T: AlmideKeyEncode + 'static>() {
 }
 
 /// The canonical bytes of a key of a registered type, else `None`.
-fn almide_map_key_registered(a: &dyn std::any::Any) -> Option<Vec<u8>> {
+fn almide_map_key_registered(a: &dyn std::any::Any) -> Option<std::vec::Vec<u8>> {
     let id = a.type_id();
     let f = ALMIDE_KEY_ENCODERS.read().unwrap_or_else(|e| e.into_inner()).iter().find(|(t, _)| *t == id)?.1;
-    let mut out = Vec::new();
+    let mut out = std::vec::Vec::new();
     f(a, &mut out).then_some(out)
 }
 
@@ -403,8 +403,8 @@ fn almide_map_flood_bound(slot_len: usize) -> usize {
 /// replaced was O(n) per call.
 #[derive(Clone, Debug, Default)]
 pub struct AlmideKeyIndex {
-    hashes: Vec<u64>,
-    slots: Vec<u64>,
+    hashes: std::vec::Vec<u64>,
+    slots: std::vec::Vec<u64>,
     /// An insert probed past [`almide_map_flood_bound`] (#4104).
     flooded: bool,
 }
@@ -412,7 +412,7 @@ pub struct AlmideKeyIndex {
 impl AlmideKeyIndex {
     pub fn with_capacity(n: usize) -> Self {
         let slot_len = (n * 2).next_power_of_two().max(32);
-        AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], flooded: false }
+        AlmideKeyIndex { hashes: std::vec::Vec::with_capacity(n), slots: ::std::vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], flooded: false }
     }
 
     /// Position of the entry whose hash is `h` and whose key `eq` confirms.
@@ -479,7 +479,7 @@ impl AlmideKeyIndex {
 
     /// Double the table: the live slots are re-placed, the dead ones dropped.
     fn grow(&mut self, slot_len: usize) {
-        let old = std::mem::replace(&mut self.slots, vec![ALMIDE_MAP_SLOT_EMPTY; slot_len]);
+        let old = std::mem::replace(&mut self.slots, almide_list![ALMIDE_MAP_SLOT_EMPTY; slot_len]);
         for s in old {
             if s != ALMIDE_MAP_SLOT_EMPTY && s != ALMIDE_MAP_SLOT_DEAD {
                 let p = (s & !ALMIDE_MAP_SLOT_TAG) as u32;
@@ -522,7 +522,7 @@ pub enum AlmideKeyLookup {
     /// hash moved this collection to an index ordered by each key's canonical
     /// bytes. Deterministic, no hidden entropy, O(log n) per operation
     /// whatever the keys. A collection stays here once it arrives.
-    Ordered(std::collections::BTreeMap<Vec<u8>, usize>),
+    Ordered(std::collections::BTreeMap<std::vec::Vec<u8>, usize>),
 }
 
 impl AlmideKeyLookup {
@@ -586,7 +586,7 @@ impl AlmideKeyLookup {
 /// the live entries.
 #[derive(Clone, Debug)]
 pub struct AlmideMap<K, V> {
-    entries: Vec<Option<(K, V)>>,
+    entries: std::vec::Vec<Option<(K, V)>>,
     dead: usize,
     lookup: AlmideKeyLookup,
 }
@@ -600,7 +600,7 @@ impl<K, V> Default for AlmideMap<K, V> {
 
 impl<K, V> AlmideMap<K, V> {
     pub fn new() -> Self {
-        AlmideMap { entries: Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
+        AlmideMap { entries: std::vec::Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
     }
     pub fn len(&self) -> usize {
         self.entries.len() - self.dead
@@ -990,9 +990,9 @@ pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &Almide
 pub fn almide_rt_map_remove_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { m.remove(&k); m }
 pub fn almide_rt_map_contains<K: PartialEq + 'static, V, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> bool
 where K: std::borrow::Borrow<Q> { m.contains_key(k) }
-pub fn almide_rt_map_keys<K: Clone, V>(m: &AlmideMap<K, V>) -> Vec<K> { m.keys().cloned().collect() }
-pub fn almide_rt_map_values<K, V: Clone>(m: &AlmideMap<K, V>) -> Vec<V> { m.values().cloned().collect() }
-pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> Vec<(K, V)> { m.iter().map(|(k, v)| (k.clone(), v.clone())).collect() }
+pub fn almide_rt_map_keys<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> AlmideList<K> { m.keys().cloned().collect() }
+pub fn almide_rt_map_values<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> AlmideList<V> { m.values().cloned().collect() }
+pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> AlmideList<(K, V)> { m.iter().map(|(k, v)| (k.clone(), v.clone())).collect() }
 // The OWNED twins of the whole-map reads (`owned_source.rs`, the #3398
 // mechanism the list range ops use). Where the source map is not read again
 // — its last use, or a temporary such as `list.group_by(..)`'s result —
@@ -1000,9 +1000,9 @@ pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> Vec<(K,
 // value out instead of cloning it. `map_values_owned` also keeps the source's
 // key index: the keys and their order are unchanged, so the hashes and the
 // slot table stay valid as they are and nothing is rehashed.
-pub fn almide_rt_map_keys_owned<K, V>(m: AlmideMap<K, V>) -> Vec<K> { m.into_iter().map(|(k, _)| k).collect() }
-pub fn almide_rt_map_values_owned<K, V>(m: AlmideMap<K, V>) -> Vec<V> { m.into_iter().map(|(_, v)| v).collect() }
-pub fn almide_rt_map_entries_owned<K, V>(m: AlmideMap<K, V>) -> Vec<(K, V)> { m.entries.into_iter().flatten().collect() }
+pub fn almide_rt_map_keys_owned<K: Clone, V: Clone>(m: AlmideMap<K, V>) -> AlmideList<K> { m.into_iter().map(|(k, _)| k).collect() }
+pub fn almide_rt_map_values_owned<K: Clone, V: Clone>(m: AlmideMap<K, V>) -> AlmideList<V> { m.into_iter().map(|(_, v)| v).collect() }
+pub fn almide_rt_map_entries_owned<K: Clone, V: Clone>(m: AlmideMap<K, V>) -> AlmideList<(K, V)> { m.entries.into_iter().flatten().collect() }
 // The holes stay where they are, so the index and `dead` carry over as is.
 pub fn almide_rt_map_map_values_owned<K, V, W>(m: AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> AlmideMap<K, W> {
     let AlmideMap { entries, dead, lookup } = m;
