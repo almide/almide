@@ -123,3 +123,56 @@ pub fn census_with(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> 
     }
     Ok(c)
 }
+
+/// One function's census (probe only): its position, whether it is a
+/// certified frame, its tally, and the accesses no class above takes —
+/// loads, stores, and byte-wide ones.
+#[derive(Default, Debug, Clone, Copy)]
+pub struct FnRow {
+    pub func: usize,
+    pub frame: bool,
+    pub tally: Tally,
+    pub other_load: usize,
+    pub other_store: usize,
+    pub other_byte: usize,
+}
+
+/// [`census_with`], one row per defined function that accesses memory.
+pub fn census_by_function(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Vec<FnRow>, String> {
+    let at = located(anchors)?;
+    let (_, _, _, _, _, rc) = parse_anchors_held(anchors)?;
+    let frames: HashSet<usize> = rc.map(|(_, _, f, _, _, _)| f.into_iter().map(|(p, _)| p).collect()).unwrap_or_default();
+    let mut out = Vec::new();
+    for (func, b) in bodies.iter().enumerate() {
+        let mut r = FnRow { func, frame: frames.contains(&func), ..FnRow::default() };
+        for (k, op) in b.ops.iter().enumerate() {
+            let bulk = matches!(op, Op::MemoryCopy { .. } | Op::MemoryFill { .. });
+            let Some(off) = offset(op).or(bulk.then_some(0)) else { continue };
+            r.tally.accesses += 1;
+            let here = at.contains(&At { func, op: k });
+            let before_call = b.ops.get(k + 1).is_some_and(|o| matches!(o, Op::Call { .. })) && at.contains(&At { func, op: k + 1 });
+            if here || before_call {
+                r.tally.located += 1;
+            } else if linear.contains(&At { func, op: k }) {
+                r.tally.located += 1;
+                r.tally.linear += 1;
+            } else if bulk {
+                r.tally.bulk += 1;
+            } else if off < 12 && b.args[k].first().copied().flatten().is_some_and(|p| matches!(b.ops[p], Op::LocalGet { .. })) {
+                r.tally.header += 1;
+            } else {
+                let byte_load = matches!(op, Op::I32Load8S { .. } | Op::I32Load8U { .. } | Op::I64Load8S { .. } | Op::I64Load8U { .. });
+                match store_width(op) {
+                    Some((1, _)) => r.other_byte += 1,
+                    Some(_) => r.other_store += 1,
+                    None if byte_load => r.other_byte += 1,
+                    None => r.other_load += 1,
+                }
+            }
+        }
+        if r.tally.accesses > 0 {
+            out.push(r);
+        }
+    }
+    Ok(out)
+}

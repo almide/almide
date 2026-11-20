@@ -83,6 +83,23 @@ fn main() {
         };
         linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_with(&bodies, &a, &l)))
     });
+    // Probe only: the census again, one row per function.
+    let by_function = census.then(|| {
+        let linear = match &lin_cert {
+            None => Ok(std::collections::HashSet::new()),
+            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
+                .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect()),
+        };
+        linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_by_function(&bodies, &a, &l)))
+    });
+    if let Some(Ok(rows)) = &by_function {
+        for r in rows {
+            println!(
+                "CENSUSFN {} {} {} {} {} {} {} {} {} {}",
+                r.func, u8::from(r.frame), r.tally.accesses, r.tally.located, r.tally.linear, r.tally.header, r.tally.bulk, r.other_load, r.other_store, r.other_byte
+            );
+        }
+    }
     match almide_anchor_check::check_within(w, b, a, limit) {
         Ok(r) => {
             println!(
