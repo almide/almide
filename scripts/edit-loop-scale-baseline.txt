@@ -125,11 +125,24 @@ slope 0.871
 #     Xeon 8573C (4)  79.00 79.33 80.86 81.95   median 80.10
 #   Not anchored (one run each, under the three-run minimum): Xeon 6973P-C
 #   74.59, Xeon 6975P-C 76.75. They report and warn until three runs exist.
-ratio | AMD EPYC 7763 64-Core Processor | 82.49 | 47
-ratio | AMD EPYC 9V74 80-Core Processor | 75.79 | 26
-ratio | AMD EPYC 9V45 96-Core Processor | 62.33 | 11
-ratio | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 86.28 | 9
-ratio | INTEL(R) XEON(R) PLATINUM 8573C | 80.10 | 4
+# ratio x 0.5689 on every class (2026-11-20, #4187): `almide check` lowers the
+#   whole program inside its one front-end pass instead of parsing, resolving
+#   and checking every source a second time from disk for its E109 and
+#   permissions gates. The 10,727-line rung fell 0.548x; the floor rung is
+#   unchanged (it has no user module). Three interleaved pairs of the full
+#   ladder, 40 runs per rung, GCE c4-standard-8 (Xeon 8581C, load ~1),
+#   bugs-misc before vs after the change:
+#     ratio   before  82.59 84.68 85.90   median 84.68
+#             after   47.95 48.17 49.26   median 48.17   factor 0.5689
+#     10k min before 422.9 426.0 429.9 ms   after 231.6 233.1 232.9 ms
+#   Each class anchor x 0.5689 (a tightening: the old floors sit far above the
+#   new readings). slope (0.904 -> 0.851) and slope_check (0.944 both) stay
+#   inside their bands and keep their anchors.
+ratio | AMD EPYC 7763 64-Core Processor | 46.92 | 47
+ratio | AMD EPYC 9V74 80-Core Processor | 43.11 | 26
+ratio | AMD EPYC 9V45 96-Core Processor | 35.46 | 11
+ratio | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 49.08 | 9
+ratio | INTEL(R) XEON(R) PLATINUM 8573C | 45.57 | 4
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
