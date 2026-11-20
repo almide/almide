@@ -48,6 +48,22 @@ struct ResolveCtx<'a> {
     /// loading the root from inside the submodule would see the root's own
     /// `import self.<that submodule>` as a cycle.
     root_requested_by: Option<String>,
+    /// Whether the imports being resolved are written in a DEPENDENCY's
+    /// module (#4865): E121's local-versus-dependency ambiguity is judged only
+    /// for the root package's own imports, whose local modules sit in
+    /// `base_dir`. A dependency's `import llm` names its own `[dependencies]`
+    /// entry; the root's `src/llm.almd` is not that dependency's module (#4270).
+    importer_is_dependency: bool,
+}
+
+/// Run `f` with [`ResolveCtx::importer_is_dependency`] set for a module whose
+/// package is `pkg_id` (a dependency's, or the root's when `None`), restoring
+/// the outer importer's value after.
+fn as_importer<T>(ctx: &mut ResolveCtx, pkg_id: &Option<project::PkgId>, f: impl FnOnce(&mut ResolveCtx) -> T) -> T {
+    let outer = std::mem::replace(&mut ctx.importer_is_dependency, pkg_id.is_some());
+    let out = f(ctx);
+    ctx.importer_is_dependency = outer;
+    out
 }
 
 /// Record a disk-loaded module's path + source so its own diagnostics can be
@@ -276,7 +292,7 @@ pub fn resolve_imports_with_deps(
     let mut loaded_names: HashSet<String> = HashSet::new();
     let mut loading: HashSet<String> = HashSet::new();
     let mut sources: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
-    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading, sources: &mut sources, root_requested_by: None };
+    let mut ctx = ResolveCtx { base_dir, dep_paths, loaded: &mut loaded, loaded_names: &mut loaded_names, loading: &mut loading, sources: &mut sources, root_requested_by: None, importer_is_dependency: false };
 
     for import in &program.imports {
         if let ast::Decl::Import { path, alias, .. } = import {
@@ -551,11 +567,28 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
     }
     ctx.loading.insert(name.to_string());
 
+    if !ctx.importer_is_dependency {
+        refuse_ambiguous_import(name, ctx.base_dir, ctx.dep_paths)?;
+    }
     let (file_path, pkg_id) = find_module_file(name, ctx.base_dir, ctx.dep_paths)?;
     let (program, mod_source) = parse_module_source("module", name, &file_path)?;
     record_module_source(ctx, name, &file_path, mod_source);
 
     // Recursively resolve this module's imports (depth-first -> leaves first)
+    as_importer(ctx, &pkg_id, |ctx| load_module_imports(name, &program, ctx))?;
+    ctx.loading.remove(name);
+    ctx.loaded_names.insert(name.to_string());
+    ctx.loaded.push((name.to_string(), program, pkg_id.clone(), false));
+
+    // Module System v2: load sub-namespace files for packages
+    // If this module was loaded from mod.almd (or lib.almd), also load sibling .almd files as sub-namespaces
+    load_module_sub_namespaces(name, &file_path, &pkg_id, ctx)?;
+
+    Ok(())
+}
+
+/// `load_module`'s import loop: each import of the module `name`, in order.
+fn load_module_imports(name: &str, program: &ast::Program, ctx: &mut ResolveCtx) -> Result<(), String> {
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
@@ -581,15 +614,6 @@ fn load_module(name: &str, ctx: &mut ResolveCtx) -> Result<(), String> {
             resolve_named_import(path, ctx)?;
         }
     }
-
-    ctx.loading.remove(name);
-    ctx.loaded_names.insert(name.to_string());
-    ctx.loaded.push((name.to_string(), program, pkg_id.clone(), false));
-
-    // Module System v2: load sub-namespace files for packages
-    // If this module was loaded from mod.almd (or lib.almd), also load sibling .almd files as sub-namespaces
-    load_module_sub_namespaces(name, &file_path, &pkg_id, ctx)?;
-
     Ok(())
 }
 
@@ -644,7 +668,7 @@ fn load_sub_namespace_file(root: &str, pkg_name: &str, file_path: &Path, pkg_id:
     }
     let (program, mod_source) = parse_almd_file(file_path, &sub_name)?;
     record_module_source(ctx, &sub_name, file_path, mod_source);
-    resolve_submodule_imports(&program, root, ctx)?;
+    as_importer(ctx, pkg_id, |ctx| resolve_submodule_imports(&program, root, ctx))?;
     ctx.loaded_names.insert(sub_name.clone());
     ctx.loaded.push((sub_name, program, pkg_id.clone(), false));
     Ok(())
@@ -661,7 +685,7 @@ fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Op
         if in_tree_file(&sub_mod) {
             let (program, mod_source) = parse_almd_file(&sub_mod, &sub_name)?;
             record_module_source(ctx, &sub_name, &sub_mod, mod_source);
-            resolve_submodule_imports(&program, root, ctx)?;
+            as_importer(ctx, pkg_id, |ctx| resolve_submodule_imports(&program, root, ctx))?;
             ctx.loaded_names.insert(sub_name.clone());
             ctx.loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
         }
@@ -755,6 +779,9 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
     }
 
     // Find the package's source directory
+    if !ctx.importer_is_dependency {
+        refuse_ambiguous_import(pkg_name, ctx.base_dir, ctx.dep_paths)?;
+    }
     let (src_dir, pkg_id) = find_package_src_dir(pkg_name, ctx.base_dir, ctx.dep_paths)?;
 
     // Build file path from sub_path segments
@@ -788,40 +815,43 @@ fn load_submodule(pkg_name: &str, sub_path: &[crate::intern::Sym], mod_name: &st
     // fs.FileStat) fail to emit in codegen, producing invalid Rust that
     // references the missing struct. Mirrors the recursion in load_module /
     // load_self_module / load_bundled_module.
-    for import in &program.imports {
-        if let ast::Decl::Import { path, .. } = import {
-            let dep_name = &path[0];
-            if dep_name.as_str() == "self" {
-                // `import self.<X>` INSIDE a dependency names a SIBLING module
-                // of that dependency, not of the consumer (#885). Skipping it
-                // left the sibling unresolved, so the alias reported
-                // `undefined variable '<alias>'` in the dependency's own
-                // source — and WHICH modules happened to be loaded (by the
-                // consumer's unrelated imports) decided how many errors
-                // appeared. Resolve it against the DEPENDENCY's package, under
-                // its canonical bare name, exactly as the package's own build
-                // would.
-                if path.len() >= 2 {
-                    let sub = &path[1..];
-                    // Registered under the DOTTED package-qualified name, the
-                    // convention every other dependency submodule uses
-                    // (`ceangal.cell`) — the bare name is what the package's
-                    // OWN build uses, and mixing the two left the dependency's
-                    // internal calls pointing at a name nothing registered.
-                    let dotted = std::iter::once(pkg_name)
-                        .chain(sub.iter().map(|s| s.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(".");
-                    if !ctx.loaded_names.contains(&dotted) {
-                        load_submodule(pkg_name, sub, &dotted, ctx)?;
+    as_importer(ctx, &pkg_id, |ctx| -> Result<(), String> {
+        for import in &program.imports {
+            if let ast::Decl::Import { path, .. } = import {
+                let dep_name = &path[0];
+                if dep_name.as_str() == "self" {
+                    // `import self.<X>` INSIDE a dependency names a SIBLING module
+                    // of that dependency, not of the consumer (#885). Skipping it
+                    // left the sibling unresolved, so the alias reported
+                    // `undefined variable '<alias>'` in the dependency's own
+                    // source — and WHICH modules happened to be loaded (by the
+                    // consumer's unrelated imports) decided how many errors
+                    // appeared. Resolve it against the DEPENDENCY's package, under
+                    // its canonical bare name, exactly as the package's own build
+                    // would.
+                    if path.len() >= 2 {
+                        let sub = &path[1..];
+                        // Registered under the DOTTED package-qualified name, the
+                        // convention every other dependency submodule uses
+                        // (`ceangal.cell`) — the bare name is what the package's
+                        // OWN build uses, and mixing the two left the dependency's
+                        // internal calls pointing at a name nothing registered.
+                        let dotted = std::iter::once(pkg_name)
+                            .chain(sub.iter().map(|s| s.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        if !ctx.loaded_names.contains(&dotted) {
+                            load_submodule(pkg_name, sub, &dotted, ctx)?;
+                        }
                     }
+                    continue;
                 }
-                continue;
+                let _ = dep_name;
+                resolve_named_import(path, ctx)?;
             }
-            let _ = dep_name;
-            resolve_named_import(path, ctx)?;
         }
-    }
+        Ok(())
+    })?;
 
     ctx.loaded_names.insert(mod_name.to_string());
     ctx.loaded.push((mod_name.to_string(), program, pkg_id, false));
@@ -834,7 +864,6 @@ fn find_package_src_dir(
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
 ) -> Result<(PathBuf, Option<project::PkgId>), String> {
-    refuse_ambiguous_import(pkg_name, base_dir, dep_paths)?;
     // Check local — prefer src/ subdirectory
     let local_src = base_dir.join(pkg_name).join("src");
     if local_src.is_dir() {
@@ -881,7 +910,6 @@ fn refuse_ambiguous_import(name: &str, base_dir: &Path, dep_paths: &[(project::P
 }
 
 fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(PathBuf, Option<project::PkgId>), String> {
-    refuse_ambiguous_import(name, base_dir, dep_paths)?;
     // 1. Check explicit dependency paths FIRST (almide.toml [dependencies])
     // These take priority over local filesystem matches to prevent stale
     // clones or unrelated directories from shadowing cached dependencies.
