@@ -21,6 +21,17 @@ fn main() {
             signal(13, 0);
         }
     }
+    #[cfg(all(target_os = "linux", target_env = "gnu", not(miri)))]
+    {
+        extern "C" {
+            fn mallopt(param: i32, value: i32) -> i32;
+        }
+        // M_TRIM_THRESHOLD = -1, M_MMAP_THRESHOLD = -3 (#4620)
+        unsafe {
+            mallopt(-1, i32::MAX);
+            mallopt(-3, 1 << 30);
+        }
+    }
     almide_stack_guard_install();
     {
         let __almide_hook = std::panic::take_hook();
