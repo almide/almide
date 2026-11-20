@@ -6,6 +6,13 @@
 use almide_str::{almide_str_mark_reachable, AlmideList, AlmideStr};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Mutex;
+
+/// The marking window is a process-wide switch: while one test marks, every
+/// clone in the binary clones its elements once more. A test that counts
+/// element clones holds this lock, as the marking test does, so the two
+/// never overlap.
+static MARKING_WINDOW: Mutex<()> = Mutex::new(());
 
 #[test]
 fn a_clone_shares_the_block_and_a_write_copies_it() {
@@ -190,6 +197,7 @@ fn it_agrees_with_vec_on_a_run_of_edits() {
 
 #[test]
 fn marking_a_list_marks_the_strings_it_holds() {
+    let _window = MARKING_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
     let s = AlmideStr::from("shared text");
     let xs: AlmideList<AlmideStr> = vec![s.clone()].into();
     assert!(!s.is_thread_shared());
@@ -298,6 +306,7 @@ fn the_vec_surface_agrees_with_vec_and_copies_on_write() {
 /// of a shared one; slice writes through a shared block copy it once.
 #[test]
 fn owned_iteration_and_slice_writes_count_their_copies() {
+    let _window = MARKING_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
     struct Counted(Rc<Cell<i64>>);
     impl Clone for Counted {
         fn clone(&self) -> Self {
