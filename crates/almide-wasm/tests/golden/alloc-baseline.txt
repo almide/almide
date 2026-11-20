@@ -493,7 +493,7 @@
 99504	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 66000	spec/wasm_cross/list_product_overflow.almd
 131728	spec/wasm_cross/list_push_field_in_place.almd
-146768	spec/wasm_cross/list_push_field_reads_root.almd
+146800	spec/wasm_cross/list_push_field_reads_root.almd
 67008	spec/wasm_cross/list_push_on_record_field.almd
 67520	spec/wasm_cross/list_range_step_extremes.almd
 72400	spec/wasm_cross/list_reduce_fused_fold_release.almd
