@@ -17,7 +17,7 @@
 // form `fan { }` follows (C-199). The caller's `!` then routes it to the
 // effect-main termination path (`Error: <msg>` + exit 1), byte-identical to
 // the wasm `__main_runner`.
-pub fn almide_rt_fan_map<A, B>(
+pub fn almide_rt_fan_map<A: Clone, B: Clone>(
     items: AlmideList<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
 ) -> Result<AlmideList<B>, AlmideString> {
@@ -172,7 +172,7 @@ pub fn almide_rt_fan_any<T>(
 // and return the FIRST `Ok`; an element's Err disqualifies that element only.
 // All-fail (and the empty list) is the ledger-constant Err. Deterministic --
 // the early cut is structural (later elements are never evaluated).
-pub fn almide_rt_fan_any_map<A, B>(
+pub fn almide_rt_fan_any_map<A: Clone, B>(
     items: AlmideList<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
 ) -> Result<B, AlmideString> {

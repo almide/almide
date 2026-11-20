@@ -342,7 +342,7 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
         (ParamBorrow::Ref | ParamBorrow::RefSlice, ty) => format!("&{}", render_type(ctx, ty)),
         // `&mut AlmideRcCow<T>` deref-coerces through `make_mut`: the host
         // writes the caller's binding copy-on-write, as a `mut` param means.
-        (ParamBorrow::RefMut, Ty::Bytes) => "&mut Vec<u8>".to_string(),
+        (ParamBorrow::RefMut, Ty::Bytes) => "&mut AlmideList<u8>".to_string(),
         (ParamBorrow::RefMut, ty) if extern_rust_is_rc_cow(ty) => "&mut AlmideMatrix".to_string(),
         (ParamBorrow::RefMut, ty) => format!("&mut {}", render_type(ctx, ty)),
     }

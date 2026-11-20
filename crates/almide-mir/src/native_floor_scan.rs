@@ -14,7 +14,19 @@ fn header_items() -> &'static BTreeSet<&'static str> {
         // The alias line defines the string's two names; its spliced module body
         // is the string's own, never a runtime item.
         out.extend(lex(alias).windows(2).filter(|w| w[0].text == "type" || w[0].text == "mod").map(|w| w[1].text));
-        out.extend(lex(alias).windows(4).filter(|w| w[0].text == "use").map(|w| w[3].text));
+        // A `use` brings in the last name of each path it lists, a braced
+        // group included (`use m::{A, B};`): a name that closes a path. Only
+        // the alias lines at the top count, not the spliced module bodies.
+        let toks = lex(alias);
+        let mut in_use = false;
+        for (i, t) in toks.iter().enumerate() {
+            match t.text {
+                "use" if t.depth == 0 => in_use = true,
+                ";" => in_use = false,
+                _ if in_use && toks.get(i + 1).is_some_and(|n| matches!(n.text, "," | "}" | ";")) => { out.insert(t.text); }
+                _ => {}
+            }
+        }
         out
     })
 }

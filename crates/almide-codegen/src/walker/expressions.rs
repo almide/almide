@@ -563,9 +563,9 @@ fn render_expr_rust_macro(ctx: &RenderContext, name: &Sym, args: &[IrExpr]) -> S
 /// `ToVec { expr: inner }` case of `render_expr`.
 fn render_expr_to_vec(ctx: &RenderContext, inner: &IrExpr) -> String {
     if matches!(&inner.kind, IrExprKind::Range { .. }) {
-        format!("({}).collect::<Vec<_>>()", render_expr(ctx, inner))
+        format!("({}).collect::<AlmideList<_>>()", render_expr(ctx, inner))
     } else {
-        format!("({}).to_vec()", render_expr(ctx, inner))
+        format!("({}).to_list()", render_expr(ctx, inner))
     }
 }
 

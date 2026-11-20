@@ -400,7 +400,7 @@ pub fn almide_rt_bytes_chunks(b: &AlmideList<u8>, size: i64) -> AlmideList<Almid
     if size <= 0 {
         return almide_list![];
     }
-    b.chunks(size as usize).map(|c| c.to_vec()).collect()
+    b.chunks(size as usize).map(|c| AlmideList::from(c)).collect()
 }
 
 pub fn almide_rt_bytes_split(b: &AlmideList<u8>, sep: &AlmideList<u8>) -> AlmideList<AlmideList<u8>> {
@@ -413,10 +413,10 @@ pub fn almide_rt_bytes_split(b: &AlmideList<u8>, sep: &AlmideList<u8>) -> Almide
     let mut out: AlmideList<AlmideList<u8>> = AlmideList::new();
     let mut start = 0usize;
     while let Some(i) = almide_bytes_kmp_find(b, sep, &fail, start) {
-        out.push(b[start..i].to_vec());
+        out.push(AlmideList::from(&b[start..i]));
         start = i + sep.len();
     }
-    out.push(b[start..].to_vec());
+    out.push(AlmideList::from(&b[start..]));
     out
 }
 
@@ -656,7 +656,7 @@ pub fn almide_rt_bytes_read_bool_at(b: &AlmideList<u8>, pos: i64) -> (i64, Optio
 pub fn almide_rt_bytes_take_at(b: &AlmideList<u8>, pos: i64, n: i64) -> (i64, Option<AlmideList<u8>>) {
     let Ok(nn) = usize::try_from(n) else { return (pos, None); };
     let Some(p) = window(pos, nn, b.len()) else { return (pos, None); };
-    (pos + n, Some(b[p..p + nn].to_vec()))
+    (pos + n, Some(AlmideList::from(&b[p..p + nn])))
 }
 
 // ── Big-endian appenders ──

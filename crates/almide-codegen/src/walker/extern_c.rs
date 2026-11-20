@@ -74,7 +74,7 @@ fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String
     match ty {
         Ty::String if to_host => format!("({e}).to_string()"),
         Ty::String => format!("AlmideString::from(({e}).as_str())"),
-        Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<Vec<_>>()", inner(&x, &args[0])),
+        Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<{}<_>>()", inner(&x, &args[0]), if to_host { "Vec" } else { "AlmideList" }),
         Ty::Applied(C::Set, args) => format!("({e}).iter().map(|{x}| {}).collect::<AlmideSet<_>>()", inner(&x, &args[0])),
         Ty::Applied(C::Option, args) => format!("({e}).as_ref().map(|{x}| {})", inner(&x, &args[0])),
         Ty::Applied(C::Result, args) => format!(

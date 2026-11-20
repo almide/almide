@@ -239,7 +239,7 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<std::vec::Vec<u8>> {
     };
     if let Some(x) = a.downcast_ref::<i64>() { return Some(le(*x)); }
     if let Some(s) = a.downcast_ref::<AlmideString>() { return Some(s.as_bytes().to_vec()); }
-    if let Some(b) = a.downcast_ref::<bool>() { return Some(almide_list![*b as u8]); }
+    if let Some(b) = a.downcast_ref::<bool>() { return Some(::std::vec![*b as u8]); }
     if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() { return Some([le(*x), le(*y)].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() { return Some([lp(x.as_bytes()), y.as_bytes().to_vec()].concat()); }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() { return Some([lp(x.as_bytes()), le(*y)].concat()); }
@@ -252,7 +252,7 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<std::vec::Vec<u8>> {
     if let Some(x) = a.downcast_ref::<u64>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u32>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u16>() { return Some(x.to_le_bytes().to_vec()); }
-    if let Some(x) = a.downcast_ref::<u8>() { return Some(almide_list![*x]); }
+    if let Some(x) = a.downcast_ref::<u8>() { return Some(::std::vec![*x]); }
     if let Some(s) = a.downcast_ref::<String>() { return Some(s.as_bytes().to_vec()); }
     almide_map_key_registered(a)
 }
@@ -479,7 +479,7 @@ impl AlmideKeyIndex {
 
     /// Double the table: the live slots are re-placed, the dead ones dropped.
     fn grow(&mut self, slot_len: usize) {
-        let old = std::mem::replace(&mut self.slots, almide_list![ALMIDE_MAP_SLOT_EMPTY; slot_len]);
+        let old = std::mem::replace(&mut self.slots, ::std::vec![ALMIDE_MAP_SLOT_EMPTY; slot_len]);
         for s in old {
             if s != ALMIDE_MAP_SLOT_EMPTY && s != ALMIDE_MAP_SLOT_DEAD {
                 let p = (s & !ALMIDE_MAP_SLOT_TAG) as u32;

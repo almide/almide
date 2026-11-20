@@ -802,11 +802,11 @@ fn almide_fan_park() {
 /// Each cell is a `Mutex` so the type is `Sync` without an `unsafe impl`
 /// (#4007); the lock is never contended, because one thread draws each index.
 struct AlmideFanBlocks<T> {
-    cells: AlmideList<std::sync::Mutex<Option<T>>>,
+    cells: std::vec::Vec<std::sync::Mutex<Option<T>>>,
 }
 
 impl<T> AlmideFanBlocks<T> {
-    fn new(blocks: AlmideList<T>) -> Self {
+    fn new(blocks: std::vec::Vec<T>) -> Self {
         AlmideFanBlocks { cells: blocks.into_iter().map(|b| std::sync::Mutex::new(Some(b))).collect() }
     }
 
@@ -840,7 +840,7 @@ struct AlmideFanGate {
     /// then no helper clones `caller`: seven helpers cloning and dropping one
     /// handle per offer contended on its count.
     parking: std::sync::atomic::AtomicBool,
-    panics: std::sync::Mutex<AlmideList<std::thread::Result<()>>>,
+    panics: std::sync::Mutex<std::vec::Vec<std::thread::Result<()>>>,
     /// The offer's taking loop, borrowed from `almide_fan_deal`'s frame
     /// (see the SAFETY note there).
     take: std::cell::UnsafeCell<Option<*const (dyn Fn() -> bool + Sync)>>,
@@ -1301,7 +1301,7 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
 
 // ── Mutable operations ──
 
-#[inline(always)] pub fn almide_rt_list_push<A>(xs: &mut AlmideList<A>, x: A) { xs.push(x); }
+#[inline(always)] pub fn almide_rt_list_push<A: Clone>(xs: &mut AlmideList<A>, x: A) { xs.push(x); }
 
 // Pre-allocate a List with the given capacity. Start-empty (len=0) but
 // skips all reallocations up to `cap` pushes. Useful when the caller

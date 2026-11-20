@@ -359,11 +359,10 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // ADR-0013: the Almide String (the shared buffer `AlmideStr`), its
     // boundary conversion and the `AlmideConcat` trait (prelude_string.rs).
     s.push_str(&prelude_string::string_prelude(vis));
-    // ADR-0037 step order: the runtime spells an Almide list `AlmideList<T>`;
-    // the v1 native header binds it to the counted block. This v0 source
-    // emitter switches in its own step (ADR-0037 D6) and until then binds the
-    // name to its `Vec`, so the shared runtime text serves both routes.
-    s.push_str(&format!("#[allow(dead_code)]\n{vis}type AlmideList<T> = Vec<T>;\n{macro_attr}#[allow(unused_macros)]\nmacro_rules! almide_list {{ ($($t:tt)*) => {{ vec![$($t)*] }}; }}\n"));
+    // ADR-0037 D6: an Almide list is `AlmideList<T>`, the counted block the
+    // string prelude splices in; `almide_list![..]` builds one as `vec!` does a Vec.
+    s.push_str(&format!("{macro_attr}#[allow(unused_macros)]\nmacro_rules! almide_list {{\n    () => {{ $crate::AlmideList::new() }};\n    ($x:expr; $n:expr) => {{ $crate::AlmideList::from(::std::vec![$x; $n]) }};\n    ($($x:expr),+ $(,)?) => {{ $crate::AlmideList::from(::std::vec![$($x),+]) }};\n}}\n"));
+    s.push_str("impl<T: Clone> AlmideConcat<AlmideList<T>> for AlmideList<T> { type Output = AlmideList<T>; #[inline(always)] fn concat(self, rhs: AlmideList<T>) -> AlmideList<T> { let mut r = self; r.extend(rhs); r } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
     // whose `Stdout` is line-buffered whatever it is attached to — one write
@@ -539,11 +538,11 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // placeholder meanwhile — no allocation per call (wrapping the taken `Vec`
     // in a fresh `Rc` was one malloc and one free per 4-byte write).
     s.push_str(&format!("impl<T> AlmideRcCow<T> {{ #[inline(always)] {vis}fn from_rc(r: std::rc::Rc<T>) -> Self {{ AlmideRcCow(r) }} #[inline(always)] {vis}fn into_rc(self) -> std::rc::Rc<T> {{ self.0 }} }}\n"));
-    s.push_str(&format!("thread_local! {{ static ALMIDE_EMPTY_BYTES_RC: std::rc::Rc<Vec<u8>> = std::rc::Rc::new(Vec::new()); }}\n#[inline(always)] {vis}fn almide_empty_bytes_rc() -> std::rc::Rc<Vec<u8>> {{ ALMIDE_EMPTY_BYTES_RC.with(|e| e.clone()) }}\n"));
+    s.push_str(&format!("thread_local! {{ static ALMIDE_EMPTY_BYTES_RC: std::rc::Rc<AlmideList<u8>> = std::rc::Rc::new(AlmideList::new()); }}\n#[inline(always)] {vis}fn almide_empty_bytes_rc() -> std::rc::Rc<AlmideList<u8>> {{ ALMIDE_EMPTY_BYTES_RC.with(|e| e.clone()) }}\n"));
     // #3577: a runtime twin that takes its Bytes source by value
     // (`impl Into<Vec<u8>>`) gets the buffer out of the wrapper — moved when
     // this is the only holder, copied when shared.
-    s.push_str("impl From<AlmideRcCow<Vec<u8>>> for Vec<u8> { fn from(v: AlmideRcCow<Vec<u8>>) -> Self { v.into_inner() } }\n");
+    s.push_str("impl From<AlmideRcCow<AlmideList<u8>>> for AlmideList<u8> { fn from(v: AlmideRcCow<AlmideList<u8>>) -> Self { v.into_inner() } }\n");
     s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
     // Blanket AlmideConcat: AlmideRcCow<T> + Rhs and AlmideRcCow<T> + Val<U> — 2 impls cover all combos.
@@ -624,6 +623,7 @@ fn almide_repr_prelude(vis: &str) -> String {
     s.push_str("impl AlmideRepr for str { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     // List: `[a, b, c]`, empty `[]`.
     s.push_str("impl<T: AlmideRepr> AlmideRepr for std::vec::Vec<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for AlmideList<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
     // Option: `some(v)` / `none`.
     s.push_str("impl<T: AlmideRepr> AlmideRepr for std::option::Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
     // Result: `ok(v)` / `err(e)`.
