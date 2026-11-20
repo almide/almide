@@ -4,11 +4,11 @@
 enum AlmideRxNode {
     Lit(char),
     Dot,
-    Class(Vec<(char, char)>, bool), // ranges, negated
+    Class(std::vec::Vec<(char, char)>, bool), // ranges, negated
     AnchorStart,
     AnchorEnd,
     WordBoundary(bool), // true = \b, false = \B
-    Group(Vec<Vec<AlmideRxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
+    Group(std::vec::Vec<std::vec::Vec<AlmideRxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
 }
 
 #[derive(Clone)]
@@ -20,7 +20,7 @@ struct AlmideRxPiece {
 }
 
 struct AlmideRxPat {
-    alts: Vec<Vec<AlmideRxPiece>>,
+    alts: std::vec::Vec<std::vec::Vec<AlmideRxPiece>>,
     ncap: usize,
     multiline: bool, // a leading (?m): ^ and $ also match at line breaks
     size: usize,     // the pattern's length in chars (the walk's step budget scales with it)
@@ -44,9 +44,9 @@ fn rx_flag_group(chars: &[char]) -> Option<(usize, bool, bool)> {
 /// class of both, and a class gains the other case of every letter in it
 /// (before a `^` negates it), so `c` matches when `c` or its other case is in
 /// the class — the self-hosted twin tests exactly that.
-fn rx_fold_case(alts: &mut [Vec<AlmideRxPiece>]) {
-    fn fold_ranges(ranges: &mut Vec<(char, char)>) {
-        let mut extra = Vec::new();
+fn rx_fold_case(alts: &mut [std::vec::Vec<AlmideRxPiece>]) {
+    fn fold_ranges(ranges: &mut std::vec::Vec<(char, char)>) {
+        let mut extra = std::vec::Vec::new();
         for &(lo, hi) in ranges.iter() {
             for (a, z, d) in [('a', 'z', -32i32), ('A', 'Z', 32i32)] {
                 let (l, h) = (lo.max(a), hi.min(z));
@@ -63,7 +63,7 @@ fn rx_fold_case(alts: &mut [Vec<AlmideRxPiece>]) {
             match &mut piece.node {
                 AlmideRxNode::Lit(c) if c.is_ascii_alphabetic() => {
                     let (l, u) = (c.to_ascii_lowercase(), c.to_ascii_uppercase());
-                    piece.node = AlmideRxNode::Class(vec![(l, l), (u, u)], false);
+                    piece.node = AlmideRxNode::Class(::std::vec![(l, l), (u, u)], false);
                 }
                 AlmideRxNode::Class(ranges, _) => fold_ranges(ranges),
                 AlmideRxNode::Group(inner, _) => rx_fold_case(inner),
@@ -73,12 +73,12 @@ fn rx_fold_case(alts: &mut [Vec<AlmideRxPiece>]) {
     }
 }
 
-type AlmideRxCaps = Vec<Option<(usize, usize)>>;
+type AlmideRxCaps = std::vec::Vec<Option<(usize, usize)>>;
 
 // ---- Parsing ----
 
 fn rx_compile(pat: &str) -> AlmideRxPat {
-    let chars: Vec<char> = pat.chars().collect();
+    let chars: std::vec::Vec<char> = pat.chars().collect();
     let mut pos = 0usize;
     let mut ncap = 0usize;
     let (mut multiline, mut icase) = (false, false);
@@ -94,13 +94,13 @@ fn rx_compile(pat: &str) -> AlmideRxPat {
     AlmideRxPat { alts, ncap, multiline, size: chars.len() }
 }
 
-fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> Vec<Vec<AlmideRxPiece>> {
-    let mut alts: Vec<Vec<AlmideRxPiece>> = vec![vec![]];
+fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> std::vec::Vec<std::vec::Vec<AlmideRxPiece>> {
+    let mut alts: std::vec::Vec<std::vec::Vec<AlmideRxPiece>> = ::std::vec![::std::vec![]];
     while *pos < chars.len() {
         if chars[*pos] == ')' && in_group { break; }
         if chars[*pos] == '|' {
             *pos += 1;
-            alts.push(vec![]);
+            alts.push(::std::vec![]);
             continue;
         }
         let piece = rx_parse_piece(chars, pos, ncap);
@@ -202,14 +202,14 @@ fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     let c = chars[*pos];
     *pos += 1;
     match c {
-        'd' => AlmideRxNode::Class(vec![('0', '9')], false),
-        'D' => AlmideRxNode::Class(vec![('0', '9')], true),
-        'w' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
-        'W' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
+        'd' => AlmideRxNode::Class(::std::vec![('0', '9')], false),
+        'D' => AlmideRxNode::Class(::std::vec![('0', '9')], true),
+        'w' => AlmideRxNode::Class(::std::vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
+        'W' => AlmideRxNode::Class(::std::vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
         // `\s` is the conventional ASCII whitespace set [ \t\n\v\f\r] — the
         // one PCRE, Python, Rust, JS and POSIX [[:space:]] share (#4257).
-        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], false),
-        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], true),
+        's' => AlmideRxNode::Class(::std::vec![(' ', ' '), ('\t', '\r')], false),
+        'S' => AlmideRxNode::Class(::std::vec![(' ', ' '), ('\t', '\r')], true),
         'b' => AlmideRxNode::WordBoundary(true),
         'B' => AlmideRxNode::WordBoundary(false),
         'n' => AlmideRxNode::Lit('\n'),
@@ -222,7 +222,7 @@ fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
 fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     let neg = *pos < chars.len() && chars[*pos] == '^';
     if neg { *pos += 1; }
-    let mut ranges: Vec<(char, char)> = vec![];
+    let mut ranges: std::vec::Vec<(char, char)> = ::std::vec![];
     // A `]` in the FIRST position is a literal member, not the terminator —
     // POSIX, and every engine follows it (PCRE, Python, Rust, Go, JS). Read as
     // a terminator, `[]]` became the empty class followed by a stray `]`, so
@@ -346,7 +346,7 @@ fn rx_check(pat: &str) -> Option<String> {
 /// The pattern's state count (exact up to the limit, then the limit + 1), or
 /// its syntax error.
 fn rx_states(pat: &str) -> Result<u64, String> {
-    let chars: Vec<char> = pat.chars().collect();
+    let chars: std::vec::Vec<char> = pat.chars().collect();
     let mut pos = rx_flag_group(&chars).map_or(0, |(len, _, _)| len);
     let size = rx_check_alts(&chars, &mut pos, 0).map_err(|reason| reason.to_string())?;
     if pos < chars.len() {
@@ -603,7 +603,7 @@ fn rx_node_matches(node: &AlmideRxNode, c: char) -> bool {
 // twin in stdlib/regex_engine.almd walks the same tree in the same order, so
 // the two legs agree on every match, capture and failure.
 
-type AlmideRxSeq = Vec<AlmideRxPiece>;
+type AlmideRxSeq = std::vec::Vec<AlmideRxPiece>;
 
 /// The continuation that ends the walk: the whole pattern has matched.
 const ALMIDE_RX_DONE: usize = usize::MAX;
@@ -631,7 +631,7 @@ enum AlmideRxGoal<'a> {
     /// Match the sequence from `pc` at `p`, then run `k`.
     Seq { pc: AlmideRxPc<'a>, p: usize, k: usize },
     /// Try the alternatives `alts[ai..]` at `p`, each followed by `k`.
-    Alts { alts: &'a Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize },
+    Alts { alts: &'a std::vec::Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize },
     /// Start one more instance of the repeated group at `pc` (`count` so far).
     Inst { pc: AlmideRxPc<'a>, p: usize, count: usize, k: usize },
     /// The lazy single atom at `pc` has matched `count` chars ending at `p`.
@@ -667,9 +667,9 @@ struct AlmideRxVm<'a> {
     /// Only `captures` reads the slots, so only it pays for writing them.
     track: bool,
     caps: AlmideRxCaps,
-    frames: Vec<AlmideRxFrame<'a>>,
-    choices: Vec<AlmideRxChoice<'a>>,
-    trail: Vec<(usize, Option<(usize, usize)>)>,
+    frames: std::vec::Vec<AlmideRxFrame<'a>>,
+    choices: std::vec::Vec<AlmideRxChoice<'a>>,
+    trail: std::vec::Vec<(usize, Option<(usize, usize)>)>,
     /// Steps taken (a goal, or a character a single-atom loop reads) and the
     /// most it may take (usize::MAX = no bound). Past the bound the walk gives
     /// up and `gave_up` says so: the Pike VM answers instead.
@@ -708,10 +708,10 @@ impl<'a> AlmideRxVm<'a> {
             cx: AlmideRxCx { s, multiline: rx.multiline },
             end_at,
             track,
-            caps: vec![None; rx.ncap],
-            frames: Vec::new(),
-            choices: Vec::new(),
-            trail: Vec::new(),
+            caps: ::std::vec![None; rx.ncap],
+            frames: std::vec::Vec::new(),
+            choices: std::vec::Vec::new(),
+            trail: std::vec::Vec::new(),
             steps: 0,
             budget: usize::MAX,
             gave_up: false,
@@ -720,7 +720,7 @@ impl<'a> AlmideRxVm<'a> {
 
     /// The end of the first match the walk reaches from `p`, if any; `caps`
     /// then holds that match's groups.
-    fn exec(&mut self, alts: &'a Vec<AlmideRxSeq>, p: usize) -> Option<usize> {
+    fn exec(&mut self, alts: &'a std::vec::Vec<AlmideRxSeq>, p: usize) -> Option<usize> {
         self.frames.clear();
         self.choices.clear();
         self.trail.clear();
@@ -771,7 +771,7 @@ impl<'a> AlmideRxVm<'a> {
         Some(goal)
     }
 
-    fn alts(&mut self, alts: &'a Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize) -> AlmideRxGoal<'a> {
+    fn alts(&mut self, alts: &'a std::vec::Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize) -> AlmideRxGoal<'a> {
         let Some(seq) = alts.get(ai) else { return AlmideRxGoal::Fail };
         if ai + 1 < alts.len() {
             self.push(AlmideRxGoal::Alts { alts, ai: ai + 1, p, k });
@@ -1004,11 +1004,11 @@ enum AlmideRxInst {
 }
 
 struct AlmideRxProg {
-    insts: Vec<AlmideRxInst>,
+    insts: std::vec::Vec<AlmideRxInst>,
     /// The atoms the Char and Assert instructions name.
-    nodes: Vec<AlmideRxNode>,
+    nodes: std::vec::Vec<AlmideRxNode>,
     /// The number of tracked group instances open at each pc.
-    depth: Vec<usize>,
+    depth: std::vec::Vec<usize>,
     /// States per pc: one more than the deepest nesting of tracked groups.
     width: usize,
     /// Counter registers (counted mode): the deepest nesting of counted
@@ -1018,15 +1018,15 @@ struct AlmideRxProg {
     /// one (no assertion or empty match before the first character). A start
     /// position whose character none of them accepts cannot begin a match, so
     /// the search skips it rather than starting threads that die at once.
-    first: Option<Vec<usize>>,
+    first: Option<std::vec::Vec<usize>>,
 }
 
 /// The atoms read first from pc 0 — None when an assertion or MATCH can come
 /// before any of them.
-fn rx_first_atoms(insts: &[AlmideRxInst]) -> Option<Vec<usize>> {
-    let mut seen = vec![false; insts.len()];
-    let mut todo = vec![0usize];
-    let mut atoms: Vec<usize> = Vec::new();
+fn rx_first_atoms(insts: &[AlmideRxInst]) -> Option<std::vec::Vec<usize>> {
+    let mut seen = ::std::vec![false; insts.len()];
+    let mut todo = ::std::vec![0usize];
+    let mut atoms: std::vec::Vec<usize> = std::vec::Vec::new();
     while let Some(pc) = todo.pop() {
         if pc >= insts.len() || seen[pc] {
             continue;
@@ -1055,12 +1055,12 @@ fn rx_first_atoms(insts: &[AlmideRxInst]) -> Option<Vec<usize>> {
 }
 
 struct AlmideRxComp<'a> {
-    insts: Vec<AlmideRxInst>,
-    nodes: Vec<AlmideRxNode>,
+    insts: std::vec::Vec<AlmideRxInst>,
+    nodes: std::vec::Vec<AlmideRxNode>,
     /// Each AST atom's index in `nodes`, so its copies share one entry.
     index: std::collections::HashMap<*const AlmideRxNode, usize>,
     pat: std::marker::PhantomData<&'a AlmideRxPat>,
-    depth: Vec<usize>,
+    depth: std::vec::Vec<usize>,
     cur: usize,
     deepest: usize,
     over: bool,
@@ -1134,7 +1134,7 @@ impl<'a> AlmideRxComp<'a> {
     /// The alternatives in order, each one's end jumping past the rest.
     fn alts(&mut self, alts: &'a [AlmideRxSeq]) {
         const HOLE: usize = usize::MAX - 1;
-        let mut ends = Vec::new();
+        let mut ends = std::vec::Vec::new();
         for (i, seq) in alts.iter().enumerate() {
             if self.over {
                 return;
@@ -1191,7 +1191,7 @@ impl<'a> AlmideRxComp<'a> {
             }
             self.emit(AlmideRxInst::Char(n));
         }
-        let mut exits = Vec::new();
+        let mut exits = std::vec::Vec::new();
         match piece.max {
             None => {
                 let top = self.here();
@@ -1245,7 +1245,7 @@ impl<'a> AlmideRxComp<'a> {
         // The last count with its own copy: an unbounded repetition loops at
         // `min`, a bounded one stops at `max`.
         let last = max.unwrap_or(min);
-        let mut exits = Vec::new();
+        let mut exits = std::vec::Vec::new();
         let mut c = 0;
         loop {
             if self.over {
@@ -1328,11 +1328,11 @@ fn rx_program(rx: &AlmideRxPat) -> Option<AlmideRxProg> {
 /// The program compiled expanded (None past the state budget) or counted.
 fn rx_program_as(rx: &AlmideRxPat, counted: bool) -> Option<AlmideRxProg> {
     let mut comp = AlmideRxComp {
-        insts: Vec::new(),
-        nodes: Vec::new(),
+        insts: std::vec::Vec::new(),
+        nodes: std::vec::Vec::new(),
         index: std::collections::HashMap::new(),
         pat: std::marker::PhantomData,
-        depth: Vec::new(),
+        depth: std::vec::Vec::new(),
         cur: 0,
         deepest: 0,
         over: false,
@@ -1353,16 +1353,16 @@ fn rx_program_as(rx: &AlmideRxPat, counted: bool) -> Option<AlmideRxProg> {
 /// `stride` slots ([match start, then per group: start, end, instance start,
 /// then the counter registers]).
 struct AlmideRxThreads {
-    pcs: Vec<(usize, usize)>,
-    slots: Vec<usize>,
+    pcs: std::vec::Vec<(usize, usize)>,
+    slots: std::vec::Vec<usize>,
     /// The stamp each state was last added under; a state is in this list when
     /// its stamp is the list's. Indexed by (pc, d) for an expanded program.
-    seen: Vec<u64>,
+    seen: std::vec::Vec<u64>,
     stamp: u64,
     /// Counted mode: the states added under the current stamp, an open-
     /// addressing hash table of entries [stamp, pc, d, registers...]; an entry
     /// with an older stamp is free.
-    table: Vec<u64>,
+    table: std::vec::Vec<u64>,
     /// Entries in `table` (a power of two, 0 before the first), and used.
     cap: usize,
     used: usize,
@@ -1370,7 +1370,7 @@ struct AlmideRxThreads {
 
 impl AlmideRxThreads {
     fn new(states: usize) -> Self {
-        AlmideRxThreads { pcs: Vec::new(), slots: Vec::new(), seen: vec![0; states], stamp: 0, table: Vec::new(), cap: 0, used: 0 }
+        AlmideRxThreads { pcs: std::vec::Vec::new(), slots: std::vec::Vec::new(), seen: ::std::vec![0; states], stamp: 0, table: std::vec::Vec::new(), cap: 0, used: 0 }
     }
 
     fn clear(&mut self) {
@@ -1415,7 +1415,7 @@ impl AlmideRxThreads {
     fn grow(&mut self, entry: usize) {
         let old_cap = self.cap;
         let cap = if old_cap == 0 { 1024 } else { old_cap * 2 };
-        let old = std::mem::replace(&mut self.table, vec![0; cap * entry]);
+        let old = std::mem::replace(&mut self.table, ::std::vec![0; cap * entry]);
         self.cap = cap;
         // Stamps start at 1, so a zeroed entry is free.
         for e in 0..old_cap {
@@ -1423,7 +1423,7 @@ impl AlmideRxThreads {
             if old[at] != self.stamp {
                 continue;
             }
-            let regs: Vec<usize> = old[at + 3..at + entry].iter().map(|&r| r as usize).collect();
+            let regs: std::vec::Vec<usize> = old[at + 3..at + entry].iter().map(|&r| r as usize).collect();
             let mut i = rx_hash(old[at + 1] as usize, old[at + 2] as usize, &regs, cap - 1);
             while self.table[i * entry] == self.stamp {
                 i = (i + 1) & (cap - 1);
@@ -1459,10 +1459,10 @@ const ALMIDE_RX_UNSET: usize = usize::MAX;
 struct AlmideRxPike {
     clist: AlmideRxThreads,
     nlist: AlmideRxThreads,
-    stack: Vec<AlmideRxStep>,
-    scratch: Vec<usize>,
+    stack: std::vec::Vec<AlmideRxStep>,
+    scratch: std::vec::Vec<usize>,
     /// The slots of the match found (slot 0 = its start).
-    found: Vec<usize>,
+    found: std::vec::Vec<usize>,
     /// Only `captures` reads the groups, so only it carries them.
     track: bool,
     /// Slots per thread: the capture slots (`ncap`), then `regs` counter
@@ -1481,9 +1481,9 @@ impl AlmideRxPike {
         AlmideRxPike {
             clist: AlmideRxThreads::new(states),
             nlist: AlmideRxThreads::new(states),
-            stack: Vec::new(),
-            scratch: vec![ALMIDE_RX_UNSET; nslots],
-            found: vec![ALMIDE_RX_UNSET; nslots],
+            stack: std::vec::Vec::new(),
+            scratch: ::std::vec![ALMIDE_RX_UNSET; nslots],
+            found: ::std::vec![ALMIDE_RX_UNSET; nslots],
             track,
             nslots,
             ncap_slots,
@@ -1744,7 +1744,7 @@ const ALMIDE_RX_CACHE_BYTES: usize = 1 << 20;
 /// used again: 17 patterns applied in turn to a 16-entry list recompiled on
 /// every call (#4392). Random eviction keeps most of such a cycle compiled.
 struct AlmideRxCache {
-    entries: Vec<(std::rc::Rc<str>, std::rc::Rc<AlmideRxCompiled>)>,
+    entries: std::vec::Vec<(std::rc::Rc<str>, std::rc::Rc<AlmideRxCompiled>)>,
     index: std::collections::HashMap<std::rc::Rc<str>, usize, std::hash::BuildHasherDefault<AlmideRxHasher>>,
     bytes: usize,
     seed: u64,
@@ -1806,7 +1806,7 @@ impl AlmideRxCache {
 
 thread_local! {
     static ALMIDE_RX_COMPILED: std::cell::RefCell<AlmideRxCache> = std::cell::RefCell::new(AlmideRxCache {
-        entries: Vec::new(),
+        entries: std::vec::Vec::new(),
         index: std::collections::HashMap::default(),
         bytes: 0,
         seed: 0x9E37_79B9_7F4A_7C15,
@@ -1958,7 +1958,7 @@ pub fn almide_regex_new(pat: &str) -> AlmideString { let __almide_v: String = { 
 /// The code-point index where the leftmost match starts, or -1.
 pub fn almide_regex_index_of(pat: &str, s: &str) -> i64 {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut m = AlmideRxMatcher::new(&rx, &chars, false);
     m.find_at(0).map_or(-1, |(start, _)| start as i64)
 }
@@ -1978,11 +1978,11 @@ fn rx_mark(chars: &[char], span: Option<(usize, usize)>) -> String {
 /// the previous match to the start of this one. `first` stops after one match
 /// (replace_first_with). regex.captures_all, replace_with and
 /// replace_first_with read it.
-pub fn almide_regex_scan(pat: &str, s: &str, first: bool) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_regex_scan(pat: &str, s: &str, first: bool) -> AlmideList<AlmideString> { let __almide_v: std::vec::Vec<String> = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, true);
-    let mut out: Vec<String> = vec![(rx.rx.ncap + 1).to_string()];
+    let mut out: std::vec::Vec<String> = ::std::vec![(rx.rx.ncap + 1).to_string()];
     let (mut last, mut scan) = (0usize, 0usize);
     while scan <= chars.len() {
         let Some((start, end)) = vm.find_at(scan) else { break };
@@ -1998,34 +1998,34 @@ pub fn almide_regex_scan(pat: &str, s: &str, first: bool) -> Vec<AlmideString> {
     }
     out.push(chars[last..].iter().collect());
     out
-})(); __almide_v.into_almide() }
+})(); AlmideList::from(__almide_v).into_almide() }
 
 pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut m = AlmideRxMatcher::new(&rx, &chars, false);
     m.is_match()
 }
 
 pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut m = AlmideRxMatcher::new(&rx, &chars, false);
     m.full_match()
 }
 
 pub fn almide_regex_find(pat: &str, s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     vm.find_at(0).map(|(start, end)| chars[start..end].iter().collect())
 })(); __almide_v.into_almide() }
 
-pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_regex_find_all(pat: &str, s: &str) -> AlmideList<AlmideString> { let __almide_v: std::vec::Vec<String> = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
-    let mut results: Vec<String> = vec![];
+    let mut results: std::vec::Vec<String> = ::std::vec![];
     let mut pos = 0;
     while pos <= chars.len() {
         if let Some((start, end)) = vm.find_at(pos) {
@@ -2036,11 +2036,11 @@ pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<AlmideString> { let __al
         }
     }
     results
-})(); __almide_v.into_almide() }
+})(); AlmideList::from(__almide_v).into_almide() }
 
 pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     let mut result = String::new();
     let mut pos = 0;
@@ -2070,7 +2070,7 @@ pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> AlmideString { let
 
 pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     if let Some((start, end)) = vm.find_at(0) {
         let mut result = String::new();
@@ -2098,11 +2098,11 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> AlmideString
 /// with each other, which matters more than matching any one engine's
 /// treatment of an empty alternation arm (there the three disagree among
 /// themselves).
-pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+pub fn almide_regex_split(pat: &str, s: &str) -> AlmideList<AlmideString> { let __almide_v: std::vec::Vec<String> = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
-    let mut results: Vec<String> = vec![];
+    let mut results: std::vec::Vec<String> = ::std::vec![];
     let (mut last, mut scan) = (0usize, 0usize);
     while scan <= chars.len() {
         let Some((start, end)) = vm.find_at(scan) else { break };
@@ -2112,7 +2112,7 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almid
     }
     results.push(chars[last..].iter().collect());
     results
-})(); __almide_v.into_almide() }
+})(); AlmideList::from(__almide_v).into_almide() }
 
 /// Index 0 is the WHOLE match, 1.. are the groups — the shape every mainstream
 /// regex API uses (Rust `Captures::get(0)`, Python `m.group(0)`, JS `match[0]`,
@@ -2124,16 +2124,16 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almid
 /// also came back for a pattern with NO groups, conflating "matched nothing to
 /// capture" with "did not match" — with a full match at index 0 that case has a
 /// real answer, `some([whole])`.
-pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<AlmideString>> { let __almide_v: Option<Vec<String>> = (|| {
+pub fn almide_regex_captures(pat: &str, s: &str) -> Option<AlmideList<AlmideString>> { let __almide_v: Option<std::vec::Vec<String>> = (|| {
     let rx = rx_valid(pat);
-    let chars: Vec<char> = s.chars().collect();
+    let chars: std::vec::Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, true);
     let (mstart, mend) = vm.find_at(0)?;
     // each marked as rx_mark does: regex.captures reads a group that took no
     // part as none (R-regex-08)
-    let mut result = vec![rx_mark(&chars, Some((mstart, mend)))];
+    let mut result = ::std::vec![rx_mark(&chars, Some((mstart, mend)))];
     result.extend(vm.caps().iter().map(|c| rx_mark(&chars, *c)));
     Some(result)
-})(); __almide_v.into_almide() }
+})(); __almide_v.map(AlmideList::from).into_almide() }
 
 // ---- End Regex Runtime ----

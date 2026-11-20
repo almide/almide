@@ -51,6 +51,7 @@ dependencies = [
  "almide-mir",
  "almide-optimize",
  "almide-rt-core",
+ "almide-str",
  "almide-tools",
  "almide-types",
  "almide-verify",
@@ -170,6 +171,7 @@ dependencies = [
  "almide-base",
  "almide-ir",
  "almide-lang",
+ "almide-str",
  "serde",
  "toml",
 ]
