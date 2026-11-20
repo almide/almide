@@ -123,7 +123,7 @@ impl Window<'_> {
     /// `op` cannot look at the cell.
     fn admits(&mut self, op: &Op) -> bool {
         match op {
-            Op::CallFn { name, .. } if name == "__mg_take" => false,
+            Op::CallFn { name, .. } if name == crate::mir_ops::MG_TAKE => false,
             Op::CallFn { name, args, dst, .. } if (self.program_fn)(name) => self.program_call(args, *dst),
             Op::CallFn { args, .. } => args.iter().all(|a| !matches!(a, CallArg::Handle(v) if !self.plain(v))),
             Op::Prim { kind: PrimKind::Handle, .. } | Op::IntBinOp { .. } | Op::ConstInt { .. } => true,
@@ -160,7 +160,7 @@ pub(crate) fn take_window(
     let mut w = window(func, (d, cell, kind), tys, program_fn);
     for (j, op) in func.ops.iter().enumerate().skip(at + 1) {
         if let Op::CallFn { name, args, dst, .. } = op {
-            if name == "__mg_take" {
+            if name == crate::mir_ops::MG_TAKE {
                 let same = matches!(args.as_slice(), [CallArg::Scalar(a)] if w.root.get(a) == Some(&cell));
                 return (*dst).filter(|x| same && only_released(func, j, *x));
             }

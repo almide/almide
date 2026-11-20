@@ -604,6 +604,31 @@
         assert_eq!(call_modes_witness(&prog2, &|n: &str| n.contains('.')), "|");
     }
 
+    /// #4828: an out-of-program callee is admitted (no row) only by membership
+    /// in what the render serves, never by its spelling. A `__` helper and a
+    /// dotted `mod.f` that no registry, shim, floor, list op or host op serves
+    /// get the out-of-range row the checker rejects; a registered self-host
+    /// call name keeps its renderer-contract omission.
+    #[test]
+    fn an_unserved_callee_is_rejected_whatever_its_spelling() {
+        use std::collections::BTreeMap;
+        let site = |callee: &str| {
+            let mut main = func(vec![
+                Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
+                Op::CallFn { dst: None, name: callee.into(), args: vec![CallArg::Handle(ValueId(0))], result: None },
+                Op::Drop { v: ValueId(0) },
+            ]);
+            main.name = "main".into();
+            let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+            program.insert(main.name.clone(), main);
+            call_modes_witness(&program, &render_served_callee)
+        };
+        assert_eq!(site("__unknown_helper_4828"), "|1 0");
+        assert_eq!(site("zq_mod_4828.f"), "|1 0");
+        let served = crate::lower::registry_sig::registered_call_names()[0];
+        assert_eq!(site(served), "|", "{served} is served by the self-host registry");
+    }
+
     #[test]
     fn branch_grouping_accepts_agreement_and_rejects_cross_arm_compensation() {
         // AGREEMENT at net +1: each arm acquires one alias of a pre-branch
