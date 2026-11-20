@@ -19,11 +19,16 @@ pub struct Body<'a> {
 
 /// The proposals whose control flow this checker does not classify (#4854):
 /// GC's `br_on_cast*`, the legacy exception handling's `try` / `delegate`,
-/// stack switching's `resume` / `switch`. A module using any of them is
-/// REFUSED by validation rather than read as if those operators did not
-/// branch — the checker's domain is declared here, not defaulted.
-pub const UNCLASSIFIED_PROPOSALS: WasmFeatures =
-    WasmFeatures::GC.union(WasmFeatures::LEGACY_EXCEPTIONS).union(WasmFeatures::STACK_SWITCHING);
+/// stack switching's `resume` / `switch`, and exception handling's
+/// `try_table`, whose catch clauses take control from ANY call in its body
+/// to a label — a transfer no single instruction's [`branch_target`] can
+/// name. A module using any of them is REFUSED by validation rather than read
+/// as if those operators did not branch — the checker's domain is declared
+/// here, not defaulted. No emitter writes any of them.
+pub const UNCLASSIFIED_PROPOSALS: WasmFeatures = WasmFeatures::GC
+    .union(WasmFeatures::LEGACY_EXCEPTIONS)
+    .union(WasmFeatures::STACK_SWITCHING)
+    .union(WasmFeatures::EXCEPTIONS);
 
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
@@ -167,7 +172,7 @@ pub fn is_load(op: &Op<'_>) -> bool {
 /// A branch's target depth (the frame it leaves to), or `Some(0)` for an
 /// exit of the whole function; `None` for an instruction that does not
 /// branch.
-pub(crate) fn branch_target(op: &Op<'_>, d: u32) -> Option<u32> {
+pub fn branch_target(op: &Op<'_>, d: u32) -> Option<u32> {
     match op {
         Op::Br { relative_depth }
         | Op::BrIf { relative_depth }
