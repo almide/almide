@@ -221,7 +221,7 @@ crates/almide-mir/src/render_native_interp.rs	<almide_mir::render_native_interp:
 crates/almide-mir/src/render_native_interp.rs	<almide_mir::render_native_interp::ChainScan>::render_piece	2
 crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::concat_of	1
 crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::fmt_parts	4
-crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::printed_scalars	2
+crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::printed_scalars	1
 crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::printed_scalars::{closure#0}	4
 crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::render_final::{closure#0}	1
 crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::render_final_opt::{closure#1}	2
@@ -232,7 +232,6 @@ crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_op::{closure#0}	2
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_step::<core::iter::adapters::enumerate::Enumerate<core::slice::iter::Iter<almide_mir::Op>>>	1
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_tier_op	2
-crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_printed_scalar	3
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_test_die	16
 crates/almide-mir/src/render_native_loops.rs	almide_mir::render_native_loops::moves_out_of_dying_source	2
 crates/almide-mir/src/render_native_map.rs	almide_mir::render_native_addr::map::note_add	1
