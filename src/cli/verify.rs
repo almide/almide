@@ -179,7 +179,7 @@ pub(super) fn verifier_present() -> bool {
 /// [`gate_build`] accepts it; a rejection exits 1. The sinks are process-wide,
 /// so a parallel test lane makes and judges one module at a time while a
 /// verifier is installed; without one nothing changes.
-pub(super) fn certified<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+pub(super) fn certified(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
     certified_with(file, &[], make)
 }
 
@@ -194,11 +194,11 @@ pub(super) const TEST_RUNNER_GRANTS: &[&str] = &["Env.read", "Proc"];
 
 /// [`certified`] for a test lane's module: the runner's grants
 /// ([`TEST_RUNNER_GRANTS`]) join the manifest's allow when it has one.
-pub(super) fn certified_test<T>(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+pub(super) fn certified_test(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
     certified_with(file, TEST_RUNNER_GRANTS, make)
 }
 
-fn certified_with<T>(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Vec<u8>, T), ()>) -> Result<(Vec<u8>, T), ()> {
+fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if !verifier_present() {
         return make();
