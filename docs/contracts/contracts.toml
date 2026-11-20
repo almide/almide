@@ -6073,6 +6073,20 @@ evidence  = [
   { path = "spec/wasm_cross/bigint_protocol_order.almd", class = "fixture" },
 ]
 
+# ── OUTPUT LINE: AN INTERPOLATED println WRITES THE STRING PATH'S BYTES ─
+[[contract]]
+id        = "C-457"
+spec      = "ALS-R2"
+title     = "An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream"
+statement = "ALS-R2 (ADR-0038): an output line — `println` / `eprintln` whose single argument is an interpolated string (or a plain string literal) written directly in the argument position, every hole an Int, a sized int (Int8..Int64, UInt8..UInt64), Float, Float32, Bool or String — writes the same bytes on both targets as the String path would: the bytes the interpolated String would hold (the same interpolation built as a String outside the line and then printed), which for an integer hole are its type's `to_string` digits, for a Bool `true` / `false`, for a String its bytes, and for a Float / Float32 hole the interpolation Display form of C-011 (shortest round-trip digits, no exponent, `NaN`, `inf`, `-inf`, the `.0` of an integral value dropped). It allocates nothing per line, and it never interleaves with another line on the same stream: under `fan.map` arms that print concurrently, every line appears whole, in the list-order observation of C-004. Requirements-first: specified here before the implementation lowers an output line to the sink; the 0.70.0-rc3 release already prints these bytes through the String path, so the byte evidence is green against it and certifies the reference the new lowering must keep (the per-line zero-allocation clause is the implementation's alloc_count ledger, cited there)."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/output_line_int_bool.almd", class = "fixture" },
+  { path = "spec/wasm_cross/output_line_float.almd", class = "fixture" },
+  { path = "spec/wasm_cross/output_line_fan_whole.almd", class = "fixture" },
+]
+
 # ── IMPORT: A NAME THAT IS BOTH A LOCAL MODULE AND A DEPENDENCY IS REFUSED ─
 [[contract]]
 id        = "C-458"

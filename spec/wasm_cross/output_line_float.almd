@@ -1,0 +1,70 @@
+// @contract: C-457
+// ALS-R2 / ALS-B4 (ADR-0038): an output line with a Float or Float32 hole writes
+// the same bytes as the same interpolation built as a String (the Display form
+// of ALS-R2 / C-011: shortest round-trip digits, no exponent, the `.0` of an
+// integral value dropped; `NaN`, `inf`, `-inf`) — NOT `float.to_string`, which
+// keeps the `.0`. Every value is printed on two consecutive lines: the output
+// line, then the same interpolation bound to a String outside the line and
+// printed. Each pair must be equal, and native must equal wasm. ±0.0, 2.0 and
+// the large integral values are where the `.0` difference would show. Every
+// value is built from its bits, so the fixture does no Float arithmetic. The list covers, for f64 and f32:
+// 0.0, -0.0, the smallest and largest subnormals, the smallest normal, the
+// largest finite value and its negation, NaN, inf, -inf, and the values with the
+// longest text (-5e-324 and -2.2250738585072014e-308; -1.4e-45), plus the
+// integral values 2.0 and 1e300 (f64) / 2.0 and 1e30 rounded to f32.
+
+fn f64_line(bits: Int) -> Unit = {
+  let x = float.from_bits(bits)
+  println("${x}")
+  let s = "${x}"
+  println(s)
+}
+
+fn f32_line(bits: Int) -> Unit = {
+  let x = float32.from_bits(bits)
+  println("${x}")
+  let s = "${x}"
+  println(s)
+}
+
+effect fn main() -> Unit = {
+  // binary64 bit patterns, as signed 64-bit Int
+  let f64_bits = [
+    0,
+    int.min_value(),
+    1,
+    4503599627370495,
+    4503599627370496,
+    9218868437227405311,
+    -4503599627370497,
+    9221120237041090560,
+    9218868437227405312,
+    -4503599627370496,
+    -9223372036854775807,
+    -9218868437227405312,
+    4611686018427387904,
+    9094988921128908188,
+  ]
+  for bits in f64_bits {
+    f64_line(bits)
+  }
+  // binary32 bit patterns, as non-negative Int
+  let f32_bits = [
+    0,
+    2147483648,
+    1,
+    8388607,
+    8388608,
+    2139095039,
+    4286578687,
+    2143289344,
+    2139095040,
+    4286578688,
+    2147483649,
+    1073741824,
+    1900671690,
+  ]
+  for bits in f32_bits {
+    f32_line(bits)
+  }
+}

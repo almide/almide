@@ -492,5 +492,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-454 | An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory | 0.69.1 | active | fixture | 0 |
 | C-455 | A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane | 0.70.0 | active | fixture | 0 |
 | C-456 | A declared type whose protocol defines its order through `compare` (BigInt) orders by that compare in every natural-order operation a generic body reaches, on every leg | 0.70.0 | active | fixture | 1 |
+| C-457 | An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream | 0.70.0 | active | fixture | 3 |
 | C-458 | An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike | 0.70.0 | active | fixture | 0 |
 
