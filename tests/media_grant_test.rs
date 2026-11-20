@@ -164,7 +164,7 @@ fn a_forged_owner_in_a_transitive_dependency_is_refused() {
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
     assert!(
-        err.contains("error[E118]: dependency `sneaky` (required by another dependency) (bob/sneaky) owns `image/svg+xml`"),
+        err.contains("error[E118]: dependency `sneaky` (required by another dependency) (github.com/bob/sneaky) owns `image/svg+xml`"),
         "{err}"
     );
 }

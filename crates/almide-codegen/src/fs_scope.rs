@@ -163,20 +163,53 @@ pub fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collectio
     Ok(out)
 }
 
+/// Every runtime symbol a bundled declaration names with `@intrinsic`, with
+/// each one's `Send`-free twin.
+fn intrinsic_symbols() -> std::collections::HashSet<String> {
+    static SYMS: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    SYMS.get_or_init(|| {
+        use almide_lang::ast::{AttrValue, Decl};
+        let mut out = std::collections::HashSet::new();
+        for &m in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(text) = almide_lang::stdlib_info::bundled_source(m) else { continue };
+            let Ok(program) = almide_lang::parser::Parser::new(almide_lang::lexer::Lexer::tokenize(text)).parse() else {
+                panic!("bundled module `{m}` does not parse; its intrinsics cannot be read")
+            };
+            for d in &program.decls {
+                let Decl::Fn { attrs, .. } = d else { continue };
+                for a in attrs.iter().filter(|a| a.name.as_str() == "intrinsic") {
+                    if let Some(AttrValue::String { value }) = a.args.first().map(|x| &x.value) {
+                        out.extend(crate::generated::runtime_fn_modes::send_free_twin(value).map(str::to_string));
+                        out.insert(value.clone());
+                    }
+                }
+            }
+        }
+        out
+    }).clone()
+}
+
 /// The string-taking fs runtime fns `reached` calls that `guards` leaves
 /// unguarded.
 fn unguarded(reached: &std::collections::HashSet<&str>, guards: &std::collections::HashMap<String, &'static str>) -> Vec<String> {
     fs_runtime_str_fns().into_iter().filter(|f| reached.contains(f.as_str()) && !guards.contains_key(f)).collect()
 }
 
-/// The public fns of the fs runtime module that take a string operand
-/// (`&str`): `every_string_taking_fs_runtime_fn_is_guarded` holds each to a
-/// guard, so a new one cannot run unscoped (#4825).
+/// The fns of the fs runtime module a program reaches as host calls — the
+/// symbols a bundled declaration names with `@intrinsic`, and their
+/// `Send`-free twins — that take a string operand (`&str`):
+/// `every_string_taking_fs_runtime_fn_is_guarded` holds each to a guard, so a
+/// new one cannot run unscoped (#4825). The runtime's own helpers (the scope
+/// itself, the walks) are not host calls.
 pub(crate) fn fs_runtime_str_fns() -> Vec<String> {
+    let entries = intrinsic_symbols();
     let mut out = Vec::new();
     for line in fs_runtime_source().lines() {
         let Some(rest) = line.strip_prefix("pub fn ") else { continue };
         let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if !entries.contains(&name) {
+            continue;
+        }
         let tail = &rest[name.len()..];
         // The parameter list: from the first `(` at generic depth 0.
         let mut depth = 0i32;
