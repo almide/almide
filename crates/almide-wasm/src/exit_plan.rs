@@ -231,7 +231,12 @@ impl Emitter<'_> {
     /// (`rc_share_guard` in lower_sum); a guard's borrowed value took its
     /// ret-inc before this; rc_owned holds only flat blocks.
     pub(crate) fn emit_exit(&mut self, plan: &ExitPlan) {
-        self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        // Negative-test hook (tests/exit_validation.rs): write the exit
+        // without recording it, so the validator has an unplanned transfer
+        // to name. Off by default.
+        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        }
         // Negative-test hook (tests/exit_validation.rs): omit the first
         // release so the validator has a defect to name. Off by default.
         let omit_first = OMIT_FIRST_RELEASE.load(std::sync::atomic::Ordering::Relaxed);
@@ -320,6 +325,15 @@ static OMIT_FIRST_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::At
 #[doc(hidden)]
 pub fn test_omit_first_release(on: bool) {
     OMIT_FIRST_RELEASE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+static OMIT_EXIT_RECORD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Test hook: make `emit_exit` write its exit without recording the plan,
+/// so `validate_exits` meets a transfer no plan claims (#4854).
+#[doc(hidden)]
+pub fn test_omit_exit_record(on: bool) {
+    OMIT_EXIT_RECORD.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// One exit as `emit_exit` wrote it: the plan, and the function-body byte
