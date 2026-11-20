@@ -504,7 +504,7 @@ impl Manifest<'_> {
                     .iter()
                     .map(|i| i.get_ref().as_str().map(str::to_ascii_lowercase).ok_or_else(|| located(path, content, i.span().start, shape)))
                     .collect::<Result<Vec<_>, _>>()?;
-                let key = k.get_ref().as_ref().to_ascii_lowercase();
+                let key = crate::media_grant::manifest_grant_key(k.get_ref().as_ref());
                 crate::media_grant::check_grant_key(&key).map_err(|e| located(path, content, k.span().start, &e))?;
                 Ok(MediaGrant { key, media, line: line_of(content, at) })
             })
