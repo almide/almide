@@ -22,7 +22,7 @@ pub struct Body<'a> {
 /// stack switching's `resume` / `switch`. A module using any of them is
 /// REFUSED by validation rather than read as if those operators did not
 /// branch — the checker's domain is declared here, not defaulted.
-pub const UNCLASSIFIED_PROPOSALS: WasmFeatures =
+pub(crate) const UNCLASSIFIED_PROPOSALS: WasmFeatures =
     WasmFeatures::GC.union(WasmFeatures::LEGACY_EXCEPTIONS).union(WasmFeatures::STACK_SWITCHING);
 
 /// Every defined function of `bytes`, validated, in position order.
