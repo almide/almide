@@ -95,6 +95,8 @@ fn render_fn(
         // #1950: SIGPIPE's default disposition first, as the standard
         // codegen's `main` (the shared text, already 4-space indented).
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
+        // #4620: the allocator policy, as the standard codegen's `main`.
+        out.push_str(almide_codegen::main_alloc_prelude_text());
         line!("almide_stack_guard_install();");
         line!("let _almide_host_exit = AlmideHostExitGuard;");
     }

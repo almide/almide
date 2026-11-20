@@ -633,6 +633,20 @@ fn render_fn_safe_name(
 // SIGPIPE and SIG_DFL (0): no handler address of ours is handed over.
 pub(crate) const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
+/// The allocator policy every native `main` sets first (#4620, owner ruling
+/// 2026-11-20): glibc's malloc adapts its trim and mmap thresholds at run
+/// time, so a program that frees and reallocates large blocks in a loop gave
+/// the top of its heap back to the kernel and faulted it in again every
+/// round (p13: 26 s native, 3.5 s with both thresholds fixed, at the same
+/// peak RSS), and the instructions it ran varied by up to a fifth between
+/// runs of the same program. M_TRIM_THRESHOLD (-1) is set to the largest
+/// `int` and M_MMAP_THRESHOLD (-3) to 1 GiB, the values measured. Only glibc
+/// has these knobs; elsewhere, and under Miri, it is a no-op.
+// SAFETY: (of the emitted call) mallopt(3) is declared with its C prototype
+// (two ints, returning an int) and called with two of its documented
+// parameters, before the program allocates anything of its own.
+pub(crate) const MAIN_ALLOC_PRELUDE: &str = "    #[cfg(all(target_os = \"linux\", target_env = \"gnu\", not(miri)))]\n    {\n        extern \"C\" {\n            fn mallopt(param: i32, value: i32) -> i32;\n        }\n        // M_TRIM_THRESHOLD = -1, M_MMAP_THRESHOLD = -3 (#4620)\n        unsafe {\n            mallopt(-1, i32::MAX);\n            mallopt(-3, 1 << 30);\n        }\n    }\n";
+
 /// Call-stack exhaustion as the defined abort (C-196): replace std's
 /// guard-page handler with the one that prints `Error: stack overflow` and
 /// exits 1 (prelude_stack.rs), before anything else in `main` runs.
@@ -716,9 +730,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, ret_ty: &Ty, is_rust_
         })
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", {});\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines, main_err_message(ctx, ret_ty))
+        format!("{}\n\nfn main() {{\n{}{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", {});\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines, main_err_message(ctx, ret_ty))
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }
