@@ -25,7 +25,7 @@ use std::sync::atomic::AtomicUsize as AlmideListCount;
 
 /// The block header. The elements follow it at [`almide_list_offset`].
 #[repr(C, align(16))]
-pub struct AlmideListHeader {
+pub(crate) struct AlmideListHeader {
     rc: AlmideListCount,
     len: usize,
     cap: usize,
