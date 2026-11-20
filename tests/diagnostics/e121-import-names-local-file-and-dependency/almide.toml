@@ -1,0 +1,6 @@
+[package]
+name = "diagfx"
+version = "0.1.0"
+
+[dependencies]
+zq_dep = { path = "deps/zq_dep" }

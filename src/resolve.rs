@@ -834,6 +834,7 @@ fn find_package_src_dir(
     base_dir: &Path,
     dep_paths: &[(project::PkgId, PathBuf)],
 ) -> Result<(PathBuf, Option<project::PkgId>), String> {
+    refuse_ambiguous_import(pkg_name, base_dir, dep_paths)?;
     // Check local — prefer src/ subdirectory
     let local_src = base_dir.join(pkg_name).join("src");
     if local_src.is_dir() {
@@ -854,7 +855,33 @@ fn find_package_src_dir(
     Err(format!("package '{}' not found in dependencies", pkg_name))
 }
 
+/// E121 (#4865, C-458): an import's first segment that names both a module
+/// of the project (`<base>/<name>.almd` or a `<base>/<name>/` directory) and
+/// a `[dependencies]` entry is refused, so `import pkg` and `import pkg.sub`
+/// cannot load the name from two places. One decision for both lookups.
+fn refuse_ambiguous_import(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(), String> {
+    let dep_dirs: Vec<&PathBuf> = dep_paths.iter().filter(|(p, _)| p.name == name).map(|(_, d)| d).collect();
+    if dep_dirs.is_empty() {
+        return Ok(());
+    }
+    let local = [base_dir.join(format!("{name}.almd")), base_dir.join(name)];
+    let Some(found) = local.iter().find(|p| std::fs::symlink_metadata(p).is_ok()) else { return Ok(()) };
+    // A path dependency that IS that directory (its root or its `src/`) is
+    // one package, not two.
+    let canon = |p: &Path| p.canonicalize().ok();
+    let here = canon(found);
+    if here.is_some() && dep_dirs.iter().any(|d| canon(d) == here || d.parent().and_then(canon) == here) {
+        return Ok(());
+    }
+    Err(format!(
+        "error[E121]: `import {name}` names both the local module {} and the dependency `{name}` in almide.toml\n  \
+         hint: rename one of them — the local module, or the `[dependencies]` key — so the name means one package",
+        found.display()
+    ))
+}
+
 fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(PathBuf, Option<project::PkgId>), String> {
+    refuse_ambiguous_import(name, base_dir, dep_paths)?;
     // 1. Check explicit dependency paths FIRST (almide.toml [dependencies])
     // These take priority over local filesystem matches to prevent stale
     // clones or unrelated directories from shadowing cached dependencies.

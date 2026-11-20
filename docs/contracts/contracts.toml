@@ -6072,3 +6072,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bigint_protocol_order.almd", class = "fixture" },
 ]
+
+# ── IMPORT: A NAME THAT IS BOTH A LOCAL MODULE AND A DEPENDENCY IS REFUSED ─
+[[contract]]
+id        = "C-458"
+spec      = "ALS-DL1"
+title     = "An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike"
+statement = "ALS-DL1 (almide/almide#4865): when the first segment of an `import` — `import pkg`, `import pkg.sub`, with or without an alias — names both a module of the importing project's own source (a `pkg.almd` file or a `pkg/` directory where the importing file's modules are looked up) and an entry of the governing `almide.toml` `[dependencies]`, the import is refused with error E121 naming both places, and the hint asks to rename one of them; no form of the import picks one of the two. `almide check`, `run`, `build` and `test` refuse it alike, on both targets, before anything is built. A name that is only local, or only a dependency, resolves as before, and the submodule form resolves its first segment by the same decision as the plain form."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/import_dependency_ambiguity_test.rs", name = "a_name_that_is_both_local_and_a_dependency_is_refused_in_every_import_form", class = "fixture" },
+]
