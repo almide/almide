@@ -31,7 +31,7 @@
 5932	spec/wasm_cross/bang_in_record_literal_field.almd
 5227	spec/wasm_cross/base64_decode_canonical.almd
 3364	spec/wasm_cross/base64_encode.almd
-29363	spec/wasm_cross/bigint_protocol_order.almd
+31612	spec/wasm_cross/bigint_protocol_order.almd
 15900	spec/wasm_cross/bigint_text_and_pow_limits.almd
 5467	spec/wasm_cross/binary_operators.almd
 4213	spec/wasm_cross/binary_search_duplicate_keys.almd
@@ -126,7 +126,7 @@
 37915	spec/wasm_cross/codec_whitespace_tolerance.almd
 7898	spec/wasm_cross/collection_literals.almd
 3315	spec/wasm_cross/composition_fuzz_batch.almd
-13519	spec/wasm_cross/compound_eq.almd
+17383	spec/wasm_cross/compound_eq.almd
 21515	spec/wasm_cross/compound_repr_interp.almd
 19594	spec/wasm_cross/compound_repr_records_interp.almd
 15942	spec/wasm_cross/compound_repr_recursive_interp.almd
@@ -201,7 +201,7 @@
 6776	spec/wasm_cross/env_set_refusal.almd
 1991	spec/wasm_cross/env_sleep_pause.almd
 15976	spec/wasm_cross/env_vars_remove.almd
-26240	spec/wasm_cross/equality_ops_every_equatable_element.almd
+33926	spec/wasm_cross/equality_ops_every_equatable_element.almd
 3934	spec/wasm_cross/err_arm_takes_let_match_type.almd
 35035	spec/wasm_cross/err_text_operand_escape_families.almd
 2055	spec/wasm_cross/error_operators.almd
@@ -541,7 +541,7 @@
 16421	spec/wasm_cross/map_literal_ctor_values.almd
 18125	spec/wasm_cross/map_merge_in_place.almd
 5152	spec/wasm_cross/map_of_maps_value.almd
-3099	spec/wasm_cross/map_rich_variant_key.almd
+6130	spec/wasm_cross/map_rich_variant_key.almd
 14245	spec/wasm_cross/map_set_eq.almd
 18923	spec/wasm_cross/map_set_in_place.almd
 24958	spec/wasm_cross/map_set_index_threshold.almd
@@ -825,7 +825,7 @@
 5310	spec/wasm_cross/self_call_swapped_params.almd
 4187	spec/wasm_cross/sequential_match_two_arg_call.almd
 9833	spec/wasm_cross/set_entries_reclaim.almd
-11255	spec/wasm_cross/set_from_list_every_equatable_element.almd
+15018	spec/wasm_cross/set_from_list_every_equatable_element.almd
 11827	spec/wasm_cross/set_index_order.almd
 13345	spec/wasm_cross/set_insertion_order.almd
 2733	spec/wasm_cross/shared_arg_pair_dup.almd
