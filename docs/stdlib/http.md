@@ -1202,7 +1202,7 @@ http.headers(m: M) -> List[(String, String)]
 // @since 0.6.0 or earlier
 http.body(m: M) -> String
 
-// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
+// Body as bytes: a fetched body exactly as sent, a bytes body exactly as given, otherwise the UTF-8 bytes of body(m).
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 
@@ -1214,7 +1214,7 @@ http.set_header(m: M, name: String, value: String) -> M
 // @since unreleased
 http.set_body(m: M, body: String) -> M
 
-// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
+// m with its body replaced by body, kept exactly; a response's Content-Type becomes application/octet-stream.
 // @since unreleased
 http.set_body_bytes(m: M, body: Bytes) -> M
 
