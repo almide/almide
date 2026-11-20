@@ -6098,3 +6098,14 @@ status    = "active"
 evidence  = [
   { path = "tests/import_dependency_ambiguity_test.rs", name = "a_name_that_is_both_local_and_a_dependency_is_refused_in_every_import_form", class = "fixture" },
 ]
+# ── PROCESS: A COMMAND NAME RUNS WHAT THE LAUNCH PATH FINDS ─────────────
+[[contract]]
+id        = "C-459"
+spec      = "ALS-R5"
+title     = "A process command name runs the program the launch PATH finds; env.set(\"PATH\") never changes which program a name runs, on native and the embedded wasm host alike"
+statement = "ALS-R5 (almide/almide#4844): a `process` call that takes a command name without a `/` (`process.exec`, `process.output`, `process.run` and `process.start`) runs the program that the `PATH` the program was LAUNCHED with finds, on native and on the embedded wasm host alike. `env.set(\"PATH\", ...)` and `env.remove(\"PATH\")` change what `env.get(\"PATH\")` answers, but never which program a name runs: a program granted `[permissions] proc = [\"ls\"]` that copies another executable into a directory as `ls` and puts that directory first on `PATH` still runs the `ls` the launch `PATH` finds, so a `[permissions] proc` entry names the program the launch environment resolves, not one the program can substitute. A name with a `/` is a path and is spawned as written. On Linux and macOS a name resolves to the first directory of the launch `PATH` holding an executable file of that name; on Windows the platform's search over the launch `PATH` and `PATHEXT` applies. Before, the native spawn resolved the name through the process `PATH` at spawn time, which `env.set` rewrites, while the embedded host resolved it through its own `PATH`, which `env.set` never reaches, so the two legs ran different programs for one name and the proc list could be sidestepped natively."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/proc_launch_path_test.rs", name = "a_command_name_runs_what_the_launch_path_finds_on_both_legs", class = "fixture" },
+]
