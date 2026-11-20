@@ -10659,6 +10659,7 @@ fn new_request(method: String, target: String, body: String, headers: List[(Stri
 
 @intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
+@consume(method, target, body)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.

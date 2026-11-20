@@ -218,9 +218,12 @@ pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &
 // a Map key compare it by content, as the wasm leg's representation does.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlmideHttpRequest {
-    pub method: String,
-    pub path: String,
-    pub body: String,
+    // The request's text fields are shared strings (#4767): building a request
+    // around a body or reading one back counts a reference, as on wasm, where
+    // a copy of every String argument made `new_request` O(n) on native only.
+    pub method: AlmideString,
+    pub path: AlmideString,
+    pub body: AlmideString,
     pub headers: Vec<(String, String)>,
     /// Path parameters bound by `http.router` (#2588): `{id}` in the route
     /// pattern → `("id", "42")`. Empty for a request the listener parsed.
@@ -235,11 +238,11 @@ pub struct AlmideHttpRequest {
 /// `http.new_request` (#2588): a request built in code, so a handler or a
 /// router can be exercised without a socket. `target` is the request-target
 /// as it appears on the wire — path plus any `?query`.
-pub fn almide_rt_http___new_request(method: &str, target: &str, body: &str, flat: &[AlmideString]) -> AlmideHttpRequest {
+pub fn almide_rt_http___new_request(method: AlmideString, target: AlmideString, body: AlmideString, flat: &[AlmideString]) -> AlmideHttpRequest {
     AlmideHttpRequest {
-        method: method.to_string(),
-        path: target.to_string(),
-        body: body.to_string(),
+        method,
+        path: target,
+        body,
         headers: header_pairs(flat),
         params: Vec::new(),
         body_raw: None,
@@ -265,7 +268,7 @@ pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[AlmideStr
 /// Router plumbing for `http.mount`: the sub-app sees the target with the
 /// mount prefix stripped.
 pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> AlmideHttpRequest {
-    req.path = target.to_string();
+    req.path = target.into();
     req
 }
 
@@ -284,7 +287,7 @@ impl AlmideIntoStr for AlmideHttpRequest {
 
 impl AlmideRepr for AlmideHttpRequest {
     fn almide_repr(&self) -> String {
-        format!("HttpRequest {{ method: {}, path: {}, body: {}, headers: {} }}", self.method.almide_repr(), self.path.almide_repr(), self.body.almide_repr(), self.headers.len())
+        format!("HttpRequest {{ method: {}, path: {}, body: {}, headers: {} }}", self.method.as_str().to_string().almide_repr(), self.path.as_str().to_string().almide_repr(), self.body.as_str().to_string().almide_repr(), self.headers.len())
     }
 }
 
@@ -299,9 +302,9 @@ pub fn almide_http_resp_repr(resp: &AlmideHttpResponse) -> AlmideString { resp.a
 pub fn almide_http_req_eq(a: &AlmideHttpRequest, b: &AlmideHttpRequest) -> bool { a == b }
 pub fn almide_http_resp_eq(a: &AlmideHttpResponse, b: &AlmideHttpResponse) -> bool { a == b }
 
-pub fn almide_http_req_method(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.method.clone() })(); __almide_v.into_almide() }
-pub fn almide_http_req_path(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.path.clone() })(); __almide_v.into_almide() }
-pub fn almide_http_req_body(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.body.clone() })(); __almide_v.into_almide() }
+pub fn almide_http_req_method(req: &AlmideHttpRequest) -> AlmideString { req.method.clone() }
+pub fn almide_http_req_path(req: &AlmideHttpRequest) -> AlmideString { req.path.clone() }
+pub fn almide_http_req_body(req: &AlmideHttpRequest) -> AlmideString { req.body.clone() }
 
 pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
@@ -323,7 +326,7 @@ pub fn almide_http_req_set_header(mut req: AlmideHttpRequest, key: &str, value: 
 }
 
 pub fn almide_http_req_set_body(mut req: AlmideHttpRequest, body: &str) -> AlmideHttpRequest {
-    req.body = body.to_string();
+    req.body = body.into();
     req.body_raw = None;
     req
 }
@@ -335,11 +338,11 @@ pub fn almide_http_req_set_body(mut req: AlmideHttpRequest, body: &str) -> Almid
 pub fn almide_http_req_set_body_bytes(mut req: AlmideHttpRequest, body: &Vec<u8>) -> AlmideHttpRequest {
     match std::str::from_utf8(body) {
         Ok(text) => {
-            req.body = text.to_string();
+            req.body = text.into();
             req.body_raw = None;
         }
         Err(_) => {
-            req.body = String::from_utf8_lossy(body).into_owned();
+            req.body = String::from_utf8_lossy(body).into_owned().into();
             req.body_raw = Some(body.clone());
         }
     }
@@ -537,7 +540,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // a division by zero no longer ends the server.
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
-        let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new(), body_raw: None };
+        let req = AlmideHttpRequest { method: method.into(), path: path.into(), body: body.into(), headers, params: Vec::new(), body_raw: None };
         almide_request_hooks(0);
         almide_containment(true);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
