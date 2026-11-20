@@ -66,7 +66,9 @@ one() { # one <leg> <file>
     census="$("$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>&1 | grep -m1 '^CENSUS' || echo -)"
   fi
   if [ "$arc" -eq 0 ]; then
-    "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | grep '^CENSUSFN' > "$W/a.fn" || true
+    "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
+    grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
+    grep '^CENSUSX' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fxrows.tsv" || true
     python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
   fi
   local verdict
@@ -147,3 +149,33 @@ for key in sorted(agg):
     acc = a[1] or 1
     print(f"   {key[0]:8} {key[1]:8} {key[2]:9} {a[0]:6} {a[1]:8} {a[2]:7} {a[3]:9} {a[4]:6} {a[5]:6} {a[6]:10} {a[7]:11} {a[8]:10}  {100 * a[2] / acc:7.1f}%  {100 * (a[2] + a[4] + a[5]) / acc:7.1f}%")
 PY2
+
+python3 - "$OUT/fnrows.tsv" "$OUT/fxrows.tsv" <<'PY3'
+import sys, collections
+klass = {}
+for l in open(sys.argv[1]):
+    r = l.rstrip("\n").split("\t")
+    klass[(r[0], r[1], r[5])] = (r[3], r[4])
+agg = collections.defaultdict(collections.Counter)
+names = collections.defaultdict(collections.Counter)
+for l in open(sys.argv[2]):
+    leg, file, pos, key, n = l.rstrip("\n").split("\t")
+    c, name = klass.get((leg, file, pos), ("runtime", "-"))
+    agg[(leg, c)][key] += int(n)
+    region = key.split("|")[0]
+    agg[(leg, c)]["REGION " + region] += int(n)
+    if c == "stdlib":
+        names[leg][name.split(".")[0] + "." + name.split(".")[-1].split("__")[0]] += int(n)
+print("== the accesses no class takes, by where they sit and what they are (top 25 per class)")
+for key in sorted(agg):
+    tot = sum(v for k, v in agg[key].items() if not k.startswith("REGION "))
+    print(f"   --- {key[0]} / {key[1]}: {tot}")
+    for k, v in sorted(((k, v) for k, v in agg[key].items() if k.startswith("REGION ")), key=lambda x: -x[1]):
+        print(f"       {k:44} {v:8} {100 * v / tot:5.1f}%")
+    for k, v in sorted(((k, v) for k, v in agg[key].items() if not k.startswith("REGION ")), key=lambda x: -x[1])[:25]:
+        print(f"       {k:44} {v:8} {100 * v / tot:5.1f}%")
+for leg in sorted(names):
+    print(f"   --- {leg} / stdlib functions holding the most (top 25)")
+    for k, v in names[leg].most_common(25):
+        print(f"       {k:44} {v:8}")
+PY3

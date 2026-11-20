@@ -92,6 +92,19 @@ fn main() {
         };
         linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_by_function(&bodies, &a, &l)))
     });
+    if census {
+        let linear: std::collections::HashSet<almide_anchor_check::At> = match &lin_cert {
+            None => std::collections::HashSet::new(),
+            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
+                .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect())
+                .unwrap_or_default(),
+        };
+        if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_detail(&bodies, &a, &linear)) {
+            for (func, key, n) in rows {
+                println!("CENSUSX {func} {key} {n}");
+            }
+        }
+    }
     if let Some(Ok(rows)) = &by_function {
         for r in rows {
             println!(

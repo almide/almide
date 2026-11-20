@@ -176,3 +176,101 @@ pub fn census_by_function(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<A
     }
     Ok(out)
 }
+
+/// `pos:lo-hi` tokens of one anchor-file line (`rcarms`, `rcroutines`).
+fn windows(anchors: &str, line: &str) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    for l in anchors.lines() {
+        let Some(rest) = l.strip_prefix(line) else { continue };
+        for tok in rest.split_whitespace() {
+            let Some((p, r)) = tok.split_once(':') else { continue };
+            let Some((lo, hi)) = r.split_once('-') else { continue };
+            if let (Ok(p), Ok(lo), Ok(hi)) = (p.parse(), lo.parse(), hi.parse()) {
+                out.push((p, lo, hi));
+            }
+        }
+    }
+    out
+}
+
+fn load_width(op: &Op<'_>) -> u32 {
+    match op {
+        Op::I32Load8S { .. } | Op::I32Load8U { .. } | Op::I64Load8S { .. } | Op::I64Load8U { .. } => 1,
+        Op::I32Load16S { .. } | Op::I32Load16U { .. } | Op::I64Load16S { .. } | Op::I64Load16U { .. } => 2,
+        Op::I32Load { .. } | Op::F32Load { .. } | Op::I64Load32S { .. } | Op::I64Load32U { .. } => 4,
+        Op::I64Load { .. } | Op::F64Load { .. } => 8,
+        _ => 16,
+    }
+}
+
+/// How an access's address was built, read off its producer.
+fn addr_shape(b: &Body<'_>, k: usize) -> &'static str {
+    let prod = |i: usize, n: usize| b.args.get(i).and_then(|a| a.get(n)).copied().flatten();
+    let Some(p) = prod(k, 0) else { return "unknown" };
+    match &b.ops[p] {
+        Op::LocalGet { .. } | Op::LocalTee { .. } => "local",
+        Op::GlobalGet { .. } => "global",
+        Op::Call { .. } => "call",
+        Op::I32Const { .. } => "const",
+        o if is_load(o) => "loaded",
+        Op::I32Add => {
+            let kind = |n: usize| match prod(p, n).map(|q| &b.ops[q]) {
+                Some(Op::LocalGet { .. } | Op::LocalTee { .. }) => 'l',
+                Some(Op::I32Const { .. }) => 'c',
+                Some(Op::I32Mul | Op::I32Shl) => 'm',
+                Some(Op::I32Add) => 'a',
+                Some(Op::I32WrapI64) => 'w',
+                _ => 'o',
+            };
+            match (kind(0), kind(1)) {
+                ('l', 'c') | ('c', 'l') => "local+const",
+                ('l', 'm') | ('m', 'l') | ('a', 'm') | ('m', 'a') => "base+scaled",
+                ('l', 'l') => "local+local",
+                ('l', 'w') | ('w', 'l') | ('a', 'w') | ('w', 'a') => "base+index",
+                ('a', _) | (_, 'a') => "sum",
+                _ => "add-other",
+            }
+        }
+        _ => "other",
+    }
+}
+
+/// The accesses [`census_by_function`] leaves in no class, by where they sit
+/// (inside an inlined routine's or arm's window, or not), what they are and
+/// how their address was built: `(function, key, count)`.
+pub fn census_detail(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Vec<(usize, String, usize)>, String> {
+    let at = located(anchors)?;
+    let (routines, arms) = (windows(anchors, "rcroutines "), windows(anchors, "rcarms "));
+    let inside = |w: &[(usize, usize, usize)], f: usize, k: usize| w.iter().any(|&(p, lo, hi)| p == f && lo <= k && k <= hi);
+    let mut out: std::collections::BTreeMap<(usize, String), usize> = std::collections::BTreeMap::new();
+    for (func, b) in bodies.iter().enumerate() {
+        for (k, op) in b.ops.iter().enumerate() {
+            let Some(off) = offset(op) else { continue };
+            let here = at.contains(&At { func, op: k });
+            let before_call = b.ops.get(k + 1).is_some_and(|o| matches!(o, Op::Call { .. })) && at.contains(&At { func, op: k + 1 });
+            let header = off < 12 && b.args[k].first().copied().flatten().is_some_and(|p| matches!(b.ops[p], Op::LocalGet { .. }));
+            if here || before_call || linear.contains(&At { func, op: k }) || header {
+                continue;
+            }
+            let region = if inside(&routines, func, k) {
+                "routine"
+            } else if inside(&arms, func, k) {
+                "arm"
+            } else {
+                "plain"
+            };
+            let (kind, width) = match store_width(op) {
+                Some((w, _)) => ("store", w),
+                None => ("load", load_width(op)),
+            };
+            let offc = match off {
+                0 => "0",
+                1..=11 => "hdr",
+                12 => "12",
+                _ => ">12",
+            };
+            *out.entry((func, format!("{region}|{kind}{width}|off{offc}|{}", addr_shape(b, k)))).or_insert(0) += 1;
+        }
+    }
+    Ok(out.into_iter().map(|((f, key), n)| (f, key, n)).collect())
+}
