@@ -1595,6 +1595,18 @@ impl Checker {
         self.call_fn_typed_local(name, &local, arg_tys)
     }
 
+    /// A pipe stage naming a callee by a bare identifier: through a Fn-typed
+    /// local when one is in scope ([`Self::pipe_through_fn_typed_local`]),
+    /// otherwise the named fn.
+    fn pipe_named_call(&mut self, callee: &mut ast::Expr, callee_id: ast::ExprId, name: &str, arg_tys: &[Ty]) -> Ty {
+        self.note_value_callee(callee_id, name);
+        self.check_effect_alias_call(name);
+        match self.pipe_through_fn_typed_local(callee, name, arg_tys) {
+            Some(ret) => ret,
+            None => self.check_named_call(name, arg_tys),
+        }
+    }
+
     fn infer_pipe_direct(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         // ADR-0006 D1 (#1108 Phase 2a): the pipe path bypasses `infer_call`,
         // so the fallible-callback normalization runs here too
@@ -1716,13 +1728,8 @@ impl Checker {
                 let callee_id = callee.id;
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => {
-                        self.note_value_callee(callee_id, name);
-                        self.check_effect_alias_call(name);
                         let name = name.clone();
-                        if let Some(ret) = self.pipe_through_fn_typed_local(callee, &name, &all_arg_tys) {
-                            return ret;
-                        }
-                        self.check_named_call(&name, &all_arg_tys)
+                        self.pipe_named_call(callee, callee_id, &name, &all_arg_tys)
                     }
                     ExprKind::Member { object, field, .. } if self.local_shadows_module(object) => {
                         let written: Vec<ast::Expr> = std::iter::once((**left).clone()).chain(args.iter().cloned()).collect();
@@ -1748,15 +1755,9 @@ impl Checker {
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
             ExprKind::Ident { name, .. } => {
-                self.note_value_callee(right_id, name);
-                self.check_effect_alias_call(name);
-                let all_arg_tys = vec![left_ty];
-                self.arg_spans = vec![left_span];
                 let name = name.clone();
-                if let Some(ret) = self.pipe_through_fn_typed_local(right, &name, &all_arg_tys) {
-                    return ret;
-                }
-                self.check_named_call(&name, &all_arg_tys)
+                self.arg_spans = vec![left_span];
+                self.pipe_named_call(right, right_id, &name, &[left_ty])
             }
             // `xs |> list.len` with a local `list` (#4254): the written call
             // `list.len(xs)`, which goes THROUGH the local (#2345 / #2348).
