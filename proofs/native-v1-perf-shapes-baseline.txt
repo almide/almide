@@ -10,6 +10,9 @@
 #   debd04a515) have no perf program and no proof of deadness yet; #4799 stays
 #   open until they are covered or proven dead and the rows are back at
 #   10 / 2 / 6 or lower. Every other row is at or below its earlier value.
+# History: 2026-11-20 (#4787): the key-type render (render_native_key_encode.rs)
+#   lands with no new row: record_key_sets.almd takes its paths, and its
+#   recursive variant lowers enum_field_boxed {closure#0}::{closure#0} 6 -> 1.
 crates/almide-mir/src/render_native.rs	<almide_mir::render_native::NTy>::is_stringy	1
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::as_str_arg	7
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::render_items	29
@@ -256,7 +259,7 @@ crates/almide-mir/src/render_native_order.rs	<almide_mir::render_native_rec::Der
 crates/almide-mir/src/render_native_order.rs	<almide_mir::render_native_rec::Derive>::structural_order_decl::{closure#0}::{closure#0}	2
 crates/almide-mir/src/render_native_order.rs	almide_mir::render_native_rec::native_order_safe::kind	12
 crates/almide-mir/src/render_native_rec.rs	almide_mir::render_native_rec::bind_type_params	6
-crates/almide-mir/src/render_native_rec.rs	almide_mir::render_native_rec::enum_field_boxed::{closure#0}::{closure#0}	6
+crates/almide-mir/src/render_native_rec.rs	almide_mir::render_native_rec::enum_field_boxed::{closure#0}::{closure#0}	1
 crates/almide-mir/src/render_native_rec.rs	almide_mir::render_native_rec::holds_no_closure::go	4
 crates/almide-mir/src/render_native_rec.rs	almide_mir::render_native_rec::holds_no_closure::go::{closure#1}	2
 crates/almide-mir/src/render_native_rec_b.rs	<almide_mir::render_native_rec::Derive>::kind_head	1

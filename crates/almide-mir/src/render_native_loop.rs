@@ -97,6 +97,9 @@ fn render_fn(
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
         // #4620: the allocator policy, as the standard codegen's `main`.
         out.push_str(almide_codegen::main_alloc_prelude_text());
+        // #4787: the generated key types register here (the marker becomes
+        // the call, or nothing, once every generated type is known).
+        out.push_str(crate::render_native_rec::KEY_TYPES_MARKER);
         line!("almide_stack_guard_install();");
         line!("let _almide_host_exit = AlmideHostExitGuard;");
     }

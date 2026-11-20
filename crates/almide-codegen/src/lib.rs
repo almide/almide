@@ -836,6 +836,8 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     ctx.repr_c = options.repr_c;
     ctx.trace = options.trace;
     let user_code = walker::render_program(&ctx, program);
+    // #4787: the key bytes of the program's Set element / Map key types.
+    let user_code = walker::key_encode::place(user_code, program, &ctx);
 
     // Prepend runtime preamble
     let mut output = String::new();

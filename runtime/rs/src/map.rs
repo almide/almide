@@ -144,7 +144,7 @@ fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
     if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
         return xs.as_slice().almide_key_hash();
     }
-    almide_map_key_hash_sized_int(a)
+    almide_map_key_hash_sized_int(a).or_else(|| almide_map_key_registered(a).map(|b| almide_rt_map_hash_bytes(&b)))
 }
 
 fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
@@ -254,7 +254,107 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
     if let Some(x) = a.downcast_ref::<u16>() { return Some(x.to_le_bytes().to_vec()); }
     if let Some(x) = a.downcast_ref::<u8>() { return Some(vec![*x]); }
     if let Some(s) = a.downcast_ref::<String>() { return Some(s.as_bytes().to_vec()); }
-    None
+    almide_map_key_registered(a)
+}
+
+// ── Registered key types (#4787) ─────────────────────────────────────────────
+// A generated record, tuple or variant type whose equality is its fields'
+// exact equality has canonical bytes: the program registers it at start-up
+// (`almide_map_register_key`), and a Set or Map of it takes the hash lane
+// and the ordered fallback like an Int or String key. Before, every such key
+// stayed on the linear scan, so building a set of n distinct records was
+// O(n^2). A type nobody registers keeps the linear lane — decided per TYPE,
+// never per value, as above. The bytes are one-to-one under the type's own
+// `==`: each field in declaration order, a String or list length-prefixed, a
+// variant's case index first.
+
+/// Writes the canonical key bytes of a value (#4787). Implemented for the
+/// scalar and runtime types a registered key's fields can hold; the generated
+/// program implements it for its own types, field by field.
+pub trait AlmideKeyEncode {
+    fn almide_key_encode(&self, out: &mut Vec<u8>);
+}
+impl AlmideKeyEncode for i64 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i32 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i16 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for i8 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u64 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u32 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u16 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
+impl AlmideKeyEncode for u8 { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.push(*self); } }
+impl AlmideKeyEncode for bool { fn almide_key_encode(&self, out: &mut Vec<u8>) { out.push(*self as u8); } }
+impl AlmideKeyEncode for AlmideString {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&(self.len() as u64).to_le_bytes());
+        out.extend_from_slice(self.as_bytes());
+    }
+}
+impl<T: AlmideKeyEncode> AlmideKeyEncode for Vec<T> {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&(self.len() as u64).to_le_bytes());
+        for x in self { x.almide_key_encode(out); }
+    }
+}
+impl<T: AlmideKeyEncode> AlmideKeyEncode for Option<T> {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+        match self {
+            None => out.push(0),
+            Some(x) => { out.push(1); x.almide_key_encode(out); }
+        }
+    }
+}
+impl<T: AlmideKeyEncode, E: AlmideKeyEncode> AlmideKeyEncode for Result<T, E> {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+        match self {
+            Ok(x) => { out.push(0); x.almide_key_encode(out); }
+            Err(e) => { out.push(1); e.almide_key_encode(out); }
+        }
+    }
+}
+impl<A: AlmideKeyEncode, B: AlmideKeyEncode> AlmideKeyEncode for (A, B) {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); }
+}
+impl<A: AlmideKeyEncode, B: AlmideKeyEncode, C: AlmideKeyEncode> AlmideKeyEncode for (A, B, C) {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) { self.0.almide_key_encode(out); self.1.almide_key_encode(out); self.2.almide_key_encode(out); }
+}
+impl<A: AlmideKeyEncode, B: AlmideKeyEncode, C: AlmideKeyEncode, D: AlmideKeyEncode> AlmideKeyEncode for (A, B, C, D) {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) {
+        self.0.almide_key_encode(out); self.1.almide_key_encode(out); self.2.almide_key_encode(out); self.3.almide_key_encode(out);
+    }
+}
+impl<T: AlmideKeyEncode + ?Sized> AlmideKeyEncode for Box<T> {
+    fn almide_key_encode(&self, out: &mut Vec<u8>) { (**self).almide_key_encode(out); }
+}
+
+/// The registered key encoders, by type: written at start-up, read on every
+/// hash of a key no fixed lane above answers.
+static ALMIDE_KEY_ENCODERS: std::sync::RwLock<Vec<(std::any::TypeId, fn(&dyn std::any::Any, &mut Vec<u8>) -> bool)>> =
+    std::sync::RwLock::new(Vec::new());
+
+fn almide_map_key_encode_as<T: AlmideKeyEncode + 'static>(a: &dyn std::any::Any, out: &mut Vec<u8>) -> bool {
+    match a.downcast_ref::<T>() {
+        Some(x) => { x.almide_key_encode(out); true }
+        None => false,
+    }
+}
+
+/// Registers `T` as a hashable key type (#4787). Idempotent. Not an Almide
+/// operation: only the render's own `almide_register_key_types` calls it,
+/// always with its type spelled, so it sits outside the `almide_rt_*` ops.
+pub fn almide_map_register_key<T: AlmideKeyEncode + 'static>() {
+    let id = std::any::TypeId::of::<T>();
+    let mut reg = ALMIDE_KEY_ENCODERS.write().unwrap_or_else(|e| e.into_inner());
+    if !reg.iter().any(|(t, _)| *t == id) {
+        reg.push((id, almide_map_key_encode_as::<T>));
+    }
+}
+
+/// The canonical bytes of a key of a registered type, else `None`.
+fn almide_map_key_registered(a: &dyn std::any::Any) -> Option<Vec<u8>> {
+    let id = a.type_id();
+    let f = ALMIDE_KEY_ENCODERS.read().unwrap_or_else(|e| e.into_inner()).iter().find(|(t, _)| *t == id)?.1;
+    let mut out = Vec::new();
+    f(a, &mut out).then_some(out)
 }
 
 /// The least probe distance at which an insert marks its index flooded

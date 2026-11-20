@@ -7,6 +7,7 @@
 //! Nanopass passes (Layer 2) which annotate the IR before the walker runs.
 
 mod declarations;
+pub(crate) mod key_encode;
 mod expressions;
 pub mod helpers;
 pub(crate) mod runtime_owned;
@@ -730,9 +731,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, ret_ty: &Ty, is_rust_
         })
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", {});\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines, main_err_message(ctx, ret_ty))
+        format!("{}\n\nfn main() {{\n{}{}{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", {});\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, key_encode::KEY_TYPES_MARKER, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines, main_err_message(ctx, ret_ty))
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_ALLOC_PRELUDE, key_encode::KEY_TYPES_MARKER, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }

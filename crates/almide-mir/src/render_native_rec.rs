@@ -665,6 +665,7 @@ pub(crate) fn runtime_default_impls() -> String {
 }
 
 include!("render_native_defs.rs");
+include!("render_native_key_encode.rs");
 include!("render_native_deep_drop.rs");
 
 /// The table key of a tuple type (its spelled form).
