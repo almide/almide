@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 /// The marking window is a process-wide switch: while one test marks, every
 /// clone in the binary clones its elements once more. A test that counts
-/// element clones holds this lock, as the marking test does, so the two
+/// element clones holds this lock, as every test that marks does, so they
 /// never overlap.
 static MARKING_WINDOW: Mutex<()> = Mutex::new(());
 
@@ -207,6 +207,7 @@ fn marking_a_list_marks_the_strings_it_holds() {
 
 #[test]
 fn owners_on_several_threads_drop_the_block_once() {
+    let _window = MARKING_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
     let xs: AlmideList<AlmideStr> = (0..64).map(|i| AlmideStr::from(format!("item {i}").as_str())).collect();
     almide_str_mark_reachable(&xs);
     std::thread::scope(|scope| {
