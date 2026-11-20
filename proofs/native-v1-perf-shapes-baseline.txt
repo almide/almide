@@ -16,9 +16,7 @@ crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::buil
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::build_enum_slot::{closure#4}	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::enum_read	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>	2
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#5}	2
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#5}::{closure#0}	16
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#7}	1
+crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#5}::{closure#0}	2
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#8}::{closure#1}	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>	6
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>::{closure#5}	2
@@ -167,7 +165,6 @@ crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::indirect_env::{closure#0}	1
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::kind_code	2
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::param_spelling	4
-crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::push_typed_dispatch_tables	1
 crates/almide-mir/src/render_native_closure.rs	almide_mir::render_native_closure::render_typed_call_indirect::{closure#0}	1
 crates/almide-mir/src/render_native_deep_drop.rs	almide_mir::render_native_rec::deep_edge	1
 crates/almide-mir/src/render_native_defaults.rs	almide_mir::render_native_rec::has_default::check	3
@@ -192,7 +189,7 @@ crates/almide-mir/src/render_native_eq.rs	<almide_mir::render_native_rec::Derive
 crates/almide-mir/src/render_native_eq.rs	<almide_mir::render_native_rec::Derive>::source_equalities::{closure#0}	1
 crates/almide-mir/src/render_native_eq.rs	almide_mir::render_native_rec::compares	1
 crates/almide-mir/src/render_native_eq.rs	almide_mir::render_native_rec::field_eq_expr	4
-crates/almide-mir/src/render_native_eq.rs	almide_mir::render_native_rec::source_comparison_agrees	6
+crates/almide-mir/src/render_native_eq.rs	almide_mir::render_native_rec::source_comparison_agrees	5
 crates/almide-mir/src/render_native_eq.rs	almide_mir::render_native_rec::source_comparison_agrees::{closure#1}::{closure#0}	2
 crates/almide-mir/src/render_native_fold_loops.rs	almide_mir::render_native_fold_loops::rewrite_at	8
 crates/almide-mir/src/render_native_fold_loops.rs	almide_mir::render_native_fold_loops::rewrite_at::{closure#2}	6
@@ -301,7 +298,7 @@ crates/almide-mir/src/render_native_streams.rs	almide_mir::render_native_streams
 crates/almide-mir/src/render_native_streams.rs	almide_mir::render_native_streams::loop_head	1
 crates/almide-mir/src/render_native_streams.rs	almide_mir::render_native_streams::render	2
 crates/almide-mir/src/render_native_streams.rs	almide_mir::render_native_streams::stream_at	1
-crates/almide-mir/src/render_native_tail.rs	almide_mir::render_native::finish_native_fn	18
+crates/almide-mir/src/render_native_tail.rs	almide_mir::render_native::finish_native_fn	12
 crates/almide-mir/src/render_native_tail.rs	almide_mir::render_native::narrow_abi_wrapper	1
 crates/almide-mir/src/render_native_tail.rs	almide_mir::render_native::narrow_abi_wrapper::{closure#1}	1
 crates/almide-mir/src/render_native_tail.rs	almide_mir::render_native::narrow_abi_wrapper::{closure#1}::{closure#0}	1

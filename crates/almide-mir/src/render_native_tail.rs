@@ -74,21 +74,19 @@ fn finish_native_fn(
     let ret_nty = if is_main { None } else { ret_override.or_else(|| func.ret.map(|v| tys[&v])) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
+    // Every owned return type a native fn spells (`owned_ty`) has a Default,
+    // and a Result carrier's Ok payload does, so one spelling serves each
+    // kind; only a record without a Default and a Never return cannot have one.
     if out.contains(CUT_RET_MARKER) {
         let cut_ret = match ret_nty {
             Some(NTy::Never) => return Err(wall("native: a strict budget cut cannot fabricate a Never return")),
             None => "return;",
-            Some(NTy::I64) => "return 0;",
-            Some(NTy::F64 | NTy::F32) => "return 0.0;",
-            Some(NTy::Bool) => "return false;",
-            Some(NTy::Str | NTy::StrRef) => "return AlmideString::new();",
-            Some(NTy::Vec | NTy::VecRef) => "return Vec::new();",
-            Some(NTy::Res) => "return Ok(0);",
-            Some(NTy::VecStr | NTy::VecStrRef) => "return Vec::new();",
             Some(t @ (NTy::Rec(_) | NTy::RecRef(_))) if !crate::render_native_rec::has_default(t) => "unreachable!(\"strict cut\");",
-            Some(NTy::Rec(_) | NTy::RecRef(_)) => "return Default::default();",
-            Some(NTy::Opt) => "return None;",
-            Some(NTy::ResStr) => "return Ok(AlmideString::new());",
+            Some(NTy::Res | NTy::ResStr) => "return Ok(Default::default());",
+            Some(
+                NTy::I64 | NTy::F64 | NTy::F32 | NTy::Bool | NTy::Str | NTy::StrRef | NTy::Vec | NTy::VecRef
+                | NTy::VecStr | NTy::VecStrRef | NTy::Rec(_) | NTy::RecRef(_) | NTy::Opt,
+            ) => "return Default::default();",
         };
         out = out.replace(CUT_RET_MARKER, cut_ret);
     }

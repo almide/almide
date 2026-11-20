@@ -1,0 +1,24 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4799): a
+// Set[Bool] and a Set[Float] built, queried and mapped inside a loop, through
+// a fn that takes and returns the set and set callbacks over the elements.
+// It takes the native render's real bool / f64 set element paths (#4795):
+// the lane converted at the set boundary and in each set callback.
+fn flip_all(s: Set[Bool]) -> Set[Bool] = set.map(s, (b) => not b)
+
+fn scaled(s: Set[Float], k: Float) -> Set[Float] = set.map(s, (x) => x * k)
+
+fn main() -> Unit = {
+  let n = int.parse("400") ?? 4
+  var acc = 0
+  var r = 0
+  while r < n {
+    let bs: Set[Bool] = set.from_list([r % 2 == 0, r % 3 == 0])
+    let fs: Set[Float] = set.from_list(list.range(0, 40) |> list.map((i) => float.from(i + r % 7) * 0.5))
+    acc = acc + set.len(flip_all(bs)) + set.count(bs, (b) => b)
+    acc = acc + set.count(scaled(fs, 2.0), (x) => x > 10.0)
+    if set.contains(fs, 1.5) then acc = acc + 1 else ()
+    if set.any(bs, (b) => b) then acc = acc + 1 else ()
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}
