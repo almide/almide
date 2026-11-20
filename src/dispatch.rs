@@ -170,6 +170,22 @@ fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Ve
     }
 }
 
+/// #4885: `--profile` / `--allow` are `almide check` flags. `run` does not
+/// apply the profile, so it refuses them instead of running the program
+/// unprofiled (they used to reach the program as its arguments, exit 0).
+fn refuse_check_profile_on_run(profile: Option<&str>, allow: &[String]) {
+    let flag = match (profile, allow.first()) {
+        (Some(p), _) => format!("--profile {p}"),
+        (None, Some(a)) => format!("--allow {a}"),
+        (None, None) => return,
+    };
+    eprintln!(
+        "error: `almide run` does not apply `{flag}`: it is an `almide check` flag. \
+         Check the program first (`almide check <file> {flag}`); to pass it to the program as an argument, put it after `--`"
+    );
+    std::process::exit(1);
+}
+
 /// #4129: `--profile critical` judges the program as written, so an inherited
 /// switch that changes what is compiled or which check runs is refused, not
 /// ignored — `--allow-switch` does not lift it.
@@ -932,8 +948,10 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
     }
     match command {
         Commands::Init { json: _ } => cli::cmd_init(),
-        Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, program_args } =>
-            dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args }),
+        Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, profile, allow, program_args } => {
+            refuse_check_profile_on_run(profile.as_deref(), &allow);
+            dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args })
+        }
         Commands::Bench { file, runs, target, program_args, json: _, locked: _ } => {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);

@@ -1006,17 +1006,36 @@ fn novel_a_decoded_type_is_judged_by_its_own_declaration_not_its_name() {
                 let tr = tree(&manifest(""), &[("src/main.almd", main), (format!("src/{m}.almd").as_str(), module)]);
                 let o = inside(&tr, &["check", "{main}"]);
                 let what = format!("{how} in the entry: entry {root_p}, module {mod_p}");
-                // Remaining part of #4884: the checker half reads an ENTRY
-                // type's protocols under its bare key, which a module's
-                // same-named type also registers (registration_decls.rs
-                // protocol_keys), so the entry's `Decode` type is still read
-                // as `Codec` there. Over-refusal only; the row says so.
-                // The flow half also still reads the entry's bare `T.decode`
-                // as the module's type in this pairing (observed 2026-11-20).
-                if root_p == "Decode" && mod_p == "Codec" {
-                    continue;
-                }
                 if root_p == "Codec" { refused(&what, &o, &["E110"]) } else { admitted(&what, &o) }
+            }
+        }
+    }
+}
+
+/// #4886: a derived method was keyed only by the bare type name, so a
+/// module's `User.decode` (registered first) answered the entry's own
+/// `User.decode(..)` call: the entry's value was typed as the module's
+/// record. Each program now reads its own type's derived methods: the entry
+/// by the bare key, a module by its canonical `module.User` key, and two
+/// modules' same-named types do not share one. Checked, then run on both
+/// targets, the output naming whose fields and defaults were used.
+#[test]
+fn novel_a_derived_method_belongs_to_its_own_type_not_a_same_named_one() {
+    let (m, n, t) = (novel::module(), novel::ident("other"), novel::ident("T"));
+    let t = format!("{}{}", t[..1].to_uppercase(), &t[1..]);
+    for mod_p in ["Decode", "Codec"] {
+        let main = fill("import json\nimport self.@M@\nimport self.@N@\n\ntype @T@: Codec = { name: String, age: Int = 7 }\n\neffect fn main() -> Unit = {\n  let u = @T@.decode(json.parse(\"{\\\"name\\\": \\\"x\\\"}\")!)!\n  println(\"entry ${u.name} ${u.age}\")\n  println(json.stringify(u.encode()))\n  println(@M@.show(@M@.load()!))\n  println(@N@.show(@N@.load()!))\n}\n", &[("@T@", &t), ("@M@", &m), ("@N@", &n)]);
+        let module = fill(&format!("import json\n\ntype @T@: {mod_p} = {{ title: String, admin: Bool = true }}\n\neffect fn load() -> @T@ = @T@.decode(json.parse(\"{{\\\"title\\\": \\\"m\\\"}}\")!)!\n\nfn show(u: @T@) -> String = \"module ${{u.title}} ${{u.admin}}\"\n"), &[("@T@", &t)]);
+        let other = fill("import json\n\ntype @T@: Codec = { size: Int, tag: String = \"o\" }\n\neffect fn load() -> @T@ = @T@.decode(json.parse(\"{\\\"size\\\": 3}\")!)!\n\nfn show(u: @T@) -> String = \"other ${u.size} ${u.tag} ${json.stringify(u.encode())}\"\n", &[("@T@", &t)]);
+        let tr = tree(&manifest(""), &[("src/main.almd", main), (format!("src/{m}.almd").as_str(), module), (format!("src/{n}.almd").as_str(), other)]);
+        let what = format!("entry {t}: Codec, module {t}: {mod_p}, other module {t}: Codec");
+        admitted(&format!("{what}: check"), &inside(&tr, &["check", "{main}"]));
+        for target in ["rust", "wasm"] {
+            let o = inside(&tr, &["run", "{main}", "--target", target]);
+            admitted(&format!("{what}: run --target {target}"), &o);
+            let out = String::from_utf8_lossy(&o.stdout).to_string();
+            for want in ["entry x 7", "\"age\":7", "module m true", "other 3 o", "\"size\":3"] {
+                assert!(out.contains(want), "{what}: run --target {target}: no `{want}` in:\n{out}");
             }
         }
     }

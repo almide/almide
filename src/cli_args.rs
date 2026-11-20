@@ -186,6 +186,14 @@ pub(crate) enum Commands {
         /// machine) next to the measured wall clock on this host.
         #[arg(long)]
         time_report: bool,
+        /// `almide check`'s profile flags, parsed here only to be refused
+        /// (#4885): without them `run app.almd --profile critical` handed the
+        /// flag to the program and ran it unprofiled. A program argument
+        /// spelled the same goes after `--`.
+        #[arg(long, hide = true)]
+        profile: Option<String>,
+        #[arg(long, hide = true)]
+        allow: Vec<String>,
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.

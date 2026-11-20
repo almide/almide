@@ -528,6 +528,19 @@ impl Checker {
         // still win: they are registered under `{prefix}.{name}` as well, and
         // that is what `declares_it_itself` asks about. For the entry program
         // (no prefix) the bare key IS its own, so nothing changes there.
+        // #4886: the same for a module's own DERIVED `Type.method`: its bare
+        // key is shared with every same-named type (the entry program's
+        // holds it), its canonical `{prefix}.Type.method` is the module's own.
+        if let (Some(p), Some((ty, _))) = (&self.current_module_prefix, name.split_once('.'))
+            && almide_base::names::is_type_side_name(ty)
+        {
+            let own = sym(&format!("{}.{}", p, name));
+            if !self.env.explicit_convention_fns.contains(&own)
+                && let Some(sig) = self.env.functions.get(&own)
+            {
+                return (Some(sig.clone()), None);
+            }
+        }
         let declares_it_itself = match (&self.current_module_prefix, name.contains('.')) {
             (Some(p), false) => self.env.functions.contains_key(&sym(&format!("{}.{}", p, name))),
             _ => true,

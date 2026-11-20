@@ -338,7 +338,10 @@ pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Opti
         if let Some((_, bare)) = type_name.rsplit_once('.') {
             let qualified = format!("{}.{}", type_name, method);
             let suffix = format!(".{}.{}", bare, method);
+            // Only an EXPLICIT method links under the qualified spelling; a
+            // derived one's canonical key (#4886) is a checker key only.
             if env.functions.contains_key(&sym(&qualified))
+                && env.explicit_convention_fns.contains(&sym(&qualified))
                 && env
                     .functions
                     .keys()
@@ -618,10 +621,28 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     // the qualified key here instead would change the name LOWERING emits, and
     // the backend resolves a derived method by its bare name plus
     // `module_origin` (#1087).
+    //
+    // #4886: that bare key is one slot shared by every type of the bare name.
+    // Modules register before the entry program, so a module's `User.decode`
+    // held the slot and the entry's own `User.decode(..)` was typed as the
+    // module's `acct.User`. So a module's type ALSO keys its derived methods
+    // under its canonical name (`acct.User.decode`), which `convention_fn_key`
+    // tries first and a module-local `User.decode(..)` call reads
+    // (`resolve_call_sig_and_import`). The entry program's own registration
+    // takes the bare slot back from a module's DERIVED sig. An explicit `fn
+    // User.decode` keeps the slot, as before, and so does a stdlib-owned
+    // name's (#1828: its bare slot is the bundled module's).
+    let entry_own = prefix.is_none()
+        && env.alias_owner_module.is_none()
+        && almide_lang::stdlib_info::stdlib_owned_type_owner(type_name).is_none();
     let register = |env: &mut TypeEnv, method: &str, sig: FnSig| {
-        let key = format!("{}.{}", type_name, method);
-        if !env.functions.contains_key(&sym(&key)) {
-            env.functions.insert(sym(&key), sig);
+        let key = sym(&format!("{}.{}", type_name, method));
+        let takes_back = entry_own && !env.explicit_convention_fns.contains(&key);
+        if takes_back || !env.functions.contains_key(&key) {
+            env.functions.insert(key, sig.clone());
+        }
+        if canonical != type_name {
+            env.functions.entry(sym(&format!("{}.{}", canonical, method))).or_insert(sig);
         }
     };
     // C-435: the codec directions come from the protocol table — `Encode`
