@@ -152,6 +152,7 @@ spec/wasm_cross/availability_pure_batch.almd
 spec/wasm_cross/bang_in_record_literal_field.almd
 spec/wasm_cross/base64_decode_canonical.almd
 spec/wasm_cross/base64_encode.almd
+spec/wasm_cross/bigint_protocol_order.almd
 spec/wasm_cross/bigint_text_and_pow_limits.almd
 spec/wasm_cross/binary_operators.almd
 spec/wasm_cross/binary_search_duplicate_keys.almd
@@ -595,6 +596,7 @@ spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_field_in_place.almd
+spec/wasm_cross/list_push_field_reads_root.almd
 spec/wasm_cross/list_push_on_record_field.almd
 spec/wasm_cross/list_range_step_extremes.almd
 spec/wasm_cross/list_reduce_fused_fold_release.almd
