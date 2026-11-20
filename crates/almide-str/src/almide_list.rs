@@ -267,6 +267,81 @@ impl<T> AlmideList<T> {
         out
     }
 
+    /// Room for `extra` more elements in a unique block (a shared block is copied first).
+    pub fn reserve(&mut self, extra: usize) where T: Clone {
+        self.reserve_unique(extra);
+    }
+
+    /// The elements for writing, as `Vec::as_mut_slice` (ADR-0037 D2: a shared block is copied first).
+    pub fn as_mut_slice(&mut self) -> &mut [T] where T: Clone {
+        self.make_mut()
+    }
+
+    /// Inserts `x` at `i`, shifting the rest right. Panics when `i > len`, as `Vec::insert`.
+    pub fn insert(&mut self, i: usize, x: T) where T: Clone {
+        let len = self.len();
+        assert!(i <= len, "insertion index (is {i}) should be <= len (is {len})");
+        self.reserve_unique(1);
+        // SAFETY: the block is unique with room for `len + 1`; `i..len` moves one slot right (overlapping, hence
+        // `copy`), then slot `i` is written. `len` is bumped after the write.
+        unsafe {
+            let p = self.data().add(i);
+            std::ptr::copy(p, p.add(1), len - i);
+            p.write(x);
+            (*self.ptr.as_ptr()).len = len + 1;
+        }
+    }
+
+    /// Removes and returns the element at `i`, shifting the rest left. Panics when `i >= len`, as `Vec::remove`.
+    pub fn remove(&mut self, i: usize) -> T where T: Clone {
+        let len = self.len();
+        assert!(i < len, "removal index (is {i}) should be < len (is {len})");
+        self.reserve_unique(0);
+        // SAFETY: the block is unique; slot `i` is read out, `i + 1..len` moves one slot left, and `len` drops by one,
+        // so every remaining element is initialised exactly once.
+        unsafe {
+            let p = self.data().add(i);
+            let x = p.read();
+            std::ptr::copy(p.add(1), p, len - i - 1);
+            (*self.ptr.as_ptr()).len = len - 1;
+            x
+        }
+    }
+
+    /// The list's elements as a `Vec` for an edit `Vec` already has, then back: moved through when unique.
+    fn edit_as_vec<R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R where T: Clone {
+        let mut v = std::mem::take(self).into_vec();
+        let r = f(&mut v);
+        *self = AlmideList::from(v);
+        r
+    }
+
+    /// Keeps the elements `f` accepts, in order, as `Vec::retain`.
+    pub fn retain(&mut self, f: impl FnMut(&T) -> bool) where T: Clone {
+        self.edit_as_vec(|v| v.retain(f));
+    }
+
+    /// Removes consecutive repeated elements, as `Vec::dedup`.
+    pub fn dedup(&mut self) where T: Clone + PartialEq {
+        self.edit_as_vec(|v| v.dedup());
+    }
+
+    /// Splits the list at `at`, keeping `..at` and returning `at..`, as `Vec::split_off`.
+    pub fn split_off(&mut self, at: usize) -> AlmideList<T> where T: Clone {
+        self.edit_as_vec(|v| AlmideList::from(v.split_off(at)))
+    }
+
+    /// Moves every element of `other` onto the end of this list, as `Vec::append`.
+    pub fn append(&mut self, other: &mut AlmideList<T>) where T: Clone {
+        let moved = std::mem::take(other);
+        self.extend(moved);
+    }
+
+    /// Removes the elements in `range` and returns them, as `Vec::drain` (collected: the list is edited at once).
+    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> std::vec::IntoIter<T> where T: Clone {
+        self.edit_as_vec(|v| v.drain(range).collect::<Vec<T>>().into_iter())
+    }
+
     /// The last owner: drops the elements and frees the block.
     fn free_block(&mut self) {
         debug_assert!(!std::ptr::eq(self.ptr.as_ptr().cast_const(), &ALMIDE_LIST_EMPTY), "the static empty block is never freed");
@@ -322,6 +397,56 @@ impl<T> Deref for AlmideList<T> {
     fn deref(&self) -> &[T] {
         self.as_slice()
     }
+}
+
+/// Writing through the slice copies a shared block first (ADR-0037 D2), so `xs[i] = v`, `xs.sort()` and every
+/// other `&mut [T]` edit is copy-on-write.
+impl<T: Clone> std::ops::DerefMut for AlmideList<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [T] {
+        self.make_mut()
+    }
+}
+
+/// The elements by value: moved out when this handle is the only owner, cloned otherwise.
+impl<T: Clone> IntoIterator for AlmideList<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+
+impl<T: Clone> Extend<T> for AlmideList<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, it: I) {
+        let it = it.into_iter();
+        self.reserve_unique(it.size_hint().0);
+        for x in it {
+            self.push(x);
+        }
+    }
+}
+
+impl<'a, T: Clone + 'a> Extend<&'a T> for AlmideList<T> {
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, it: I) {
+        for x in it {
+            self.push(x.clone());
+        }
+    }
+}
+
+impl<T: Clone> From<AlmideList<T>> for Vec<T> {
+    fn from(l: AlmideList<T>) -> Vec<T> {
+        l.into_vec()
+    }
+}
+
+/// `almide_list![a, b, c]`, `almide_list![]` and `almide_list![x; n]`: the `vec!` forms, building an `AlmideList`.
+#[macro_export]
+macro_rules! almide_list {
+    () => { AlmideList::new() };
+    ($x:expr; $n:expr) => { AlmideList::from(vec![$x; $n]) };
+    ($($x:expr),+ $(,)?) => { AlmideList::from(vec![$($x),+]) };
 }
 
 impl<T> AsRef<[T]> for AlmideList<T> {

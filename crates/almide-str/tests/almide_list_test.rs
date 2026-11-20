@@ -216,3 +216,110 @@ fn owners_on_several_threads_drop_the_block_once() {
     assert_eq!(xs[0].as_str(), "item 0");
     assert!(xs.is_unique());
 }
+
+/// Stage 2a (ADR-0037): the `Vec` surface the runtime and the renderers use —
+/// insert, remove, retain, dedup, split_off, append, drain, extend, owned
+/// iteration and slice writes — agrees with `Vec` on a run of edits, and every
+/// write to a shared block leaves the other owners' view unchanged.
+#[test]
+fn the_vec_surface_agrees_with_vec_and_copies_on_write() {
+    use almide_str::almide_list;
+    let mut model: Vec<i64> = Vec::new();
+    let mut list: AlmideList<i64> = almide_list![];
+    let mut held: Vec<(AlmideList<i64>, Vec<i64>)> = Vec::new();
+    let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
+    for _ in 0..600 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let v = seed as i64 % 50;
+        let at = |n: usize| (seed as usize / 13) % (n + 1);
+        match seed % 11 {
+            0 | 1 => {
+                let i = at(model.len());
+                model.insert(i, v);
+                list.insert(i, v);
+            }
+            2 if !model.is_empty() => {
+                let i = at(model.len() - 1);
+                assert_eq!(list.remove(i), model.remove(i));
+            }
+            3 => {
+                model.retain(|x| x % 7 != 0);
+                list.retain(|x| x % 7 != 0);
+            }
+            4 => {
+                model.dedup();
+                list.dedup();
+            }
+            5 => {
+                let i = at(model.len());
+                let (mt, lt) = (model.split_off(i), list.split_off(i));
+                assert_eq!(&*lt, mt.as_slice());
+                let mut back = lt;
+                list.append(&mut back);
+                model.extend(mt);
+                assert!(back.is_empty());
+            }
+            6 => {
+                let i = at(model.len());
+                let d: Vec<i64> = list.drain(i..).collect();
+                assert_eq!(d, model.drain(i..).collect::<Vec<_>>());
+            }
+            7 => {
+                list.extend([v, v + 1]);
+                model.extend([v, v + 1]);
+                list.extend(&[v]);
+                model.push(v);
+            }
+            8 if !model.is_empty() => {
+                let i = at(model.len() - 1);
+                list[i] = -v;
+                model[i] = -v;
+                list.sort();
+                model.sort();
+            }
+            9 => held.push((list.clone(), model.clone())),
+            _ => {
+                let owned: Vec<i64> = list.clone().into_iter().collect();
+                assert_eq!(owned, model);
+            }
+        }
+        assert_eq!(&*list, model.as_slice());
+    }
+    for (l, m) in &held {
+        assert_eq!(&**l, m.as_slice(), "an earlier owner's view never changes");
+    }
+    assert_eq!(&*almide_list![1, 2, 3], &[1, 2, 3]);
+    assert_eq!(&*almide_list![7i64; 4], &[7, 7, 7, 7]);
+}
+
+/// Owned iteration moves the elements out of a unique block and clones them out
+/// of a shared one; slice writes through a shared block copy it once.
+#[test]
+fn owned_iteration_and_slice_writes_count_their_copies() {
+    struct Counted(Rc<Cell<i64>>);
+    impl Clone for Counted {
+        fn clone(&self) -> Self {
+            self.0.set(self.0.get() + 1);
+            Counted(self.0.clone())
+        }
+    }
+    let clones = Rc::new(Cell::new(0));
+    let mut a: AlmideList<Counted> = AlmideList::new();
+    for _ in 0..4 {
+        a.push(Counted(clones.clone()));
+    }
+    let b = a.clone();
+    assert_eq!(b.into_iter().count(), 4);
+    assert_eq!(clones.get(), 4, "iterating a shared block by value clones each element");
+    assert_eq!(a.clone().into_iter().count(), 4);
+    assert_eq!(clones.get(), 8);
+    let mut c = a.clone();
+    c.swap(0, 3);
+    assert_eq!(clones.get(), 12, "a slice write through a shared block copies it once");
+    c.swap(1, 2);
+    assert_eq!(clones.get(), 12, "the copy is unique: the next write is in place");
+    assert_eq!(a.into_iter().count(), 4);
+    assert_eq!(clones.get(), 12, "iterating the only owner by value moves the elements");
+}
