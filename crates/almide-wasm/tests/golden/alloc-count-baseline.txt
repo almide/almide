@@ -699,6 +699,9 @@
 39	27	315	39	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 92	36	1202	92	spec/wasm_cross/ord_record_variant.almd
 274	140	1970	274	spec/wasm_cross/ord_recursive.almd
+13	8	344	13	spec/wasm_cross/output_line_fan_whole.almd
+71	66	8810	71	spec/wasm_cross/output_line_float.almd
+66	51	1045	66	spec/wasm_cross/output_line_int_bool.almd
 8	3	106	4	spec/wasm_cross/panic_abort_positions.almd
 3	0	34	2	spec/wasm_cross/panic_value_arm.almd
 101	86	592	101	spec/wasm_cross/path_extension_hidden.almd
