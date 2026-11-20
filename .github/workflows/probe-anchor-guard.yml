@@ -1,0 +1,24 @@
+name: Probe — anchor guard tests
+# A one-off run of the anchor checker's own tests on this branch. Not a gate.
+on:
+  push:
+    branches: [probe/anchor-guard]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Anchor checker tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - name: The guard soundness cases
+        run: cargo test -p almide-anchor-check --test guard_soundness --no-fail-fast -- --nocapture --test-threads=1
+      - name: The rest of the checker's tests
+        if: always()
+        run: cargo test -p almide-anchor-check --no-fail-fast
