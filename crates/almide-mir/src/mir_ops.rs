@@ -15,12 +15,12 @@ pub use almide_lang::self_host_registry::self_host_runtime;
 /// inline (no body links it). The one declaration of the name; the lowering,
 /// the native slot passes, the linked-call check and the call-mode witness's
 /// served set read it from here (#4828).
-pub const MG_TAKE: &str = "__mg_take";
+pub(crate) const MG_TAKE: &str = "__mg_take";
 
 /// The compiler-injected accessors: `Op::CallFn` targets the lowering itself
 /// emits and every render serves inline. A callee is admitted by membership
 /// here, never by the shape of its name.
-pub const INJECTED_ACCESSORS: &[&str] = &[MG_TAKE];
+pub(crate) const INJECTED_ACCESSORS: &[&str] = &[MG_TAKE];
 
 /// The names of `Op::CallFn` targets (and generated-drop targets) that resolve
 /// to no `MirFunction` in the program — a call that no linked body answers.
