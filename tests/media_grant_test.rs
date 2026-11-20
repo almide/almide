@@ -118,7 +118,7 @@ fn stdout(o: &Output) -> String {
 
 const RUN: &[&str] = &["run", "src/main.almd", "--target", "wasm"];
 const SVG_DEP: &str = "\n[dependencies]\nsvg = { git = \"https://github.com/almide/svg\", tag = \"v0.1.0\" }\n";
-const SVG_GRANT: &str = "\n[trust]\nmedia = { \"almide/svg\" = [\"image/svg+xml\"] }\n";
+const SVG_GRANT: &str = "\n[trust]\nmedia = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }\n";
 
 #[test]
 fn a_granted_owner_builds_and_serves_its_type() {
@@ -131,7 +131,7 @@ fn a_granted_owner_builds_and_serves_its_type() {
     let listing = stdout(&o);
     assert!(listing.contains("media owners:"), "{listing}");
     assert!(listing.contains("html (stdlib, granted implicitly): text/html, application/xhtml+xml"), "{listing}");
-    assert!(listing.contains("svg (almide/svg): image/svg+xml (granted at"), "{listing}");
+    assert!(listing.contains("svg (github.com/almide/svg): image/svg+xml (granted at"), "{listing}");
 }
 
 #[test]
@@ -143,9 +143,9 @@ fn the_grant_removed_refuses_the_build_naming_the_line_to_add() {
         let err = stderr(&o);
         assert_eq!(o.status.code(), Some(1), "`almide {}`:\n{err}", args.join(" "));
         for needle in [
-            "error[E118]: dependency `svg` (almide/svg) owns `image/svg+xml`, which runs script in a browser",
+            "error[E118]: dependency `svg` (github.com/almide/svg) owns `image/svg+xml`, which runs script in a browser",
             "does not grant it",
-            "media = { \"almide/svg\" = [\"image/svg+xml\"] }",
+            "media = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }",
         ] {
             assert!(err.contains(needle), "missing `{needle}`:\n{err}");
         }
@@ -174,23 +174,23 @@ fn two_granted_owners_of_one_type_are_refused() {
     let h = Hosts::new("duplicate");
     let manifest = "\n[dependencies]\nsvg = { git = \"https://github.com/almide/svg\", tag = \"v0.1.0\" }\n\
                     svgtoo = { git = \"https://github.com/almide/svgtoo\", tag = \"v0.1.0\" }\n\n\
-                    [trust]\nmedia = { \"almide/svg\" = [\"image/svg+xml\"], \"almide/svgtoo\" = [\"image/svg+xml\"] }\n";
+                    [trust]\nmedia = { \"github.com/almide/svg\" = [\"image/svg+xml\"], \"github.com/almide/svgtoo\" = [\"image/svg+xml\"] }\n";
     let dir = h.project("app", manifest, "svg");
     let o = h.almide(&dir, RUN);
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
-    assert!(err.contains("error[E118]: dependency `svgtoo` (almide/svgtoo) owns `image/svg+xml` and dependency `svg` (almide/svg) owns `image/svg+xml`"), "{err}");
+    assert!(err.contains("error[E118]: dependency `svgtoo` (github.com/almide/svgtoo) owns `image/svg+xml` and dependency `svg` (github.com/almide/svg) owns `image/svg+xml`"), "{err}");
 }
 
 #[test]
 fn a_grant_for_a_type_the_package_does_not_declare_is_refused() {
     let h = Hosts::new("overgrant");
-    let manifest = format!("{SVG_DEP}\n[trust]\nmedia = {{ \"almide/svg\" = [\"image/svg+xml\", \"text/html\"] }}\n");
+    let manifest = format!("{SVG_DEP}\n[trust]\nmedia = {{ \"github.com/almide/svg\" = [\"image/svg+xml\", \"text/html\"] }}\n");
     let dir = h.project("app", &manifest, "svg");
     let o = h.almide(&dir, RUN);
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
-    assert!(err.contains("grants `almide/svg` the media type `text/html`, which it does not declare"), "{err}");
+    assert!(err.contains("grants `github.com/almide/svg` the media type `text/html`, which it does not declare"), "{err}");
 }
 
 #[test]
@@ -200,4 +200,15 @@ fn an_owner_of_a_type_that_runs_no_script_needs_no_grant() {
     let o = h.almide(&dir, RUN);
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(stdout(&o), "text/csv\n");
+}
+
+/// #4868: a grant in the old `owner/repo` form (github.com implied) is
+/// refused with the form it is now, never read as a narrower or wider grant.
+#[test]
+fn an_old_owner_repo_grant_key_is_refused_with_its_new_form() {
+    let h = Hosts::new("oldkey");
+    let dir = h.project("app", &format!("{SVG_DEP}\n[trust]\nmedia = {{ \"almide/svg\" = [\"image/svg+xml\"] }}\n"), "svg");
+    let o = h.almide(&dir, &["check", "src/main.almd"]);
+    assert!(!o.status.success(), "an old-form key was read:\n{}", stderr(&o));
+    assert!(stderr(&o).contains("\"github.com/almide/svg\""), "the refusal does not give the new form:\n{}", stderr(&o));
 }

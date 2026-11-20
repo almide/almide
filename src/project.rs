@@ -493,7 +493,7 @@ impl Manifest<'_> {
         let Some(trust) = spanned_entry(&self.spans, "trust") else { return Ok(Vec::new()) };
         let Some(trust) = trust.get_ref().as_table() else { return Ok(Vec::new()) };
         let Some(media) = spanned_entry(trust, "media") else { return Ok(Vec::new()) };
-        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"almide/svg\" = [\"image/svg+xml\"] }`";
+        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }`";
         let table = media.get_ref().as_table().ok_or_else(|| located(path, content, media.span().start, shape))?;
         table
             .iter()
@@ -504,7 +504,9 @@ impl Manifest<'_> {
                     .iter()
                     .map(|i| i.get_ref().as_str().map(str::to_ascii_lowercase).ok_or_else(|| located(path, content, i.span().start, shape)))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(MediaGrant { key: k.get_ref().as_ref().to_ascii_lowercase(), media, line: line_of(content, at) })
+                let key = k.get_ref().as_ref().to_ascii_lowercase();
+                crate::media_grant::check_grant_key(&key).map_err(|e| located(path, content, k.span().start, &e))?;
+                Ok(MediaGrant { key, media, line: line_of(content, at) })
             })
             .collect()
     }

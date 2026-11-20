@@ -421,7 +421,7 @@ depth. Field attributes are only `@skip` /
 `html.raw(s)` for trusted markup). Any other media type is
 `http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
 or for HTML / XML / SVG). SVG comes from a package such as almide/svg, which
-the application grants in `almide.toml`: `[trust]` `media = { "almide/svg" =
+the application grants in `almide.toml`: `[trust]` `media = { "github.com/almide/svg" =
 ["image/svg+xml"] }` (E118 without it). Content-Type is never written by name: `set_header` /
 `with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`
 replace the body and its type together. `http.html` is gone (`almide fix`
