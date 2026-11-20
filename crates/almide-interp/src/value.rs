@@ -437,7 +437,7 @@ pub struct TotalOrder<'a> {
 }
 
 /// See [`TotalOrder::with_records`].
-pub type RecordOrder<'a> = dyn FnMut(&Value, &Value) -> Option<Option<std::cmp::Ordering>> + 'a;
+pub(crate) type RecordOrder<'a> = dyn FnMut(&Value, &Value) -> Option<Option<std::cmp::Ordering>> + 'a;
 
 impl<'a> TotalOrder<'a> {
     pub fn new(tags: &'a VariantTags) -> Self {
@@ -446,7 +446,7 @@ impl<'a> TotalOrder<'a> {
 
     /// The same order, asking `records` first for every record pair it meets,
     /// at the top or nested in a tuple, list, option, result or payload.
-    pub fn with_records(tags: &'a VariantTags, records: &'a mut RecordOrder<'a>) -> Self {
+    pub(crate) fn with_records(tags: &'a VariantTags, records: &'a mut RecordOrder<'a>) -> Self {
         TotalOrder { tags, records: Some(std::cell::RefCell::new(records)) }
     }
 

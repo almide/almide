@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/patterns.rs b/crates/almide-wasm/src/patterns.rs
-index 50f0e4ef9..d288afc22 100644
+index 201ad118f7..65a1b571b3 100644
 --- a/crates/almide-wasm/src/patterns.rs
 +++ b/crates/almide-wasm/src/patterns.rs
-@@ -111,7 +111,7 @@ impl Emitter<'_> {
-                 self.witness_pattern_views(&arm.pattern);
-                 self.lower(g, Some(BOOL))?;
-                 self.witness_verdict_close(split);
--                self.f.instructions().else_().i32_const(0).end();
-+                self.f.instructions().else_().i32_const(1).end();
+@@ -118,7 +118,7 @@ impl Emitter<'_> {
+                 self.witness_verdict_close(split, failed_at);
+                 self.f.instructions().else_();
+                 self.arm_anchor_bind(failed_at);
+-                self.f.instructions().i32_const(0).end();
++                self.f.instructions().i32_const(1).end();
              }
          }
          let bt = match result {
