@@ -13,6 +13,16 @@
 # History: 2026-11-20 (#4787): the key-type render (render_native_key_encode.rs)
 #   lands with no new row: record_key_sets.almd takes its paths, and its
 #   recursive variant lowers enum_field_boxed {closure#0}::{closure#0} 6 -> 1.
+# History: 2026-11-20 (#4799): the three rows the owner ruling of 2026-11-20
+#   recorded above their earlier values are back at or below them.
+#   render_fn_move_op 13 -> 10: rebound_result_field.almd takes the plain
+#   partial move of a field out of a record rebound next (a Result field, no
+#   `Default`). nested_field_take {closure#3} 5 -> 2: mut_param_payload_field.almd
+#   reaches the liveness check of a carrier the callee does not own. The
+#   {closure#4} instance (9) is gone: its arm re-ran the guard's
+#   nested_field_take, and now renders the take the guard found
+#   (`NESTED_TAKE`), so the guard's instance is the only one
+#   (`{closure#3}::{closure#0}`, 2).
 crates/almide-mir/src/render_native.rs	<almide_mir::render_native::NTy>::is_stringy	1
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::as_str_arg	7
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::render_items	29
@@ -26,14 +36,9 @@ crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::buil
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::build_enum_slot::{closure#3}	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::build_enum_slot::{closure#4}	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::enum_read	1
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>	5
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#5}::{closure#0}	2
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}>::{closure#8}::{closure#1}	1
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>	9
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>::{closure#5}	2
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>::{closure#5}::{closure#0}	16
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>::{closure#7}	1
-crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#4}>::{closure#8}::{closure#1}	1
+crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}::{closure#0}>	2
+crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}::{closure#0}>::{closure#5}::{closure#0}	2
+crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::nested_field_take::<almide_mir::render_native::render_fn_move_op::{closure#3}::{closure#0}>::{closure#8}::{closure#1}	1
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::owned_from	5
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::payload_lent::{closure#1}::{closure#0}	2
 crates/almide-mir/src/render_native_addr.rs	almide_mir::render_native_addr::single_concat	6
@@ -223,7 +228,7 @@ crates/almide-mir/src/render_native_interp.rs	almide_mir::render_native_interp::
 crates/almide-mir/src/render_native_list_literal.rs	almide_mir::render_native_addr::list_literal::elem_local	1
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn	6
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_appends::<core::iter::adapters::enumerate::Enumerate<core::slice::iter::Iter<almide_mir::Op>>>::{closure#0}	2
-crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_move_op	13
+crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_move_op	10
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_op::{closure#0}	2
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_step::<core::iter::adapters::enumerate::Enumerate<core::slice::iter::Iter<almide_mir::Op>>>	1
 crates/almide-mir/src/render_native_loop.rs	almide_mir::render_native::render_fn_tier_op	2

@@ -520,6 +520,12 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
     Ok(())
 }
 
+thread_local! {
+    /// The field-of-a-payload take a `Dup` arm's guard found, for the arm to
+    /// render (#4799: computed once, not again in the arm).
+    static NESTED_TAKE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The move-shaped arms of the general op match: a dead handle, a borrow-join
 /// arm, and the copies, error carriers and reassignments that move their
 /// source instead of cloning it. `Ok(false)` = none of them.
@@ -636,11 +642,13 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             if !crate::render_native_move::drill_no_moves()
                 && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_rec::has_default(owned_of_ref(st.tys[src]))
-                && crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
-                    .is_some() =>
+                && NESTED_TAKE.with(|c| {
+                    // Decided once: the arm below renders the take this found.
+                    *c.borrow_mut() = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms);
+                    c.borrow().is_some()
+                }) =>
         {
-            let take = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
-                .expect("a field of a payload");
+            let take = NESTED_TAKE.with(|c| c.borrow_mut().take()).expect("a field of a payload");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
             // A by-value move consumed the carrier: no early release names it.
