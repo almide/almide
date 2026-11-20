@@ -490,6 +490,12 @@ impl WitnessRecorder {
         self.branches.arm_at(&mut self.log, Some(anchor));
     }
 
+    /// #4631: the current arm of the innermost open site is the shipped
+    /// arm the instruction `anchor` names (`Emitter::arm_anchor_here`).
+    pub(crate) fn branch_anchor(&mut self, anchor: u64) {
+        self.branches.anchor(anchor);
+    }
+
     /// The innermost open site joins.
     pub fn branch_close(&mut self) {
         self.branches.close(&mut self.log);
@@ -667,7 +673,9 @@ pub fn path_walk_steps() -> u64 {
     paths::steps()
 }
 
-pub(crate) fn collecting() -> bool {
+/// Are the sinks armed? A module reused from a cache recorded nothing to
+/// judge, so the run cache treats an armed build apart (#4836).
+pub fn collecting() -> bool {
     sink().lock().expect("witness sink").is_some()
 }
 

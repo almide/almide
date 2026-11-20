@@ -120,6 +120,7 @@ impl Emitter<'_> {
     ) -> Result<(), EmitError> {
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
         if let Some((extra, _)) = self.loop_ctl.as_mut() {
             *extra += 1;
         }
@@ -127,12 +128,15 @@ impl Emitter<'_> {
         self.witness_branch_open();
         let arms = (|| {
             self.witness_branch_arm();
+            self.witness_branch_anchor(then_at);
             self.room_proven = self.proven_room(cond, then);
             let then_ok = self.lower_stmt_expr(then);
             self.room_proven = None;
             then_ok?;
             self.f.instructions().else_();
+            let else_at = self.arm_anchor_here();
             self.witness_branch_arm();
+            self.witness_branch_anchor(else_at);
             self.lower_stmt_expr(else_)
         })();
         self.witness_branch_close();
@@ -158,9 +162,11 @@ impl Emitter<'_> {
         }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
         // #2755: a one-arm site whose arm leaves the frame (`emit_exit`).
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         match self.fn_ret {
             Some(want) => {
                 // `guard c else err(m)!` in an effect fn: the `!` over a
@@ -226,7 +232,9 @@ impl Emitter<'_> {
             }
         }
         self.f.instructions().end();
+        let through_at = self.arm_anchor_here();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         Ok(())
     }

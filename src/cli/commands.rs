@@ -411,7 +411,9 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
 pub fn cmd_test_update_snapshots(file: &str, no_check: bool, run_filter: Option<&str>, wasm_only: bool) {
     let test_files: Vec<String> = discover_test_files(file);
     let program_args = test_harness_args(run_filter);
-    let tmp_dir = std::env::temp_dir().join("almide-wasm-test");
+    // In the private cache base (#4835): a fixed name in the shared temp
+    // dir could be created first by another user.
+    let tmp_dir = super::private_path("wasm-test");
     std::fs::create_dir_all(&tmp_dir).ok();
 
     let mut updated = 0usize;

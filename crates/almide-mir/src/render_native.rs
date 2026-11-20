@@ -420,7 +420,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
     let bodies = crate::render_native_rec::place_key_registration(&bodies, &key_defs);
     used_shims.extend(crate::native_foreign::runtime_items()?);
     used_shims.extend(crate::native_callbacks::runtime_items()?);
-    let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies);
+    let fs_scope = crate::native_fs_scope::plan(&used_shims, &bodies).map_err(wall)?;
     if let Some(scope) = &fs_scope {
         let support = crate::native_floor::scoped_fs_runtime_items(&scope.prelude, &used_shims, fan_rendered()).map_err(wall)?;
         used_shims.extend(support);

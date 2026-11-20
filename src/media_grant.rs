@@ -9,12 +9,16 @@
 //!
 //! ```toml
 //! [trust]
-//! media = { "almide/svg" = ["image/svg+xml"] }
+//! media = { "github.com/almide/svg" = ["image/svg+xml"] }
 //! ```
 //!
-//! The package is named by its source (`owner/repo` on github.com,
-//! `host/owner/repo` elsewhere, the `[dependencies]` name for a path
-//! dependency), so a re-pointed dependency is not covered by an old grant.
+//! The package is named by its typed origin (ADR-0035; ADR-0032 amended by
+//! #4868): `host[:port]/full/path` of its git source, every path segment,
+//! the host always written (`github.com/almide/svg`); a path dependency by
+//! its package name. A re-pointed dependency is not covered by an old grant,
+//! and a grant names one repository, never a group of them. The key form
+//! before #4868 (`owner/repo`, github.com implied) is refused with the new
+//! form as its hint, so no grant silently widens or narrows.
 //! A grant naming a type the package does not declare is refused too, and so
 //! are two owners — the stdlib's, a dependency's, the application's own —
 //! whose patterns can match one media type. The application's own types need
@@ -38,14 +42,32 @@ pub struct DepMedia {
     pub granted: Vec<String>,
 }
 
-/// The key `[trust] media` names a package by (ADR-0032 Q17).
+/// The key `[trust] media` names a package by: the typed origin of its git
+/// source — host, port and the full path (ADR-0035 identity; ADR-0032's Q17
+/// amended by #4868) — or, without one, its package name.
 pub fn grant_key(source: Option<&crate::git_source::GitSource>, name: &str) -> String {
-    // The key spells the source's host and its first two path segments
-    // (github.com's host is left out), from the typed source (ADR-0035 D1).
     let Some(src) = source else { return name.to_ascii_lowercase() };
-    let [owner, repo, ..] = src.path.as_slice() else { return name.to_ascii_lowercase() };
-    let tail = format!("{}/{}", owner.as_str().to_ascii_lowercase(), repo.as_str().to_ascii_lowercase());
-    if src.host.as_str() == "github.com" { tail } else { format!("{}/{tail}", src.host.as_str()) }
+    let port = src.port.map(|p| format!(":{p}")).unwrap_or_default();
+    let path: Vec<String> = src.path.iter().map(|s| s.as_str().to_ascii_lowercase()).collect();
+    format!("{}{port}/{}", src.host.as_str().to_ascii_lowercase(), path.join("/"))
+}
+
+/// A `[trust] media` key in the form before #4868 — `owner/repo` with
+/// github.com implied: two segments, the first no host (no `.` or `:`) — is
+/// refused with the key it now is, since the same text no longer names the
+/// same packages.
+pub fn check_grant_key(key: &str) -> Result<(), String> {
+    let segs: Vec<&str> = key.split('/').collect();
+    if let [owner, repo] = segs.as_slice()
+        && !owner.contains(['.', ':'])
+        && !owner.is_empty()
+        && !repo.is_empty()
+    {
+        return Err(format!(
+            "[trust].media key \"{key}\" is the old `owner/repo` form; a grant now names the source's host and full path\n  hint: write \"github.com/{key}\" if the package comes from github.com"
+        ));
+    }
+    Ok(())
 }
 
 /// Every `@media_owns` pattern declared under `dir`, with its file.
@@ -209,9 +231,33 @@ mod tests {
     #[test]
     fn a_grant_names_the_source() {
         let src = |s: &str| crate::git_source::GitSource::parse(s).unwrap();
-        assert_eq!(grant_key(Some(&src("https://github.com/almide/svg")), "svg"), "almide/svg");
-        assert_eq!(grant_key(Some(&src("https://github.com/Almide/SVG.git")), "svg"), "almide/svg");
+        assert_eq!(grant_key(Some(&src("https://github.com/almide/svg")), "svg"), "github.com/almide/svg");
+        assert_eq!(grant_key(Some(&src("https://github.com/Almide/SVG.git")), "svg"), "github.com/almide/svg");
         assert_eq!(grant_key(Some(&src("https://gitlab.com/alice/svg")), "svg"), "gitlab.com/alice/svg");
         assert_eq!(grant_key(None, "local_svg"), "local_svg");
+    }
+
+    /// #4868: two repositories under one group get two keys, the port is
+    /// part of the key, and the group's key is no repository's.
+    #[test]
+    fn a_grant_names_one_repository_by_host_port_and_full_path() {
+        let src = |s: &str| crate::git_source::GitSource::parse(s).unwrap();
+        let a = grant_key(Some(&src("https://gitlab.example/g/s/a")), "a");
+        let b = grant_key(Some(&src("https://gitlab.example/g/s/b")), "b");
+        assert_eq!(a, "gitlab.example/g/s/a");
+        assert_ne!(a, b);
+        assert_ne!(a, "gitlab.example/g/s");
+        assert_eq!(grant_key(Some(&src("https://gitlab.example:8443/g/s/a")), "a"), "gitlab.example:8443/g/s/a");
+    }
+
+    /// The old `owner/repo` key is refused with its new form; host-led and
+    /// package-name keys stand.
+    #[test]
+    fn the_old_owner_repo_key_is_refused_with_its_new_form() {
+        let e = super::check_grant_key("almide/svg").unwrap_err();
+        assert!(e.contains("github.com/almide/svg"), "{e}");
+        assert!(super::check_grant_key("github.com/almide/svg").is_ok());
+        assert!(super::check_grant_key("gitlab.example/g/s/a").is_ok());
+        assert!(super::check_grant_key("local_svg").is_ok());
     }
 }

@@ -306,9 +306,18 @@ fn infer_entry(file: &str, source: &str, prog: &mut almide::ast::Program) -> Vec
     use almide::check::Checker;
     use almide::canonicalize;
 
-    static DEP_PATHS: std::sync::OnceLock<Vec<(almide::project::PkgId, std::path::PathBuf)>> = std::sync::OnceLock::new();
-    let dep_paths = DEP_PATHS.get_or_init(super::dep_paths_from_cwd_toml);
-    let resolved = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths);
+    // Per governing manifest (#4830): each file reads its own project's deps.
+    type Deps = Vec<(almide::project::PkgId, std::path::PathBuf)>;
+    static DEP_PATHS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<Option<std::path::PathBuf>, Deps>>> = std::sync::OnceLock::new();
+    let manifest = almide::project::manifest_for_entry(file);
+    let dep_paths = DEP_PATHS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .entry(manifest)
+        .or_insert_with(|| super::dep_paths_for(file))
+        .clone();
+    let resolved = almide::resolve::resolve_imports_with_deps(file, prog, &dep_paths);
     let imports_unresolved = resolved.is_err();
     let modules = resolved.map(|r| r.modules).unwrap_or_default();
     let canon = canonicalize::canonicalize_program(prog, modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)));

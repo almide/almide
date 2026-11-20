@@ -493,7 +493,7 @@ impl Manifest<'_> {
         let Some(trust) = spanned_entry(&self.spans, "trust") else { return Ok(Vec::new()) };
         let Some(trust) = trust.get_ref().as_table() else { return Ok(Vec::new()) };
         let Some(media) = spanned_entry(trust, "media") else { return Ok(Vec::new()) };
-        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"almide/svg\" = [\"image/svg+xml\"] }`";
+        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }`";
         let table = media.get_ref().as_table().ok_or_else(|| located(path, content, media.span().start, shape))?;
         table
             .iter()
@@ -504,7 +504,9 @@ impl Manifest<'_> {
                     .iter()
                     .map(|i| i.get_ref().as_str().map(str::to_ascii_lowercase).ok_or_else(|| located(path, content, i.span().start, shape)))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(MediaGrant { key: k.get_ref().as_ref().to_ascii_lowercase(), media, line: line_of(content, at) })
+                let key = k.get_ref().as_ref().to_ascii_lowercase();
+                crate::media_grant::check_grant_key(&key).map_err(|e| located(path, content, k.span().start, &e))?;
+                Ok(MediaGrant { key, media, line: line_of(content, at) })
             })
             .collect()
     }
@@ -899,23 +901,77 @@ pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<alm
     Ok(out)
 }
 
-/// The manifest whose `[permissions]` govern `entry`: the nearest
-/// `almide.toml` in the entry file's directory or above it, else the one in
-/// the working directory. Before, only the working directory was read, so
-/// `almide run sub/app.almd` from outside the project ran with no
-/// `[permissions]` at all.
+/// The ONE manifest lookup (#4829, #4830, #4835, #4846): the `almide.toml`
+/// that governs `entry`, a source file or a directory of them. It is the
+/// nearest one in the entry's own directory (the directory itself for a
+/// directory) or above it, and nothing else: never the working directory and
+/// never a temp directory's parents. Every route reads its project here: the
+/// up-front manifest gate and version pin, the dependency and grant gates,
+/// the compile driver, the native build's `CrateInputs` backstop, `verify`,
+/// both test lanes and the editor server. A file the compiler writes itself
+/// is looked up in [`register_generated_entry`]'s table instead, never by its
+/// location.
 pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
-    let start = std::path::Path::new(entry).parent().map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p });
-    let mut dir = start.and_then(|d| d.canonicalize().ok());
+    let path = std::path::Path::new(entry);
+    let canon = path.canonicalize().ok();
+    if let Some(c) = &canon {
+        if let Some(gov) = generated_entries().lock().unwrap_or_else(|p| p.into_inner()).get(c) {
+            return gov.clone();
+        }
+    }
+    let start = match &canon {
+        Some(c) if c.is_dir() => Some(c.clone()),
+        Some(c) => c.parent().map(std::path::Path::to_path_buf),
+        // An entry that does not exist yet: its directory decides.
+        None => path
+            .parent()
+            .map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p })
+            .and_then(|d| d.canonicalize().ok()),
+    };
+    let mut dir = start;
     while let Some(d) = dir {
         let candidate = d.join("almide.toml");
-        if candidate.is_file() {
+        // Whatever stands there governs — a link to a device, a dangling
+        // link, a directory — and the reader refuses what is not a regular
+        // file; skipping it would build under the manifest above, or none.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             return Some(candidate);
         }
         dir = d.parent().map(std::path::Path::to_path_buf);
     }
-    let cwd = std::path::Path::new("almide.toml");
-    cwd.is_file().then(|| cwd.to_path_buf())
+    None
+}
+
+/// `files` split by the manifest that governs each ([`manifest_for_entry`]),
+/// in first-seen order: a run that compiles several files as one program
+/// takes one project, so files of different projects are different runs.
+pub fn group_by_manifest(files: &[String]) -> Vec<(Option<PathBuf>, Vec<String>)> {
+    let mut groups: Vec<(Option<PathBuf>, Vec<String>)> = Vec::new();
+    for f in files {
+        let m = manifest_for_entry(f);
+        match groups.iter_mut().find(|(k, _)| *k == m) {
+            Some((_, members)) => members.push(f.clone()),
+            None => groups.push((m, vec![f.clone()])),
+        }
+    }
+    groups
+}
+
+fn generated_entries() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>> {
+    static TABLE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(Default::default)
+}
+
+/// Declare `entry`, a file the compiler wrote itself (`almide deps`'s import
+/// list, `almide compile <stdlib module>`'s staged source), as governed by
+/// `manifest` — the project the command is about, or `None` for no project.
+/// Its location (a temp directory, whose parents anyone may write to) then
+/// decides nothing (#4835).
+pub fn register_generated_entry(entry: &Path, manifest: Option<PathBuf>) -> Result<(), String> {
+    let canon = entry.canonicalize().map_err(|e| format!("cannot resolve {}: {e}", entry.display()))?;
+    generated_entries().lock().unwrap_or_else(|p| p.into_inner()).insert(canon, manifest);
+    Ok(())
 }
 
 /// The project [`manifest_for_entry`] names, parsed; `None` only when there
@@ -929,12 +985,26 @@ pub fn permissions_project_for(entry: &str) -> Option<Project> {
 /// `path`, an `almide.toml` that exists and governs the command, read by the
 /// one reader every route uses: the gate's checks (`check_manifest`) and
 /// `parse_toml`; any error ends the command (#4829).
+///
+/// Every caller compiles or checks under the project, so its `almide =
+/// "X.Y.Z"` minimum holds here too (#4846): the pin is read off the same
+/// manifest on every route, not off `./almide.toml` alone.
 pub fn governing_manifest(path: &Path) -> Project {
-    let read = read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path));
-    read.unwrap_or_else(|e| {
-        eprintln!("error: {}: {e}", path.display());
+    let proj = read_governing_manifest(path).unwrap_or_else(|e| {
+        eprintln!("error: {}", naming(path, e));
         std::process::exit(1)
-    })
+    });
+    if let Err(e) = check_compiler_version(&proj) {
+        eprintln!("error: {e}");
+        std::process::exit(1)
+    }
+    proj
+}
+
+/// [`governing_manifest`]'s reader, for a caller that must not exit (the
+/// editor server reports the error as a diagnostic instead).
+pub fn read_governing_manifest(path: &Path) -> Result<Project, String> {
+    read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path))
 }
 
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
@@ -945,6 +1015,7 @@ pub fn governing_manifest(path: &Path) -> Project {
 pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
+    refuse_unknown_security_keys(path, content, &manifest)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.permission_list(path, content, "fs")?;
     manifest.trust_owners(path, content)?;
@@ -954,8 +1025,15 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
     // #4829: everything `parse_toml` refuses is refused here too, so the gate
-    // and the readers cannot accept different manifests.
-    parse_toml(path).map(|_| ())
+    // and the readers cannot accept different manifests. The error names the
+    // manifest, which the command may not have read from the cwd.
+    parse_toml(path).map(|_| ()).map_err(|e| naming(path, e))
+}
+
+/// `e`, prefixed with `path` unless it already names it.
+fn naming(path: &Path, e: String) -> String {
+    let shown = path.display().to_string();
+    if e.contains(&shown) { e } else { format!("{shown}: {e}") }
 }
 
 // ── Unknown keys (#3382) ────────────────────────────────────────────
@@ -1045,6 +1123,55 @@ fn unknown_key_warnings(
             manifest_warning(path, lines, at, message, hint)
         })
         .collect()
+}
+
+/// The tables that restrict the program, with the keys each reads.
+const SECURITY_TABLES: &[(&str, &[&str])] = &[("permissions", PERMISSION_KEYS), ("trust", TRUST_KEYS)];
+
+/// #4851: in a table that restricts the program, a key no reader reads is
+/// refused, never a warning: `alow = []` in `[permissions]`, or a
+/// `[permission]` table, left the bound unset and granted every capability.
+/// An unknown top-level table one edit from a security table is its
+/// misspelling and refused the same way. Other unknown keys stay warnings
+/// ([`manifest_warnings`], #3382).
+fn refuse_unknown_security_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
+    for (k, _) in manifest.spans.iter() {
+        let name = k.get_ref().as_ref();
+        if TOP_LEVEL_KEYS.contains(&name) {
+            continue;
+        }
+        if let Some((table, _)) = SECURITY_TABLES.iter().find(|(t, _)| within_one_edit(&name.to_ascii_lowercase(), t)) {
+            return Err(located(
+                path,
+                content,
+                k.span().start,
+                &format!(
+                    "unknown table `{}` is refused — it is one edit from [{table}], which restricts the program, and a misspelled bound would grant everything\n  hint: write it as [{table}]",
+                    shown(name)
+                ),
+            ));
+        }
+    }
+    for (table, keys) in SECURITY_TABLES {
+        let Some(t) = spanned_entry(&manifest.spans, table).and_then(|t| t.get_ref().as_table()) else { continue };
+        let mut unknown: Vec<(usize, String)> =
+            t.iter().filter(|(k, _)| !keys.contains(&k.get_ref().as_ref())).map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect();
+        unknown.sort();
+        if let Some((at, key)) = unknown.into_iter().next() {
+            let list = keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+            let hint = match keys.iter().find(|k| within_one_edit(&key, k)) {
+                Some(k) => format!("did you mean `{k}`? [{table}] reads only {list}"),
+                None => format!("[{table}] reads only {list}; delete it or write one of them"),
+            };
+            return Err(located(
+                path,
+                content,
+                at,
+                &format!("unknown key `{}` in [{table}] is refused — a key the table does not read would leave its bound unset\n  hint: {hint}", shown(&key)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The warnings for keys `almide.toml` writes that no reader reads (#3382):

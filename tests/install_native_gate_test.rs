@@ -100,3 +100,33 @@ fn native_install_uses_checked_v1_modules_and_filesystem_scope() {
     assert_eq!(output.stdout, b"42\n");
     assert!(output.stderr.is_empty(), "{}", text(&output));
 }
+
+/// #4864: a spec spelled as a source is remote even when the working
+/// directory holds a directory by that name — the trust check refuses it and
+/// the planted project is never built.
+#[test]
+fn a_planted_directory_named_like_a_source_is_not_installed() {
+    let td = tempfile::tempdir().unwrap();
+    let planted = td.path().join("github.com/someone-untrusted/tool");
+    std::fs::create_dir_all(planted.join("src")).unwrap();
+    std::fs::write(planted.join("almide.toml"), "[package]\nname = \"tool\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(planted.join("src/main.almd"), "effect fn main() -> Unit = println(\"planted\")\n").unwrap();
+    std::fs::create_dir_all(td.path().join("home")).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["tool", "install", "github.com/someone-untrusted/tool", "--bin-dir", td.path().join("bin").to_str().unwrap()])
+        .current_dir(td.path())
+        .env("HOME", td.path().join("home"))
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("its owner is not trusted"), "the planted directory was read as the source:\n{}", text(&o));
+    assert!(!td.path().join("bin/tool").exists(), "the planted project was installed");
+    // The control: the same directory spelled as a path installs.
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["tool", "install", "./github.com/someone-untrusted/tool", "--bin-dir", td.path().join("bin").to_str().unwrap(), "--target", "wasm"])
+        .current_dir(td.path())
+        .env("HOME", td.path().join("home"))
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+}

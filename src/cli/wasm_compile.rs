@@ -79,17 +79,13 @@ pub(crate) fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program
     }
 
     // Resolve dependencies
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            match project_fetch::fetch_all_deps(&proj) {
-                Ok(deps) => deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect(),
-                Err(e) => { err(&format!("{}", e)); return Err(()); }
-            }
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
+    // The entry's own project (the one lookup, #4830), never the cwd's.
+    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = match project::permissions_project_for(file) {
+        Some(proj) => match project_fetch::fetch_all_deps(&proj) {
+            Ok(deps) => deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect(),
+            Err(e) => { err(&format!("{}", e)); return Err(()); }
+        },
+        None => vec![],
     };
 
     let resolved = match resolve::resolve_imports_with_deps(file, &program, &dep_paths) {
@@ -161,7 +157,7 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // gate judges this route exactly as it does the native build, on the same
     // post-optimize, pre-mono IR. This route's integrity check is
     // `verify_wasm_ir`, after the link.
-    let proj = project::permissions_project_for(entry.0).or_else(crate::compile_driver::cwd_project);
+    let proj = project::permissions_project_for(entry.0);
     crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), entry, |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)
@@ -560,18 +556,30 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     let _ = (&mut ir_program, allow_unverified, verified);
     // The embedded-leg run form (`run` / `bench`) reuses a module rendered
     // from the same inputs (`wasm_run_cache`); every gate above has run.
+    // On a certified route (`verify::certified`: the witness sinks armed) a
+    // reused module recorded no certificate, so an entry there is written
+    // only after the installed verifier accepted it, keyed by that verifier
+    // too (#4836): a hit is a module this verifier already judged.
+    let certifying = almide_wasm::witness::collecting();
     let cache = (embedded_leg && !library_ok && inputs.has_main)
-        .then(|| super::wasm_run_cache::entry_path(file, &source_text, &resolved, &dep_paths, verified))
+        .then(|| super::wasm_run_cache::entry_path(file, &source_text, &resolved, &dep_paths, verified, certifying))
         .flatten();
     let (bytes, host_ops) = match cache.as_deref().and_then(super::wasm_run_cache::lookup) {
         Some(hit) => {
             t.lap("render (cache hit)");
+            if certifying {
+                super::wasm_run_cache::note_judged_hit();
+            }
             hit
         }
         None => {
             let rendered = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths, &fresh_resolved)?;
             if let Some(entry) = &cache {
-                super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
+                if certifying {
+                    super::wasm_run_cache::store_once_judged(entry, &rendered.0, &rendered.1);
+                } else {
+                    super::wasm_run_cache::store(entry, &rendered.0, &rendered.1);
+                }
             }
             t.lap("render");
             rendered

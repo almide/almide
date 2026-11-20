@@ -17,12 +17,18 @@ impl Drop for ScopeGuard {
     }
 }
 
-pub(crate) fn plan(used: &[&str], bodies: &str) -> Option<almide_codegen::fs_scope::FsScope> {
-    let roots = ROOTS.with(|r| r.borrow().clone())?;
-    if !crate::native_floor::carries_fs_host(used) { return None; }
+/// The scope for a render whose `bodies` and glue `used` reach a call the
+/// scope bounds — read off the declarations' path marks, not a module's
+/// symbol prefix (#4825) — `Ok(None)` when none is reached or no scope is
+/// set; `Err` when one reached cannot be bounded.
+pub(crate) fn plan(used: &[&str], bodies: &str) -> Result<Option<almide_codegen::fs_scope::FsScope>, String> {
+    let Some(roots) = ROOTS.with(|r| r.borrow().clone()) else { return Ok(None) };
     let mut calls = bodies.to_owned();
     for shim in used.iter().filter(|s| !crate::native_floor::is_runtime_text(s)) {
         calls.push_str(shim);
     }
-    Some(almide_codegen::fs_scope::FsScope::new(&roots, "", "", &calls))
+    if !almide_codegen::fs_scope::FsScope::applies_to(&calls) {
+        return Ok(None);
+    }
+    almide_codegen::fs_scope::FsScope::new(&roots, "", "", &calls).map(Some)
 }

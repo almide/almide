@@ -63,7 +63,7 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
     let rs_code = super::build::arm_alloc_count(rs_code);
-    let rs_code = super::build::inject_fs_scope(rs_code);
+    let rs_code = super::build::inject_fs_scope(rs_code, super::fs_scope_for(file));
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).
@@ -646,7 +646,16 @@ fn run_mainless(file: &str, wasm_leg: bool, no_check: bool) {
 /// `$TMPDIR ?? "/tmp"`, C-189 — the explicit `--env` wins over inherit-env,
 /// which on Windows would carry no TMPDIR at all). Shared by `cmd_run_wasm`
 /// and the wasm test harness so both legs see one filesystem contract.
-pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
+///
+/// Under `[permissions] fs` (`scope`), the preopens are exactly the granted
+/// roots instead (#4842: `--dir=/` turned the scope off on this route).
+pub(crate) fn wasmtime_fs_args(cmd: &mut Command, scope: Option<&[String]>) {
+    if let Some(roots) = scope {
+        for root in roots {
+            cmd.arg(format!("--dir={root}"));
+        }
+        return;
+    }
     if cfg!(windows) {
         cmd.arg("--dir=.");
         // GetTempPath answers with a trailing separator; wasmtime's
@@ -735,7 +744,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
+    let (bytes, host_ops) = match super::verify::certified(file, || super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true)) {
         Ok(b) => b,
         Err(()) => return 1,
     };

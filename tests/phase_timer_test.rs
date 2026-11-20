@@ -20,6 +20,8 @@ fn scratch(name: &str) -> PathBuf {
         .map_or(0, |d| d.as_nanos());
     let dir = std::env::temp_dir().join(format!("almide-phase-timer-{name}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    #[cfg(unix)]
+    std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap(); // closed run dir override (#4842)
     dir
 }
 

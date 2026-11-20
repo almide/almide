@@ -15,7 +15,35 @@
 //! The wire protocol is git's protocol v2, with a v0 fallback for a server
 //! that does not speak v2.
 
+#[cfg(any(unix, windows))]
 pub mod http;
+/// The library built for wasm32 (the playground) has no socket and no TLS
+/// stack: rustls' `getrandom` does not build for wasm32-unknown-unknown, so
+/// the https half is native only and every request here fails as unreachable.
+#[cfg(not(any(unix, windows)))]
+pub mod http {
+    use crate::git_source::GitSource;
+
+    pub const MAX_BODY: usize = 2 * crate::package_tree::MAX_PACKAGE_BYTES as usize;
+
+    #[derive(Debug)]
+    pub enum HttpError {
+        NotFound(String),
+        Failed(String),
+    }
+
+    impl HttpError {
+        pub fn text(&self) -> &str {
+            match self {
+                HttpError::NotFound(s) | HttpError::Failed(s) => s,
+            }
+        }
+    }
+
+    pub fn request(src: &GitSource, _dot_git: bool, _suffix: &str, _body: Option<(&str, &[u8])>, _protocol_v2: bool) -> Result<Vec<u8>, HttpError> {
+        Err(HttpError::Failed(format!("{}: no https fetch on this target", src.host.as_str())))
+    }
+}
 pub mod objects;
 pub mod pack;
 pub mod pktline;

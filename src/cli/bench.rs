@@ -45,7 +45,9 @@ pub fn cmd_bench(file: &str, runs: u32, target: Option<&str>, args: &[String]) {
 }
 
 fn bench_native(file: &str, runs: u32, args: &[String]) {
-    let rs_code = match crate::try_compile(file, false).map(|c| inject_main_timer(&c)) {
+    // `[permissions] fs` bounds a benchmarked program as `almide run` bounds
+    // it (#4831): the same scope, baked in from the file's own project.
+    let rs_code = match crate::try_compile(file, false).map(|c| inject_main_timer(&super::build::inject_fs_scope(c, super::fs_scope_for(file)))) {
         Ok(Some(c)) => c,
         Ok(None) => {
             err("error: the generated program has no `fn main` to time");
@@ -69,7 +71,9 @@ fn bench_native(file: &str, runs: u32, args: &[String]) {
             std::process::exit(1);
         }
     };
-    let ns_file = std::env::temp_dir().join(format!("almide-bench-main-{}.ns", std::process::id()));
+    // In the private cache base (#4835): the timed binary writes this file
+    // through `std::fs::write`, which follows a link planted in a shared temp dir.
+    let ns_file = super::private_path(&format!("bench-main-{}.ns", std::process::id()));
     let run_once = || -> Result<(Vec<u8>, Timing), String> {
         let _ = std::fs::remove_file(&ns_file);
         let started = Instant::now();
@@ -117,7 +121,7 @@ struct Timing {
 }
 
 fn bench_wasm(file: &str, runs: u32, args: &[String]) {
-    let (bytes, _host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, true, false, true) {
+    let (bytes, _host_ops) = match super::verify::certified(file, || super::wasm_compile::compile_to_wasm_bytes(file, false, true, false, true)) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };

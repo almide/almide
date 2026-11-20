@@ -83,7 +83,8 @@ pub(crate) struct Emitter<'a> {
     /// #4277: each value-position `if` `lower_if_arms` emitted, by its node,
     /// and the `rc::site_window` id anchoring it to its shipped `if` / `else`
     /// — a select site recorded over that `if` later reuses the anchor.
-    pub(crate) if_sites: std::collections::HashMap<*const almide_ir::IrExpr, u64>,
+    /// and (#4631) its then- and else-arm anchors (`arm_anchor`).
+    pub(crate) if_sites: std::collections::HashMap<*const almide_ir::IrExpr, (u64, [Option<u64>; 2])>,
     /// The window an enclosing unit `if` just tested (bytes_rw.rs
     /// `proven_room`): (buffer var, position var, width), taken by the set.
     pub(crate) room_proven: Option<(VarId, VarId, i64)>,
@@ -351,16 +352,21 @@ impl Emitter<'_> {
             }
             i.i64_ge_u();
             i.if_(BlockType::Empty);
-            i.i32_const(msg as i32);
         }
+        let then_at = self.arm_anchor_here();
+        self.f.instructions().i32_const(msg as i32);
         crate::witness::bounds::check(site, self.f);
         // #2755: out of bounds ABORTS — a recorded abort terminal on its own arm.
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         self.abort_frame();
+        let through_at = self.arm_anchor();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         self.f.instructions().end();
+        self.arm_anchor_bind(through_at);
     }
 
     /// The main-level / pure-fn abort frame for a failed `!`: the exact

@@ -153,13 +153,18 @@ impl Emitter<'_> {
         }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
         // The witness (#2757): a one-arm site whose arm leaves the iteration.
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         self.lower_stmt_in_label(else_)?;
+        let through_at = self.arm_anchor();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         self.f.instructions().end();
+        self.arm_anchor_bind(through_at);
         Ok(true)
     }
 }

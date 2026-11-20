@@ -138,6 +138,8 @@ fn attributes_of(src: &str, name: &str) -> Option<Vec<String>> {
     let lines: Vec<&str> = src.lines().collect();
     let decl = |l: &str| {
         let t = l.trim_start();
+        // A module-private leaf (`local`) is the same declaration (#4817).
+        let t = t.strip_prefix("local ").unwrap_or(t);
         let t = t.strip_prefix("effect ").unwrap_or(t);
         t.starts_with(&format!("fn {name}(")) || t.starts_with(&format!("fn {name}["))
     };

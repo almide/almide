@@ -95,23 +95,25 @@ fn a_local_keeps_the_set_of_the_closure_bound_to_it() {
     assert_eq!(line_of(&r, "never_called"), "never_called  → {} (effect fn)", "{r}");
 }
 
-/// (c) A record field keeps the set of every closure stored in it.
+/// (c) A record field keeps the set of every closure stored in it. The fn
+/// that runs it is an `effect fn`: a pure one is refused (E109, which
+/// `check --effects` runs too, #4847).
 const FIELD: &str = r#"import fs
 
 type Box = { run: (String) -> String }
 
-fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
+effect fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
 
 effect fn main() -> Unit = {
   let b = Box { run: (p) => fs.read_text(p) ?? "" }
-  println(call_box(b))
+  println(call_box(b)!)
 }
 "#;
 
 #[test]
 fn a_record_field_keeps_the_set_of_the_closure_stored_in_it() {
     let r = report("field", FIELD);
-    assert_eq!(line_of(&r, "call_box"), "call_box  → {FS.read}", "{r}");
+    assert_eq!(line_of(&r, "call_box"), "call_box  → {FS.read} (effect fn)", "{r}");
     assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
 }
 
@@ -184,10 +186,10 @@ type Box = { run: (String) -> String }
 
 fn wrap(f: (String) -> String) -> Box = Box { run: f }
 
-fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
+effect fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
 
 effect fn main() -> Unit = {
-  println(call_box(wrap((p) => fs.read_text(p) ?? "")))
+  println(call_box(wrap((p) => fs.read_text(p) ?? ""))!)
 }
 "#;
 
@@ -204,12 +206,14 @@ fn a_path_names_the_parameter_when_the_value_is_not_known() {
 
 /// Untracked positions: a closure in a list, in a destructured tuple, or the
 /// operand of `??` is still charged where it runs — through the pool of its
-/// arity (list, tuple) or through the parameter it came in by (`??`).
+/// arity (list, tuple) or through the parameter it came in by (`??`). The
+/// fns that run a list's or a tuple's closure are `effect fn`s: a pure one is
+/// refused (E109, #4847).
 const UNTRACKED: &str = r#"import fs
 
-fn run_all(hs: List[(String) -> String], p: String) -> List[String] = hs |> list.map((h) => h(p))
+effect fn run_all(hs: List[(String) -> String], p: String) -> List[String] = hs |> list.map((h) => h(p))
 
-fn call_pair(t: ((String) -> String, Int)) -> String = {
+effect fn call_pair(t: ((String) -> String, Int)) -> String = {
   let (f, n) = t
   f("/etc/hosts")
 }
@@ -217,8 +221,8 @@ fn call_pair(t: ((String) -> String, Int)) -> String = {
 fn pick(o: Option[(String) -> String]) -> String = (o ?? ((s) => s))("/etc/hosts")
 
 effect fn main() -> Unit = {
-  println(list.join(run_all([(p: String) => fs.read_text(p) ?? ""], "/etc/hosts"), ","))
-  println(call_pair(((p: String) => fs.read_text(p) ?? "", 1)))
+  println(list.join(run_all([(p: String) => fs.read_text(p) ?? ""], "/etc/hosts")!, ","))
+  println(call_pair(((p: String) => fs.read_text(p) ?? "", 1))!)
   println(pick(some((p: String) => fs.read_text(p) ?? "")))
 }
 "#;
@@ -226,8 +230,8 @@ effect fn main() -> Unit = {
 #[test]
 fn a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs() {
     let r = report("untracked", UNTRACKED);
-    assert_eq!(line_of(&r, "run_all"), "run_all  → {FS.read}", "{r}");
-    assert_eq!(line_of(&r, "call_pair"), "call_pair  → {FS.read}", "{r}");
+    assert_eq!(line_of(&r, "run_all"), "run_all  → {FS.read} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "call_pair"), "call_pair  → {FS.read} (effect fn)", "{r}");
     assert_eq!(line_of(&r, "pick"), "pick  → {} + whatever o (arg 1) does", "{r}");
     assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
     let dir = project("untracked-perm", Some("\"Env\""), UNTRACKED);

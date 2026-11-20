@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn the_twin_covers_every_guarded_fn_and_reaches_fs_only_through_the_facade() {
         let entries: BTreeSet<String> =
-            super::super::fs_runtime_guards().into_iter().filter(|(_, g)| *g != "__almide_fs_root").map(|(n, _)| n).collect();
+            super::super::fs_runtime_guards().into_iter().filter(|(_, g)| *g != "__almide_fs_root").map(|(n, _)| n).filter(|n| super::super::fs_runtime_str_fns().contains(n)).collect();
         assert!(entries.len() > 30, "{entries:?}");
         let (twin, twinned) = scoped_twin(fs_src(), &entries, "");
         assert_eq!(twinned, entries, "a guarded fn is missing from the twin");

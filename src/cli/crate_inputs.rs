@@ -167,12 +167,11 @@ impl PackageNatives {
 /// or dependency that cannot be read contributes nothing here and is reported
 /// by the build's own collection.
 pub(crate) fn native_rust_text(file: &str) -> String {
-    let here = |p: &std::path::Path| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() };
-    let file_dir = std::path::Path::new(file).parent().map(here).unwrap_or_else(|| ".".into());
-    let root = if file_dir.join("almide.toml").exists() { file_dir } else { std::path::PathBuf::from(".") };
+    // The package the build compiles: the one lookup (#4830), never the cwd.
+    let Some(toml_path) = crate::project::manifest_for_entry(file) else { return String::new() };
+    let root = toml_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| ".".into());
     let mut roots = vec![root.clone()];
-    let toml_path = root.join("almide.toml");
-    if let Some(proj) = toml_path.exists().then(|| crate::project::parse_toml(&toml_path).ok()).flatten() {
+    if let Ok(proj) = crate::project::parse_toml(&toml_path) {
         if !proj.dependencies.is_empty() {
             if let Ok(fetched) = crate::project_fetch::fetch_all_deps(&proj) {
                 roots.extend(fetched.into_iter().map(|d| d.package_dir));

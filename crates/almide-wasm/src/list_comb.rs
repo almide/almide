@@ -313,10 +313,14 @@ impl Emitter<'_> {
         self.witness_branch_arm();
         // still dropping? run the callback; a false flips to keeping
         self.f.instructions().local_get(hd).i32_eqz().if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
+        self.witness_branch_anchor(then_at);
         self.lower(body, Some(BOOL))?;
         self.f.instructions().i32_eqz().local_set(hd);
         self.f.instructions().end();
+        let through_at = self.arm_anchor_here();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         self.witness_hit(&[(params[0], elem)]);
         self.f.instructions().local_get(hd).if_(BlockType::Empty);
@@ -463,20 +467,20 @@ impl Emitter<'_> {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_get(ch).i32_eqz().if_(BlockType::Result(ValType::I32));
-            i.i32_const(0);
-            i.else_();
-            // acc = xs[0] (into the ACC param), walk from 1
-            i.local_get(bh);
-        }
+        self.f.instructions().local_get(ch).i32_eqz().if_(BlockType::Result(ValType::I32));
+        let none_at = self.arm_anchor_here();
+        self.f.instructions().i32_const(0).else_();
+        let some_at = self.arm_anchor_here();
+        // acc = xs[0] (into the ACC param), walk from 1
+        self.f.instructions().local_get(bh);
         // #2755: the empty list answers none; the other arm seeds the
         // accumulator with a share of the head, moved into the walk, whose
         // activations are list.fold's.
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(none_at);
         self.witness_branch_arm();
+        self.witness_branch_anchor(some_at);
         self.load_ty_slot(elem, 0);
         // The accumulator OWNS one credit on every step, as `list.fold`'s
         // does (#2977): the first element takes its share, each step's
