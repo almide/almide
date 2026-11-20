@@ -1,0 +1,3 @@
+expects_code = "E121"
+expects_error = "names both the local module"
+hint_substring = "rename one of them"

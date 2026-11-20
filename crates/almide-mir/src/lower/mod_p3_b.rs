@@ -229,7 +229,7 @@ impl LowerCtx {
         let taken = self.fresh_value();
         self.ops.push(Op::CallFn {
             dst: Some(taken),
-            name: "__mg_take".to_string(),
+            name: crate::mir_ops::MG_TAKE.to_string(),
             args: vec![crate::CallArg::Scalar(addr)],
             result: Some(repr),
         });

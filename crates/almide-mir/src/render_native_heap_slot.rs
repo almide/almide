@@ -150,7 +150,7 @@ pub(super) fn render_heap_slot_op(
             );
             Some(Ok(true))
         }
-        Op::CallFn { dst: Some(d), name, args, .. } if name == "__mg_take" => {
+        Op::CallFn { dst: Some(d), name, args, .. } if name == crate::mir_ops::MG_TAKE => {
             let [CallArg::Scalar(a)] = args.as_slice() else {
                 return Some(Err(wall("native: a slot take whose address is not one scalar")));
             };

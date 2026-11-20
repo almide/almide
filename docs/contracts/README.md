@@ -84,7 +84,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
 | C-047 | int.pow with a negative exponent is total — it aborts, never traps or wraps | 0.24.0 | active | fixture | 2 |
 | C-048 | int.wrap_* / int.rotate_* run on the 64-bit register and int.wrap saturates its mask for bits >= 64 | 0.24.0 | active | fixture | 1 |
-| C-049 | float.sign is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
+| C-049 | float.signum is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
 | C-050 | string.split(\"\") is codepoint-granular | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 2 |
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
@@ -492,4 +492,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-454 | An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory | 0.69.1 | active | fixture | 0 |
 | C-455 | A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane | 0.70.0 | active | fixture | 0 |
 | C-456 | A declared type whose protocol defines its order through `compare` (BigInt) orders by that compare in every natural-order operation a generic body reaches, on every leg | 0.70.0 | active | fixture | 1 |
+| C-457 | An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream | 0.70.0 | active | fixture | 3 |
+| C-458 | An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike | 0.70.0 | active | fixture | 0 |
 

@@ -213,13 +213,6 @@ fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Ve
         let _ = almide_wasm::witness::take();
         return Ok((bytes, rest));
     }
-    // A program `almide build` packages as a component is not judged there
-    // either (#4877: the core module of such a program is not certified yet),
-    // so the routes that run it judge it as build does.
-    if super::build_wasm::packaged_as_component(&rest) {
-        let _ = almide_wasm::witness::take();
-        return Ok((bytes, rest));
-    }
     if let Err(e) = gate_build(file, &bytes, &bytes, runner) {
         err(&format!(
             "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"

@@ -57,6 +57,7 @@ pub fn include_native_callback_modules(
         loading: &mut loading,
         sources: &mut resolved.sources,
         root_requested_by: None,
+        importer_is_dependency: false,
     };
     // The root module, unless the entry already imported it (under any alias).
     if src_dir.join("mod.almd").exists() && !ctx.loaded.iter().any(|m| m.3) {

@@ -66,6 +66,17 @@ fn http_string_caps(op: i32) -> Option<&'static [u32]> {
     (op != 50).then_some(&[NET][..])
 }
 
+/// The http call handle's ops (#2633): open, state, wait, read, cancel and
+/// step reach the network. 59 is the handle's DROP — the release routine the
+/// emitter runs wherever the last copy of an `HttpCall` dies, in any function,
+/// as native runs `Drop` (#4877). It only cancels and forgets a call the
+/// program already opened, charged `NET` at its open (53) in the `effect fn`
+/// that made it; a plain fn that lets a handle it was handed go out of scope
+/// reaches no capability, which is what the checker admits.
+fn http_call_caps(op: i32) -> Option<&'static [u32]> {
+    Some(if op == crate::fs_meta::OP_HTTP_CALL_DROP { &[] } else { &[NET] })
+}
+
 /// testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a site
 /// on a fresh instance — a child, the native leg's re-exec — and op 118
 /// reads which site this instance was launched to run.
@@ -101,7 +112,7 @@ op_families! {
     /// fs.fold_lines / fs.for_each_line.
     FS_LINES = 51..=52 => OpCaps::All(&[FS_READ]);
     /// The http call handle (#2633).
-    HTTP_CALL = 53..=59 => OpCaps::All(&[NET]);
+    HTTP_CALL = 53..=59 => OpCaps::PerOp(http_call_caps);
     /// The monotonic clock (also the fuel meter's deadline clock).
     CLOCK_MONO = 60..=60 => OpCaps::All(&[CLOCK]);
     /// The bounded line walks and the raw-bytes readers.

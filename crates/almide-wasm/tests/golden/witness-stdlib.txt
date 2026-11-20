@@ -569,6 +569,7 @@ __selfhost_.http_status_code
 __selfhost_.http_with_headers
 __selfhost_.int16_to_string
 __selfhost_.int32_to_string
+__selfhost_.int64_to_string
 __selfhost_.int8_to_string
 __selfhost_.int_from_uint64_checked
 __selfhost_.int_to_float32_checked
@@ -982,6 +983,8 @@ bigint.top_bits
 bigint.top_nonzero
 bigint.trim
 bigint.twos
+bool.parse
+bool.to_string
 bytes.__bytes_media_type
 bytes.__bytes_to_text
 bytes.all

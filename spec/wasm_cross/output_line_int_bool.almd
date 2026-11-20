@@ -1,0 +1,115 @@
+// @contract: C-457
+// ALS-R2 / ALS-B4 (ADR-0038): an output line — `println("…${x}…")` whose holes
+// are Int, the sized ints, Bool or String — writes the same bytes as the String
+// path. Every value is printed on consecutive lines: first as an output line,
+// then as the same interpolation built as a String outside the line
+// (`let s = "${x}"`, or `+` concatenation of the same parts) and printed; for
+// a single integer or Bool hole a third line prints its type's `to_string`.
+// Every line of a group must be equal, and native must equal wasm.
+fn int_line(x: Int) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(int.to_string(x))
+}
+
+fn i8_line(x: Int8) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(int8.to_string(x))
+}
+
+fn i16_line(x: Int16) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(int16.to_string(x))
+}
+
+fn i32_line(x: Int32) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(int32.to_string(x))
+}
+
+fn i64_line(x: Int64) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(int64.to_string(x))
+}
+
+fn u8_line(x: UInt8) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(uint8.to_string(x))
+}
+
+fn u16_line(x: UInt16) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(uint16.to_string(x))
+}
+
+fn u32_line(x: UInt32) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(uint32.to_string(x))
+}
+
+fn u64_line(x: UInt64) -> Unit = {
+  println("${x}")
+  let s = "${x}"
+  println(s)
+  println(uint64.to_string(x))
+}
+
+fn bool_line(b: Bool) -> Unit = {
+  println("${b}")
+  let s = "${b}"
+  println(s)
+  println(bool.to_string(b))
+}
+
+// Literal segments around several holes, including String holes (empty too).
+fn mixed_line(axis: String, step: Int, cmd: Int, saturated: Bool, note: String) -> Unit = {
+  println("axis ${axis} t=${step} cmd=${cmd} sat=${saturated} [${note}]")
+  let built = "axis " + axis + " t=" + int.to_string(step) + " cmd=" + int.to_string(cmd) + " sat=" + bool.to_string(saturated) + " [" + note + "]"
+  println(built)
+  let interp = "axis ${axis} t=${step} cmd=${cmd} sat=${saturated} [${note}]"
+  println(interp)
+}
+
+effect fn main() -> Unit = {
+  for x in [int.min_value(), -1, 0, int.max_value()] {
+    int_line(x)
+  }
+  i8_line(int8.min_value())
+  i8_line(int8.max_value())
+  i16_line(int16.min_value())
+  i16_line(int16.max_value())
+  i32_line(int32.min_value())
+  i32_line(int32.max_value())
+  i64_line(int64.min_value())
+  i64_line(int64.max_value())
+  u8_line(uint8.min_value())
+  u8_line(uint8.max_value())
+  u16_line(uint16.min_value())
+  u16_line(uint16.max_value())
+  u32_line(uint32.min_value())
+  u32_line(uint32.max_value())
+  u64_line(uint64.min_value())
+  u64_line(uint64.max_value())
+  bool_line(true)
+  bool_line(false)
+  mixed_line("pitch", 15, int.min_value(), true, "")
+  mixed_line("", -1, 6553600, false, "rate limited")
+  println("no holes at all")
+  let plain = "no holes at all"
+  println(plain)
+}

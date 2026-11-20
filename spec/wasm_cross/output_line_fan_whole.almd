@@ -1,0 +1,19 @@
+// @contract: C-457
+// ALS-R2 / ALS-R3 (ADR-0038): parallel fan.map arms each print many output
+// lines of several parts (literal, String, Int and Bool holes) to stdout and
+// stderr. Every line must appear whole: no part of one line is split from the
+// rest by another arm's output on the same stream. The fan observation is the
+// sequential, list-order one (C-004), so native (arms on threads) and wasm
+// (the instance-parallel path) must print the same bytes.
+effect fn arm(tag: String, k: Int) -> Result[Int, String] = {
+  for i in 0..<40 {
+    println("arm ${k} [${tag}] line ${i}: value=${k * 1000 + i} even=${i % 2 == 0}")
+    eprintln("arm ${k} [${tag}] note ${i}")
+  }
+  ok(k)
+}
+
+effect fn main() -> Unit = {
+  let done = fan.map(list.range(0, 8), (k) => arm("fan", k))!
+  println("arms=${list.len(done)} last=${done[7]}")
+}

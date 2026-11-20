@@ -1,0 +1,5 @@
+// `zq_dep` is both the local module zq_dep.almd and the dependency
+// `zq_dep` in almide.toml: the local module, renamed, is imported by its own name.
+import zq_mine
+
+effect fn main() -> Unit = println(zq_mine.root())
