@@ -621,9 +621,10 @@ fn serve_run_guest(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, s: S
     i.global_get(s.body_len).local_set(L::B_LEN);
 }
 
-/// Parse the reply cells at `CUR..END` (status, an empty body cell, then
-/// header pairs; http_framed CHAR-count lengths) into a response, return it,
-/// then write its body (`B_PTR..B_LEN`, op 72's bytes) and trailers.
+/// Parse the reply cells at `CUR..END` (status, body, then header pairs;
+/// http_framed CHAR-count lengths) into a response, return it, then write its
+/// body and trailers. A guest reply's body cell is empty and its body is op
+/// 72's bytes, already in `B_PTR..B_LEN` (#4311).
 fn serve_respond(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, abi: &ServeAbi, t: &ServeTexts) {
     use HandleLocals as L;
     let ret = (g.park + RET) as i32;
@@ -637,9 +638,14 @@ fn serve_respond(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, abi: &
     i.local_get(L::TMP).i32_load8_u(mem8(0)).i32_const(48).i32_sub().i32_add().local_set(L::STATUS);
     i.local_get(L::TMP).i32_const(1).i32_add().local_set(L::TMP);
     i.br(0).end().end();
-    // The body cell is empty: the body's bytes came beside the frame (#4311)
-    // and are already in B_PTR / B_LEN.
+    // The body cell. A guest reply leaves it empty: its bytes came beside the
+    // frame (#4311) and are already in B_PTR / B_LEN. The shim's own answers
+    // (413 / 414 / 431) carry their text in it.
     cell(i);
+    i.local_get(L::CUR).local_get(L::TMP).i32_ne().if_(BlockType::Empty);
+    i.local_get(L::TMP).local_set(L::B_PTR);
+    i.local_get(L::CUR).local_get(L::TMP).i32_sub().local_set(L::B_LEN);
+    i.end();
     // No body for HEAD, 1xx, 204 and 304 (native's core).
     i.local_get(L::HEAD);
     i.local_get(L::STATUS).i32_const(100).i32_ge_u().local_get(L::STATUS).i32_const(200).i32_lt_u().i32_and().i32_or();
