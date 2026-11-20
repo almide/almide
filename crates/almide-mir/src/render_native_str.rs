@@ -22,7 +22,7 @@ pub(crate) fn almide_string_alias() -> String {
 /// spelled by that name in the program and in the runtime items it carries
 /// (host plumbing that is not an Almide list stays a plain `Vec`).
 pub(crate) fn almide_list_alias() -> String {
-    format!("pub use almide_str_block::{{AlmideList, AlmideToList}};\n{}", almide_list_macro())
+    format!("pub use almide_str_block::{{AlmideList, AlmideToList, AlmideListElem, AlmideListFill, AlmideListFillZeroed, AlmideZeroValid}};\n{}", almide_list_macro())
 }
 
 /// `almide_list![..]`: the `vec!` forms, building an `AlmideList` (which must
@@ -31,6 +31,6 @@ pub(crate) fn almide_list_alias() -> String {
 pub(crate) fn almide_list_macro() -> &'static str {
     "#[allow(unused_macros)]\nmacro_rules! almide_list {\n    \
      () => { AlmideList::new() };\n    \
-     ($x:expr; $n:expr) => { AlmideList::from(::std::vec![$x; $n]) };\n    \
+     ($x:expr; $n:expr) => { (&&AlmideListElem::new($x)).almide_list_fill($n) };\n    \
      ($($x:expr),+ $(,)?) => { AlmideList::from(::std::vec![$($x),+]) };\n}\n\n"
 }

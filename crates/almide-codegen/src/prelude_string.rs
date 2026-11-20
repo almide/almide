@@ -14,7 +14,7 @@ pub(crate) fn string_prelude(vis: &str) -> String {
     s.push_str(&format!("{vis}mod almide_str_block {{\n{}\n{}\n}}\n", almide_str::SOURCE, almide_str::LIST_SOURCE));
     // Only `almide`-prefixed names reach the top level: a user fn of the
     // same name would collide (E0428). The unique view stays in its module.
-    s.push_str(&format!("{vis}use almide_str_block::{{almide_str_mark_reachable, AlmideStr, AlmideList, AlmideToList}};\n"));
+    s.push_str(&format!("{vis}use almide_str_block::{{almide_str_mark_reachable, AlmideStr, AlmideList, AlmideToList, AlmideListElem, AlmideListFill, AlmideListFillZeroed, AlmideZeroValid}};\n"));
     s.push_str(&format!("{vis}type AlmideString = AlmideStr;\n"));
     // A runtime function converts what it returns once, at its boundary.
     s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\n"));

@@ -701,3 +701,118 @@ impl<T: Clone> AlmideList<T> {
         self.clone()
     }
 }
+
+/// A fresh heap block of `n > 0` elements whose bytes are all zero (`alloc_zeroed`, so the
+/// allocator may hand back untouched pages): only the header is written.
+fn almide_list_alloc_zeroed<T>(n: usize) -> NonNull<AlmideListHeader> {
+    let layout = almide_list_layout::<T>(n);
+    // SAFETY: the layout's size is at least the header's, so it is non-zero.
+    let raw = unsafe { std::alloc::alloc_zeroed(layout) }.cast::<AlmideListHeader>();
+    let block = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+    // SAFETY: the block is freshly allocated, sized and aligned for the header; the
+    // caller guarantees all-zero bytes are `n` valid elements.
+    unsafe { block.as_ptr().write(AlmideListHeader { rc: AlmideListCount::new(1), len: n, cap: n }) };
+    block
+}
+
+impl<T> AlmideList<T> {
+    /// `n` clones of `x` (`vec![x; n]`): one block at its final capacity, filled in place;
+    /// the last element is `x` itself.
+    pub fn from_elem(x: T, n: usize) -> Self where T: Clone {
+        if n == 0 {
+            return Self::new();
+        }
+        let out = Self::with_capacity(n);
+        let data = out.data();
+        for i in 0..n - 1 {
+            // SAFETY: the block is unique with room for `n` elements; `len` follows each
+            // write, so a panicking clone drops exactly the elements written.
+            unsafe {
+                data.add(i).write(x.clone());
+                (*out.ptr.as_ptr()).len = i + 1;
+            }
+        }
+        // SAFETY: as above, the last slot.
+        unsafe {
+            data.add(n - 1).write(x);
+            (*out.ptr.as_ptr()).len = n;
+        }
+        out
+    }
+}
+
+/// An element type whose value is its bytes and whose all-zero bytes are a value: a
+/// `Copy` type with no padding and no invalid bit pattern at zero. `almide_list![x; n]`
+/// with an all-zero `x` of such a type allocates its block zeroed.
+///
+/// # Safety
+/// Every byte of a value must be initialized (no padding), and the all-zero bit
+/// pattern must be a valid value. A clone of a value is then its bytes.
+pub unsafe trait AlmideZeroValid: Copy {}
+// SAFETY: the primitive scalars have no padding, and zero is a valid value of each
+// (`0`, `0.0`, `false`, `'\0'`).
+unsafe impl AlmideZeroValid for i8 {}
+unsafe impl AlmideZeroValid for i16 {}
+unsafe impl AlmideZeroValid for i32 {}
+unsafe impl AlmideZeroValid for i64 {}
+unsafe impl AlmideZeroValid for i128 {}
+unsafe impl AlmideZeroValid for isize {}
+unsafe impl AlmideZeroValid for u8 {}
+unsafe impl AlmideZeroValid for u16 {}
+unsafe impl AlmideZeroValid for u32 {}
+unsafe impl AlmideZeroValid for u64 {}
+unsafe impl AlmideZeroValid for u128 {}
+unsafe impl AlmideZeroValid for usize {}
+unsafe impl AlmideZeroValid for f32 {}
+unsafe impl AlmideZeroValid for f64 {}
+unsafe impl AlmideZeroValid for bool {}
+unsafe impl AlmideZeroValid for char {}
+
+/// `almide_list![x; n]`'s element. The macro calls `(&&AlmideListElem::new(x)).almide_list_fill(n)`:
+/// method lookup tries the `&&` receiver first, which only an [`AlmideZeroValid`] element
+/// has, and otherwise derefs to the general fill. The cell lets either fill move `x` out
+/// through the shared receiver, so the list holds `x` and `n - 1` clones, as `vec!` does.
+pub struct AlmideListElem<T>(std::cell::Cell<Option<T>>);
+
+impl<T> AlmideListElem<T> {
+    #[inline]
+    pub fn new(x: T) -> Self {
+        AlmideListElem(std::cell::Cell::new(Some(x)))
+    }
+
+    #[inline]
+    fn take(&self) -> T {
+        self.0.take().expect("an almide_list! element is filled once")
+    }
+}
+
+/// The fill an element type that is valid when zeroed takes: a zero value allocates the block zeroed.
+pub trait AlmideListFillZeroed<T> {
+    fn almide_list_fill(self, n: usize) -> AlmideList<T>;
+}
+
+impl<T: AlmideZeroValid> AlmideListFillZeroed<T> for &&AlmideListElem<T> {
+    #[inline]
+    fn almide_list_fill(self, n: usize) -> AlmideList<T> {
+        let x = self.take();
+        // SAFETY: `AlmideZeroValid` promises every byte of `x` is initialized.
+        let bytes = unsafe { std::slice::from_raw_parts((&x as *const T).cast::<u8>(), std::mem::size_of::<T>()) };
+        if n == 0 || bytes.iter().any(|&b| b != 0) {
+            return AlmideList::from_elem(x, n);
+        }
+        // The zeroed block holds `n` copies of `x`: its bytes are `x`'s, and a copy of `x` is its bytes.
+        AlmideList { ptr: almide_list_alloc_zeroed::<T>(n), _elems: PhantomData }
+    }
+}
+
+/// The general fill: `n` clones written into one block.
+pub trait AlmideListFill<T> {
+    fn almide_list_fill(self, n: usize) -> AlmideList<T>;
+}
+
+impl<T: Clone> AlmideListFill<T> for &AlmideListElem<T> {
+    #[inline]
+    fn almide_list_fill(self, n: usize) -> AlmideList<T> {
+        AlmideList::from_elem(self.take(), n)
+    }
+}

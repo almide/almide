@@ -227,15 +227,15 @@ fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(p
         let ranges = &ranges;
         std::thread::scope(|scope| {
             let f = &f;
-            let mut handles = AlmideList::with_capacity(threads);
+            let mut handles = std::vec::Vec::with_capacity(threads);
             for t in 0..threads {
                 let init = init.clone();
                 handles.push(almide_fan_spawn(scope, move || {
                     almide_stack_guard_register();
-                    ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<AlmideList<_>>()
+                    ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<std::vec::Vec<_>>()
                 }));
             }
-            let mut slots: AlmideList<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
+            let mut slots: std::vec::Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
             for (t, h) in handles.into_iter().enumerate() {
                 let parts = match h {
                     AlmideFanArm::Spawned(h) => h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?,

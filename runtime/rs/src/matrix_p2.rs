@@ -91,7 +91,7 @@ pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &[i64]) -> Almide
     let cols = m[0].len();
     indices.iter().map(|&idx| {
         let i = idx as usize;
-        if i < m.len() { m[i].to_vec() } else { almide_list![0.0f64; cols] }
+        if i < m.len() { m[i].to_list() } else { almide_list![0.0f64; cols] }
     }).collect()
 }
 

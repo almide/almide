@@ -21,7 +21,7 @@ pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> AlmideList<u8> {
     // SAFETY: `ffi.read` checked `off + n <= len` for the Region `base` came
     // from, and the Region keeps its owner (or its foreign release guard)
     // alive while it is borrowed here (ADR-0031 D2).
-    unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize).to_vec() }
+    AlmideList::from(unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize) })
 }
 
 pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &AlmideList<u8>) {

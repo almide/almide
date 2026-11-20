@@ -323,7 +323,7 @@ pub fn almide_json_from_float(n: f64) -> AlmideValue { AlmideValue::Float(n) }
 pub fn almide_json_from_string(s: &str) -> AlmideValue { AlmideValue::Str(AlmideString::from(s)) }
 pub fn almide_json_from_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_json_from_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
-pub fn almide_json_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
+pub fn almide_json_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(AlmideList::from(items)) }
 
 // ── Stringify pretty ──
 

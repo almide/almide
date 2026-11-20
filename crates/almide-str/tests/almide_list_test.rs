@@ -392,3 +392,79 @@ fn try_reserve_resize_and_swap_remove_agree_with_vec_and_copy_on_write() {
     assert_eq!(&*moved, &[4, 5]);
     assert_eq!(moved.to_vec().ref_count(), 2, "to_vec shares the block");
 }
+
+/// `almide_list![x; n]` in a context that only knows `T: Clone` takes the general fill.
+fn fill_generic<T: Clone>(x: T, n: usize) -> AlmideList<T> {
+    almide_str::almide_list![x; n]
+}
+
+#[test]
+fn a_zero_fill_allocates_zeroed_and_the_list_is_an_ordinary_unique_block() {
+    // The zeroed path: an all-zero value of each kind of scalar.
+    let mut ints: AlmideList<i64> = almide_str::almide_list![0i64; 1000];
+    assert_eq!(&ints[..], &vec![0i64; 1000][..]);
+    assert!(ints.is_unique());
+    assert_eq!(ints.capacity(), 1000);
+    let floats: AlmideList<f64> = almide_str::almide_list![0.0f64; 7];
+    assert_eq!(&floats[..], &[0.0f64; 7][..]);
+    let flags: AlmideList<bool> = almide_str::almide_list![false; 3];
+    assert_eq!(&flags[..], &[false; 3][..]);
+    let bytes: AlmideList<u8> = almide_str::almide_list![0u8; 33];
+    assert_eq!(&bytes[..], &[0u8; 33][..]);
+    // Every element is readable and writable in place, and the block grows and drops as any other.
+    ints[999] = 5;
+    ints.push(6);
+    let shared = ints.clone();
+    ints[0] = 1;
+    assert_eq!((ints[0], shared[0], shared[999], shared[1000]), (1, 0, 5, 6));
+    // Zero elements: the static empty block.
+    let none: AlmideList<i64> = almide_str::almide_list![0i64; 0];
+    assert!(none.is_empty() && !none.is_unique());
+}
+
+#[test]
+fn a_nonzero_or_general_fill_writes_each_element_into_one_block() {
+    // A nonzero scalar, and -0.0 (not all-zero bits), take the clone fill.
+    let sevens: AlmideList<i64> = almide_str::almide_list![7i64; 5];
+    assert_eq!(&sevens[..], &[7i64; 5][..]);
+    assert_eq!(sevens.capacity(), 5);
+    let neg: AlmideList<f64> = almide_str::almide_list![-0.0f64; 4];
+    assert!(neg.iter().all(|x| x.to_bits() == (-0.0f64).to_bits()));
+    // A zero inside a generic context also takes the clone fill.
+    let generic = fill_generic(0i64, 6);
+    assert_eq!(&generic[..], &[0i64; 6][..]);
+    // A heap element: the list holds `x` and n - 1 clones, as `vec!` does.
+    let x = Rc::new(9);
+    let held: AlmideList<Rc<i32>> = almide_str::almide_list![x.clone(); 4];
+    assert_eq!(Rc::strong_count(&x), 5);
+    drop(held);
+    assert_eq!(Rc::strong_count(&x), 1);
+    let strs = fill_generic(AlmideStr::from("ab"), 3);
+    assert_eq!(strs.iter().map(|s| &**s).collect::<Vec<&str>>(), vec!["ab"; 3]);
+    let empty = fill_generic(Rc::new(1), 0);
+    assert!(empty.is_empty());
+}
+
+/// A clone that panics partway leaves the fill with exactly the elements it wrote, each dropped once.
+#[test]
+fn a_clone_that_panics_mid_fill_drops_what_was_written() {
+    struct Bomb(Rc<Cell<usize>>, Rc<Cell<usize>>);
+    impl Clone for Bomb {
+        fn clone(&self) -> Self {
+            self.0.set(self.0.get() + 1);
+            assert!(self.0.get() < 3, "the third clone panics");
+            Bomb(self.0.clone(), self.1.clone())
+        }
+    }
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            self.1.set(self.1.get() + 1);
+        }
+    }
+    let (clones, drops) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let bomb = Bomb(clones.clone(), drops.clone());
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fill_generic(bomb, 10)));
+    assert!(r.is_err());
+    // two clones written, then the original: three drops
+    assert_eq!((clones.get(), drops.get()), (3, 3));
+}
