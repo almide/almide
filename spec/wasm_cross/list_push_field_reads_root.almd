@@ -26,7 +26,9 @@ fn param_rows(n: Int) -> String = {
     h.next = h.next + 1
   }
   let sum = h.slots |> list.fold(0, (acc, p) => acc + p.0 + p.1)
-  "${list.len(h.slots)} ${sum} ${list.first(h.slots) ?? (0, 0)} ${list.last(h.slots) ?? (0, 0)}"
+  let (f0, f1) = list.first(h.slots) ?? (0, 0)
+  let (l0, l1) = list.last(h.slots) ?? (0, 0)
+  "${list.len(h.slots)} ${sum} (${f0}, ${f1}) (${l0}, ${l1})"
 }
 
 fn alias_rows(n: Int) -> String = {
