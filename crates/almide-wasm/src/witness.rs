@@ -492,7 +492,7 @@ impl WitnessRecorder {
 
     /// #4631: the current arm of the innermost open site is the shipped
     /// arm the instruction `anchor` names (`Emitter::arm_anchor_here`).
-    pub fn branch_anchor(&mut self, anchor: u64) {
+    pub(crate) fn branch_anchor(&mut self, anchor: u64) {
         self.branches.anchor(anchor);
     }
 
