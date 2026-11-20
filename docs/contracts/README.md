@@ -494,4 +494,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-456 | A declared type whose protocol defines its order through `compare` (BigInt) orders by that compare in every natural-order operation a generic body reaches, on every leg | 0.70.0 | active | fixture | 1 |
 | C-457 | An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream | 0.70.0 | active | fixture | 3 |
 | C-458 | An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike | 0.70.0 | active | fixture | 0 |
+| C-459 | A process command name runs the program the launch PATH finds; env.set(\"PATH\") never changes which program a name runs, on native and the embedded wasm host alike | 0.70.0 | active | fixture | 0 |
 
