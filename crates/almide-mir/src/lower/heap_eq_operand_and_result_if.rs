@@ -1,5 +1,5 @@
 // The heap `==` operand materialization and the heap-result `if` of
-// control_p3_c.rs (max-lines split — pure text move; included from
+// control_p3_c.rs (moved out of it whole; included from
 // control_b.rs after control_p3_c.rs).
 
 impl LowerCtx {
