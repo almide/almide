@@ -12,7 +12,6 @@
 // largest finite value and its negation, NaN, inf, -inf, and the values with the
 // longest text (-5e-324 and -2.2250738585072014e-308; -1.4e-45), plus the
 // integral values 2.0 and 1e300 (f64) / 2.0 and 1e30 rounded to f32.
-
 fn f64_line(bits: Int) -> Unit = {
   let x = float.from_bits(bits)
   println("${x}")
@@ -43,7 +42,7 @@ effect fn main() -> Unit = {
     -9223372036854775807,
     -9218868437227405312,
     4611686018427387904,
-    9094988921128908188,
+    9094988921128908188
   ]
   for bits in f64_bits {
     f64_line(bits)
@@ -62,7 +61,7 @@ effect fn main() -> Unit = {
     4286578688,
     2147483649,
     1073741824,
-    1900671690,
+    1900671690
   ]
   for bits in f32_bits {
     f32_line(bits)

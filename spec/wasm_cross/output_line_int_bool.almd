@@ -6,7 +6,6 @@
 // (`let s = "${x}"`, or `+` concatenation of the same parts) and printed; for
 // a single integer or Bool hole a third line prints its type's `to_string`.
 // Every line of a group must be equal, and native must equal wasm.
-
 fn int_line(x: Int) -> Unit = {
   println("${x}")
   let s = "${x}"
