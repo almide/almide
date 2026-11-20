@@ -41,10 +41,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "140"
+# unstamped_ceiling     = "133"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "201"
-# failopen_ceiling      = "54"
+# skipped_route_ceiling = "189"
+# failopen_ceiling      = "46"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -143,25 +143,18 @@ keys = []
 decides = "a program whose user fns' transitive category sets (effect_flow over the lowered IR) stay inside [permissions].allow passes; any fn reaching an ungranted category is a capability violation"
 from = "mixed:reach+name"
 unknown = "refuse"
-unknown_note = "new user fn: judged by reach (fail-closed). new stdlib module: every_stdlib_module_is_classified_once forces a STDLIB_MODULE_EFFECTS row. new plain stdlib fn in a Pure-classified module that calls a prim host op: charged nothing (#4827). runtime symbols are classified by `almide_rt_<module>_` prefix; an undeclared symbol of a classified module fails closed to the module default"
-routes = { check = "runs: check_one whole-program IR (check.rs:230-241)", check_json = "skipped: #4815", check_effects = "skipped: separate copy (perm.check-effects-gate), entry IR only #4815", run = "runs: compile_driver::optimize_gate_and_link", build = "runs", test = "runs: native check_through_link + batch (batch judged by first file's project #4833); wasm lane wasm_test_permissions_refuse", bench = "runs: try_compile / compile_to_wasm_bytes", native = "runs", wasm = "runs: wasm_compile.rs:164", wasi = "runs", component = "runs: build_wasm -> compile_to_wasm_bytes_surfaced", lsp = "n.a.: produces no code", mcp = "skipped: almide_check is check --json #4815 (almide_test runs)", emit = "runs: emit.rs:209" }
-tests = [
-  "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions",
-  "tests/permissions_both_targets_test.rs::a_disallowed_effect_is_refused_by_the_native_and_the_wasm_build_alike",
-  "tests/effect_category_flow_test.rs::permissions_refuse_the_runner_with_a_path_through_the_parameter",
-  "tests/effect_value_laundering_test.rs::permissions_see_a_category_carried_by_a_fn_value",
-  "tests/effect_permissions_test.rs::a_plain_fn_extern_is_every_category",
-  "tests/proc_category_test.rs::env_does_not_grant_starting_a_process",
-]
+unknown_note = "a new user fn is judged by reach (effect_flow over the whole program's IR); a capability reached only through an imported module is refused on every judging route, check --json and check --effects included (#4815). A runtime symbol is classified by its `almide_rt_<module>_` prefix (effect.rs:325-346), and a plain fn of a Pure-classified module that reaches a prim host op is charged nothing (`prim` Pure, effect.rs:231; #4827)"
+routes = { check = "runs: check_one whole-program IR (check.rs:230-241)", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs: compile_driver::optimize_gate_and_link", build = "runs", test = "runs: native check_through_link + batch (batch judged by first file's project #4833); wasm lane wasm_test_permissions_refuse", bench = "runs: try_compile / compile_to_wasm_bytes", native = "runs", wasm = "runs: wasm_compile.rs:164", wasi = "runs", component = "runs: build_wasm -> compile_to_wasm_bytes_surfaced", lsp = "n.a.: produces no code", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs: emit.rs:209" }
+tests = ["tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions", "tests/permissions_both_targets_test.rs::a_disallowed_effect_is_refused_by_the_native_and_the_wasm_build_alike", "tests/effect_category_flow_test.rs::permissions_refuse_the_runner_with_a_path_through_the_parameter", "tests/effect_value_laundering_test.rs::permissions_see_a_category_carried_by_a_fn_value", "tests/effect_permissions_test.rs::a_plain_fn_extern_is_every_category", "tests/proc_category_test.rs::env_does_not_grant_starting_a_process", "tests/decision_batch1a_test.rs::novel_allow_gate_refuses_a_capability_reached_through_a_fresh_module"]
 control_note = "docs/roadmap/active/security-by-construction.md row 26: permissions_routes_test 0/2 on the v0.68.0-rc2 binary (ALMIDE_CONTROL_BIN, 2026-10-26)"
 issues = [4815, 4827, 4829, 4833]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (module table by stdlib module name is identity-resolved, but runtime symbols are prefix-classified: effect.rs:325 runtime_symbol_effect)",
-  "c2:fail-open (prim host op in Pure module #4827)",
-  "c3:route-skipped (check --json, check --effects #4815)",
-]
-note = "effect_flow is reach over user/bundled bodies plus per-op tables (scan.rs:395-458). check_permissions filters stdlib fns out as roots by name (mod.rs:101) — reporting only, callers carry the set."
+reasons = ["c1: runtime symbols are classified by `almide_rt_<module>_` prefix (effect.rs:325-346) and modules by their STDLIB_MODULE_EFFECTS row (owned by purity.effect-classification, #4827)", "c2: a plain fn of a Pure-classified module that reaches a prim host op is charged nothing (effect.rs:231, #4827)"]
+note = "#4815 closed (a0dc3ae5c1): check --json (check.rs:394-402) and check --effects (check.rs:525-531) run enforce_project_permissions over whole_program_ir; the MCP almide_check is check --json. #4829 closed: the governing manifest is refused when it does not parse (project.rs:925-938). check_permissions filters stdlib fns out as roots (mod.rs:101-104), reporting only. When the whole-program lowering fails, check falls back to the entry's IR (check.rs:193-201; issue draft issue-check-whole-ir-fallback)."
+novel = "tests/decision_batch1a_test.rs::novel_allow_gate_refuses_a_capability_reached_through_a_fresh_module"
+control_test = "tests/decision_batch1a_test.rs::novel_allow_gate_refuses_a_capability_reached_through_a_fresh_module"
+control_patch = "proofs/decision-controls/perm.allow-gate.patch"
+probe = "tests/decision-probes/perm.allow-gate"
 
 [[site]]
 id = "perm.allow-vocabulary"
@@ -173,23 +166,21 @@ keys = []
 decides = "each [permissions].allow name must be an ADR-0026 D2 leaf or one of the four parents (Effect::granted_by); an unknown name is refused on its manifest line"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "an unknown/misspelled capability name is an error (check_manifest project.rs:877, allowed_permissions_or_report mod.rs:398); a new Effect variant enters Effect::ALL/grantable_names in one place"
-routes = { check = "runs: check_manifest on ./almide.toml before dispatch; entry project via check_permissions", check_json = "skipped: #4815 (only the cwd check_manifest gate runs)", check_effects = "runs: enforce_effect_permissions", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command",
-  "tests/manifest_permissions_test.rs::an_unknown_name_in_a_multi_line_allow_is_refused_on_its_line",
-  "tests/manifest_permissions_test.rs::log_is_not_a_capability",
-  "tests/diagnostics/permissions-unknown-capability",
-  "tests/diagnostics/permissions-unknown-capability-multiline",
-]
+unknown_note = "Effect::granted_by is the one vocabulary (project.rs:890-900, ADR-0026 D2); a name it does not know is refused on its manifest line by check_manifest (project.rs:953-955) — run by the dispatch gate on ./almide.toml (dispatch.rs:756) and by governing_manifest on the entry's own manifest from outside the project (project.rs:932-938, #4829)"
+routes = { check = "runs: check_manifest on ./almide.toml before dispatch; entry project via check_permissions", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs: enforce_effect_permissions", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command", "tests/manifest_permissions_test.rs::an_unknown_name_in_a_multi_line_allow_is_refused_on_its_line", "tests/manifest_permissions_test.rs::log_is_not_a_capability", "tests/diagnostics/permissions-unknown-capability", "tests/diagnostics/permissions-unknown-capability-multiline", "tests/decision_batch1a_test.rs::novel_a_fresh_capability_name_is_refused_on_every_route"]
 control_note = "tests/diagnostics/permissions-unknown-capability (broken expects the refusal)"
 issues = [4815, 4829]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (an entry project's manifest that does not parse is read as no manifest: project.rs:861 .ok(), #4829)",
-  "c3:route-skipped (#4815)",
-]
-note = "check_manifest validates the cwd manifest only; permissions_project_for(entry) swallows any parse error, so a bad name in a manifest outside cwd drops [permissions] entirely (#4829)."
+status = "STAMPED"
+reasons = []
+note = "#4829 closed (5129b9f467): permissions_project_for reads through governing_manifest, which refuses instead of `.ok()`; #4815 closed: check --json / --effects read it. lsp n.a. (produces no code)."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_capability_name_is_refused_on_every_route"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_capability_name_is_refused_on_every_route"
+control_patch = "proofs/decision-controls/perm.allow-vocabulary.patch"
+probe = "tests/decision-probes/perm.allow-vocabulary"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "perm.empty-allow-deny-all"
@@ -200,21 +191,22 @@ items = [
 keys = []
 decides = "absent `allow` = unchecked; explicit `allow = []` = no capability granted"
 from = "declaration"
-unknown = "n.a."
-unknown_note = "absent key is deliberately unchecked (#4101, documented as an open decision in security row 17)"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "runs: proj.permissions.is_some()", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "tests/manifest_permissions_test.rs::an_explicit_empty_allow_denies_every_capability",
-  "tests/manifest_permissions_test.rs::an_absent_allow_stays_unchecked",
-]
+unknown = "refuse"
+unknown_note = "the row's unknown item is a capability: `allow = []` grants no leaf, so every category a fresh fn reaches is refused (mod.rs:305-310). An absent `allow` is the declared choice to leave the program unchecked (#4101), not an unknown item. A manifest that does not parse is refused (#4829, project.rs:932-938)"
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs: proj.permissions.is_some()", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["tests/manifest_permissions_test.rs::an_explicit_empty_allow_denies_every_capability", "tests/manifest_permissions_test.rs::an_absent_allow_stays_unchecked", "tests/decision_batch1a_test.rs::novel_an_empty_allow_refuses_every_capability_a_fresh_fn_reaches"]
 control_note = "security-by-construction.md rows 17/18: reading `allow = []` as absent fails the test (exit 101)"
 issues = [4815, 4829]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (unparseable manifest = absent = allow-all, #4829)",
-  "c3:route-skipped (#4815)",
-]
-note = "mod.rs:305-310."
+status = "STAMPED"
+reasons = []
+note = "mod.rs:305-310. unknown was `n.a.`; batch 1a sets `refuse` (see unknown_note) — a judgment, confirm. #4815 / #4829 closed."
+novel = "tests/decision_batch1a_test.rs::novel_an_empty_allow_refuses_every_capability_a_fresh_fn_reaches"
+control_test = "tests/decision_batch1a_test.rs::novel_an_empty_allow_refuses_every_capability_a_fresh_fn_reaches"
+control_patch = "proofs/decision-controls/perm.empty-allow-deny-all.patch"
+probe = "tests/decision-probes/perm.empty-allow-deny-all"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "perm.manifest-lookup"
@@ -225,20 +217,19 @@ items = [
 keys = []
 decides = "which almide.toml's [permissions] govern an entry: nearest at/above the entry, else cwd; a manifest that does not parse is treated as none"
 from = "declaration"
-unknown = "allow"
-unknown_note = "parse failure (hyphen in package name, bad native shape, dup key outside cwd) => None => no gate (#4829); test batches judged by first file's project (#4833); wasm/compile_driver fall back to cwd_project"
-routes = { check = "runs", check_json = "n.a.: no gate #4815", check_effects = "runs", run = "runs", build = "runs", test = "runs: native batch uses first file (#4833); wasm lane per file (#4816 for fs)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
-tests = [
-  "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions",
-]
+unknown = "refuse"
+unknown_note = "the nearest almide.toml at or above the entry, else ./almide.toml (manifest_for_entry, project.rs:907-919); one that does not parse is refused, never `None` (governing_manifest, project.rs:925-938, #4829). The wasm test lane reads each file's own project (test_wasm.rs:462-468, 791, #4816); the native test batch still judges every file by the first file's project (compile_driver.rs:856, #4833)"
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs: native batch uses first file (#4833); wasm lane per file (#4816 for fs)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions", "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"]
 control_note = "NONE"
 issues = [4829, 4833, 4816]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (#4829)",
-  "c4:no-control (no test of an unparseable manifest)",
-]
-note = "project.rs:860-862, compile_driver.rs:247-250 and 335-337 all `.ok()`."
+reasons = ["c3: the native test batch judges every file by the first file's project (compile_driver.rs:856, #4833 open)"]
+note = "#4829 closed (5129b9f467); #4816 closed for the wasm test lane (b9027eede6). unknown was `allow` (the parse failure); now `refuse` (failopen count -1)."
+novel = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"
+control_test = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"
+control_patch = "proofs/decision-controls/perm.manifest-lookup.patch"
+probe = "tests/decision-probes/perm.manifest-lookup"
 
 [[site]]
 id = "perm.check-route-gate"
@@ -250,18 +241,17 @@ keys = []
 decides = "almide check applies [permissions] (allow + proc) on the whole-program IR when the entry's project has `allow` or `proc`; Proc-without-list refused under critical"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "user modules lowered by whole_program_ir; if that front end panics (debug assertion) the gate silently judges the entry IR only (check.rs:194, compile_driver.rs:295-299)"
+unknown_note = "user modules are judged through whole_program_ir; when that second front end fails it returns None (compile_driver.rs:313-333) and check judges the entry's IR alone (check.rs:193-201) — a fail-open fallback (issue draft issue-check-whole-ir-fallback)"
 routes = { check = "runs", check_json = "skipped: check_json_one never calls it #4815", check_effects = "skipped: #4815 own copy", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs only with --target wasm (compile_to_wasm_bytes)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "skipped: #4815", emit = "n.a." }
-tests = [
-  "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions",
-]
+tests = ["tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions", "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"]
 control_note = "security-by-construction.md row 26 (rc2 control)"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped (check --json #4815)",
-]
-note = "fs-only manifest (no allow/proc) skips enforce_project_permissions in check (check.rs:236) — fs is judged at run time elsewhere."
+reasons = ["c2: when whole_program_ir returns None, check judges the entry's IR alone (check.rs:193-201) — fail-open (issue draft issue-check-whole-ir-fallback; kept `refuse` pending a ruling: `allow` would raise the failopen count)"]
+note = "check.rs:228-242 (check_one). #4815: check --json has its own copy now (check_json_one, check.rs:394-402), so the draft cells check_json / mcp = skipped are stale (VM). An fs-only manifest (no allow / proc) skips enforce_project_permissions on check (check.rs:236)."
+novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_patch = "proofs/decision-controls/perm.check-route-gate.patch"
 
 [[site]]
 id = "perm.check-effects-gate"
@@ -272,20 +262,19 @@ items = [
 keys = []
 decides = "check --effects refuses any fn in the ENTRY IR whose transitive set leaves [permissions].allow"
 from = "mixed:reach+name"
-unknown = "allow"
-unknown_note = "a capability reached through an imported user module is never seen (entry-only lower_program, check.rs:469); no proc list, no E109"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "runs: entry only #4815", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "tests/effect_permissions_test.rs::check_effects_reports_the_extern_and_its_caller",
-]
+unknown = "refuse"
+unknown_note = "check --effects runs the whole-program [permissions] gate before its per-fn report (check.rs:525-531, #4815): a capability reached through an imported module and the proc list are judged. The per-fn report (enforce_effect_permissions) still reads the entry's IR, and the whole-program lowering falls back to the entry's IR when it fails (check.rs:527-528)"
+routes = { check = "runs (observed 2026-11-20, inside and outside the project)", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs: entry only #4815", run = "runs (observed 2026-11-20, inside and outside the project)", build = "runs (observed 2026-11-20, inside and outside the project)", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "runs (observed 2026-11-20, inside and outside the project)", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "runs (observed 2026-11-20, inside and outside the project)", component = "runs (observed 2026-11-20, inside and outside the project)", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs (observed 2026-11-20, inside and outside the project)" }
+tests = ["tests/effect_permissions_test.rs::check_effects_reports_the_extern_and_its_caller", "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"]
 control_note = "NONE"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (imported module capability unseen, #4815)",
-  "c4:no-control",
-]
-note = "Duplicate of check_permissions' loop over a different IR; prints 'Permissions OK'."
+reasons = ["c1: the categories come from the shared classification (runtime symbol prefix, module rows; #4827)", "c2: the whole-program lowering falls back to the entry's IR when it fails (check.rs:527-528; issue draft issue-check-whole-ir-fallback)"]
+note = "#4815 closed (a0dc3ae5c1). unknown was `allow` (imported module unseen); now `refuse` (failopen count -1)."
+novel = "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"
+control_test = "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"
+control_patch = "proofs/decision-controls/perm.check-effects-gate.patch"
+probe = "tests/decision-probes/perm.check-effects-gate"
 
 [[site]]
 id = "perm.proc-allowlist-static"
@@ -299,22 +288,12 @@ from = "name"
 unknown = "allow"
 unknown_note = "a spawning fn not in PROC_SPAWNING (process.__os_run/__os_output/__os_start today; any future spawner) passes (#4817); match is module == \"process\" and func name, FnRef by \"process.\" prefix"
 routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route",
-  "tests/proc_allowlist_test.rs::a_command_the_list_cannot_check_is_refused_too",
-  "tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing",
-]
+tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route", "tests/proc_allowlist_test.rs::a_command_the_list_cannot_check_is_refused_too", "tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing"]
 control_note = "NONE"
 issues = [4817, 4815]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (PROC_SPAWNING mod.rs:180, prefix mod.rs:257)",
-  "c2:fail-open (#4817)",
-  "c2:no-novel-test",
-  "c3:route-skipped (#4815)",
-  "c4:no-control",
-]
-note = "Listed in proofs/name-keyed-sites.toml (src/cli/mod.rs::PROC_SPAWNING::table). Spawning is not a declaration (unlike @signals_process)."
+reasons = ["c1: PROC_SPAWNING names the spawning fns (mod.rs:180-185); a fn value is matched by its `process.` prefix (mod.rs:257)", "c2: a spawning fn not on the table (process.__os_run / __os_output / __os_start, stdlib/process.almd:105-114) passes (#4817)", "c2: no novel test", "c4: no control"]
+note = "Listed in proofs/name-keyed-sites.toml (src/cli/mod.rs::PROC_SPAWNING::table). #4815 closed: check --json and check --effects run this gate (check.rs:394-402, 525-531), so the draft cells skipped #4815 are stale (VM). Batch 1a wrote no evidence: c1 / c2 need the declaration fix first (#4817)."
 
 [[site]]
 id = "perm.proc-signal-kill"
@@ -326,20 +305,19 @@ keys = []
 decides = "a @signals_process stdlib fn (call or value) needs `kill` on [permissions] proc"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a new signalling fn declared @signals_process is covered automatically (stdlib_info::is_signals_process_stdlib_fn); undeclared one is not"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list",
-]
+unknown_note = "the signalling set is the stdlib's @signals_process declarations (is_signals_process_stdlib_fn, crates/almide-types/src/stdlib_info.rs:682-684): a newly declared fn is covered with no code change. The call arm is reached for a CallTarget::Module whose module is `process` (mod.rs:230-233); a @signals_process fn declared in another module would pass — none exists, and the novel test enumerates every declaration"
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (+ host op 87)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list", "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"]
 control_note = "NONE"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped (#4815)",
-  "c4:no-control",
-  "c2:no-novel-test",
-]
-note = "module still matched by the string \"process\" (mod.rs:231), but the fn set is declaration-driven."
+reasons = ["c3: lsp cell is `n.a.` without a reason (observe did not judge the LSP)"]
+note = "mod.rs:230-266. #4815 closed: check --json / --effects run it."
+novel = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"
+control_test = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"
+control_patch = "proofs/decision-controls/perm.proc-signal-kill.patch"
+probe = "tests/decision-probes/perm.proc-signal-kill"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 
 [[site]]
 id = "perm.proc-grant-without-list"
@@ -353,17 +331,15 @@ from = "declaration"
 unknown = "n.a."
 unknown_note = "an allow list with an unknown name returns Ok here (mod.rs:161) — refused by allowed_effects elsewhere"
 routes = { check = "runs (refuse only with --profile critical)", check_json = "skipped: check --json --profile critical never calls it #4815", check_effects = "skipped: #4815", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs (warning)" }
-tests = [
-  "tests/proc_category_test.rs::proc_without_a_command_list_warns_and_critical_refuses_it",
-]
+tests = ["tests/proc_category_test.rs::proc_without_a_command_list_warns_and_critical_refuses_it", "tests/decision_batch1a_test.rs::novel_proc_granted_without_a_list_is_refused_under_critical"]
 control_note = "NONE"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped (check --json under critical, #4815)",
-  "c4:no-control",
-]
-note = "check.rs:233."
+reasons = ["c2: unknown = n.a.: the decision has no unknown-item axis (it reads the set allowed_effects grants and whether `proc` is written, mod.rs:159-175); the judge requires `refuse`, so stamping needs a ruling (an n.a.-by-shape exception)"]
+note = "#4815 closed: check --json refuses under --profile critical (check.rs:397-398). The novel test's novel item is only the listed command (the control)."
+novel = "tests/decision_batch1a_test.rs::novel_proc_granted_without_a_list_is_refused_under_critical"
+control_test = "tests/decision_batch1a_test.rs::novel_proc_granted_without_a_list_is_refused_under_critical"
+control_patch = "proofs/decision-controls/perm.proc-grant-without-list.patch"
 
 [[site]]
 id = "perm.proc-host-bound"
@@ -398,21 +374,12 @@ from = "mixed:reach+name"
 unknown = "allow"
 unknown_note = "unknown module (not in STDLIB_MODULE_EFFECTS) and unknown fn of a module => empty set (effect.rs:309,317); unresolved Named that is no builtin/runtime symbol and unresolved Method => no category; gated only by every_stdlib_module_is_classified_once"
 routes = { check = "runs", check_json = "skipped: #4815", check_effects = "runs (entry only #4815)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes",
-  "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs",
-  "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once",
-  "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function",
-  "crates/almide-ir/src/effect.rs::the_rows_3246_fixed",
-]
+tests = ["tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes", "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs", "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once", "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function", "crates/almide-ir/src/effect.rs::the_rows_3246_fixed"]
 control_note = "security-by-construction.md row 26 (rc2 controls for effect_value_laundering/permissions_routes)"
 issues = [4827, 4815]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (runtime symbol prefix effect.rs:326-333; module row by name)",
-  "c2:fail-open (unknown fn/module => empty; prim host ops Pure #4827)",
-]
-note = "the_rows_3246_fixed asserts stdlib_call_effect(\"not_a_module\", f) is empty — fail-open by design, closed only by the classification test."
+reasons = ["c1: runtime symbols by `almide_rt_<module>_` prefix (effect.rs:325-346); module rows by name", "c2: an unknown module or an undeclared fn is the empty set (effect.rs:308-318); prim host ops are Pure (effect.rs:231, #4827); an unresolved Method charges nothing"]
+note = "the_rows_3246_fixed asserts stdlib_call_effect(\"not_a_module\", f) is empty — fail-open by design, closed only by the classification test. #4815 closed: check --json / --effects run the gate over the whole program, so those cells are runs-candidates (VM). No evidence written (c1 / c2 need #4827)."
 
 [[site]]
 id = "effect.foreign-top"
@@ -422,23 +389,21 @@ items = [
 ]
 keys = []
 decides = "an @extern fn, and an @inline_rust fn outside the stdlib, carries every category (⊤)"
-from = "mixed:declaration+name"
+from = "declaration"
 unknown = "refuse"
-unknown_note = "in_stdlib = versioned_name is None && is_any_stdlib(module name) (pass_effect_inference.rs:68); a dependency always has a versioned name; entry-file @inline_rust is ⊤ too (probe c1). A new foreign-body attribute other than these two would not be ⊤"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = [
-  "crates/almide-codegen/src/pass_effect_inference.rs::an_extern_fn_is_every_category",
-  "crates/almide-codegen/src/pass_effect_inference.rs::an_inline_rust_fn_outside_the_stdlib_is_every_category",
-  "tests/inline_rust_authority_test.rs::a_granted_template_is_every_capability",
-  "tests/effect_permissions_test.rs::a_plain_fn_extern_is_every_category",
-]
+unknown_note = "@extern and @inline_rust are declarations (pass_effect_inference.rs:53-58). `in_stdlib` (is_stdlib_module, :68-70) is the stdlib's own module by identity: no versioned_name (every dependency carries one) and a stdlib module name, which `import` always resolves to the bundled stdlib, never to a user file (resolve.rs:241-249). A new foreign-body attribute would have to be added to the compiler (an unknown attribute is E053, attr_vocab.rs:179)"
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["crates/almide-codegen/src/pass_effect_inference.rs::an_extern_fn_is_every_category", "crates/almide-codegen/src/pass_effect_inference.rs::an_inline_rust_fn_outside_the_stdlib_is_every_category", "tests/inline_rust_authority_test.rs::a_granted_template_is_every_capability", "tests/effect_permissions_test.rs::a_plain_fn_extern_is_every_category", "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"]
 control_note = "security-by-construction.md row 17 (inline Rust): dropping the effect rule fails inline_rust_authority_test (exit 101)"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped (#4815)",
-]
-note = "probe c1: allow=[\"IO\"] + entry @inline_rust fn => 11 categories refused. Otherwise stampable; the stdlib-module-name part is backed by the versioned_name identity."
+reasons = ["c3: lsp cell is `n.a.` without a reason"]
+note = "#4815 closed (check --json / --effects run the whole-program gate). `from` reclassified mixed:declaration+name -> declaration: the stdlib test is module identity, not spelling — a judgment, confirm."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category"
+control_patch = "proofs/decision-controls/effect.foreign-top.patch"
+probe = "tests/decision-probes/effect.foreign-top"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 
 [[site]]
 id = "effect.e006-isolation"
@@ -528,18 +493,21 @@ keys = [
 decides = "@pure on an `effect fn` or an `@extern` fn is refused outright"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "declaration flags; an @inline_rust fn is NOT refused here (#4824)"
+unknown_note = "the effect flag, extern_attrs and inline_rust_fns are declarations (pure_attr.rs:128-139); inline_rust_fns is recorded at registration for an entry or user-module fn (registration_decls.rs:516-518, #4824). The user-module test is is_user_module (lower/mod.rs:405-407), a stdlib-name test; a stdlib module name never names a user file (resolve.rs:241-249)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/diagnostics/e092-pure-on-effect-fn",
-]
+tests = ["tests/diagnostics/e092-pure-on-effect-fn", "tests/decision_batch1a_test.rs::novel_pure_on_a_fresh_foreign_or_effect_fn_is_refused", "tests/diagnostics/e092-pure-on-inline-rust"]
 control_note = "tests/diagnostics/e092-pure-on-effect-fn"
 issues = [4824]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (@inline_rust body is foreign like @extern but accepted, #4824)",
-]
-note = "pure_attr.rs:128-131."
+status = "STAMPED"
+reasons = []
+note = "#4824 closed (8deacf27c3); fixtures tests/diagnostics/e092-pure-on-inline-rust, e092-pure-calls-inline-rust."
+novel = "tests/decision_batch1a_test.rs::novel_pure_on_a_fresh_foreign_or_effect_fn_is_refused"
+control_test = "tests/decision_batch1a_test.rs::novel_pure_on_a_fresh_foreign_or_effect_fn_is_refused"
+control_patch = "proofs/decision-controls/pure.e092-decl.patch"
+probe = "tests/decision-probes/pure.e092-decl"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "pure.e092-reach"
@@ -551,22 +519,18 @@ keys = []
 decides = "a @pure fn is refused when anything it reaches (BFS over checker-resolved calls and fn values, cross-module) is an output/abort builtin, a stdlib fn with a category, or an @extern"
 from = "mixed:reach+name"
 unknown = "allow"
-unknown_note = "PurityCallee::Stdlib for any qualified non-user name => stdlib_call_effect: unknown module / unknown fn => pure; a Pure-module fn reaching prim host ops => pure (#4827); a user @inline_rust fn => pure (#4824); fn-typed params/locals transparent (ADR-0026 D1, by design)"
+unknown_note = "BFS over checker-resolved calls and fn values, cross-module (pure_attr.rs:178-198). A builtin is judged by the builtin table, which answers a bare call first (identity); an @extern or @inline_rust user fn is foreign (pure_attr.rs:212-218, #4824). A stdlib callee is judged by stdlib_call_effect: empty for a Pure-classified module and for an undeclared fn (effect.rs:308-318), so a Pure-module fn reaching a prim host op is pure (#4827). fn-typed params/locals are transparent (ADR-0026 D1, by design)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/diagnostics/e092-pure-calls-println",
-  "tests/diagnostics/e092-pure-calls-categorised-stdlib",
-  "tests/diagnostics/e092-pure-reaches-assert-via-helper",
-]
+tests = ["tests/diagnostics/e092-pure-calls-println", "tests/diagnostics/e092-pure-calls-categorised-stdlib", "tests/diagnostics/e092-pure-reaches-assert-via-helper", "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused", "tests/diagnostics/e092-pure-calls-inline-rust"]
 control_note = "tests/diagnostics/e092-* broken.almd (refusal expected)"
 issues = [4824, 4827]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (OUTPUT_ABORT_BUILTINS by bare name pure_attr.rs:83; stdlib by module table)",
-  "c2:fail-open (#4824 confirmed, #4827)",
-  "c2:no-novel-test",
-]
-note = "probes p2/p3: module call, pipe, UFCS and list.map(fn) all reach and refuse; only foreign/prim callees slip."
+reasons = ["c2: a stdlib callee is judged by stdlib_call_effect; a plain fn of a Pure-classified module that reaches a prim host op is pure (effect.rs:231, 308-318; #4827)"]
+note = "#4824 closed (8deacf27c3). The bare-name builtin table (pure_attr.rs:83) is the builtin's identity, not a spelling; c1 then rests on the stdlib module table (#4827)."
+novel = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
+control_test = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
+control_patch = "proofs/decision-controls/pure.e092-reach.patch"
+probe = "tests/decision-probes/pure.e092-reach"
 
 [[site]]
 id = "critical.profile-arming"
@@ -694,22 +658,20 @@ keys = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_ident::S1::E074",
 ]
 decides = "a bare callee is admitted if it is an entry fn of the profile, or its name starts with print/eprint, or is assert/assert_eq; else E074"
-from = "name"
-unknown = "allow"
-unknown_note = "a selectively imported fn named print*/eprint*/assert* (any module, incl. one that starts a process) is admitted under critical and @bounded (#4823)"
-routes = { check = "runs", check_json = "runs", check_effects = "n.a.", run = "runs for @bounded (front end)", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/diagnostics/e074-bounded-unbounded-callee",
-]
+from = "declaration"
+unknown = "refuse"
+unknown_note = "a bare callee is a profile fn (self.fns, bounded.rs:876-898), else a builtin read off the builtin table (bounded.rs:905-908), else a selective import judged as its module.member (import_table.resolve_direct, bounded.rs:909-916), else E074 (bounded.rs:917-923). UNVERIFIED GAP: a fn-typed parameter or local shadowing a profile fn is looked up by its spelling first (bounded.rs:876) although the checker resolved it to the local (check/calls.rs:161-183)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs for @bounded (front end)", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
+tests = ["tests/diagnostics/e074-bounded-unbounded-callee", "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target", "tests/critical_profile_test.rs::a_selectively_imported_print_named_fn_is_judged_by_its_target"]
 control_note = "NONE"
 issues = [4823]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed",
-  "c2:fail-open (#4823)",
-  "c4:no-control",
-]
-note = "bounded.rs:874-879."
+reasons = ["c2:fail-open (#4878, probed 2026-11-20: a fn-typed parameter named like a profile fn is judged as that fn's direct call; critical admits recursion through it)"]
+note = "#4823 closed (f6145c1eb0, a36f02c73e). `from` name -> declaration (the callee is decided by what it resolves to) and unknown allow -> refuse (a bare name the profile does not know is E074, bounded.rs:917-923; failopen count -1); the shadowing case is the open c2 reason."
+novel = "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target"
+control_test = "tests/decision_batch1a_test.rs::novel_a_selectively_imported_fresh_fn_is_judged_by_its_target"
+control_patch = "proofs/decision-controls/bounded.bare-callee.patch"
+probe = "tests/decision-probes/bounded.bare-callee"
 
 [[site]]
 id = "bounded.member-module-gate"
@@ -721,27 +683,20 @@ keys = [
   "crates/almide-frontend/src/check/bounded.rs::BoundedCx::check_call_member::S1::E074",
 ]
 decides = "a `m.f(...)` callee: m resolved through the import table (else taken as written); io -> only print*/eprint* without grant; BOUNDED_DENIED_MODULES -> E076 unless --allow; not in BOUNDED_PURE_MODULES -> E074; pure -> shape rules"
-from = "name"
+from = "mixed:type+name"
 unknown = "allow"
-unknown_note = "NEW: the receiver is never checked against local bindings. A parameter/local named like a pure stdlib module (math, list, string, ...) makes an indirect call through a record field read as a first-order pure member: probe p6/m5 `fn go(math: Box, n: Int) -> Int = math.run(n)` + `fn spin(n) = go(Box { run: spin }, n + 1)` passes `--profile critical` (No errors found) — recursion and the indirect call evade E073/E074; the same file with the param renamed `b` is E074 (m6). A param named `io` with a field `print` is likewise admitted. New stdlib modules: every_registry_module_is_classified forces a pure/denied/Pure-effect classification (fail-closed E074 for unlisted)"
-routes = { check = "runs", check_json = "runs", check_effects = "n.a.", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/diagnostics/e076-bounded-fs-effect",
-  "tests/diagnostics/e076-bounded-aliased-env",
-  "tests/diagnostics/e074-bounded-indirect-member-receiver",
-  "tests/diagnostics/e074-bounded-ufcs-receiver",
-  "crates/almide-frontend/src/check/bounded.rs::every_registry_module_is_classified",
-  "crates/almide-frontend/src/check/bounded.rs::bounded_tables_name_real_modules",
-  "tests/critical_profile_test.rs::capability_deny_all_with_explicit_grant",
-]
+unknown_note = "a receiver the checker typed as a value is an indirect callee (type_map, bounded.rs:942-959, #4840); an io member is judged by its declared category (bounded.rs:990-1007, #4823); an unlisted module is E074 (bounded.rs:1024-1031, fail-closed). Fail-open remains for a plain fn of a pure-listed module that reaches a prim host op (#4827)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
+tests = ["tests/diagnostics/e076-bounded-fs-effect", "tests/diagnostics/e076-bounded-aliased-env", "tests/diagnostics/e074-bounded-indirect-member-receiver", "tests/diagnostics/e074-bounded-ufcs-receiver", "crates/almide-frontend/src/check/bounded.rs::every_registry_module_is_classified", "crates/almide-frontend/src/check/bounded.rs::bounded_tables_name_real_modules", "tests/critical_profile_test.rs::capability_deny_all_with_explicit_grant", "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee", "tests/critical_profile_test.rs::a_value_named_like_a_module_is_an_indirect_callee"]
 control_note = "tests/diagnostics/e076-bounded-fs-effect (broken expects E076)"
 issues = [4827, 4840]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (module tables; receiver name fallback bounded.rs:903-909; io print prefix bounded.rs:936)",
-  "c2:fail-open (shadowing local named like a pure module — NEW, no issue; prim host op inside a pure-listed module #4827)",
-]
-note = "bounded.rs:891-972. Fix shape: refuse when env/scope binds the receiver name (as reject_unopted_memory_unsafe_member does with lookup_var), or resolve the member through the checker's type_map."
+reasons = ["c1: the pure / denied module tables are hand lists of module names (bounded.rs:115-130; owned by purity.bounded-pure-modules)", "c2: a pure-listed module's plain fn that reaches a prim host op is admitted (#4827)"]
+note = "#4840 closed (bffe97f5d6, 8dbece8cbc): the shadowing receiver of the draft is now E074. `from` name -> mixed:type+name (the receiver is decided by type; the module by the table)."
+novel = "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee"
+control_test = "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee"
+control_patch = "proofs/decision-controls/bounded.member-module-gate.patch"
+probe = "tests/decision-probes/bounded.member-module-gate"
 
 [[site]]
 id = "bounded.shape-rules"
@@ -821,19 +776,19 @@ keys = []
 decides = "the critical profile applies to the entry program only; imported user modules and stdlib are not profiled"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a call into a user module is E074 (member not pure) or, bare via selective import, E074 unless named print*/assert (#4823) — so unprofiled module code is reachable only through #4823 / the shadowing hole"
+unknown_note = "the profile is armed for the entry's infer_program only (check.rs:62-71); a fresh user module is reachable from it only as a callee, and a callee that is not a profile fn is E074 — as a member (bounded.rs:1024-1031) or as a selective import judged as its member (bounded.rs:909-916, #4823). The module's own body is not profiled by design (#567)"
 routes = { check = "runs", check_json = "runs", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "tests/critical_profile_test.rs::critical_clean_program_passes_both_modes",
-]
+tests = ["tests/critical_profile_test.rs::critical_clean_program_passes_both_modes", "tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee"]
 control_note = "NONE"
 issues = [4823]
 status = "UNSTAMPED"
-reasons = [
-  "c4:no-control",
-  "c2:no-novel-test (no test of a user-module call under critical)",
-]
-note = "check.rs:62-71 arms profile_critical for infer_program only; test blocks skipped by design (digest)."
+reasons = ["c3: twelve cells are bare `n.a.` without a reason"]
+note = "#4823 closed. Every route but check / check --json is n.a. (--profile is a check flag; check --effects refuses it as a usage error). The probe passes --profile critical as `args`."
+novel = "tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee"
+control_test = "tests/decision_batch1a_test.rs::novel_critical_profiles_the_entry_and_refuses_a_fresh_module_callee"
+control_patch = "proofs/decision-controls/critical.entry-scope.patch"
+probe = "tests/decision-probes/critical.entry-scope"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 
 [[site]]
 id = "prim.e085-intrinsic-attr"
@@ -963,7 +918,7 @@ decides = "a fan arm whose closure reaches an @ordered stdlib fn (ADR-0024 D3) i
 from = "mixed:declaration+reach"
 unknown = "refuse"
 unknown_note = "a callee the walk cannot see — a fn value (Computed, not a lambda literal or fn reference) or an unresolved Method call — is read as ordered and the arm is serialized (#4856)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "unknown: the matrix does not execute a built artifact; build lowers the fan as run does (run / native / emit are driven)", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "unknown: bench verifies the output but does not print it, and a serial and a parallel run take the same 80 ms here", native = "runs", wasm = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "unknown: the matrix does not execute a built artifact; build lowers the fan as run does (run / native / emit are driven)", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "unknown: bench verifies the output but does not print it, and a serial and a parallel run take the same 80 ms here", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
 tests = []
 control_note = "NONE"
 issues = [4856]
@@ -1028,22 +983,12 @@ from = "param-name"
 unknown = "allow"
 unknown_note = "a new runtime fs fn whose path parameter is named e.g. `file`/`p`/`from,to`, or a 3-param src/dst, hits `_ => continue`: no guard, not twinned, so its std::fs calls run unbounded (bounded only if some guarded call already installed the global scope AND the fn uses almide_sfs)"
 routes = { check = "n.a.: no code", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs (bin and cdylib)", test = "runs: #4833 shared scope", bench = "skipped: #4831", native = "runs", wasm = "n.a.: host_fs_scope instead", wasi = "skipped: #4816 (cmd_build_wasi_rustc never injects)", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test child", emit = "skipped: #4843 --target rust prints no guards (probe p1)" }
-tests = [
-  "crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions",
-  "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
-  "src/compile_driver_native_tests.rs::checked_native_empty_fs_scope_denies_write_only_program",
-]
+tests = ["crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions", "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "src/compile_driver_native_tests.rs::checked_native_empty_fs_scope_denies_write_only_program"]
 control_note = "NONE"
 issues = [4825, 4831, 4833, 4816]
 status = "UNSTAMPED"
-reasons = [
-  "c1:param-name",
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c3:route-skipped",
-  "c4:no-control",
-]
-note = "fs_scope.rs:72-83 match on parameter names; `_ => continue` (line 82). No test asserts every almide_rt_fs_* fn of runtime/rs/src/fs.rs gets a guard (today all 40 do: path/dir/src,dst/pattern/prefix/at)."
+reasons = ["c1: the guard is chosen by parameter name (fs_scope.rs:72-83)", "c2: `_ => continue` leaves a fn with any other parameter name unguarded (fs_scope.rs:82, #4825)", "c2: no novel test", "c3: skipped bench #4831, emit #4843", "c4: no control"]
+note = "fs_scope.rs:64-87. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). No evidence written (c1 / c2 need #4825)."
 
 [[site]]
 id = "fsscope.native-wrap-calls"
@@ -1084,19 +1029,12 @@ from = "prefix"
 unknown = "allow"
 unknown_note = "a program whose only host fs reach is outside the almide_rt_fs_ prefix (unix.__os_listen/connect, shm_create's temp file, process `dir`) gets no scope at all"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (run.rs:66)", build = "runs (build.rs:359, before the cdylib split)", test = "runs (test_native.rs:367) with the process-global SCOPE: #4833", bench = "skipped: bench.rs:47-65 #4831", native = "runs", wasm = "n.a.", wasi = "skipped: build.rs:317-322 wasi rustc route #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843 emit.rs:121 codegen_with, no inject (probe p1) \u2014 no issue" }
-tests = [
-  "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
-  "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets",
-]
+tests = ["tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets"]
 control_note = "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets (manifest removed -> outside read succeeds, assertion fails)"
 issues = [4831, 4833, 4816, 4832, 4843]
 status = "UNSTAMPED"
-reasons = [
-  "c1:prefix",
-  "c2:fail-open",
-  "c3:route-skipped",
-]
-note = "build.rs:494-518. emit --target rust skips the scope although emit.rs:195-199 says the printed source is what the build compiles: the emitted crate, built by hand, is unbounded (probe p1; not covered by #4816, which names wasm/wasi builds)."
+reasons = ["c1: decided by the `almide_rt_fs_` identifier prefix (build.rs:508)", "c2: host fs reach outside that prefix gets no scope (#4831, #4832)", "c3: skipped bench #4831, emit #4843"]
+note = "build.rs:505-529. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). No evidence written."
 
 [[site]]
 id = "fsscope.v1-native-plan"
@@ -1133,21 +1071,15 @@ items = [
 keys = []
 decides = "which [permissions] fs roots the process-global scope holds for the program being built/run (set_fs_scope), or None = unbounded"
 from = "declaration"
-unknown = "allow"
-unknown_note = "a manifest that fails to parse is read as no manifest -> None -> unbounded (#4829); no manifest -> compile_driver.rs:272 set_fs_scope(None)"
+unknown = "refuse"
+unknown_note = "the roots of the governing manifest (enforce_project_permissions, mod.rs:303-304); a manifest that does not parse is refused (#4829, project.rs:925-938); no `fs` key = unbounded is the declared choice. The wasm test lane takes each file's own project (test_wasm.rs:462-468, 791, #4816)"
 routes = { check = "runs only when allow/proc is set (check.rs:236); scope irrelevant to check", check_json = "skipped: #4815 (no gate)", check_effects = "skipped: #4815", run = "runs (entry's project, else cwd; wasm_compile.rs:164)", build = "runs", test = "native: runs per file into one global (#4833); wasm: cwd_fs_scope() overrides (test_wasm.rs:481/838) and the file's project only re-sets it when allow/proc exist (test_wasm.rs:455) #4816", bench = "wasm runs; native scope set but never injected #4831", native = "runs", wasm = "runs", wasi = "set but unused by the wasi build #4816", component = "runs (preopens)", lsp = "n.a.", mcp = "via almide_test child", emit = "set (emit.rs:209) but unused" }
-tests = [
-  "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets",
-  "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions",
-]
+tests = ["tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets", "tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions"]
 control_note = "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets (manifest removed half)"
 issues = [4829, 4816, 4833, 4831, 4815]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c3:route-skipped",
-]
-note = "Process-global SCOPE (host_fs_scope.rs:17) set at mod.rs:304 and compile_driver.rs:272; read back by inject_fs_scope and the embedded host. test_wasm.rs:453-460 calls the gate only when permissions or proc_allow is Some, so an fs-only manifest keeps the cwd's scope."
+reasons = ["c3: skipped bench native #4831, the native test batch #4833, emit #4843", "c2: no novel test", "c4: no control"]
+note = "Process-global SCOPE (host_fs_scope.rs:17). a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). unknown was `allow` (parse failure); now `refuse` (failopen count -1). No evidence written (c3 open)."
 
 [[site]]
 id = "fsscope.platform-check"
@@ -1161,17 +1093,12 @@ from = "declaration"
 unknown = "refuse"
 unknown_note = "an unlisted target_os makes FS_BENEATH_SUPPORTED false: the key is refused at build and every scoped call is refused (Unsupported) at run time"
 routes = { check = "runs only when allow/proc is also set (check.rs:236)", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "native runs; wasm only when allow/proc set — run-time calls still refuse", bench = "runs (gate on both legs)", native = "runs", wasm = "runs", wasi = "runs (gate) but scope not embedded #4816", component = "runs", lsp = "n.a.", mcp = "via children", emit = "runs (emit.rs:209)" }
-tests = [
-  "crates/almide-rt-core/tests/fs_beneath_platform.rs",
-]
+tests = ["crates/almide-rt-core/tests/fs_beneath_platform.rs"]
 control_note = "docs/roadmap/active/security-by-construction.md row 10: b421e260f build-time check disabled -> exit 101"
 issues = [4815]
 status = "UNSTAMPED"
-reasons = [
-  "c2:no-novel-test",
-  "c3:route-skipped",
-]
-note = "fs_beneath_core.rs:59,73-83. No test runs on an unsupported platform (cannot); check with an fs-only manifest never calls the gate. Harmless on supported platforms."
+reasons = ["c2: no novel test is possible on the CI platforms: FS_BENEATH_SUPPORTED is a cfg constant over target_os (fs_beneath_core.rs:59); needs a ruling (n.a.-by-shape) or a cross-target check build", "c4: no control a supported platform can turn red (the check cannot fail there)", "c3: check calls it only when allow / proc is written (check.rs:236): an fs-only manifest is not checked by check"]
+note = "fs_beneath_core.rs:59, 73-83. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM)."
 
 [[site]]
 id = "fsscope.scoped-admits"
@@ -1188,18 +1115,12 @@ from = "reach"
 unknown = "refuse"
 unknown_note = "every path is judged by where it resolves; an unresolvable path (fs_scope_resolve_parts None) is refused; a segment that is not one OS name (Windows ADS) is refused"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs native+wasm", build = "native runs; wasm/wasi artifact skipped #4816", test = "runs (scope source #4816/#4833)", bench = "wasm runs; native skipped #4831", native = "runs", wasm = "runs (embedded host)", wasi = "skipped: #4816", component = "n.a.: WASI preopens decide", lsp = "n.a.", mcp = "via almide_test", emit = "skipped: #4843 (fsscope.native-inject)" }
-tests = [
-  "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
-  "tests/fs_scope_test.rs::a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target",
-  "crates/almide-rt-core/tests/fs_scoped_core.rs::a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed",
-]
+tests = ["tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "tests/fs_scope_test.rs::a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target", "crates/almide-rt-core/tests/fs_scoped_core.rs::a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed"]
 control_note = "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets (no key -> outside read succeeds); row 10 controls for the beneath walk"
 issues = [4816, 4831, 4833]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped",
-]
-note = "fs_scoped_core.rs:114-126, 186-216. The decision itself is c1/c2/c4-clean; it is UNSTAMPED only because the routes that never install the scope (wasm/wasi builds, bench native, emit) bypass it."
+reasons = ["c3: skipped bench native #4831, emit #4843", "c2: no novel test file (batch 1a wrote none)", "c4: no control patch (the control_note names an existing test, not a patch)"]
+note = "fs_scoped_core.rs:114-126, 72-74. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). Evidence deferred until c3 can hold."
 
 [[site]]
 id = "fsscope.beneath-walk"
@@ -1321,17 +1242,17 @@ decides = "the directories the embedded p3 component host preopens: the granted 
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a path outside every preopen is refused by wasmtime-wasi; a root that does not exist at start is not preopened"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (component route of --target wasm)", build = "n.a.: stock runtime uses operator --dir #4816", test = "unknown", bench = "unknown", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "tests/fs_scope_test.rs::the_component_host_preopens_only_the_granted_roots",
-]
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (component route of --target wasm)", build = "n.a.: stock runtime uses operator --dir #4816", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "unknown", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-20, inside and outside the project)" }
+tests = ["tests/fs_scope_test.rs::the_component_host_preopens_only_the_granted_roots", "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"]
 control_note = "NONE"
 issues = [4816]
 status = "UNSTAMPED"
-reasons = [
-  "c4:no-control",
-]
-note = "host_fs_scope.rs:83-97; component_host.rs:185-189 (FsPerms::ReadWrite). Network on the same host is fully inherited (component_host.rs:181)."
+reasons = ["c3: test / bench cells unknown (does `almide test` / `bench` of an http-importing program run on the component host?)"]
+note = "host_fs_scope.rs:83-97; component_host.rs (FsPerms::ReadWrite). Probe: the OUTSIDE side is confounded (the relative path names no file from the parent, so it prints `refused` for another reason) — read the inside side. [argv] run / component drive `run --target wasm`."
+novel = "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"
+control_test = "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"
+control_patch = "proofs/decision-controls/fsscope.component-preopens.patch"
+probe = "tests/decision-probes/fsscope.component-preopens"
 
 [[site]]
 id = "fsscope.component-shim-unknown-op"
@@ -1513,18 +1434,12 @@ from = "declaration"
 unknown = "refuse"
 unknown_note = "unknown op -> Err(\"unknown process op\"); ALLOW None (no proc key) admits every command"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (--target wasm)", build = "n.a.: stock runtime refuses almide:process/spawn at load", test = "runs when the file's manifest has allow/proc (test_wasm.rs:455)", bench = "runs (wasm)", native = "n.a.: no run-time list (proc.native-no-runtime-list)", wasm = "runs", wasi = "n.a.", component = "unknown", lsp = "n.a.", mcp = "via almide_test", emit = "n.a." }
-tests = [
-  "tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing",
-  "tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list",
-]
+tests = ["tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing", "tests/proc_allowlist_test.rs::signalling_needs_kill_on_the_list"]
 control_note = "NONE"
 issues = [4829]
 status = "UNSTAMPED"
-reasons = [
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "host_process.rs:113-130, 191-273. The run-time refusal is unreachable by a program the static check admits (literal commands only; __os_* is E082 on wasm), so no test drives it."
+reasons = ["c2: no novel test: host_process::call is pub(crate) (host_process.rs:191) and no program the static check admits reaches the run-time refusal; a novel test needs an in-crate #[cfg(test)] driving call() with a fresh command and a fresh op number", "c4: no control"]
+note = "host_process.rs:112-130, 191-273. #4829: the list comes from the governing manifest now."
 
 [[site]]
 id = "proc.native-no-runtime-list"
@@ -1538,18 +1453,12 @@ from = "name"
 unknown = "allow"
 unknown_note = "process.__os_run / __os_output / __os_start (public) are not in PROC_SPAWNING and spawn any command (#4817); any future spawning runtime fn likewise"
 routes = { check = "static only", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "static only", build = "static only", test = "static only", bench = "static only", native = "no run-time check", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "static only" }
-tests = [
-  "tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route",
-]
+tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route"]
 control_note = "NONE"
 issues = [4817, 4815]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed",
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "runtime/rs/src/process.rs:45-212 carry no list; src/cli/mod.rs:180-185 PROC_SPAWNING is the only bound."
+reasons = ["c1: the only bound is PROC_SPAWNING by name (mod.rs:180-185)", "c2: process.__os_run / __os_output / __os_start spawn any command (#4817)", "c4: no control"]
+note = "runtime/rs/src/process.rs carries no list. #4815 closed: check --json / --effects run the static gate now."
 
 [[site]]
 id = "proc.command-path-resolution"
@@ -2081,24 +1990,22 @@ items = [
 keys = []
 decides = "before any command, ./almide.toml is refused (exit 1) for a duplicate key, non-TOML text, control/bidi text, a malformed proc/fs list, a bad [trust].owners entry, a bad [target] table, a bad dependency subdir, or an unknown [permissions].allow name; everything else passes"
 from = "declaration"
-unknown = "allow"
-unknown_note = "only the cwd manifest is judged; the entry's own project manifest (walk-up) is never gated, and check_manifest does not call validate_package_name, the [permissions].native shape or [trust].media, which parse_toml refuses later -> the later .ok() readers drop the whole manifest (#4829)"
+unknown = "refuse"
+unknown_note = "check_manifest now ends with parse_toml (project.rs:956-958), so the gate and every reader refuse the same manifests; the entry's own manifest outside the cwd is judged by the same check_manifest through governing_manifest (project.rs:932-938, #4829)"
 routes = { check = "runs:cwd only", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs:server exempt, tool children are almide subprocesses that run it", emit = "runs:cwd only" }
-tests = [
-  "tests/manifest_permissions_test.rs::a_manifest_that_is_not_toml_is_refused_on_its_line",
-  "tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command",
-  "tests/manifest_duplicate_key_test.rs::the_manifest_reader_refuses_every_duplicate_it_reads",
-  "tests/manifest_control_text_test.rs::a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw",
-]
+tests = ["tests/manifest_permissions_test.rs::a_manifest_that_is_not_toml_is_refused_on_its_line", "tests/manifest_permissions_test.rs::an_unknown_name_is_refused_on_its_manifest_line_by_every_command", "tests/manifest_duplicate_key_test.rs::the_manifest_reader_refuses_every_duplicate_it_reads", "tests/manifest_control_text_test.rs::a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw", "tests/decision_batch1a_test.rs::novel_the_manifest_gate_refuses_a_fresh_allow_name_on_its_line"]
 control_note = "NONE"
 issues = [4829, 4830]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c3:route-skipped",
-  "c4:no-control",
-]
-note = "check_manifest (project.rs:869-881) skips validate_package_name / permission_list(native) / media_grants that parse_toml (project.rs:1039,1050,1052) refuses; gate reads Path::new(\"almide.toml\") only (dispatch.rs:723). bugs-final: unchanged."
+status = "STAMPED"
+reasons = []
+note = "dispatch.rs:727-762 (cwd), project.rs:945-959. #4829 closed (5129b9f467). unknown was `allow`; now `refuse` (failopen count -1)."
+novel = "tests/decision_batch1a_test.rs::novel_the_manifest_gate_refuses_a_fresh_allow_name_on_its_line"
+control_test = "tests/decision_batch1a_test.rs::novel_the_manifest_gate_refuses_a_fresh_allow_name_on_its_line"
+control_patch = "proofs/decision-controls/manifest.gate-check-manifest.patch"
+probe = "tests/decision-probes/manifest.gate-check-manifest"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "manifest.parse-failure-dropped"
@@ -2110,19 +2017,20 @@ items = [
 keys = []
 decides = "a project manifest that parses governs [permissions]/deps; one that does not parse is read as no manifest (None) and the caller falls back to the cwd manifest or to no restriction"
 from = "declaration"
-unknown = "allow"
-unknown_note = "any manifest parse_toml refuses (hyphen in name, [permissions].native not a list, bad [trust].media) silently drops [permissions] allow/proc/fs"
+unknown = "refuse"
+unknown_note = "permissions_project_for -> governing_manifest ends the command with the manifest's error (project.rs:925-938); compile_driver::cwd_project likewise (compile_driver.rs:270-274). The `.ok()` readers left read ./almide.toml, which the dispatch gate has already refused (cli/mod.rs:551, wasm_compile.rs:83, compile.rs:101, test_wasm.rs:136), or a dependency manifest the fetch walk has already refused (#4820; native_grant.rs:100, crate_inputs.rs:72); compile_driver.rs:360 parses ./almide.toml only when manifest_for_entry found none, so none exists. The editor (lsp_code_actions.rs:412) never fetches"
 routes = { check = "runs:fail-open #4829", check_json = "runs:fail-open", check_effects = "runs:fail-open", run = "runs:fail-open", build = "runs:fail-open", test = "runs:fail-open", bench = "runs:fail-open", native = "runs:fail-open", wasm = "runs:fail-open", wasi = "runs:fail-open", component = "runs:fail-open", lsp = "unknown", mcp = "runs:fail-open", emit = "runs:fail-open" }
-tests = []
+tests = ["tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside", "tests/permissions_routes_test.rs::a_manifest_that_does_not_parse_refuses_every_route"]
 control_note = "NONE"
 issues = [4829]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "project.rs:861 `parse_toml(&p).ok()`; compile_driver.rs:249 `.ok()`; compile_driver.rs:335-337 falls back to cwd almide.toml when the entry's project does not parse. Confirmed by sweep-failopen p2/p3. bugs-final: unchanged."
+reasons = ["c3: lsp cell is `unknown`"]
+note = "#4829 closed (5129b9f467). unknown was `allow`; now `refuse` (failopen count -1)."
+novel = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside"
+control_test = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside"
+control_patch = "proofs/decision-controls/manifest.parse-failure-dropped.patch"
+probe = "tests/decision-probes/manifest.parse-failure-dropped"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 
 [[site]]
 id = "manifest.reader-split"
@@ -2189,18 +2097,12 @@ from = "text"
 unknown = "allow"
 unknown_note = "parse_toml accepts any name without `-` (e.g. `../x`, U+202E is refused by control-text); the hyphen refusal is not in the check_manifest gate, so a hyphen drops [permissions] on .ok() readers (#4829)"
 routes = { check = "runs:via parse_toml", check_json = "runs", check_effects = "runs", run = "runs", build = "runs+plain-name", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/install_destination_test.rs",
-]
+tests = ["tests/install_destination_test.rs"]
 control_note = "NONE"
 issues = [4829]
 status = "UNSTAMPED"
-reasons = [
-  "c1:text",
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "project.rs:610-620 checks only `-`; check_plain_name project.rs:601-608. bugs-final: unchanged."
+reasons = ["c1: a one-character blacklist (`-`, project.rs:674-684); the plain-name grammar applies only at file-name sites (project.rs:665-672)", "c2: a name with a space, `/`, `..`, a leading digit or a non-ASCII letter is read (issue draft issue-package-name-grammar)", "c4: no control"]
+note = "#4829 closed: a hyphen now ends every command (governing_manifest) instead of dropping [permissions]. No evidence written (c1 / c2 need the grammar)."
 
 [[site]]
 id = "manifest.control-text"
@@ -2212,23 +2114,23 @@ items = [
 ]
 keys = []
 decides = "a manifest/lock key, a package name/version/almide, a dependency string or any other string holding a control or bidi character (newline/tab allowed outside strict fields) is refused"
-from = "text"
+from = "declaration"
 unknown = "refuse"
-unknown_note = "every escaped char class is refused; but a DEPENDENCY's manifest refusal is swallowed by resolve_fetched_dep_manifest (fallback name, no transitive deps) and native_code_of (.ok())"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs:via parse_toml", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/manifest_control_text_test.rs::a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw",
-  "tests/manifest_bounds_test.rs::a_package_or_dependency_string_with_a_control_character_is_refused",
-  "tests/manifest_bounds_test.rs::a_lock_string_with_a_control_character_is_refused",
-]
+unknown_note = "the refused set is C-418's escape table (err_text.rs ALMIDE_RT_ERRTEXT_ESCAPED, by Unicode class), applied to every key and string of the manifest and the lock (project.rs:314-351; read_manifest :372); a dependency's manifest is refused naming it, no longer swallowed (#4820, project_fetch.rs:920-930)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_control_text_test.rs::a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw", "tests/manifest_bounds_test.rs::a_package_or_dependency_string_with_a_control_character_is_refused", "tests/manifest_bounds_test.rs::a_lock_string_with_a_control_character_is_refused", "tests/decision_batch1a_test.rs::novel_a_control_or_bidi_character_in_a_manifest_is_refused", "tests/hidden_char_inputs_test.rs::a_dependency_manifest_with_a_hidden_character_is_refused"]
 control_note = "NONE"
 issues = [4820]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "dep swallow: project_fetch.rs:943-946 `Err(_) => (fallback_name, src_dir, vec![])`; secaudit probe F6. Lock: project.rs:1166 `if let Ok(spans)` skips the control scan when DeTable fails, but the following parse refuses. bugs-final: unchanged."
+status = "STAMPED"
+reasons = []
+note = "#4820 closed (4a16b84fae + the bugs-final reader). `from` reclassified text -> declaration, as front.e101-hidden-chars is classified: the decision is the table's character classes — a judgment, confirm."
+novel = "tests/decision_batch1a_test.rs::novel_a_control_or_bidi_character_in_a_manifest_is_refused"
+control_test = "tests/decision_batch1a_test.rs::novel_a_control_or_bidi_character_in_a_manifest_is_refused"
+control_patch = "proofs/decision-controls/manifest.control-text.patch"
+probe = "tests/decision-probes/manifest.control-text"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "manifest.bounded-read"
@@ -2319,19 +2221,21 @@ keys = []
 decides = "[permissions].allow/proc/fs/native and [trust].owners must be an array of strings; any other value is refused on its line, never read as empty"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a non-array value is refused; [permissions].native is checked only in parse_toml (not the gate) -> #4829 drop"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs:via parse_toml", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/manifest_toml_reader_test.rs::a_permission_list_that_is_not_an_array_of_strings_is_refused",
-  "tests/manifest_toml_reader_test.rs::permissions_read_every_array_spelling",
-]
+unknown_note = "anything but an array of strings is refused on its line (project.rs:513-528); [permissions].native is refused by the gate too now (check_manifest ends with parse_toml, #4829)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_toml_reader_test.rs::a_permission_list_that_is_not_an_array_of_strings_is_refused", "tests/manifest_toml_reader_test.rs::permissions_read_every_array_spelling", "tests/decision_batch1a_test.rs::novel_a_permission_list_of_another_shape_is_refused"]
 control_note = "NONE"
 issues = [4829]
-status = "UNSTAMPED"
-reasons = [
-  "c4:no-control",
-]
-note = "project.rs:473-488. native shape refused by parse_toml but a refusal there is then dropped by .ok() readers (#4829, sweep-failopen p3 native=\"x\"). bugs-final: unchanged."
+status = "STAMPED"
+reasons = []
+note = "project.rs:475-528. #4829 closed."
+novel = "tests/decision_batch1a_test.rs::novel_a_permission_list_of_another_shape_is_refused"
+control_test = "tests/decision_batch1a_test.rs::novel_a_permission_list_of_another_shape_is_refused"
+control_patch = "proofs/decision-controls/manifest.permission-list-shape.patch"
+probe = "tests/decision-probes/manifest.permission-list-shape"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "manifest.allow-vocabulary"
@@ -2421,19 +2325,17 @@ keys = [
 decides = "a package whose [package].almide minimum is newer than the running compiler is refused on every compiling command; an unparseable pin is refused"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a pin semver cannot parse is refused; a manifest that does not parse skips the gate (dispatch.rs:771 `let Ok(proj) = … else return`); ALMIDE_SKIP_VERSION_CHECK honoured in release only with --allow-switch"
+unknown_note = "a pin semver cannot parse is refused (project.rs:1177-1181); a manifest that does not parse is refused before the pin is read (check_manifest ends with parse_toml, so dispatch.rs:791 `let Ok` never takes its else arm); ALMIDE_SKIP_VERSION_CHECK honoured in a release build only with --allow-switch"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "skipped: #4846 exempt", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/switch_lock_test.rs",
-]
+tests = ["tests/switch_lock_test.rs", "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"]
 control_note = "row 25: with lock_engaged_by_default false a release build honoured ALMIDE_SKIP_VERSION_CHECK and check-release-switch-lock.sh exited 1 (covers the bypass, not the pin itself)"
 issues = [4829, 4846]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "Parse-failure skip shares #4829's root cause. bugs-final: unchanged."
+reasons = ["c3: skipped #4846: from outside the project the pin is read only by the native compile driver (compile_driver.rs:363-366)", "c3: OBSERVED 2026-11-20 (route matrix, ds-2): check, check_json, check_effects, test, wasm, component, mcp, emit do not refuse as the cells say (#4846); the honest cells are `skipped: #4846` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+note = "#4829's part closed. The novel test asserts inside the project only."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command"
+control_patch = "proofs/decision-controls/manifest.compiler-version-pin.patch"
 
 [[site]]
 id = "trust.source-owner"
@@ -2741,18 +2643,18 @@ items = [
 keys = []
 decides = "a fetched dependency's almide.toml that parse_toml refuses is read as no manifest: the dependency key becomes its name and its transitive deps are dropped"
 from = "declaration"
-unknown = "allow"
-unknown_note = "every refusal parse_toml makes on a dependency manifest (bidi text, duplicate keys, bad shapes) is swallowed"
-routes = { check = "runs:swallows", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
-tests = []
+unknown = "refuse"
+unknown_note = "a fetched dependency's almide.toml is read by parse_toml and any refusal ends the walk naming the dependency and its chain (project_fetch.rs:920-930, #4820)"
+routes = { check = "runs:swallows", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs", emit = "runs" }
+tests = ["tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed", "tests/hidden_char_inputs_test.rs::a_dependency_manifest_with_a_hidden_character_is_refused"]
 control_note = "NONE"
 issues = [4820]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "project_fetch.rs:943-946. Also native_grant.rs:100 and crate_inputs.rs:72 `.ok()` (consistent — dismissed in sweep-failopen). bugs-final: unchanged."
+reasons = ["c3: the walk runs inside the project (dispatch gate) and from outside only in the native compile driver; outside, check / check_json / check_effects / test / wasm / component / emit / mcp read ./almide.toml only (#4830)", "c3: OBSERVED 2026-11-20 (route matrix, ds-2): check, check_json, check_effects, wasm, component, mcp, emit do not refuse as the cells say (#4830); the honest cells are `skipped: #4830` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+note = "#4820 closed. native_grant.rs:100 and crate_inputs.rs:72 `.ok()` read a manifest the walk has already accepted. unknown was `allow`; now `refuse` (failopen count -1)."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
+control_patch = "proofs/decision-controls/deps.dep-manifest-swallow.patch"
 
 [[site]]
 id = "deps.graph-budget"
@@ -2874,16 +2776,14 @@ keys = []
 decides = "before a building command, ./almide.toml's dependencies are fetched (trust, lock, --locked) and refused on an ungranted native dependency or an ungranted script-capable media owner"
 from = "declaration"
 unknown = "allow"
-unknown_note = "no ./almide.toml or one that does not parse -> returns (nothing judged); the entry's own project outside cwd is never seen"
+unknown_note = "no ./almide.toml -> returns (nothing judged); one that does not parse is refused now (cwd_project -> governing_manifest, compile_driver.rs:270-274, #4829); the entry's own project outside cwd is never seen (#4830)"
 routes = { check = "n.a.: check builds no native code; the grant gates the build", check_json = "n.a.: check builds no native code; the grant gates the build", check_effects = "n.a.: check builds no native code; the grant gates the build", run = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", build = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", test = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", bench = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", native = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", wasm = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", wasi = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", component = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", lsp = "n.a.", mcp = "n.a.: almide_check runs `check`, which builds no native code (the check cells); observed 2026-11-19: no native-grant refusal from MCP, as from check", emit = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)" }
-tests = [
-  "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
-]
+tests = ["tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target"]
 control_note = "row 15 (refusal -> None)"
 issues = [4830, 4829]
 status = "UNSTAMPED"
-reasons = ["c2:fail-open (cwd only, #4830; parse failure, #4829)", "c3:route-skipped on run, build, test, bench, native, wasm, wasi, component, emit (#4830; observed 2026-11-19 by the route matrix)"]
-note = "cli/mod.rs:347-361 (`let Some(proj) = cwd_project() else { return }`). bugs-final: unchanged."
+reasons = ["c2: fail-open (cwd only, #4830)", "c3:route-skipped on run, build, test, bench, native, wasm, wasi, component, emit (#4830; observed 2026-11-19 by the route matrix)"]
+note = "cli/mod.rs:347-361 (`let Some(proj) = cwd_project() else { return }`). #4829's part closed (5129b9f467); evidence unchanged (batch 4)."
 control_patch = "proofs/decision-controls/native.dispatch-gate.patch"
 control_test = "tests/decision_fixes_test.rs::novel_emit_refuses_an_ungranted_native_dependency"
 novel = "tests/decision_fixes_test.rs::novel_emit_refuses_an_ungranted_native_dependency"
@@ -3158,21 +3058,14 @@ keys = []
 decides = "`almide verify <file>` refuses a program that does not build for wasm, a component-shaped program, and a present artifact that is not byte-identical to this build; with no verifier it fails by name (exit 127)"
 from = "mixed:declaration+text"
 unknown = "refuse"
-unknown_note = "an unparseable ./almide.toml makes manifest_allow() None (`parse_toml(path).ok()?`, verify.rs:89): the caps witness is then built with no manifest bound and cannot reject a capability past [permissions].allow"
+unknown_note = "an unparseable ./almide.toml is refused now (governing_manifest, verify.rs:89-90, #4829); the manifest is still the cwd's, not the entry's project (verify.rs:84-85)"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.: --mir certifies MIR, not shipped bytes", wasm = "runs: own command", wasi = "n.a.", component = "refused by name (verify.rs:111-119)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "tests/verify_shim_test.rs::without_the_verifier_the_shim_fails_by_name_and_has_no_fallback",
-  "tests/verify_shim_test.rs::the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused",
-  "tests/verify_shim_test.rs::emit_writes_the_bundle_even_without_the_verifier",
-]
+tests = ["tests/verify_shim_test.rs::without_the_verifier_the_shim_fails_by_name_and_has_no_fallback", "tests/verify_shim_test.rs::the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused", "tests/verify_shim_test.rs::emit_writes_the_bundle_even_without_the_verifier"]
 control_note = "tests/verify_shim_test.rs::the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused (fails with the byte comparison removed)"
 issues = [4829]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open manifest parse failure drops allow (#4829)",
-  "c3:./almide.toml from cwd only, not the entry's project",
-]
-note = "manifest_allow reads ./almide.toml relative to cwd (verify.rs:85), the same cwd-vs-entry split #4830 names for the native grant; gate_build uses the same function."
+reasons = ["c3: manifest_allow reads ./almide.toml (verify.rs:84-91): from outside the project the witness gets no manifest bound while the build half reads the entry's project (issue draft issue-verify-cwd-manifest)", "c2: no novel test", "c4: control_note only (no patch)"]
+note = "#4829 closed for the parse failure. gate_build uses the same function."
 
 [[site]]
 id = "verify.bundle-parse"
@@ -3507,15 +3400,12 @@ from = "mixed:reach+prefix"
 unknown = "refuse"
 unknown_note = "an op no family assigns, or a non-constant op, is SENTINEL (cert_project.rs:115-117, 658) which no bound contains; but `__selfhost_*` fns get declared=None (emit_decls.rs:90, prefix) and are bounded only by their own reach"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "crates/almide-wasm/tests/witness_floor.rs",
-  "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign",
-]
+tests = ["crates/almide-wasm/tests/witness_floor.rs", "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign"]
 control_note = "UNKNOWN"
 issues = [4836, 4829]
 status = "UNSTAMPED"
-reasons = ["c3:route-skipped #4836", "c2:verifier reads an out-of-range callee index as reaching nothing (crates/almide-verify/src/reach.rs:44-45; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-note = "manifest_bound maps unknown allow names to nothing (cert_project.rs:462); the manifest comes from verify.rs manifest_allow (#4829 parse failure => no bound)."
+reasons = ["c1: manifest_bound reads allow names through its own pre-epoch-15 table (cert_project.rs:452-466: IO grants FS_READ / FS_WRITE, Env grants PROC; FS, Proc and the leaves grant nothing), not Effect::granted_by as certificate::manifest_caps does (crates/almide-mir/src/certificate.rs:492-514) — issue draft issue-witness-manifest-vocabulary", "c3: route-skipped #4836", "c2: the verifier reads an out-of-range callee index as reaching nothing (crates/almide-verify/src/reach.rs:44-45; not probed)", "c4: no-control (a neuter is located in the row's note; not run)"]
+note = "the manifest comes from verify.rs manifest_allow: one that does not parse is refused now (#4829); it is still the cwd's (issue-verify-cwd-manifest). `__selfhost_*` fns get declared=None (emit_decls.rs:90, prefix)."
 
 [[site]]
 id = "witness.ir-verify"
@@ -3681,19 +3571,12 @@ from = "mixed:name+declaration"
 unknown = "allow"
 unknown_note = "`prim` is Pure (effect.rs:231); a runtime symbol whose head names no table module => empty (effect.rs:334); a call to a name the module does not declare => empty (treated as a user module, 317); an undeclared symbol of a known module => the module default (fail-closed)"
 routes = { check = "runs", check_json = "skipped:#4815 (no permissions gate)", check_effects = "runs: entry file only #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped:#4815", emit = "unknown" }
-tests = [
-  "tests/effect_category_flow_test.rs",
-  "tests/effect_permissions_test.rs",
-]
+tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs"]
 control_note = "crates/almide-ir/src/effect.rs tests (classification gate: row per module, Pure module with an unexplained effect fn refused)"
 issues = [4827, 4815]
 status = "UNSTAMPED"
-reasons = [
-  "c1:module-name rows",
-  "c2:prim Pure / unknown symbol prefix => empty",
-  "c3:#4815",
-]
-note = "The perm/effect sweep owns the consumers; this row is the registry."
+reasons = ["c1: module rows by name; runtime symbols by `almide_rt_<module>_` prefix (effect.rs:325-346)", "c2: prim is Pure (effect.rs:231); an unknown symbol head is empty (effect.rs:334); an undeclared fn of a module is empty (effect.rs:317) (#4827)"]
+note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM)."
 
 [[site]]
 id = "purity.fan-par-pure-modules"
@@ -3730,20 +3613,19 @@ decides = "a pipeline stage calling a stdlib module may be fused element-by-elem
 from = "declaration"
 unknown = "refuse"
 unknown_note = "pure only when the module's bundled source is known and declares no effect (#4855); a module with no readable source, or one no registry has, is not pure. EFFECT_MODULES removed (ruling 2026-11-20): no module is named in the decision"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: native + wasm fusion", build = "runs", test = "runs", bench = "runs", native = "runs: pass_stream_fusion", wasm = "runs: list_fuse", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
+routes = { check = "n.a.: no program runs on this route, so no stage order exists", check_json = "n.a.: no program runs on this route, so no stage order exists", check_effects = "n.a.: no program runs on this route, so no stage order exists", run = "runs (observed 2026-11-20 ds-2: tests/decision-probes/purity.fusion-effect-modules prints a:1 a:2 a:3 b:1 b:2 b:3, stage by stage)", build = "runs", test = "runs (observed 2026-11-20 ds-2: the probe's test passes native and wasm)", bench = "runs", native = "runs (observed 2026-11-20 ds-2: tests/decision-probes/purity.fusion-effect-modules prints a:1 a:2 a:3 b:1 b:2 b:3, stage by stage)", wasm = "runs (observed 2026-11-20 ds-2: tests/decision-probes/purity.fusion-effect-modules prints a:1 a:2 a:3 b:1 b:2 b:3, stage by stage)", wasi = "runs", component = "runs", lsp = "n.a.: no program runs on this route, so no stage order exists", mcp = "n.a.: no program runs on this route, so no stage order exists", emit = "runs" }
 tests = [
   "tests/stream_fusion_module_purity_test.rs::module_function_purity_does_not_leak_into_root_namespace",
 ]
 control_note = "NONE"
 issues = [4855]
 status = "UNSTAMPED"
-reasons = ["c3:no probe yet: the cells are read, not driven by the route matrix"]
+reasons = ["c3: build / bench / wasi / component / emit not observed (the route matrix judges refusals only; a stdout-order probe needs an output mode)"]
 note = "Observable-order property (#2953), not a capability; complete today per the namesweep."
 control_patch = "proofs/decision-controls/purity.fusion-effect-modules.patch"
 control_test = "crates/almide-ir/tests/fusion_purity_novel.rs::novel_fusion_purity_is_the_declared_effect_set"
 novel = "crates/almide-ir/tests/fusion_purity_novel.rs::novel_fusion_purity_is_the_declared_effect_set"
 control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
-probe = "tests/decision-probes/purity.fusion-effect-modules"
 
 [[site]]
 id = "purity.bounded-pure-modules"
@@ -3757,17 +3639,12 @@ from = "name"
 unknown = "refuse"
 unknown_note = "allowlist with E074 fallback (bounded.rs:946-970); a stdlib plain fn inside an admitted module that reaches a prim host op is admitted (#4827)"
 routes = { check = "runs: @bounded / --profile critical", check_json = "skipped:#4815", check_effects = "unknown", run = "runs", build = "runs", test = "unknown: critical skips test blocks", bench = "unknown", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped: #4815 check --json", emit = "unknown" }
-tests = [
-  "crates/almide-frontend/src/check/bounded.rs::tests::bounded_tables_name_real_modules",
-]
+tests = ["crates/almide-frontend/src/check/bounded.rs::tests::bounded_tables_name_real_modules"]
 control_note = "proofs/check-stdlib-purity-registry.sh + effect.rs classification gate (BOUNDED_PURE ⊆ MIR PURE_MODULES)"
 issues = [4827, 4823]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed modules",
-  "c3:routes not traced",
-]
-note = "The critical-profile sweep owns the bare-name admissions (#4823); this row is the module registry."
+reasons = ["c1: name-keyed module registry (bounded.rs:115-130)", "c2: a plain fn of an admitted module that reaches a prim host op is admitted (#4827)", "c3: routes not traced"]
+note = "#4823 closed the bare-name admissions (bounded.rs:899-916); this row is the module registry."
 
 [[site]]
 id = "front.e101-hidden-chars"
@@ -3782,23 +3659,19 @@ keys = [
 decides = "a raw hidden character (bidi control, U+2028/2029, Cf, Tags block, C0/C1 other than TAB/LF/CR) anywhere in a source file is E101"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "the set is C-418's escape table by Unicode category (lexer.rs:518-520), not a hand list; a newly assigned Cf joins when the table's Unicode data does"
+unknown_note = "the set is C-418's table by Unicode class (lexer.rs:505-520, err_text.rs); a raw one anywhere in a source file is E101 (diagnostics.rs:156-175), in an imported module too (resolve.rs:75-77), and in any string or key of an AST .json entry (#4820, compile_driver.rs:16-30, 43-49)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs (lsp.rs:29-51 parser errors)", mcp = "runs: check --json", emit = "runs; skipped for an AST .json entry #4820" }
-tests = [
-  "tests/diagnostics/e101-bidi-control",
-  "tests/diagnostics/e101-zero-width-in-string",
-  "tests/diagnostics/e101-tag-characters-in-string",
-  "tests/diagnostics/e101-line-separator-in-comment",
-  "tests/diagnostics/e101-bidi-isolate-in-raw-string",
-  "crates/almide-syntax/src/lexer.rs::tests::hidden_characters_beyond_bidi_are_found_raw",
-]
+tests = ["tests/diagnostics/e101-bidi-control", "tests/diagnostics/e101-zero-width-in-string", "tests/diagnostics/e101-tag-characters-in-string", "tests/diagnostics/e101-line-separator-in-comment", "tests/diagnostics/e101-bidi-isolate-in-raw-string", "crates/almide-syntax/src/lexer.rs::tests::hidden_characters_beyond_bidi_are_found_raw", "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry", "tests/hidden_char_inputs_test.rs::an_ast_entry_with_a_hidden_character_is_refused"]
 control_note = "tests/diagnostic_harness_test.rs over tests/diagnostics/e101-* (broken must fail with E101, fixed must pass)"
 issues = [4820]
 status = "UNSTAMPED"
-reasons = [
-  "c3:AST .json entry skips E101 (compile_driver.rs:16, check.rs:306) #4820",
-]
-note = "Dependency almide.toml control text is #4820's other half (deps domain)."
+reasons = ["c3: emit cell says `runs; skipped for an AST .json entry #4820` — needs re-observation and a clean cell"]
+note = "#4820 closed (4a16b84fae): the .json entry is refused. The probe holds a raw U+202E in a comment."
+novel = "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry"
+control_test = "tests/decision_batch1a_test.rs::novel_every_hidden_character_is_refused_raw_in_source_and_in_an_ast_entry"
+control_patch = "proofs/decision-controls/front.e101-hidden-chars.patch"
+probe = "tests/decision-probes/front.e101-hidden-chars"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 
 [[site]]
 id = "front.e101-confusables"
@@ -3815,19 +3688,16 @@ from = "declaration"
 unknown = "refuse"
 unknown_note = "judged per FILE (self.idents of one parse; interpolation holes merged, primary.rs:741): a look-alike pair split across two modules / a dependency is never compared"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs; skipped for .json entry #4820" }
-tests = [
-  "tests/diagnostics/e101-confusable-identifiers",
-  "tests/diagnostics/e101-homoglyph-mixed-script-identifier",
-  "tests/diagnostics/e101-homoglyph-in-interpolation",
-]
+tests = ["tests/diagnostics/e101-confusable-identifiers", "tests/diagnostics/e101-homoglyph-mixed-script-identifier", "tests/diagnostics/e101-homoglyph-in-interpolation", "tests/decision_batch1a_test.rs::novel_a_fresh_confusable_identifier_is_refused"]
 control_note = "tests/diagnostic_harness_test.rs over tests/diagnostics/e101-confusable-identifiers"
 issues = [4820]
 status = "UNSTAMPED"
-reasons = [
-  "c3:.json entry #4820",
-  "c2:cross-file pair not judged (scope)",
-]
-note = "Cross-file scope gap is not in any open issue; single-script all-Cyrillic `асе` in module A vs `ace` in module B passes."
+reasons = ["c3: an AST .json entry's identifiers are not judged (compile_driver.rs:43-49 checks C-418 characters only; issue draft issue-json-entry-confusables)", "c2: judged per file: a pair split across modules is never compared (a selective import brings both spellings into the importer's file, so that case is judged)"]
+note = "diagnostics.rs:192-253. #4820 closed only the hidden-character half of the .json entry."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_confusable_identifier_is_refused"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_confusable_identifier_is_refused"
+control_patch = "proofs/decision-controls/front.e101-confusables.patch"
+probe = "tests/decision-probes/front.e101-confusables"
 
 [[site]]
 id = "front.diagnostic-echo"
@@ -3839,21 +3709,17 @@ keys = []
 decides = "hidden characters reaching compiler output are escaped"
 from = "declaration"
 unknown = "allow"
-unknown_note = "the echoed source line is escaped (diagnostic_render.rs tests::hidden_characters_are_echoed_as_escapes) but the MESSAGE text is not: `Unexpected character '{}'` (diagnostics.rs:42) and `expected ... (got ...)` carry the raw char; test names with an escape reach the test report and --json raw"
+unknown_note = "#4819 escaped the terminal and JSON sinks: message, hint, notes, context and the echoed line (diagnostic_render.rs:25-29 and its callers), the JSON rows (json_escape, diagnostic_render.rs:259-283), the --json envelope (envelope.rs:61-80), MCP (mcp.rs:155-159), test names (test_report.rs:379, 805; test_output.rs:90). Each sink escapes on its own: a new sink is raw by default, and the LSP still sends the message raw (lsp_code_actions.rs:367)"
 routes = { check = "partial #4819", check_json = "partial #4819", check_effects = "partial", run = "partial", build = "partial", test = "skipped for test names #4819", bench = "partial", native = "partial", wasm = "partial", wasi = "partial", component = "partial", lsp = "unknown", mcp = "partial", emit = "partial" }
-tests = [
-  "src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes",
-  "tests/diagnostics/silent/bidi-control-written-as-escape.almd",
-]
+tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped"]
 control_note = "NONE"
 issues = [4819]
 status = "UNSTAMPED"
-reasons = [
-  "c2:message text unescaped",
-  "c3:test report",
-  "c4:no-control",
-]
-note = "Confirmed by the secaudit probe (F1/F2)."
+reasons = ["c2: a new output sink is unescaped by default (each sink escapes on its own; no one constructor)", "c3: lsp sends the diagnostic message and hint raw (lsp_code_actions.rs:367; issue draft issue-lsp-hidden-message)", "c3: no probe (an expected substring cannot say `not raw`)"]
+note = "#4819 closed (34c782c767, a5699adbd0) for every sink but the LSP."
+novel = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
+control_test = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
+control_patch = "proofs/decision-controls/front.diagnostic-echo.patch"
 
 [[site]]
 id = "front.nesting-budget"
@@ -3864,20 +3730,18 @@ items = [
 keys = []
 decides = "expression and type nesting deeper than the `nesting` budget (500) is a parse error instead of a stack overflow"
 from = "type"
-unknown = "allow"
-unknown_note = "only expressions.rs:9 and types.rs:21 call enter_depth: patterns are uncounted (#4818, fixed on bugs-final patterns.rs only), and an interpolation hole is parsed by a FRESH sub-parser (primary.rs:719 Parser::new_with_id_offset) whose depth starts at 0, so nested `\"${...}\"` never accumulates depth"
+unknown = "refuse"
+unknown_note = "every recursive production nests through parse_expr, parse_type or parse_pattern, and each counts against the one budget (expressions.rs:9, types.rs:21, patterns.rs:21, #4818); an interpolation hole's sub-parser starts at the enclosing depth (primary.rs:725, #4841); an AST .json entry is bounded by serde_json's recursion limit. A future production that recursed without entering one of the three would be uncounted"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs; .json entry bounded by serde_json depth" }
-tests = [
-  "tests/compile_budget_test.rs (nesting shape)",
-]
+tests = ["tests/compile_budget_test.rs (nesting shape)", "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget", "tests/compile_budget_test.rs::deep_interpolation_nesting_ends_at_the_nesting_budget", "tests/compile_budget_test.rs::deep_pattern_nesting_ends_at_the_nesting_budget"]
 control_note = "tests/compile_budget_test.rs::nesting (parenthesised depth past the budget must refuse)"
 issues = [4818, 4841]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (patterns #4818; nested interpolation NEW)",
-  "c2:no-novel-test",
-]
-note = "PROBED (almide 0.70.0, verify-probe/): `println(\"${\"${...1...}\"}\")` 600 layers => `almide check` says No errors found (paren control at 600 => `expression nesting too deep (max 500)`); 50,000 layers => `fatal runtime error: stack overflow, aborting`, rc 134 after 113 s. bugs-final's #4818 fix touches patterns.rs only. Not covered by #4818 (title: patterns)."
+reasons = ["c3: OBSERVED 2026-11-20 (route matrix, ds-2): test do not refuse as the cells say (#4880); the honest cells are `skipped: #4880` and are held at their previous text until the skipped-ceiling ruling (they would take skipped 201 -> 205)"]
+note = "#4841 closed (7b513b4959), #4818 closed (5681412c7f). unknown was `allow`; now `refuse` (failopen count -1) — a judgment on the three entry points, confirm."
+novel = "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget"
+control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_mix_of_nesting_ends_at_the_budget"
+control_patch = "proofs/decision-controls/front.nesting-budget.patch"
 
 [[site]]
 id = "front.checker-budgets"
@@ -4199,8 +4063,8 @@ keys = [
 decides = "a Region lent to an @export fn may not escape the call (returned or stored)"
 from = "type"
 unknown = "refuse"
-status = "UNSTAMPED"
-reasons = ["c1:text (export target)"]
+status = "STAMPED"
+reasons = []
 unknown_note = "a destructuring let that names a lent Region makes every name it binds lent (#4862); each is then judged by its own type. Another export target is skipped (read as text)"
 routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "runs", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
 tests = ["tests/diagnostics/e119-lent-region-returned"]
@@ -4209,8 +4073,10 @@ note = "lent_region_escape.rs:29-137."
 novel = "tests/decision_gap_fixes_test.rs::novel_e119_a_region_through_a_destructuring_let"
 control_patch = "proofs/decision-controls/ownership.e119-lent-region-escape.patch"
 control_test = "tests/decision_gap_fixes_test.rs::novel_e119_a_region_through_a_destructuring_let"
-control_seen = "73b18e7eee 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
 probe = "tests/decision-probes/ownership.e119-lent-region-escape"
+stamp = "ca8423c6b1 2026-11-20"
+draft = "STAMPABLE"
 
 [[site]]
 id = "scope.e420-local-fn"
