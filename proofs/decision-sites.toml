@@ -41,7 +41,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "125"
+# unstamped_ceiling     = "123"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "187"
 # failopen_ceiling      = "43"
@@ -103,6 +103,10 @@
 #               anchor.may-write-memory (#4826) unknown -> refuse: fail-open 46 -> 43.
 #               deps.dep-manifest-swallow and native.dispatch-gate STAMPED (controls red
 #               on the merged tree): 32 stamped, 125 not.
+#   2026-11-21  ninth engineer: anchor.branch-target-depth (try_table refused,
+#               operator-matrix novel, cells name the CI verifier and quote #4849)
+#               and native.media-grant (#4892 case-keeping grant key, novel,
+#               control) STAMPED: 34 stamped, 123 not.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -946,12 +950,12 @@ from = "mixed:declaration+reach"
 unknown = "refuse"
 unknown_note = "a callee the walk cannot see — a fn value (Computed, not a lambda literal or fn reference) or an unresolved Method call — is read as ordered and the arm is serialized (#4856)"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "unknown: the matrix does not execute a built artifact; build lowers the fan as run does (run / native / emit are driven)", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "unknown: bench verifies the output but does not print it, and a serial and a parallel run take the same 80 ms here", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
-tests = []
+tests = ["tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order"]
 control_note = "NONE"
-issues = [4856]
+issues = [4856, 4893]
 status = "UNSTAMPED"
-reasons = ["c1:a bodied stdlib fn is matched by its reconstructed runtime name `almide_rt_<module>_<fn>` (stdlib_info.rs:773) — a naming bridge, not a declaration", "c3:build / bench not driven (see cells)"]
-note = "Lowering-time guard (serial vs parallel), included because the task lists @ordered determinism; may belong to the concurrency ledger."
+reasons = ["c3:build / bench not driven (see cells)"]
+note = "Lowering-time guard (serial vs parallel), included because the task lists @ordered determinism; may belong to the concurrency ledger. c1 (2026-11-21): the `almide_rt_<module>_<fn>` reconstruction in stdlib_info::is_ordered_runtime_symbol was LIVE on the Rust codegen route (emit: without it the fans of fanenv.almd and two spec fixtures were threaded, under every pass order; the native run route marks fans on pre-ResolveCalls IR in fan_native.rs and never reached it). It also missed a module-internal call StdlibLowering renames (`almide_rt_<m>_<f>` of a user module fn): such an arm was threaded (#4893; the minted-symbol test sees 2 thread groups on the old tree, 3 without the clause, 1 with the record). Replaced by CodegenAnnotations.minted_call_symbols, recorded where ResolveCalls / StdlibLowering mint the symbol; the c1 control (record lookup off, ds/fanc1.patch) turns the test red (3), observed ds-2 2026-11-21."
 novel = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 control_patch = "proofs/decision-controls/effect.fan-ordered-reach.patch"
 control_test = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
@@ -2871,21 +2875,28 @@ keys = [
   "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::check_media_ownership::S1::E118",
 ]
 decides = "a dependency owning a @script_capable media type without a root [trust].media grant, a grant for an undeclared type, a grant naming no dependency, or two overlapping owners is refused (E118)"
-from = "mixed:declaration+text"
+from = "declaration"
 unknown = "refuse"
 unknown_note = "a media type not declared script-capable by html needs no grant (by design); a dependency file the scan cannot parse contributes no @media_owns; check skips the gate on a fetch error"
 routes = { check = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_json = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_effects = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", run = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", build = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", test = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", bench = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", native = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasi = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", lsp = "n.a.: produces no code (observed 2026-11-20: the probe is not judged there)", mcp = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)" }
 tests = [
+  "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused",
+  "src/media_grant.rs::tests::a_grant_key_keeps_the_paths_case",
   "tests/media_grant_test.rs::the_grant_removed_refuses_the_build_naming_the_line_to_add",
   "tests/media_grant_test.rs::two_granted_owners_of_one_type_are_refused",
   "tests/media_grant_test.rs::a_grant_for_a_type_the_package_does_not_declare_is_refused",
 ]
 control_note = "GCE 2026-10-29 (sec doc, ADR-0032 D7): grant check off -> media_grant_test 101; one-owner rule off -> 101; check-time E118 off -> diagnostic_harness_test 101"
-issues = [4830, 4809, 4834]
-status = "UNSTAMPED"
-reasons = ["c1:url-text", "c2:no novel test (on a fetch error check_media_grants_or_exit returns and the command refuses the fetch error itself: observed 2026-11-20 on 88531b1b22, a missing path dependency -> check, check --json, run all exit 1 `path dependency 'svg' not found`)", "c4:the GCE 2026-10-29 controls predate the ledger patch format (no control_patch)"]
-note = "The cwd-only reader is gone: every route reads the entry's own project (manifest_for_entry, #4830 fixed on bugs-final fdd8fa4af4). owns_under uses native_grant::almd_files (#4809 fixed on bugs-final)."
+issues = [4830, 4809, 4834, 4892]
+status = "STAMPED"
+reasons = []
+note = "The cwd-only reader is gone: every route reads the entry's own project (manifest_for_entry, #4830 fixed on bugs-final fdd8fa4af4). owns_under uses native_grant::almd_files (#4809 fixed on bugs-final). c1 (2026-11-21): the grant key is the dependency's typed origin (#4868, 77589bce28) and keeps the path's case on both sides (#4892: the old key folded it, so one grant covered `Alice/svg` and `alice/svg`); the grant and the owned types are declarations (root [trust] media, @media_owns). On a fetch error check_media_grants_or_exit returns and the command refuses the fetch error itself (observed 2026-11-20 on 88531b1b22: a missing path dependency -> check, check --json, run all exit 1)."
 probe = "tests/decision-probes/native.media-grant"
+control_patch = "proofs/decision-controls/native.media-grant.patch"
+control_test = "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused"
+novel = "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused"
+control_seen = "a4d13b850e + the 2026-11-21 batch (q53), ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "a4d13b850e 2026-11-21"
 
 [[site]]
 id = "toolchain.rustc-floor"
@@ -3053,7 +3064,7 @@ from = "type"
 unknown = "refuse"
 unknown_note = "a fresh 0700 scratch directory per run (almide_base::private_dir, #4853): an existing name is skipped, never written through; artifact and bundle are made inside it and removed with it"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "runs: wasm, verifier present", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs: build", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = []
+tests = ["tests/decision_scratch_dir_test.rs::novel_the_build_route_hands_the_verifier_a_fresh_private_directory"]
 control_note = "NONE"
 issues = [4853]
 status = "UNSTAMPED"
@@ -3239,19 +3250,21 @@ decides = "whether an instruction inside a site's window branches out of it, and
 from = "type"
 unknown = "refuse"
 unknown_note = "the validator refuses the proposals the check does not classify (GC, legacy exceptions, stack switching: UNCLASSIFIED_PROPOSALS, #4854), and depth is the validator's own control-stack height, so a control operator added later cannot mis-depth the window"
-routes = { check = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_json = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_effects = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", run = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", build = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", test = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", bench = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", native = "n.a.", wasm = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", wasi = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", component = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_json = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_effects = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", run = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", build = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", test = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", bench = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", native = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasm = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasi = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", component = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", lsp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", mcp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", emit = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)" }
 tests = [
   "crates/almide-anchor-check/tests/check.rs::a_store_behind_a_branch_is_refused",
+  "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused",
 ]
 control_note = "NONE"
 issues = [4854, 4849]
-status = "UNSTAMPED"
-reasons = ["c3:CI fixtures only (#4849, claim narrowed)", "c3:no probe yet: the cells are read, not driven by the route matrix"]
-note = "NEW sibling of #4826 (same crate, same validator-admits-all cause, different function). Latent: none of these operators is emitted today."
+status = "STAMPED"
+reasons = []
+note = "NEW sibling of #4826 (same crate, same validator-admits-all cause, different function). Latent: none of these operators is emitted today. 2026-11-21 (task-6 item 3): exception handling's try_table joined UNCLASSIFIED_PROPOSALS — its catch clauses take control from any call in its body to a label outside a window, a transfer branch_target cannot name; the operator matrix test classifies every admitted control operator and refuses every unclassified proposal and an unassigned opcode."
 control_patch = "proofs/decision-controls/anchor.branch-target-depth.patch"
-control_test = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused"
-novel = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_test = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
+novel = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
+control_seen = "a4d13b850e + the 2026-11-21 batch (q53), ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "a4d13b850e 2026-11-21"
 
 [[site]]
 id = "witness.subset-gate"

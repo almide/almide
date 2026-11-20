@@ -1,9 +1,9 @@
-# Negative control of anchor.branch-target-depth (proofs/decision-sites.toml): the checker validates under every proposal again: a legacy `try` decodes as if it did not branch.
-# control_test: crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused
+# Negative control of anchor.branch-target-depth (proofs/decision-sites.toml): the checker validates under every proposal again: try_table, throw, a legacy `try` and br_on_cast decode as if they did not branch.
+# control_test: crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused
 diff --git a/crates/almide-anchor-check/src/decode.rs b/crates/almide-anchor-check/src/decode.rs
 --- a/crates/almide-anchor-check/src/decode.rs
 +++ b/crates/almide-anchor-check/src/decode.rs
-@@ -27,7 +27,7 @@
+@@ -32,7 +32,7 @@
  
  /// Every defined function of `bytes`, validated, in position order.
  pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
