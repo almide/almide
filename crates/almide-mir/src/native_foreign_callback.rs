@@ -29,7 +29,7 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
 pub(crate) fn host_type(ty: &Ty) -> Result<String, LowerError> {
     if let Some(s) = scalar_host_type(ty) { return Ok(s.into()); }
     Ok(match ty {
-        Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<AlmideList<u8>>".into(),
+        Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<Vec<u8>>".into(),
         t if crate::render_native_rec::is_matrix_ty(t) => "AlmideRcCow<AlmideMatrix>".into(),
         Ty::Applied(c, a) => {
             let name = match c {

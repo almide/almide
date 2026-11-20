@@ -9,11 +9,11 @@
 pub struct AlmideMatrix {
     pub rows: usize,
     pub cols: usize,
-    pub data: AlmideList<f64>, // row-major, length rows*cols
+    pub data: std::vec::Vec<f64>, // row-major, length rows*cols
 }
 
 #[inline]
-pub fn mk(rows: usize, cols: usize, data: AlmideList<f64>) -> AlmideMatrix {
+pub fn mk(rows: usize, cols: usize, data: std::vec::Vec<f64>) -> AlmideMatrix {
     debug_assert_eq!(data.len(), rows * cols);
     AlmideMatrix { rows, cols, data }
 }
@@ -64,6 +64,23 @@ impl FromIterator<AlmideList<f64>> for AlmideMatrix {
 // `vec![vec![x; cols]; rows].into()` keeps working.
 impl From<AlmideList<AlmideList<f64>>> for AlmideMatrix {
     fn from(v: AlmideList<AlmideList<f64>>) -> Self {
+        v.into_iter().collect()
+    }
+}
+
+// The host's rows (ADR-0037 ruling (A): a host builds a matrix from std
+// vectors, as the documented ABI says).
+impl FromIterator<std::vec::Vec<f64>> for AlmideMatrix {
+    fn from_iter<I: IntoIterator<Item = std::vec::Vec<f64>>>(iter: I) -> Self {
+        let rows: std::vec::Vec<std::vec::Vec<f64>> = iter.into_iter().collect();
+        let r = rows.len();
+        let c = if r > 0 { rows[0].len() } else { 0 };
+        mk(r, c, rows.into_iter().flatten().collect())
+    }
+}
+
+impl From<std::vec::Vec<std::vec::Vec<f64>>> for AlmideMatrix {
+    fn from(v: std::vec::Vec<std::vec::Vec<f64>>) -> Self {
         v.into_iter().collect()
     }
 }
@@ -215,9 +232,9 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
     // permutation for all inputs. This is the flat ABI win — the kernel reads
     // m.data straight, no copy.
     if m.rows == 0 || m.cols == 0 {
-        return mk(0, 0, almide_list![]);
+        return mk(0, 0, ::std::vec::Vec::new());
     }
-    let mut out = almide_list![0.0f64; m.rows * m.cols];
+    let mut out = ::std::vec![0.0f64; m.rows * m.cols];
     almide_kernel::transpose_f64::transpose_matrix_f64(&m.data, m.rows, m.cols, &mut out);
     mk(m.cols, m.rows, out) // transposed shape is cols × rows
 }
@@ -344,13 +361,13 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     let k = if m == 0 { 0 } else { a.cols };
     let n = if b.rows == 0 { 0 } else { b.cols };
     if m == 0 || k == 0 || n == 0 {
-        return mk(m, n, almide_list![0.0f64; m * n]);
+        return mk(m, n, ::std::vec![0.0f64; m * n]);
     }
     // #2481: the inner dimension is a precondition, not a clamp — `b` was
     // indexed as if it had `k` rows (a raw slice panic past its data) while
     // the wasm body summed over `min(k, rows(b))` and printed a product.
     almide_rt_matrix_shape_eq(k, b.rows);
-    let mut out = almide_list![0.0f64; m * n];
+    let mut out = ::std::vec![0.0f64; m * n];
     almide_kernel::matmul::matmul(&a.data, m, k, &b.data, n, &mut out);
     mk(m, n, out)
 }
@@ -448,7 +465,7 @@ pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> Al
     let e = (end.max(0) as u64).min(len as u64) as usize;
     let s = (start.max(0) as u64).min(len as u64) as usize;
     if s >= e { return almide_list![].into(); }
-    mk(e - s, m.cols, AlmideList::from(&m.data[s * m.cols..e * m.cols]))
+    mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 
 

@@ -14,6 +14,8 @@ fn header_items() -> &'static BTreeSet<&'static str> {
         // The alias line defines the string's two names; its spliced module body
         // is the string's own, never a runtime item.
         out.extend(lex(alias).windows(2).filter(|w| w[0].text == "type" || w[0].text == "mod").map(|w| w[1].text));
+        // The header's own macros (`macro_rules! almide_list`, ADR-0037), at the top level.
+        out.extend(lex(alias).windows(3).filter(|w| w[0].depth == 0 && w[0].text == "macro_rules" && w[1].text == "!").map(|w| w[2].text));
         // A `use` brings in the last name of each path it lists, a braced
         // group included (`use m::{A, B};`): a name that closes a path. Only
         // the alias lines at the top count, not the spliced module bodies.

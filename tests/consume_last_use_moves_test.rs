@@ -15,7 +15,7 @@
 //! - POSITIVE: the consumed value dies at the call — a rebind loop
 //!   `x = f(x, ..)` where `f` returns its own kind, else a per-iteration
 //!   `let r = f(x, ..)` with `x` built fresh and not read again. `main`
-//!   must not copy it (no `.clone()` / `.to_vec()` / `clone_from`).
+//!   must not copy it (no `.clone()` / `.to_vec()` / `.to_list()` / `clone_from`).
 //! - NEGATIVE CONTROL: the same call with the consumed value read again
 //!   afterwards (shared). `main` MUST still copy it — so a cell whose
 //!   positive passes for a reason other than a move (a scalar lowering that
@@ -270,7 +270,7 @@ fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 fn copies(body: &str) -> Vec<&str> {
     body.lines()
         .filter(|l| !l.trim_start().starts_with("//"))
-        .filter(|l| l.contains(".clone()") || l.contains(".to_vec()") || l.contains("clone_from"))
+        .filter(|l| l.contains(".clone()") || l.contains(".to_vec()") || l.contains(".to_list()") || l.contains("clone_from"))
         .collect()
 }
 

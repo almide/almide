@@ -30,9 +30,12 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
     let args: Vec<String> = func.params.iter().map(|p| extern_rust_arg(p, &mut before, &mut after)).collect();
     let ret = render_type(ctx, &func.ret_ty);
     let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
-    let result = if extern_rust_is_rc_cow(&func.ret_ty) {
+    let result = if matches!(func.ret_ty, Ty::Bytes) {
+        // The host's `Vec<u8>` becomes the Almide list block (ADR-0037).
+        "AlmideRcCow::from(AlmideList::<u8>::from(__almide_r))".to_string()
+    } else if extern_rust_is_rc_cow(&func.ret_ty) {
         "__almide_r.into()".to_string()
-    } else if extern_rust_has_str(&func.ret_ty) {
+    } else if extern_rust_host_differs(&func.ret_ty) {
         extern_rust_str_conv("&__almide_r", &func.ret_ty, false, 0)
     } else {
         "__almide_r".to_string()
@@ -59,13 +62,29 @@ fn extern_rust_has_str(ty: &Ty) -> bool {
     }
 }
 
+/// Whether the host shape of `ty` differs from the Almide shape at all: a
+/// String inside it (ADR-0013), or a List / Bytes, which generated code holds
+/// as the counted `AlmideList` block and the host as std's `Vec` (ADR-0037,
+/// owner ruling (A): the documented host ABI is unchanged; the wrapper copies
+/// at the boundary). A borrowed list of such values needs no copy: it is a
+/// slice either way.
+pub(super) fn extern_rust_host_differs(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId as C;
+    match ty {
+        Ty::String | Ty::Bytes | Ty::Applied(C::List, _) => true,
+        Ty::Applied(C::Set | C::Option | C::Result | C::Map, args) => args.iter().any(extern_rust_host_differs),
+        Ty::Tuple(elems) => elems.iter().any(extern_rust_host_differs),
+        _ => false,
+    }
+}
+
 /// An owned copy of the value `e` (an expression of type `&T`) in the host's
 /// shape (`to_host`: every Almide String becomes a `String`) or in the Almide
 /// shape (every host `String`, or an `AlmideString` a host already returns,
 /// becomes an `AlmideString`). `depth` keeps closure binders distinct.
 fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String {
     use almide_lang::types::TypeConstructorId as C;
-    if !extern_rust_has_str(ty) {
+    if !extern_rust_host_differs(ty) {
         return format!("({e}).clone()");
     }
     let x = format!("__x{depth}");
@@ -74,6 +93,8 @@ fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String
     match ty {
         Ty::String if to_host => format!("({e}).to_string()"),
         Ty::String => format!("AlmideString::from(({e}).as_str())"),
+        Ty::Bytes if to_host => format!("({e}).as_slice().to_vec()"),
+        Ty::Bytes => format!("AlmideRcCow::from(AlmideList::<u8>::from(({e}).as_slice()))"),
         Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<{}<_>>()", inner(&x, &args[0]), if to_host { "Vec" } else { "AlmideList" }),
         Ty::Applied(C::Set, args) => format!("({e}).iter().map(|{x}| {}).collect::<AlmideSet<_>>()", inner(&x, &args[0])),
         Ty::Applied(C::Option, args) => format!("({e}).as_ref().map(|{x}| {})", inner(&x, &args[0])),
@@ -242,7 +263,7 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(
-        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
+        "{n}    {region_ty} {{ owner: AlmideList::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
     )
 }
 
@@ -384,7 +405,7 @@ fn export_c_out_params(func: &IrFunction) -> Vec<String> {
 /// the call.
 fn render_lent_region(region_ty: &str, name: &str, writable: bool) -> String {
     format!(
-        "{region_ty} {{ owner: Vec::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
+        "{region_ty} {{ owner: AlmideList::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
          len: if {name}.is_null() {{ 0 }} else {{ i64::try_from({name}_len).unwrap_or(i64::MAX) }}, \
          writable: {writable}, keep: almide_rt_ffi_lent_keep() }}"
     )

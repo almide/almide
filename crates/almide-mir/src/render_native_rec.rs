@@ -656,7 +656,7 @@ pub(crate) fn owned_ty(t: NTy) -> String {
 pub(crate) fn runtime_default_impls() -> String {
     const IMPLS: [(&str, &str); 2] = [
         (VALUE_KEY, "impl Default for AlmideValue {\n    fn default() -> Self {\n        AlmideValue::Null\n    }\n}\n"),
-        (MATRIX_KEY, "impl Default for AlmideMatrix {\n    fn default() -> Self {\n        AlmideMatrix { rows: 0, cols: 0, data: AlmideList::new() }\n    }\n}\n"),
+        (MATRIX_KEY, "impl Default for AlmideMatrix {\n    fn default() -> Self {\n        AlmideMatrix { rows: 0, cols: 0, data: ::std::vec::Vec::new() }\n    }\n}\n"),
     ];
     RECS.with(|r| {
         let r = r.borrow();

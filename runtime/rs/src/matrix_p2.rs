@@ -136,7 +136,7 @@ pub fn almide_rt_matrix_concat_rows<M: std::ops::Deref<Target = AlmideMatrix>>(x
     };
     let cols = xs[first].cols;
     let rest = || xs[first + 1..].iter().filter(|m| !m.is_empty());
-    let mut data = AlmideList::with_capacity(xs[first].data.len() + rest().map(|m| m.data.len()).sum::<usize>());
+    let mut data = ::std::vec::Vec::with_capacity(xs[first].data.len() + rest().map(|m| m.data.len()).sum::<usize>());
     data.extend_from_slice(&xs[first].data);
     let mut rows = xs[first].rows;
     for m in rest() {
