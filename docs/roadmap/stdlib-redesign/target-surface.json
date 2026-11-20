@@ -4251,7 +4251,7 @@
 {
 "mod": "process",
 "name": "run",
-"sig": "effect fn process.run(c: ProcessCommand) -> Int",
+"sig": "effect fn process.run(c: ProcessCommand) -> Result[Unit, String]",
 "kind": "意味変更"
 },
 {

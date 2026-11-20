@@ -1718,7 +1718,7 @@
 | `poll` | `effect fn process.poll(c: ProcessChild) -> Result[ProcessStatus, String]?` | 新規 | R-process-03 |
 | `read_new_stderr` | `effect fn process.read_new_stderr(c: ProcessChild) -> String` | 新規 | R-process-03 |
 | `read_new_stdout` | `effect fn process.read_new_stdout(c: ProcessChild) -> String` | 新規 | R-process-03 |
-| `run` | `effect fn process.run(c: ProcessCommand) -> Int` | 意味変更: `ProcessCommand` を受け取る | R-process-07 |
+| `run` | `effect fn process.run(c: ProcessCommand) -> Result[Unit, String]` | 意味変更: `ProcessCommand` を受け取る | R-process-07 |
 | `start` | `effect fn process.start(c: ProcessCommand) -> ProcessChild` | 新規 | R-process-03 |
 | `stop` | `effect fn process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus` | 新規 | R-process-03 |
 | `wait` | `effect fn process.wait(c: ProcessChild) -> ProcessStatus` | 新規 | R-process-03 |
