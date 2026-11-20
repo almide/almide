@@ -1,7 +1,16 @@
 //! Fused sum consumes the chain as one activation; intermediate owned map
 //! values are discharged even when a filter skips the element.
+
+/// The witness sink is one per process (`witness::start_collecting` arms it,
+/// `take` drains it), and the test harness runs these tests on parallel
+/// threads: one test's `take` could drain the other's batch, or its
+/// `start_collecting` reset it, which under machine load lost
+/// `<lambda#1>`. Each test holds this lock from arming to draining.
+static SINK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn numeric_and_owned_stage_sum_certificates_are_accepted() {
+    let _sink = SINK.lock().unwrap_or_else(|e| e.into_inner());
     let src = r#"fn total(n: Int) -> Int = list.range(0, n)
       |> list.map((x) => x * 3) |> list.filter((x) => x % 2 == 0) |> list.sum
     fn lengths(xs: List[String]) -> Int = xs
@@ -24,6 +33,7 @@ fn numeric_and_owned_stage_sum_certificates_are_accepted() {
 /// caught an over-broad forwarding draft dropping this identity).
 #[test]
 fn captured_list_sum_retains_its_closure_witness() {
+    let _sink = SINK.lock().unwrap_or_else(|e| e.into_inner());
     let src = include_str!("../../../spec/wasm_cross/fan_block_rc_closure_capture.almd");
     let ir = almide_spine::s5::lower_to_ir("fan_block_rc_closure_capture.almd", src).expect("front");
     almide_wasm::witness::start_collecting();
