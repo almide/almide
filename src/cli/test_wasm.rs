@@ -889,7 +889,7 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     // #4836: judged by the installed verifier like the module `build` writes.
     let mut emit_err = String::new();
     let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {
-        almide_wasm::emit_program_with_ops(&ir).map_err(|e| emit_err = format!("emit: {e:?}"))
+        almide_wasm::emit_program_with_ops(&ir).map(|(b, ops)| (b, ops.into_iter().collect())).map_err(|e| emit_err = format!("emit: {e:?}"))
     })
     .map_err(|()| emit_err.clone())?;
     wasmparser::validate(&bytes).map_err(|e| format!("validate: {e}"))?;
