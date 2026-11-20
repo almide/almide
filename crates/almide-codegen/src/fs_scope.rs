@@ -102,10 +102,10 @@ pub(crate) fn fs_runtime_guards() -> std::collections::HashMap<String, &'static 
 }
 
 /// The path marks [`fs_runtime_guards`] reads.
-pub const FS_PATH_MARKS: &[&str] = &["fs_path", "fs_glob", "fs_temp", "fs_root"];
+pub(crate) const FS_PATH_MARKS: &[&str] = &["fs_path", "fs_glob", "fs_temp", "fs_root"];
 
 /// [`fs_runtime_guards`] over `sources` (`(module, text)`).
-pub fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collections::HashMap<String, &'static str>, String> {
+pub(crate) fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collections::HashMap<String, &'static str>, String> {
     use almide_lang::ast::{AttrValue, Decl, TypeExpr};
     let mut out: std::collections::HashMap<String, &'static str> = std::collections::HashMap::new();
     for (module, text) in sources {
