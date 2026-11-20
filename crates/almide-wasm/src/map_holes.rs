@@ -124,7 +124,7 @@ pub(crate) fn emit_kill(key: IdxKey, fns: IdxFns, build: u32) -> Function {
 /// moved and is read from byte `ord - 1` of `flags` (`emit_mark_live`).
 fn emit_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, hash: u32, ix: (u32, u32), (p, koff, flags): (u32, u32, u32), (ord, h, s): (u32, u32, u32)) {
     let (_, mask) = ix;
-    if key == IdxKey::Str {
+    if key.is_handle() {
         i.local_get(p).local_get(koff).i32_add().i32_load(w(0)).i32_const(0).i32_ne();
         return;
     }

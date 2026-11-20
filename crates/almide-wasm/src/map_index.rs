@@ -80,10 +80,14 @@
 //! | String                    | indexed           | word-wise multiplicative hash, `$str_eq` confirm |
 //! | Bool                      | linear `$scan_w32`| at most 2 entries — never past threshold |
 //! | Float                     | linear `$scan_f64`| native keeps floats linear too (NaN/-0.0) |
-//! | Tuple / Named (deep keys) | linear `$scan_deep`| native fingerprints (i64,i64)/(String,String); the deep lane here stays linear — a cost gap only, recorded in #1219 |
+//! | Tuple / Named / List / Option / Result of Int, Bool, String, Bytes, `()` (deep keys, acyclic) | indexed (`Deep`) | type-directed hash, `==` and order (map_index_deep.rs, #4887) |
+//! | a deep key reaching a Float, Value, Map, Set, closure, matrix or a recursive type | linear `$scan_deep` | no hash consistent with its `==` (a Float's `0.0 == -0.0`), or a walk that cannot be inlined |
 //!
-//! `index_key` IS the matrix; `keyed_find` routes through it, and the
-//! unit test below pins each row so the family cannot drift point-wise.
+//! `index_key` is the class half of the matrix (Int, String); the deep half
+//! is decided per type by `Emitter::idx_key` (`deep_key_ok`). `keyed_find`
+//! routes through it, and the unit tests pin each row so the family cannot
+//! drift point-wise. A flooded deep block (#4104) is ordered by the type's
+//! total order, as a flooded String block is by `$str_cmp`.
 
 use wasm_encoder::{BlockType, Function, MemArg, ValType};
 
@@ -101,6 +105,20 @@ pub(crate) const INDEX_THRESHOLD: u32 = 16;
 pub(crate) enum IdxKey {
     Int,
     Str,
+    /// A deep key (#4887): its type's scan, equality, order and hash
+    /// helpers, by function index.
+    Deep(DeepKey),
+}
+
+/// The helpers a deep key's lane calls: `scan` = `$scan_deep_<ety>`, `cmp` =
+/// `$named_cmpty` (the total order; a zero verdict is `==`, so the probe
+/// confirms with it too and the type carries one compare body, not two),
+/// `hash` = `$named_hashty`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct DeepKey {
+    pub(crate) scan: u32,
+    pub(crate) cmp: u32,
+    pub(crate) hash: u32,
 }
 
 /// The matrix: which key class takes the index lane.
@@ -113,17 +131,23 @@ pub(crate) fn index_key(k: SliceTy) -> Option<IdxKey> {
 }
 
 impl IdxKey {
-    fn needle(self) -> ValType {
+    pub(crate) fn needle(self) -> ValType {
         match self {
             IdxKey::Int => ValType::I64,
-            IdxKey::Str => ValType::I32,
+            IdxKey::Str | IdxKey::Deep(_) => ValType::I32,
         }
     }
     fn scan(self) -> u32 {
         match self {
             IdxKey::Int => F_SCAN_W64,
             IdxKey::Str => F_SCAN_STR,
+            IdxKey::Deep(d) => d.scan,
         }
+    }
+    /// A key held by handle (a String or a deep key): a deleted entry's
+    /// key slot is cleared, so a zero key is a hole.
+    pub(crate) fn is_handle(self) -> bool {
+        matches!(self, IdxKey::Str | IdxKey::Deep(_))
     }
 }
 
@@ -331,7 +355,7 @@ pub(crate) fn emit_hash_str() -> Function {
 pub(crate) fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
     match key {
         IdxKey::Int => i.i64_load(w(0)),
-        IdxKey::Str => i.i32_load(w(0)),
+        IdxKey::Str | IdxKey::Deep(_) => i.i32_load(w(0)),
     };
 }
 
@@ -489,6 +513,7 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
     match key {
         IdxKey::Int => i.i64_eq(),
         IdxKey::Str => i.call(F_STR_EQ),
+        IdxKey::Deep(d) => i.call(d.cmp).i32_eqz(),
     };
     i.if_(BlockType::Empty);
     i.local_get(e).return_();
@@ -601,6 +626,8 @@ pub(crate) fn helper_body(h: &Helper) -> Option<Function> {
         Helper::MapIdxHash { key } => match key {
             IdxKey::Int => emit_hash_int(),
             IdxKey::Str => emit_hash_str(),
+            // A deep key's hash is its own `$named_hashty` (`idx_fns`).
+            IdxKey::Deep(_) => unreachable!("a deep key never registers MapIdxHash"),
         },
         Helper::MapIdxBuild { key, hash, ord_build } => emit_build(*key, *hash, *ord_build),
         Helper::MapIdxFind { key, fns, build } => emit_find(*key, *fns, *build),
@@ -619,9 +646,40 @@ impl Emitter<'_> {
         IdxFns {
             side_get: self.work.helper(Helper::MapIdxSideGet),
             side_set: self.work.helper(Helper::MapIdxSideSet { raw }),
-            hash: self.work.helper(Helper::MapIdxHash { key }),
+            hash: match key {
+                IdxKey::Deep(d) => d.hash,
+                _ => self.work.helper(Helper::MapIdxHash { key }),
+            },
             ord: crate::map_ordered::ord_fns(self.work, key),
         }
+    }
+
+    /// The index lane of key type `k`: the class lanes (Int, String), or the
+    /// deep lane for a qualifying compound type (#4887), else `None` (the
+    /// linear scan). Its helpers are registered here; a body for this type
+    /// that already failed to build keeps the scan.
+    pub(crate) fn idx_key(&mut self, k: SliceTy) -> Option<IdxKey> {
+        if let Some(key) = index_key(k) {
+            return Some(key);
+        }
+        if !self.deep_key_ok(k) {
+            return None;
+        }
+        use crate::work::NamedOp;
+        let ety = self.types.intern(k);
+        let ti = ety.index() as u32;
+        let failed = [NamedOp::CmpTy, NamedOp::HashTy]
+            .iter()
+            .any(|op| matches!(self.work.named_bodies.borrow().get(&(*op, ti)), Some(crate::work::DisplayBuild::Failed)))
+            || matches!(self.work.scan_bodies.borrow().get(&ety), Some(crate::work::DisplayBuild::Failed));
+        if failed {
+            return None;
+        }
+        Some(IdxKey::Deep(DeepKey {
+            scan: self.work.helper(Helper::ScanDeep { key: ety }),
+            cmp: self.work.helper(Helper::NamedOp { op: NamedOp::CmpTy, ti }),
+            hash: self.work.helper(Helper::NamedOp { op: NamedOp::HashTy, ti }),
+        }))
     }
 
     /// The keyed lookup for a STABLE block (one that outlives the loop
@@ -631,7 +689,7 @@ impl Emitter<'_> {
     /// `scan_helper` — see invariant 1 in the module doc. `map.from_list`
     /// builds through the in-place window, so it takes this lane (#3544).
     pub(crate) fn keyed_find(&mut self, k: SliceTy) -> Result<u32, EmitError> {
-        let Some(key) = index_key(k) else {
+        let Some(key) = self.idx_key(k) else {
             return self.scan_helper(k);
         };
         let fns = self.idx_fns(key);
@@ -642,7 +700,7 @@ impl Emitter<'_> {
     /// The append hook for the in-place window (`None` for a key class
     /// with no index lane).
     pub(crate) fn keyed_append(&mut self, k: SliceTy) -> Option<u32> {
-        let key = index_key(k)?;
+        let key = self.idx_key(k)?;
         let fns = self.idx_fns(key);
         let grow = self.work.helper(Helper::MapIdxGrow { key, hash: fns.hash, from_index: fns.ord.from_index });
         Some(self.work.helper(Helper::MapIdxAppend { key, fns, grow }))
@@ -651,7 +709,7 @@ impl Emitter<'_> {
     /// The tombstoning delete's helpers for a key class with an index
     /// lane: `($mapidx_kill, $mapidx_settle)` (#3691).
     pub(crate) fn keyed_kill(&mut self, k: SliceTy) -> Option<(u32, u32)> {
-        let key = index_key(k)?;
+        let key = self.idx_key(k)?;
         let fns = self.idx_fns(key);
         let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash, ord_build: fns.ord.build_all });
         let kill = self.work.helper(Helper::MapIdxKill { key, fns, build });
@@ -660,7 +718,7 @@ impl Emitter<'_> {
 
     /// `$mapidx_settle` for a key class with an index lane.
     pub(crate) fn keyed_settle(&mut self, k: SliceTy) -> Option<u32> {
-        let key = index_key(k)?;
+        let key = self.idx_key(k)?;
         let fns = self.idx_fns(key);
         Some(self.work.helper(Helper::MapIdxSettle { key, fns }))
     }
@@ -674,7 +732,8 @@ impl Emitter<'_> {
     /// The in-place delete's hook (`None` for a key class with no index
     /// lane): `$mapidx_forget`, called with 0 — see invariant 3.
     pub(crate) fn keyed_remove(&mut self, k: SliceTy) -> Option<u32> {
-        let IdxFns { side_get, side_set, .. } = self.idx_fns(index_key(k)?);
+        let key = self.idx_key(k)?;
+        let IdxFns { side_get, side_set, .. } = self.idx_fns(key);
         Some(self.work.helper(Helper::MapIdxForget { side_get, side_set }))
     }
 }
@@ -691,7 +750,9 @@ mod tests {
         assert_eq!(index_key(STR), Some(IdxKey::Str));
         assert_eq!(index_key(BOOL), None, "Bool never reaches the threshold");
         assert_eq!(index_key(FLOAT), None, "Float keys stay linear (native too)");
-        assert_eq!(index_key(SliceTy::Tuple(0)), None, "deep keys stay on the scan_deep lane");
-        assert_eq!(index_key(SliceTy::Named(0)), None, "deep keys stay on the scan_deep lane");
+        // Deep keys are decided per type by `Emitter::idx_key` (#4887), never
+        // by their class: the class half answers none for them.
+        assert_eq!(index_key(SliceTy::Tuple(0)), None, "a deep key's lane is its type's, not its class's");
+        assert_eq!(index_key(SliceTy::Named(0)), None, "a deep key's lane is its type's, not its class's");
     }
 }

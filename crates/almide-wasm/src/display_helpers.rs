@@ -122,6 +122,8 @@ impl Shell {
     /// of the five i32 locals (4 = p, 5 = end) are the scan's own walk, so
     /// the Emitter's cursor takes the spare slot 8.
     pub(crate) const SCAN: Shell = Shell { params: 4, i32s: 5, cursor: 8, tmp_i32: 6, scr_i32: 7 };
+    /// `(key) -> i32`: one raw param (the deep key hash, #4887).
+    pub(crate) const ONE: Shell = Shell { params: 1, i32s: 3, cursor: 1, tmp_i32: 2, scr_i32: 3 };
 }
 
 /// Build one helper body on `shell`'s local layout: `body` emits into a
@@ -301,11 +303,18 @@ pub(crate) fn build_one_named_helper(
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     // #2758: both operand blocks are lent (params 0 and 1).
-    let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", &[0, 1]);
-    build_helper_body(table, types, work, pool, (Shell::PAIR, hw), |em| {
+    let hash = matches!(op, crate::work::NamedOp::HashTy);
+    let lent: &[u32] = if hash { &[0] } else { &[0, 1] };
+    let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", lent);
+    let shell = if hash { Shell::ONE } else { Shell::PAIR };
+    build_helper_body(table, types, work, pool, (shell, hw), |em| {
         // #4250: a type on a cycle compares a deep pair on a bounded stack.
         if matches!(op, crate::work::NamedOp::Eq) && em.types.named_on_cycle(ti) {
             return em.emit_named_eq_deep(ti);
+        }
+        // The deep key hash reads its one param itself (#4887).
+        if hash {
+            return em.emit_deep_hash_body(em.types.el(crate::ETy::from_index(ti as usize)));
         }
         em.f.instructions().local_get(0).local_get(1);
         match op {
@@ -318,6 +327,7 @@ pub(crate) fn build_one_named_helper(
                 em.emit_val_eq_level(em.types.el(crate::ETy::from_index(ti as usize)), &mut Vec::new())
             }
             crate::work::NamedOp::CmpTy => em.emit_val_cmp_level(em.types.el(crate::ETy::from_index(ti as usize))),
+            crate::work::NamedOp::HashTy => unreachable!("answered above"),
         }
     })
 }
