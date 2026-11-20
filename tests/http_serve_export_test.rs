@@ -574,3 +574,55 @@ fn a_server_that_is_not_serve_shaped_or_reads_files_is_refused_for_stock_wasm() 
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #4311: a response built from bytes that are not UTF-8 is served byte for
+/// byte by the stock export, as natively. The guest hands op 72 the body's
+/// bytes beside the reply frame; the shim used to read the body out of the
+/// frame's body cell, which is empty now, so the stock lane answered an
+/// empty body (found by the stdlib re-inspection of `http.serve`).
+#[test]
+fn the_stock_serve_export_sends_a_bytes_body_exactly() {
+    const APP: &str = r#"import env
+import http
+
+effect fn app(req: HttpRequest) -> HttpResponse = match http.path(req) {
+  "/raw" => http.response(200, bytes.from_list([0, 255, 104, 105, 192, 128, 10])),
+  "/text" => http.response(200, "héllo"),
+  _ => http.response(404, "no"),
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  http.serve(int.parse(port) ?? 0, app)!
+}
+"#;
+    let dir = scratch("bytes-body");
+    let src = dir.join("bytes_body.almd");
+    std::fs::write(&src, APP).expect("write the app");
+    let wasm = dir.join("app.wasm");
+    let r = Command::new(almide_bin()).arg("build").arg(&src).args(["--target", "wasm", "-o"]).arg(&wasm).output().expect("almide build runs");
+    assert!(r.status.success(), "almide build --target wasm failed:\n{}", String::from_utf8_lossy(&r.stderr));
+    if !wasmtime_serves_p3() {
+        return;
+    }
+    let (wport, mut served) = serve_artifact(&dir, &wasm, &[]);
+    let nport = free_port();
+    let mut nc = Command::new(almide_bin());
+    nc.arg("run").arg(&src).arg("--").arg(nport.to_string());
+    let mut native = spawn(nc, &dir.join("native.log"));
+    let got: Vec<(Observed, Observed)> = ["/raw", "/text"]
+        .iter()
+        .map(|p| {
+            let req = request("GET", p, &[], b"");
+            (observe(&ask(nport, &req)).expect("native answer"), observe(&ask(wport, &req)).expect("stock answer"))
+        })
+        .collect();
+    kill_group(&mut served);
+    kill_group(&mut native);
+    assert_eq!(got[0].0.body, vec![0u8, 255, 104, 105, 192, 128, 10], "native's raw body");
+    assert_eq!(got[1].0.body, "héllo".as_bytes(), "native's text body");
+    for (n, w) in &got {
+        assert_eq!(n, w, "stock and native answer differently");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
