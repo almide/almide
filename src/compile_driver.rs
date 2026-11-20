@@ -213,7 +213,28 @@ fn lower_one_user_module(
         checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
     }
     infer_module_capturing(checker, name, mod_prog, sources, module_diags);
-    let versioned = pkg_id.as_ref().map(|pid| {
+    let mod_ir_program = lower_user_module_ir(checker, name, mod_prog, pkg_id.as_ref(), ir_program, is_test_file, true);
+    checker.env.self_module_name = saved_self;
+    if let Some(p) = mod_ir_program {
+        module_irs.insert(name.clone(), p);
+    }
+}
+
+/// Lower one user module the checker has just inferred: its IR module is
+/// pushed onto `ir_program`, and with `want_program` its own whole-program
+/// IR (the build's `module_irs`) is returned too. The build and `almide
+/// check` (#4187: one front-end pass, not a second one from disk) both lower
+/// a module here, right after inferring it.
+pub(crate) fn lower_user_module_ir(
+    checker: &mut check::Checker,
+    name: &str,
+    mod_prog: &ast::Program,
+    pkg_id: Option<&project::PkgId>,
+    ir_program: &mut Option<almide::ir::IrProgram>,
+    is_test_file: bool,
+    want_program: bool,
+) -> Option<almide::ir::IrProgram> {
+    let versioned = pkg_id.map(|pid| {
         let base = pid.mod_name();
         if let Some(suffix) = name.strip_prefix(&pid.name) {
             format!("{}{}", base, suffix)
@@ -245,13 +266,12 @@ fn lower_one_user_module(
     // are consumed by `StdlibLoweringPass` to rewrite call sites
     // into `IrExprKind::InlineRust`. Fns without those attrs
     // (e.g. helpers like `split_at`) emit normally. No prune.
-    let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
+    let mod_ir_program = want_program.then(|| almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map));
     checker.env.import_table = saved_table;
-    checker.env.self_module_name = saved_self;
-    module_irs.insert(name.clone(), mod_ir_program);
     if let Some(ir) = ir_program {
         ir.modules.push(mod_ir_module);
     }
+    mod_ir_program
 }
 
 fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
@@ -303,33 +323,6 @@ pub(crate) fn optimize_gate_and_link(
         return Err("1 error(s) found".to_string());
     }
     Ok(())
-}
-
-/// The whole lowered program — the entry and every user module — for the
-/// gates `almide check` runs after its own type check (E109 and
-/// `[permissions]`): check lowers only the entry, so a module's function was
-/// never judged there. Re-runs the build's front end with warnings silenced
-/// (check has printed them); `None` when it fails, which check has reported.
-pub(crate) fn whole_program_ir(file: &str) -> Option<almide::ir::IrProgram> {
-    let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
-    // A debug-build assertion in module lowering (`increment_use` on a
-    // `self.` module lowered from outside its package directory) must not
-    // turn a clean `check` into a crash: the gates then judge the entry's own
-    // IR, as before this change, and the build route reports the defect.
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let ir = std::panic::catch_unwind(|| {
-        let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _, self_versioned) =
-            parse_and_resolve_for_compile(file).ok()?;
-        let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        let mut module_irs = std::collections::HashMap::new();
-        typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs).ok()?.0
-    })
-    .ok()
-    .flatten();
-    std::panic::set_hook(hook);
-    crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
-    ir
 }
 
 /// E109 (#4151): refuse a pure fn that runs an `effect fn` reached through a
