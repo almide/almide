@@ -716,9 +716,6 @@ pub(crate) fn validate_exits(
     drop_fns: &[u32],
     name_of: impl Fn(u32) -> String,
 ) -> Result<(), EmitError> {
-    if ledger.is_empty() {
-        return Ok(());
-    }
     let d = Defects { function };
     let ops = read_ops(f, &d)?;
     // Windows may nest (an early exit lowered inside a later-started
@@ -727,6 +724,8 @@ pub(crate) fn validate_exits(
     let mut order: Vec<usize> = (0..ledger.len()).collect();
     order.sort_by_key(|&k| std::cmp::Reverse(ledger[k].start));
     let mut claimed: Vec<(usize, usize)> = Vec::new();
+    // The transfer instruction (an index into `ops`) each plan's window ends at.
+    let mut transfers: Vec<usize> = Vec::new();
     for k in order {
         let rec = &ledger[k];
         let cont_name = match rec.plan.continuation {
@@ -738,7 +737,19 @@ pub(crate) fn validate_exits(
         };
         let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, drop_fns, &d)?;
         claimed.push((rec.start, ops[tj].0));
+        transfers.push(tj);
         check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
+    }
+    // The other direction (#4854): every `return` / `return_call` the bytes
+    // hold is the transfer of a recorded plan. One no plan claims is an exit
+    // the emitter wrote without recording it — with an empty ledger too.
+    if let Some(j) = (0..ops.len()).find(|j| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j)) {
+        return Err(d.at(
+            "an exit in the function's bytes has no exit plan",
+            format!("the transfer at body offset {}", ops[j].0),
+            "an exit plan recorded before every return / return_call",
+            if ops[j].1 == Op::Return { "a return no plan claims" } else { "a return_call no plan claims" },
+        ));
     }
     Ok(())
 }
