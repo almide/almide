@@ -160,7 +160,7 @@ impl<T> AlmideList<T> {
             return;
         }
         let cap = if extra == 0 { len } else { need.max(len.saturating_mul(2)).max(4) };
-        let mut fresh = AlmideList::<T> { ptr: almide_list_alloc::<T>(cap), _elems: PhantomData };
+        let fresh = AlmideList::<T> { ptr: almide_list_alloc::<T>(cap), _elems: PhantomData };
         for (i, x) in self.as_slice().iter().enumerate() {
             // SAFETY: slot `i < len <= cap` of the fresh block is uninitialised; `len` is bumped after each write, so a
             // panicking `clone` leaves the fresh block holding exactly the elements written so far.
