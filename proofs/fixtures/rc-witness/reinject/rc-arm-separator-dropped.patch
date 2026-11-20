@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
+index a849af46a8..a956b4ff5d 100644
+--- a/crates/almide-wasm/src/stmts.rs
++++ b/crates/almide-wasm/src/stmts.rs
+@@ -135,8 +135,9 @@ impl Emitter<'_> {
+             then_ok?;
+             self.f.instructions().else_();
+             let else_at = self.arm_anchor_here();
+-            self.witness_branch_arm();
+-            self.witness_branch_anchor(else_at);
++            // RE-INJECTED (#4631 drill): the recorder drops the else arm's
++            // separator; the shipped arms are unchanged.
++            let _ = else_at;
+             self.lower_stmt_expr(else_)
+         })();
+         self.witness_branch_close();

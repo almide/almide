@@ -517,7 +517,8 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
                 let source = params.text_document.text;
                 let file_path = uri_to_path(&uri);
                 let deps = project_deps_for(file_path.as_deref(), dep_cache, true);
-                let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
+                let mut doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
+                doc.lsp_diagnostics = with_project_refusal(std::mem::take(&mut doc.lsp_diagnostics), file_path.as_deref());
                 publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
                 documents.insert(uri.clone(), source);
                 analyzed.insert(uri, doc);
@@ -647,7 +648,8 @@ fn flush_dirty(connection: &Connection, documents: &HashMap<Uri, String>, analyz
         let Some(source) = documents.get(&uri) else { continue };
         let file_path = uri_to_path(&uri);
         let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
-        let doc = AnalyzedDoc::analyze(source, file_path.as_deref(), &deps);
+        let mut doc = AnalyzedDoc::analyze(source, file_path.as_deref(), &deps);
+        doc.lsp_diagnostics = with_project_refusal(std::mem::take(&mut doc.lsp_diagnostics), file_path.as_deref());
         publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
         analyzed.insert(uri, doc);
     }

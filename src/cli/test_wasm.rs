@@ -126,22 +126,21 @@ fn print_wasm_test_profile(test_file: &str, marks: &[(&'static str, std::time::I
 /// `compile_and_run_wasm_test`'s dependency-fetch + import-resolution
 /// phase. Extracted verbatim.
 fn resolve_wasm_test_deps(test_file: &str, program: &almide_lang::ast::Program) -> Result<resolve::ResolvedModules, String> {
-    resolve::resolve_imports_with_deps(test_file, program, &wasm_test_dep_paths())
+    resolve::resolve_imports_with_deps(test_file, program, &wasm_test_dep_paths(test_file))
 }
 
-/// The dependency table the test runner resolves against — the cwd
-/// package's fetched deps, or nothing outside a package.
-fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            return project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|_| vec![])
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect();
-        }
+/// The dependency table the test runner resolves `test_file` against — its
+/// own project's fetched deps (the one lookup, #4830), or nothing outside a
+/// package.
+fn wasm_test_dep_paths(test_file: &str) -> Vec<(project::PkgId, std::path::PathBuf)> {
+    match project::permissions_project_for(test_file) {
+        Some(proj) => project_fetch::fetch_all_deps(&proj)
+            .unwrap_or_else(|_| vec![])
+            .into_iter()
+            .map(|fd| (fd.pkg_id, fd.source_dir))
+            .collect(),
+        None => vec![],
     }
-    vec![]
 }
 
 /// The test lane's rendering of a test file (#2179): the product's wasm
@@ -189,10 +188,23 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     };
     // The ONE rendering of a test module — proofs/structural-wall.sh's
     // stdlib-test leg judges exactly these bytes.
-    let routed = almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(), run_filter, declared_tests > 0, &gate);
+    // #4836: judged by the installed verifier like the module `build` writes.
+    let mut walled: Option<(&'static str, String)> = None;
+    let routed = super::verify::certified_test(test_file, || {
+        match almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(test_file), run_filter, declared_tests > 0, &gate) {
+            Ok(r) => Ok((r.bytes, r.host_ops)),
+            Err(w) => {
+                walled = Some(w);
+                Err(())
+            }
+        }
+    });
     let (bytes, host_ops) = match routed {
-        Ok(r) => (r.bytes, r.host_ops),
-        Err((stage, detail)) => { wall(stage, detail); return None; }
+        Ok(r) => r,
+        Err(()) => {
+            if let Some((stage, detail)) = walled { wall(stage, detail); }
+            return None;
+        }
     };
     // The abort-site ops are test-only and embedded-only (ADR-0029): they are
     // not a wall of the leg, and there is no stock artifact to rewrite.
@@ -595,7 +607,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             return skip_env(format!("write: {}", e));
         }
         let mut cmd = std::process::Command::new("wasmtime");
-        super::run::wasmtime_fs_args(&mut cmd);
+        super::run::wasmtime_fs_args(&mut cmd, file_fs_scope(test_file).as_deref());
         cmd.arg("-S").arg("inherit-env=y");
         // Same ALMIDE_CWD pin as `cmd_run_wasm` (#874): relative fs paths in a
         // test resolve against the real launcher cwd, not a stale PWD. On
@@ -805,8 +817,22 @@ fn run_one_program_phase(test_files: &[String], cpus: usize, run_filter: Option<
     if WasmTestRunner::from_env() != WasmTestRunner::Embedded || almide::source_overlay::is_armed() || test_files.len() < 2 {
         return (Vec::new(), test_files.to_vec());
     }
+    // One program takes one project (#4830): files governed by different
+    // manifests are different programs.
+    let groups = crate::project::group_by_manifest(test_files);
+    if groups.len() > 1 {
+        let mut outcomes = Vec::new();
+        let mut rest = Vec::new();
+        for (_, files) in groups {
+            let (o, r) = run_one_program_phase(&files, cpus, run_filter);
+            outcomes.extend(o);
+            rest.extend(r);
+        }
+        return (outcomes, rest);
+    }
+    let manifest = groups.into_iter().next().and_then(|(m, _)| m);
     let t = super::run::PhaseTimer::start();
-    let Ok(ctx) = crate::compile_driver::test_run_context() else { return (Vec::new(), test_files.to_vec()) };
+    let Ok(ctx) = crate::compile_driver::test_run_context(manifest.as_deref()) else { return (Vec::new(), test_files.to_vec()) };
     // A file the per-file route decides before it lowers anything (a
     // declared skip, nothing to test) stays there.
     let (candidates, mut rest): (Vec<String>, Vec<String>) = test_files.iter().cloned().partition(|f| {
@@ -860,7 +886,12 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir) {
         return Err(format!("matrix.{op} is native-only"));
     }
-    let (bytes, host_ops) = almide_wasm::emit_program_with_ops(&ir).map_err(|e| format!("emit: {e:?}"))?;
+    // #4836: judged by the installed verifier like the module `build` writes.
+    let mut emit_err = String::new();
+    let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {
+        almide_wasm::emit_program_with_ops(&ir).map(|(b, ops)| (b, ops.into_iter().collect())).map_err(|e| emit_err = format!("emit: {e:?}"))
+    })
+    .map_err(|()| emit_err.clone())?;
     wasmparser::validate(&bytes).map_err(|e| format!("validate: {e}"))?;
     t.lap("wasm emit");
     if let Some(op) = host_ops

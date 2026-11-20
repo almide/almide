@@ -21,6 +21,11 @@ static SCOPE: Mutex<Option<Vec<String>>> = Mutex::new(None);
 /// one project per `almide` invocation.
 pub fn set_scope(roots: Option<Vec<String>>) {
     fb::fs_scoped_install(roots.as_deref());
+    // The unix socket paths are judged by the same decision (#4832); the
+    // gate admits every path while no scope is installed.
+    almide_rt_core::net_unix_core::almide_unix_path_gate(|path| {
+        if fb::fs_scoped_admits(path) { Ok(()) } else { Err(fb::fs_scope_refusal(path)) }
+    });
     *SCOPE.lock().unwrap_or_else(|p| p.into_inner()) = roots;
 }
 

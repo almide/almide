@@ -553,6 +553,28 @@ impl<'b, 'a> Flow<'b, 'a> {
         Some((s, e, [at(e)?, at(end)?]))
     }
 
+    /// #4631: the instructions a recorder arm anchored to instruction `x`
+    /// covers, as the open interval `(lo, hi)`: an `if` names its then-arm
+    /// (up to its `else`, or its `end` when it has none), an `else` its
+    /// else-arm (up to the `end` of its `if`), and the `end` of an `if`
+    /// with no `else` the empty arm that falls through it; and the `end`
+    /// of that `if` (its join). `None` when `x` is none of these.
+    pub(crate) fn arm_region(&self, x: usize) -> Option<(usize, usize, usize)> {
+        let else_of = |s: usize| (s + 1..self.close[s]).find(|&k| self.parent[k] == Some(s) && matches!(self.b.ops[k], Op::Else));
+        match self.b.ops.get(x)? {
+            Op::If { .. } if self.close[x] != usize::MAX => Some((x, else_of(x).unwrap_or(self.close[x]), self.close[x])),
+            Op::Else => {
+                let s = self.parent[x]?;
+                (matches!(self.b.ops[s], Op::If { .. }) && self.close[s] != usize::MAX).then_some((x, self.close[s], self.close[s]))
+            }
+            Op::End => {
+                let s = self.parent[x]?;
+                (matches!(self.b.ops[s], Op::If { .. }) && self.close[s] == x && else_of(s).is_none()).then_some((x, x, x))
+            }
+            _ => None,
+        }
+    }
+
     /// The local both arms of the `if` closed at `end` yield (module header
     /// of `term`), if they do.
     fn joined(&self, end: usize) -> Option<u32> {

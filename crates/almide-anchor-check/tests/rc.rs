@@ -499,6 +499,38 @@ fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
     Ok(())
 }
 
+/// #4631: an arm the recorder anchors (`^@<x>-<x>`: the `if`, `else` or
+/// fall-through `end` whose arm it is) holds its events to that shipped
+/// arm: a dropped or moved arm separator, or arms swapped, put an event in
+/// a recorder arm whose bytes do not hold its call, and it is refused. An
+/// event may still take a call past the join (the value the arms chose).
+#[test]
+fn an_anchored_arm_takes_only_calls_in_its_shipped_arm() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let check = |body: &str, ev: &str| {
+        let bytes = module("(local i32 i32 i32)", body);
+        let bodies = decode(&bytes)?;
+        check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default())
+    };
+    // 1 if, 3 call, 5 else, 7 call, 9 end
+    let both = "local.get 2 (if (then local.get 0 call $alloc drop) (else local.get 1 call $alloc drop))";
+    check(both, "( ^@1-1 d0 | ^@5-5 d1 )")?;
+    // Unanchored, the dropped separator is not seen: the gap the anchors close.
+    check(both, "( d0 d1 )")?;
+    assert!(check(both, "( ^@1-1 d0 d1 )").is_err(), "separator dropped");
+    assert!(check(both, "( ^@1-1 | ^@5-5 d0 d1 )").is_err(), "separator moved by one event");
+    assert!(check(both, "( ^@5-5 d0 | ^@1-1 d1 )").is_err(), "arms swapped");
+    assert!(check(both, "( ^@2-2 d0 | ^@5-5 d1 )").unwrap_err().contains("opens no arm"), "an anchor on no arm");
+    // 1 if, 3 call, 5 end (no else: the fall-through arm is empty), 7 call
+    let one = "local.get 2 (if (then local.get 0 call $alloc drop)) local.get 1 call $alloc drop";
+    check(one, "( ^@1-1 d0 | ^@5-5 ) d1")?;
+    assert!(check(one, "( ^@1-1 | ^@5-5 d0 ) d1").is_err(), "an event in the empty arm");
+    // Past the join: the call on the value the arms chose.
+    check("local.get 2 (if (then nop) (else nop)) local.get 0 call $alloc drop", "( ^@1-1 d0 | ^@3-3 )")?;
+    assert!(check("local.get 0 call $alloc drop local.get 2 (if (then nop) (else nop))", "( ^@4-4 d0 | ^@6-6 )").is_err(), "a call before the if");
+    Ok(())
+}
+
 /// A temporary's event logged inside a window takes a call inside that
 /// window, never a release elsewhere that no event of its own accounts.
 #[test]

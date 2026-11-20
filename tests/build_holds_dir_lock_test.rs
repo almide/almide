@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 fn scratch() -> PathBuf {
     let root = std::env::temp_dir().join(format!("almide-issue4269-lock-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(root.join("run")).expect("mkdir");
+    std::fs::create_dir_all(&root).expect("mkdir");
+    // The run dir override must be closed to other writers (#4842).
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(root.join("run")).expect("mkdir run");
     std::fs::write(root.join("app.almd"), "fn main() -> Unit = println(\"built by the lock holder's peer\")\n").expect("write");
     root
 }

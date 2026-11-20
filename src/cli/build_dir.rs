@@ -82,9 +82,52 @@ impl BuildDirLock {
 /// resolution, shared by the builder and by `almide clean` (#2500), so the
 /// dir `clean` empties is the dir the builds fill.
 pub(crate) fn shared_run_project_dir() -> std::path::PathBuf {
-    almide_base::env::var("ALMIDE_RUN_PROJECT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| cache_base().join("run"))
+    match almide_base::env::var("ALMIDE_RUN_PROJECT_DIR") {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            // The override holds binaries that are executed, as the base
+            // does (#4842): one another user could write into is refused. A
+            // missing one is created closed (0700), as the base is, so the
+            // next run does not refuse what this one made under the umask.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+            }
+            #[cfg(unix)]
+            if let Err(e) = owned_and_closed_to_writers(&dir) {
+                crate::err(&format!("error: ALMIDE_RUN_PROJECT_DIR={}: {e}", dir.display()));
+                std::process::exit(1);
+            }
+            dir
+        }
+        None => cache_base().join("run"),
+    }
+}
+
+/// `dir`, when it exists, is a real directory (not a symlink) owned by the
+/// effective uid that no group or other user can write to: the
+/// `ALMIDE_RUN_PROJECT_DIR` override (#4842).
+#[cfg(unix)]
+fn owned_and_closed_to_writers(dir: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let md = match std::fs::symlink_metadata(dir) {
+        Ok(md) => md,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("cannot read it: {e}")),
+    };
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::geteuid() };
+    if !md.file_type().is_dir() {
+        return Err("it is not a directory (a symlink or a file)".into());
+    }
+    if md.uid() != uid {
+        return Err(format!("it is owned by uid {}, not by you (uid {uid}); another user could plant a binary that runs as you", md.uid()));
+    }
+    if md.mode() & 0o022 != 0 {
+        return Err(format!("group or other users can write to it (mode {:o}); another user could plant a binary that runs as you", md.mode() & 0o777));
+    }
+    Ok(())
 }
 
 /// The private base every native build cache lives under (#4180):
@@ -109,6 +152,15 @@ pub(crate) fn cache_base() -> std::path::PathBuf {
             std::process::exit(1);
         }
     }
+}
+
+/// `name` inside [`cache_base`], the directory only this user can enter
+/// (#4835): where the compiler stages a file of its own (a generated entry,
+/// the bench timer file, the verifier hand-off). A fixed or pid-keyed name
+/// directly in the shared temp directory could be planted first, as a link
+/// the write follows or a file the read takes, by another local user.
+pub(crate) fn private_path(name: &str) -> std::path::PathBuf {
+    cache_base().join(name)
 }
 
 /// [`cache_base`] under `temp`.

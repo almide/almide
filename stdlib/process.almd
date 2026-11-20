@@ -25,6 +25,7 @@ mod type ProcessChild = Int
 /// Stdout on exit 0; else err with stderr text.
 @ordered
 @intrinsic("almide_rt_process_exec")
+@spawns_process(cmd)
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
@@ -119,15 +120,18 @@ local fn __child(c: ProcessChild) -> Int = match c {
 // ── The runtime leaves ──
 @ordered
 @intrinsic("almide_rt_process___os_output")
-effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
+@spawns_process(cmd)
+local effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_run")
-effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+@spawns_process(cmd)
+local effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_start")
-effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+@spawns_process(cmd)
+local effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_process___os_poll")
 effect fn __os_poll(h: Int) -> Result[Bool, String] = _

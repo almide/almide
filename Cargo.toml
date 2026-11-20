@@ -84,13 +84,10 @@ crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.263"
 wasi-preview1-component-adapter-provider = "50.0.1"
-# The dependency fetch's in-process git client (ADR-0035 D2): https over the
-# same rustls / ring / root-store pin almide-rt-core's http client uses, a
-# pack's zlib streams inflated by miniz_oxide (pure Rust, no unsafe), and
-# every object id recomputed with sha1 (or sha2 for sha256 repositories).
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-webpki-roots = "1.0"
-rustls-native-certs = "0.8"
+# The dependency fetch's in-process git client (ADR-0035 D2): a pack's zlib
+# streams inflated by miniz_oxide (pure Rust, no unsafe), and every object id
+# recomputed with sha1 (or sha2 for sha256 repositories). Its https half
+# (rustls) is native only, below.
 miniz_oxide = "0.9"
 sha1 = "0.11"
 
@@ -113,6 +110,12 @@ ring = "0.17"
 # `almide upgrade` lives in the binary, and rustls' `getrandom` does not
 # build for the wasm32-unknown-unknown library target.
 almide-rt-core = { path = "crates/almide-rt-core" }
+# The dependency fetch's https half (src/fetch/http.rs, ADR-0035 D2): the same
+# rustls / ring / root-store pin almide-rt-core's http client uses. Native only
+# for the same reason; the wasm32 library gets a stub that refuses the fetch.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "1.0"
+rustls-native-certs = "0.8"
 
 # `almide run` on Windows waits for the program and ignores the console's
 # Ctrl-C itself, which the program also receives (#2809). Unix execs instead.

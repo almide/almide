@@ -179,7 +179,7 @@ fn every_accepted_key_changes_the_parse() {
         // `media` is a table from a package source to its media types
         // (ADR-0032 D7); `owners` a list of owners.
         let value = match *key {
-            "media" => "{ \"almide/svg\" = [\"image/svg+xml\"] }",
+            "media" => "{ \"github.com/almide/svg\" = [\"image/svg+xml\"] }",
             _ => "[\"github.com/alice\"]",
         };
         let text = format!("{pkg}[trust]\n{key} = {value}\n");
@@ -249,4 +249,33 @@ fn the_cli_warns_once_and_exits_zero() {
     assert!(out.status.success(), "a warning must not fail run: {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #4851: in the tables that restrict the program an unknown key, or a
+/// top-level table one edit from one, is refused on every command — a
+/// misspelled bound used to warn and grant every capability. The control: a
+/// stray `[package]` key above still only warns.
+#[test]
+fn a_misspelled_security_key_or_table_is_refused() {
+    let pkg = "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n";
+    for (tag, table) in [
+        ("perm-table", "[permission]\nallow = []\n"),
+        ("perm-case", "[Permissions]\nallow = []\n"),
+        ("perm-key", "[permissions]\nalow = []\n"),
+        ("perm-new-key", "[permissions]\nnet = [\"example.com\"]\n"),
+        ("trust-table", "[trusts]\nowners = []\n"),
+        ("trust-key", "[trust]\nowner = [\"github.com/alice\"]\n"),
+    ] {
+        let dir = scratch(tag);
+        std::fs::write(dir.join("almide.toml"), format!("{pkg}{table}")).expect("write manifest");
+        std::fs::write(dir.join("main.almd"), "effect fn main() -> Unit = println(\"hi\")\n").expect("write source");
+        for args in [vec!["check", "main.almd"], vec!["run", "main.almd", "--target", "wasm"]] {
+            let out = Command::new(almide_bin()).args(&args).current_dir(&dir).output().expect("spawn almide");
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            assert!(!out.status.success(), "{tag}: `almide {}` accepted a misspelled bound:\n{text}", args.join(" "));
+            assert!(text.contains("is refused"), "{tag}: {text}");
+            assert!(!text.contains("hi\n"), "{tag}: the program ran:\n{text}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -76,7 +76,7 @@ Patterns follow RFC 6839: `*` is any type, and `*<suffix>` matches a longer subt
 
 ```toml
 [trust]
-media = { "almide/svg" = ["image/svg+xml"] }
+media = { "github.com/almide/svg" = ["image/svg+xml"] }
 ```
 
 - **Who is named.** The key is the dependency's source `owner/repo` (github.com implied; `host/owner/repo` for another host; a path dependency by its `[dependencies]` name). A dependency name can be pointed at another repository, a source cannot (Q17).
@@ -180,3 +180,6 @@ The owner ruled ○ on 2026-11-20: `Body`'s second requirement is `to_bytes(self
 - Before, every Bytes body was decoded as lossy UTF-8 when the response was built: the 256 byte values came back as 512 bytes on both legs (C-275, spec/stdlib/http_response_body_bytes_test.almd).
 - It breaks a type outside the stdlib that conforms to `Body`: `fn T.to_text(self) -> String` becomes `fn T.to_bytes(self) -> Bytes` (dialect epoch 17).
 
+## Amendment (2026-11-20, #4868): a grant names the package's typed origin
+
+Q17 named a package by its source's `owner/repo` (github.com implied; `host/owner/repo` elsewhere). That is the host plus the first two path segments, so on a host with deeper paths a grant could not name one repository (`gitlab.example/g/s` covered every repository under `g/s/`), and the port was dropped. The key is now the dependency's typed origin as ADR-0035 defines identity: the host, the port when it is not the transport's default, and the full path, always with the host written — `"github.com/almide/svg"`, `"gitlab.example:8443/g/s/a"`. A path dependency is still named by its package name. A key in the old two-segment form (`"almide/svg"`) is refused on its line with the new form as the hint, so no existing grant silently widens or narrows. E118's hints print the new key (`src/media_grant.rs` `grant_key`, `check_grant_key`; `tests/media_grant_test.rs`).

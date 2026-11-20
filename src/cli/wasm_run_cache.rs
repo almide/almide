@@ -47,6 +47,7 @@ pub(super) fn entry_path(
     resolved: &crate::resolve::ResolvedModules,
     dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
     verified: bool,
+    certifying: bool,
 ) -> Option<std::path::PathBuf> {
     if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
         return None;
@@ -61,6 +62,10 @@ pub(super) fn entry_path(
     field("magic", MAGIC.as_bytes());
     field("compiler", compiler_identity().as_bytes());
     field("verified", &[verified as u8]);
+    // A certified route's entries are the modules the installed verifier
+    // accepted: they are kept apart, per verifier (#4836).
+    let judge = if certifying { super::verify::verifier_identity() } else { String::new() };
+    field("judged-by", judge.as_bytes());
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
     field("cwd", cwd.as_bytes());
     field("entry", file.as_bytes());
@@ -127,6 +132,41 @@ pub(super) fn store(entry: &std::path::Path, bytes: &[u8], host_ops: &[i32]) {
         return;
     }
     let _ = super::run::record_binary_digest(entry);
+}
+
+/// A certified route's rendered module, held until the verifier accepts it
+/// (`commit_judged`), and whether the module came from such an entry.
+static JUDGED_PENDING: std::sync::Mutex<Option<(std::path::PathBuf, Vec<u8>, Vec<i32>)>> = std::sync::Mutex::new(None);
+static JUDGED_HIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hold a certified route's render; [`commit_judged`] stores it once the
+/// verifier accepted it, so an entry a certified run reuses is one the
+/// verifier judged (#4836).
+pub(super) fn store_once_judged(entry: &std::path::Path, bytes: &[u8], host_ops: &[i32]) {
+    *JUDGED_PENDING.lock().unwrap_or_else(|p| p.into_inner()) = Some((entry.to_path_buf(), bytes.to_vec(), host_ops.to_vec()));
+}
+
+/// A certified route reused an entry written after the verifier accepted it.
+pub(super) fn note_judged_hit() {
+    JUDGED_HIT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Forget what a previous certified make left behind.
+pub(super) fn reset_judged() {
+    JUDGED_HIT.store(false, std::sync::atomic::Ordering::SeqCst);
+    *JUDGED_PENDING.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
+/// Did the certified make just reuse a judged entry?
+pub(super) fn took_judged_hit() -> bool {
+    JUDGED_HIT.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The verifier accepted the module: store the held render.
+pub(super) fn commit_judged() {
+    if let Some((entry, bytes, ops)) = JUDGED_PENDING.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        store(&entry, &bytes, &ops);
+    }
 }
 
 /// The running compiler: its version line, plus the path, size and mtime of

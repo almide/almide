@@ -1285,7 +1285,7 @@ takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
 `http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
 computed one, or for HTML / XML / SVG: SVG comes from a package such as
 almide/svg, which the application grants in `almide.toml` with `[trust]
-media = { "almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
+media = { "github.com/almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /
 `http.with_body(resp, body)` replace the body and its type together. A
 fetched response keeps the type it arrived with:

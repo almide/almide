@@ -317,3 +317,32 @@ fn locked_refuses_what_the_lock_does_not_name() {
     let o = h.almide(&dir, run_locked);
     assert_eq!(stdout(&o), "1\n", "{}", stderr(&o));
 }
+
+/// #4867: `almide add NAME --git URL` wrote NAME into almide.toml as text, so
+/// a name holding a newline and TOML added lines the command never showed —
+/// a `path` dependency, a `[trust] owners` entry. A name that is not an
+/// identifier is refused before anything is probed, and the manifest is left
+/// as it was.
+#[test]
+fn a_dependency_name_that_is_not_an_identifier_is_refused_and_writes_nothing() {
+    let h = Hosts::new("addname");
+    let dir = h.project("app", "", &[], "1");
+    let before = read(dir.join("almide.toml")).unwrap();
+    for name in [
+        "solo = { path = \"/etc\" }\n[trust]\nowners = [\"github.com/attacker\"]\n#",
+        "so\nlo",
+        "so=lo",
+        "so\"lo",
+        "so[lo",
+        "so#lo",
+    ] {
+        let o = h.almide(&dir, &["add", name, "--git", "https://github.com/carol/solo", "--tag", "v0.1.0", "--trust", "github.com/carol"]);
+        assert!(!o.status.success(), "{name:?} was added:\n{}", stderr(&o));
+        assert!(stderr(&o).contains("package name"), "{name:?}: the refusal does not name the bad name:\n{}", stderr(&o));
+        assert_eq!(read(dir.join("almide.toml")).unwrap(), before, "{name:?} changed almide.toml");
+    }
+    // The control: the same command with an identifier adds it.
+    let o = h.almide(&dir, &["add", "solo", "--git", "https://github.com/carol/solo", "--tag", "v0.1.0", "--trust", "github.com/carol"]);
+    assert!(o.status.success(), "{}", stderr(&o));
+    assert!(read(dir.join("almide.toml")).unwrap().contains("solo = { git = \"https://github.com/carol/solo\", tag = \"v0.1.0\" }"));
+}

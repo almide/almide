@@ -20,6 +20,10 @@ pub(crate) struct PendingRust {
     pub(crate) native_input: Option<NativeInput>,
     /// The `native/*.rs` text this program is built with (`cli::native_rust_text`).
     pub(crate) native_text: String,
+    /// The `[permissions] fs` roots of this program's own project (#4833):
+    /// carried with it, never read back from the process-wide copy another
+    /// file's check may have set meanwhile.
+    pub(crate) fs_scope: Option<Vec<String>>,
 }
 
 impl PendingRust {
@@ -36,7 +40,7 @@ impl PendingRust {
         }
         let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
         let host = self.host_source();
-        render_native_tests(&self.source, std::mem::take(&mut self.native_text), host, input)
+        render_native_tests(&self.source, std::mem::take(&mut self.native_text), host, input, self.fs_scope.clone())
     }
 
     /// The standard codegen's Rust for this program, made when the native
@@ -74,10 +78,10 @@ pub(crate) fn host_source(ir: &almide::ir::IrProgram, opts: &codegen::CodegenOpt
     })
 }
 
-pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput) -> Result<String, String> {
+pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput, fs_scope: Option<Vec<String>>) -> Result<String, String> {
     let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text).with_host_source(host);
     let (rust, _) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
-        source, ir, checker, almide_wasm_run::fs_scope(),
+        source, ir, checker, fs_scope,
     ).map_err(|error| format!("native v1 test render: {error:?}"))?;
     if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
         eprintln!("native: v1 trust-spine render (test harness)");
@@ -92,6 +96,7 @@ pub(crate) fn try_compile_pending(file: &str, no_check: bool, codegen_opts: &cod
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     let ir = ir_program.expect("IR required for codegen");
     let native_text = cli::native_rust_text(file);
-    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input, native_text }, metered, outside_guarantee))
+    let fs_scope = cli::fs_scope_for(file);
+    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input, native_text, fs_scope }, metered, outside_guarantee))
 }
 
