@@ -69,7 +69,9 @@ impl AlmideHttpResponse {
     }
     /// A fetched response: the body text is the lossy decoding of `raw`,
     /// which is kept only when that decoding lost bytes.
-    fn fetched(status: i64, headers: AlmideList<(String, String)>, raw: AlmideList<u8>) -> Self {
+    fn fetched(status: i64, headers: impl Into<AlmideList<(String, String)>>, raw: impl Into<AlmideList<u8>>) -> Self {
+        // The transport hands back host vectors; the response holds Almide lists (ADR-0037).
+        let (headers, raw): (AlmideList<(String, String)>, AlmideList<u8>) = (headers.into(), raw.into());
         match String::from_utf8(raw.into()) {
             Ok(body) => Self { status, body, headers, body_raw: None },
             Err(e) => {
@@ -540,7 +542,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // a division by zero no longer ends the server.
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
-        let req = AlmideHttpRequest { method: method.into(), path: path.into(), body: body.into(), headers, params: AlmideList::new(), body_raw: None };
+        let req = AlmideHttpRequest { method: method.into(), path: path.into(), body: body.into(), headers: headers.into(), params: AlmideList::new(), body_raw: None };
         almide_request_hooks(0);
         almide_containment(true);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
