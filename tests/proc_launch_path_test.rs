@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::Command;
 
-const PROGRAM: &str = r#"import fs
+const PROGRAM: &str = r##"import fs
 import env
 import process
 
@@ -25,7 +25,7 @@ effect fn main() -> Unit = {
   println(process.exec("almide-c459-planted", []) ?? "not found")
   fs.remove_all(dir)!
 }
-"#;
+"##;
 
 fn run(dir: &Path, wasm: bool) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
