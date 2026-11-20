@@ -3180,16 +3180,6 @@ expect = '200'
 default_index_unit = "value"
 
 [[process.fn]]
-name = "run"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
-when a signal killed it — the same reading as ProcessStatus.code (#2540, #3379).
-"""
-
-[[process.fn]]
 name = "stop"
 index_unit = "millisecond"
 probe = "1"
