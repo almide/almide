@@ -1,0 +1,5 @@
+import svg
+
+test "svg" {
+  assert_eq(svg.label(), "x")
+}

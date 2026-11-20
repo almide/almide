@@ -41,10 +41,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "127"
+# unstamped_ceiling     = "125"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "204"
-# failopen_ceiling      = "46"
+# skipped_route_ceiling = "187"
+# failopen_ceiling      = "43"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -97,6 +97,12 @@
 #               combined control) STAMPED; perm.proc-signal-kill, effect.foreign-top,
 #               manifest.parse-failure-dropped, front.e101-hidden-chars re-observed
 #               (cells written) and STAMPED. 30 stamped, 127 not, 204 skipped.
+#   2026-11-20  bugs-final merged into decision-sites (#4830 fix): dep-manifest-swallow,
+#               native.dispatch-gate and manifest.reader-split cells observed refusing
+#               on every route -> skipped 204 -> 187; dispatch-gate, reader-split and
+#               anchor.may-write-memory (#4826) unknown -> refuse: fail-open 46 -> 43.
+#               deps.dep-manifest-swallow and native.dispatch-gate STAMPED (controls red
+#               on the merged tree): 32 stamped, 125 not.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -245,6 +251,7 @@ novel = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fres
 control_test = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"
 control_patch = "proofs/decision-controls/perm.manifest-lookup.patch"
 probe = "tests/decision-probes/perm.manifest-lookup"
+control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh); control patch regenerated for the merged tree"
 
 [[site]]
 id = "perm.check-route-gate"
@@ -332,7 +339,7 @@ novel = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_need
 control_test = "tests/decision_batch1a_test.rs::novel_every_declared_signalling_fn_needs_kill_on_the_list"
 control_patch = "proofs/decision-controls/perm.proc-signal-kill.patch"
 probe = "tests/decision-probes/perm.proc-signal-kill"
-control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh); control patch regenerated for the merged tree"
 stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
@@ -2029,17 +2036,14 @@ draft = "STAMPABLE"
 
 [[site]]
 id = "manifest.parse-failure-dropped"
-at = "src/project.rs::permissions_project_for (+ compile_driver.rs::cwd_project, cli/check.rs:230/497, cli/wasm_compile.rs:164, cli/test_wasm.rs:454, cli/emit.rs:209, compile_driver.rs:335/481/832)"
-items = [
-  "src/project.rs::permissions_project_for",
-  "src/compile_driver.rs::cwd_project",
-]
+at = "src/project.rs::permissions_project_for and src/dispatch.rs::refuse_invalid_manifest (two layers since #4830, fdd8fa4af4: the up-front gate reads the entry's manifest too; compile_driver::cwd_project is gone)"
+items = ["src/project.rs::permissions_project_for", "src/dispatch.rs::refuse_invalid_manifest"]
 keys = []
 decides = "a project manifest that parses governs [permissions]/deps; one that does not parse is read as no manifest (None) and the caller falls back to the cwd manifest or to no restriction"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "permissions_project_for -> governing_manifest ends the command with the manifest's error (project.rs:925-938); compile_driver::cwd_project likewise (compile_driver.rs:270-274). The `.ok()` readers left read ./almide.toml, which the dispatch gate has already refused (cli/mod.rs:551, wasm_compile.rs:83, compile.rs:101, test_wasm.rs:136), or a dependency manifest the fetch walk has already refused (#4820; native_grant.rs:100, crate_inputs.rs:72); compile_driver.rs:360 parses ./almide.toml only when manifest_for_entry found none, so none exists. The editor (lsp_code_actions.rs:412) never fetches"
-routes = { check = "runs:fail-open #4829", check_json = "runs:fail-open", check_effects = "runs:fail-open", run = "runs:fail-open", build = "runs:fail-open", test = "runs:fail-open", bench = "runs:fail-open", native = "runs:fail-open", wasm = "runs:fail-open", wasi = "runs:fail-open", component = "runs:fail-open", lsp = "n.a.: the LSP produces and runs no code and reads no manifest (observed 2026-11-20, route matrix ds-2: the probe is not refused there)", mcp = "runs:fail-open", emit = "runs:fail-open" }
+unknown_note = "permissions_project_for -> governing_manifest ends the command with the manifest's error (project.rs:925-938). The `.ok()` readers left read ./almide.toml, which the dispatch gate has already refused (cli/mod.rs:551, wasm_compile.rs:83, compile.rs:101, test_wasm.rs:136), or a dependency manifest the fetch walk has already refused (#4820; native_grant.rs:100, crate_inputs.rs:72); compile_driver.rs:360 parses ./almide.toml only when manifest_for_entry found none, so none exists. The editor (lsp_code_actions.rs:412) never fetches"
+routes = { check = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", check_json = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", check_effects = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", run = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", build = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", test = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", bench = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", native = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", wasm = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", wasi = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", component = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the LSP produces and runs no code and reads no manifest (observed 2026-11-20, route matrix ds-2: the probe is not refused there)", mcp = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)", emit = "runs (observed 2026-11-20 on 88531b1b22, route matrix ds-2: refused inside and outside the project)" }
 tests = ["tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside", "tests/permissions_routes_test.rs::a_manifest_that_does_not_parse_refuses_every_route"]
 control_note = "NONE"
 issues = [4829]
@@ -2050,34 +2054,27 @@ novel = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_re
 control_test = "tests/decision_batch1a_test.rs::novel_a_manifest_that_does_not_parse_refuses_every_route_from_outside"
 control_patch = "proofs/decision-controls/manifest.parse-failure-dropped.patch"
 probe = "tests/decision-probes/manifest.parse-failure-dropped"
-control_seen = "ca8423c6b1 2026-11-20 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on every route inside and outside the project"
+control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh); control patch regenerated for the merged tree"
 stamp = "ceae3afc9d 2026-11-20"
 
 [[site]]
 id = "manifest.reader-split"
-at = "src/cli/mod.rs::resolve_cwd_deps_or_exit / src/project.rs::manifest_for_entry / src/cli/mod.rs::load_native_build_config"
-items = [
-  "src/cli/mod.rs::resolve_cwd_deps_or_exit",
-  "src/project.rs::manifest_for_entry",
-  "src/cli/mod.rs::load_native_build_config",
-]
+at = "src/cli/mod.rs::resolve_deps_or_exit / src/project.rs::manifest_for_entry / src/cli/mod.rs::load_native_build_config"
+items = ["src/cli/mod.rs::resolve_deps_or_exit", "src/project.rs::manifest_for_entry", "src/cli/mod.rs::load_native_build_config"]
 keys = []
 decides = "which almide.toml decides the native-grant gate (cwd only), the compiled dependency set (entry walk-up, then cwd) and the CrateInputs backstop (entry dir only, then cwd)"
 from = "mixed:declaration+text"
-unknown = "allow"
-unknown_note = "`cd elsewhere && almide run /abs/app/src/main.almd`: the cwd gate sees no deps, the build compiles the entry's project deps, the backstop finds no manifest beside src/main.almd -> an ungranted dependency's native code reaches rustc"
-routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:split #4830", build = "runs:split", test = "runs:split", bench = "runs:split", native = "runs:split", wasm = "n.a.:no cargo", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs:split (children)", emit = "skipped: #4830 emit is cwd-only and fails closed outside" }
+unknown = "refuse"
+unknown_note = "the gate, the compiled dependency set and the CrateInputs backstop all read manifest_for_entry (cli/mod.rs::resolve_deps_or_exit, load_native_build_config); whatever stands at the found path governs and the reader refuses what it cannot read (#4829)"
+routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)", build = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)", test = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)", bench = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)", native = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)", wasm = "n.a.:no cargo", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs (children; observed as above)", emit = "runs (one lookup, project::manifest_for_entry, since #4830; observed 2026-11-20 on 88531b1b22 through the native.dispatch-gate probe: refused from outside the project)" }
 tests = [
   "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
 ]
 control_note = "row 15: refusal returning None fails 3 of 6 native_grant tests (cwd-only scenarios)"
 issues = [4830]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped",
-  "c2:no-novel-test",
-]
-note = "cli/mod.rs:348 cwd_project(); project.rs:843-855 walk-up; cli/mod.rs:573-580 entry dir then ./almide.toml. Probe p1 in sweep-readers. bugs-final: unchanged."
+reasons = ["c2:no-novel-test", "c3:no probe of its own (observed through native.dispatch-gate's)", "c4:no control patch"]
+note = "The split is gone after the #4830 fix (bugs-final fdd8fa4af4). unknown was `allow`; now `refuse` (failopen count -1)."
 
 [[site]]
 id = "manifest.temp-entry-walkup"
@@ -2667,17 +2664,19 @@ decides = "a fetched dependency's almide.toml that parse_toml refuses is read as
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a fetched dependency's almide.toml is read by parse_toml and any refusal ends the walk naming the dependency and its chain (project_fetch.rs:920-930, #4820)"
-routes = { check = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", check_json = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", check_effects = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", wasi = "runs", component = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)", emit = "skipped: #4830 this route reads ./almide.toml only from outside the project and never walks the dependency (observed 2026-11-20, route matrix ds-2, from outside the project)" }
+routes = { check = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", check_json = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", check_effects = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", wasi = "runs", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)" }
 tests = ["tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed", "tests/hidden_char_inputs_test.rs::a_dependency_manifest_with_a_hidden_character_is_refused"]
 control_note = "NONE"
 issues = [4820]
-status = "UNSTAMPED"
-reasons = ["c3: skipped #4830 on check, check_json, check_effects, wasm, component, mcp, emit (observed 2026-11-20, route matrix ds-2): the walk runs inside the project (dispatch gate) and from outside only in the native compile driver; cells set by owner ruling 2026-11-20 (skipped ceiling 189 -> 205)"]
+status = "STAMPED"
+reasons = []
 note = "#4820 closed. native_grant.rs:100 and crate_inputs.rs:72 `.ok()` read a manifest the walk has already accepted. unknown was `allow`; now `refuse` (failopen count -1)."
 novel = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
 probe = "tests/decision-probes/deps.dep-manifest-swallow"
 control_patch = "proofs/decision-controls/deps.dep-manifest-swallow.patch"
+control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "88531b1b22 2026-11-20"
 
 [[site]]
 id = "deps.graph-budget"
@@ -2790,28 +2789,26 @@ note = "native_grant.rs:142-155 skip list; :202 `g == fd.pkg_id.name`; :162 TEMP
 
 [[site]]
 id = "native.dispatch-gate"
-at = "src/dispatch.rs::dispatch (Run/Test/Bench/Build) -> cli/mod.rs::resolve_cwd_deps_or_exit"
-items = [
-  "src/dispatch.rs::dispatch",
-  "src/cli/mod.rs::resolve_cwd_deps_or_exit",
-]
+at = "src/dispatch.rs::dispatch (Run/Test/Bench/Build/Emit) -> cli/mod.rs::resolve_deps_or_exit(entry)"
+items = ["src/dispatch.rs::dispatch", "src/cli/mod.rs::resolve_deps_or_exit"]
 keys = []
 decides = "before a building command, ./almide.toml's dependencies are fetched (trust, lock, --locked) and refused on an ungranted native dependency or an ungranted script-capable media owner"
 from = "declaration"
-unknown = "allow"
-unknown_note = "no ./almide.toml -> returns (nothing judged); one that does not parse is refused now (cwd_project -> governing_manifest, compile_driver.rs:270-274, #4829); the entry's own project outside cwd is never seen (#4830)"
-routes = { check = "n.a.: check builds no native code; the grant gates the build", check_json = "n.a.: check builds no native code; the grant gates the build", check_effects = "n.a.: check builds no native code; the grant gates the build", run = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", build = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", test = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", bench = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", native = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", wasm = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", wasi = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", component = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)", lsp = "n.a.", mcp = "n.a.: almide_check runs `check`, which builds no native code (the check cells); observed 2026-11-19: no native-grant refusal from MCP, as from check", emit = "skipped: #4830 refused inside the project; from outside it this route does not read the entry's own manifest, so the dependency is never judged (observed 2026-11-19, route matrix)" }
+unknown = "refuse"
+unknown_note = "no almide.toml at or above the entry -> nothing to judge (no project); a fetch error or a manifest that does not parse ends the command (resolve_deps_or_exit / governing_manifest); the entry's own project is read wherever the command runs (#4830)"
+routes = { check = "n.a.: check builds no native code; the grant gates the build", check_json = "n.a.: check builds no native code; the grant gates the build", check_effects = "n.a.: check builds no native code; the grant gates the build", run = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", build = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", test = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", bench = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", native = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", wasi = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the LSP produces and runs no code, so no native dependency is built (observed 2026-11-20 on 88531b1b22: the probe is not refused there)", mcp = "n.a.: almide_check runs `check`, which builds no native code (the check cells); observed 2026-11-19: no native-grant refusal from MCP, as from check", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)" }
 tests = ["tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target"]
 control_note = "row 15 (refusal -> None)"
 issues = [4830, 4829]
-status = "UNSTAMPED"
-reasons = ["c2: fail-open (cwd only, #4830)", "c3:route-skipped on run, build, test, bench, native, wasm, wasi, component, emit (#4830; observed 2026-11-19 by the route matrix)"]
-note = "cli/mod.rs:347-361 (`let Some(proj) = cwd_project() else { return }`). #4829's part closed (5129b9f467); evidence unchanged (batch 4)."
+status = "STAMPED"
+reasons = []
+note = "cli/mod.rs::resolve_deps_or_exit(entry) via project::permissions_project_for (#4830 fixed on bugs-final fdd8fa4af4; #4829's part closed 5129b9f467). unknown was `allow`; now `refuse` (failopen count -1)."
 control_patch = "proofs/decision-controls/native.dispatch-gate.patch"
 control_test = "tests/decision_fixes_test.rs::novel_emit_refuses_an_ungranted_native_dependency"
 novel = "tests/decision_fixes_test.rs::novel_emit_refuses_an_ungranted_native_dependency"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh)"
 probe = "tests/decision-probes/native.dispatch-gate"
+stamp = "88531b1b22 2026-11-20"
 
 [[site]]
 id = "native.crate-inputs-backstop"
@@ -2868,13 +2865,8 @@ note = "install.rs:55-65. bugs-final: almd_files fix applies here too."
 
 [[site]]
 id = "native.media-grant"
-at = "src/media_grant.rs::refusal (E118) via cli/mod.rs::enforce_media_grants_or_exit / check_cwd_media_grants_or_exit"
-items = [
-  "src/media_grant.rs::refusal",
-  "src/cli/mod.rs::enforce_media_grants_or_exit",
-  "src/cli/mod.rs::check_cwd_media_grants_or_exit",
-  "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::check_media_ownership",
-]
+at = "src/media_grant.rs::refusal (E118) via cli/mod.rs::enforce_media_grants_or_exit / check_media_grants_or_exit"
+items = ["src/media_grant.rs::refusal", "src/cli/mod.rs::enforce_media_grants_or_exit", "src/cli/mod.rs::check_media_grants_or_exit", "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::check_media_ownership"]
 keys = [
   "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::check_media_ownership::S1::E118",
 ]
@@ -2882,7 +2874,7 @@ decides = "a dependency owning a @script_capable media type without a root [trus
 from = "mixed:declaration+text"
 unknown = "refuse"
 unknown_note = "a media type not declared script-capable by html needs no grant (by design); a dependency file the scan cannot parse contributes no @media_owns; check skips the gate on a fetch error"
-routes = { check = "runs:cwd only, skipped on fetch error", check_json = "runs:cwd only", check_effects = "runs:cwd only", run = "runs:cwd only", build = "runs:cwd only", test = "runs:cwd only", bench = "runs:cwd only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs:children", emit = "runs: emit (not the AST / IR / dialect views) resolves and gates the dependencies as the build does (#4848)" }
+routes = { check = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_json = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_effects = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", run = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", build = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", test = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", bench = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", native = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasi = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", lsp = "n.a.: produces no code (observed 2026-11-20: the probe is not judged there)", mcp = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)" }
 tests = [
   "tests/media_grant_test.rs::the_grant_removed_refuses_the_build_naming_the_line_to_add",
   "tests/media_grant_test.rs::two_granted_owners_of_one_type_are_refused",
@@ -2891,8 +2883,9 @@ tests = [
 control_note = "GCE 2026-10-29 (sec doc, ADR-0032 D7): grant check off -> media_grant_test 101; one-owner rule off -> 101; check-time E118 off -> diagnostic_harness_test 101"
 issues = [4830, 4809, 4834]
 status = "UNSTAMPED"
-reasons = ["c1:url-text", "c2:check skips on a fetch error (cwd only, #4830)"]
-note = "Same cwd-only reader as native (cli/mod.rs:367-384) and owns_under uses native_grant::almd_files (skips dot/target/native, #4809). bugs-final: almd_files fixed."
+reasons = ["c1:url-text", "c2:no novel test (on a fetch error check_media_grants_or_exit returns and the command refuses the fetch error itself: observed 2026-11-20 on 88531b1b22, a missing path dependency -> check, check --json, run all exit 1 `path dependency 'svg' not found`)", "c4:the GCE 2026-10-29 controls predate the ledger patch format (no control_patch)"]
+note = "The cwd-only reader is gone: every route reads the entry's own project (manifest_for_entry, #4830 fixed on bugs-final fdd8fa4af4). owns_under uses native_grant::almd_files (#4809 fixed on bugs-final)."
+probe = "tests/decision-probes/native.media-grant"
 
 [[site]]
 id = "toolchain.rustc-floor"
@@ -3217,15 +3210,14 @@ note = "proven-vs-trusted.md:43-44 says `held ... by almide-anchor-check per bui
 
 [[site]]
 id = "anchor.may-write-memory"
-at = "crates/almide-anchor-check/src/operands/tags.rs::may_write_memory"
-items = [
-  "crates/almide-anchor-check/src/operands/tags.rs::may_write_memory",
-]
+at = "crates/almide-anchor-check/src/operands/tags.rs (define_may_write_memory over for_each_operator!, answered by writes_memory_table.rs)"
+items = []
+files = ["crates/almide-anchor-check/src/operands/tags.rs", "crates/almide-anchor-check/src/operands/writes_memory_table.rs"]
 keys = []
 decides = "whether an instruction between a bounds check and its access may change memory (and so break the check's hold)"
-from = "text"
-unknown = "allow"
-unknown_note = "falls back to `format!(\"{op:?}\")` containing Atomic/Store or starting Table/Memory (tags.rs:25-26): a validated operator whose Debug name has none (stack-switching resume/suspend/switch, GC struct.set / array.set / array.fill) counts as read-only"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "every Operator variant of the pinned wasmparser has an explicit arm in writes_memory_table.rs; one the table does not name fails to compile, and the non_exhaustive fallback answers \"may write\" (tags.rs:12-30, #4826 fixed on bugs-final 44ab57940f / f0d3db65b3)"
 routes = { check = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_json = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_effects = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", run = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", build = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", test = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", bench = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", native = "n.a.", wasm = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", wasi = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", component = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-anchor-check/tests/check.rs",
@@ -3233,8 +3225,8 @@ tests = [
 control_note = "NONE"
 issues = [4826, 4849]
 status = "UNSTAMPED"
-reasons = ["c1:Debug-name substrings", "c2:latent (the validator now refuses GC / stack-switching, so the operators the fallback misreads no longer validate, #4854)", "c3:CI fixtures only (#4849, claim narrowed)", "c4:no-control"]
-note = "Latent: the structural emitter emits none of these operators; decode() validates with WasmFeatures::all() (decode.rs:22), so they would pass validation."
+reasons = ["c2:no-novel-test (the tags.rs unit tests assert suspend / switch / call / memory.fill write; no novel case)", "c3:CI fixtures only (#4849, claim narrowed)", "c4:no-control"]
+note = "#4826: the Debug-name fallback is gone; the classifier is generated per variant from an explicit table (bugs-final). Row repointed after the merge into decision-sites."
 
 [[site]]
 id = "anchor.branch-target-depth"

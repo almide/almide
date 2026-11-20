@@ -1,14 +1,15 @@
 # Negative control of native.dispatch-gate (proofs/decision-sites.toml): emit leaves the dependency gate (#4848): a fresh dependency's ungranted native code is printed as Rust
 # control_test: tests/decision_fixes_test.rs::novel_emit_refuses_an_ungranted_native_dependency
 diff --git a/src/dispatch.rs b/src/dispatch.rs
+index 1e9ea30a96..457f931734 100644
 --- a/src/dispatch.rs
 +++ b/src/dispatch.rs
-@@ -923,7 +923,7 @@
+@@ -1023,7 +1023,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
              | Commands::Build { print_release_rustflags: false, .. }
              // #4848: emitted source is a build the user compiles; the
              // inspection views (AST / IR / dialect) stay available.
 -            | Commands::Emit { emit_ast: false, emit_ir: false, emit_dialect: false, .. }
 +            | Commands::Emit { emit_ast: true, emit_ir: true, emit_dialect: true, .. }
      ) {
-         cli::resolve_cwd_deps_or_exit();
-     }
+         for entry in entries_or_cwd(&command) {
+             cli::resolve_deps_or_exit(&entry);

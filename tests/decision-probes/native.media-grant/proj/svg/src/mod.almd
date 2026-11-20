@@ -1,0 +1,8 @@
+type Mark: Body = { text: String }
+
+@media_owns("image/svg+xml")
+fn Mark.media_type(self) -> String = "image/svg+xml"
+
+fn Mark.to_text(self) -> String = self.text
+
+fn label() -> String = "x"
