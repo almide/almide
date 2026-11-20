@@ -225,18 +225,22 @@ impl Emitter<'_> {
         saved
     }
 
+    /// Enter `plan` in the ledger `validate_exits` reads back. The
+    /// negative-test hook (tests/exit_validation.rs) skips it, so the
+    /// validator meets a transfer no plan claims. Off by default.
+    fn record_exit(&mut self, plan: &ExitPlan) {
+        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        }
+    }
+
     /// The ONE writer of a frame's exit releases. Safe by the epilogue's
     /// argument on every edge: a tail call's arguments are lowered and
     /// rc_arg_guard-inc'd already; an err block shares its payload
     /// (`rc_share_guard` in lower_sum); a guard's borrowed value took its
     /// ret-inc before this; rc_owned holds only flat blocks.
     pub(crate) fn emit_exit(&mut self, plan: &ExitPlan) {
-        // Negative-test hook (tests/exit_validation.rs): write the exit
-        // without recording it, so the validator has an unplanned transfer
-        // to name. Off by default.
-        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
-            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
-        }
+        self.record_exit(plan);
         // Negative-test hook (tests/exit_validation.rs): omit the first
         // release so the validator has a defect to name. Off by default.
         let omit_first = OMIT_FIRST_RELEASE.load(std::sync::atomic::Ordering::Relaxed);
@@ -754,16 +758,21 @@ pub(crate) fn validate_exits(
         transfers.push(tj);
         check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
     }
-    // The other direction (#4854): every `return` / `return_call` the bytes
-    // hold is the transfer of a recorded plan. One no plan claims is an exit
-    // the emitter wrote without recording it — with an empty ledger too.
-    if let Some(j) = (0..ops.len()).find(|j| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j)) {
-        return Err(d.at(
+    every_transfer_planned(&ops, &transfers, &d)
+}
+
+/// The other direction (#4854): every `return` / `return_call` the bytes
+/// hold is the transfer of a recorded plan. One no plan claims is an exit the
+/// emitter wrote without recording it — with an empty ledger too.
+fn every_transfer_planned(ops: &[(usize, Op)], transfers: &[usize], d: &Defects<'_>) -> Result<(), EmitError> {
+    let unplanned = |j: &usize| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j);
+    match (0..ops.len()).find(unplanned) {
+        None => Ok(()),
+        Some(j) => Err(d.at(
             "an exit in the function's bytes has no exit plan",
             format!("the transfer at body offset {}", ops[j].0),
             "an exit plan recorded before every return / return_call",
             if ops[j].1 == Op::Return { "a return no plan claims" } else { "a return_call no plan claims" },
-        ));
+        )),
     }
-    Ok(())
 }
