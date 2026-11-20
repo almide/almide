@@ -3829,10 +3829,12 @@ stamp = "127a0a6312 2026-11-19"
 id = "scope.e033-opaque-outside-module"
 items = [
   "crates/almide-frontend/src/check/calls_ufcs.rs::Checker::check_type_name_opaque_alias",
+  "crates/almide-frontend/src/check/generic_eq.rs::Checker::validate_opaque_spreads",
   "crates/almide-frontend/src/check/infer_members.rs::Checker::emit_opaque_e033",
 ]
 keys = [
   "crates/almide-frontend/src/check/calls_ufcs.rs::Checker::check_type_name_opaque_alias::S1::E033",
+  "crates/almide-frontend/src/check/generic_eq.rs::Checker::validate_opaque_spreads::S1::E122",
   "crates/almide-frontend/src/check/infer_members.rs::Checker::emit_opaque_e033::S1::E033",
 ]
 decides = "an opaque (`mod type` / `local type`) type is constructed or its fields read only inside its own module or package"
