@@ -216,7 +216,7 @@ impl Checker {
     /// foreign opaque record — the base was still open where the spread
     /// was inferred (`{ ...x }` on a lambda parameter).
     ///
-    /// E121 (#4285) for a base that resolved to a type parameter with no
+    /// E122 (#4285) for a base that resolved to a type parameter with no
     /// record-shape bound. The body is checked once, before any
     /// instantiation, so the E033 rule never saw the instance:
     /// `fn copy[A](x: A) -> A = { ...x }` copied a `Secret` outside its
@@ -234,7 +234,7 @@ impl Checker {
                 let hint = format!(
                     "a spread copies a record's fields, and an instance of '{name}' may be a type whose fields are closed outside its module (an opaque type such as `Secret`): bound it with a record shape, `[{name}: {{ .. }}]`, or take the record type itself"
                 );
-                self.emit(err(msg, hint, format!("type parameter {name}")).with_code("E121"));
+                self.emit(err(msg, hint, format!("type parameter {name}")).with_code("E122"));
             }
             self.reject_foreign_opaque_record(&resolved, "build a record update of");
             self.current_span = saved;

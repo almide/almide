@@ -321,7 +321,7 @@ pub struct Checker {
     /// check (E033): a base whose type is still open at the spread is
     /// judged once it resolves. The third column is the type parameters
     /// with a record-shape bound in scope at the spread: a base that
-    /// resolves to any OTHER type parameter is E121 (#4285).
+    /// resolves to any OTHER type parameter is E122 (#4285).
     pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>, Vec<Sym>)>,
     /// Comparison operand pairs awaiting the post-solve one-type check
     /// (E037, #4018 / security row 11b): see `eq_operands.rs`.

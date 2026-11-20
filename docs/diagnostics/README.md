@@ -114,7 +114,7 @@ equal to the set of codes the compiler emits.
 | [E119](E119.md) | a Region lent to an `@export(c)` fn escapes its call |
 | [E120](E120.md) | a `??` whose grouping changed at dialect 16 |
 | [E121](E121.md) | an import name that is both a local module and a dependency |
-| [E121](E121.md) | a spread of a type parameter without a record shape |
+| [E122](E122.md) | a spread of a type parameter without a record shape |
 | [E420](E420.md) | Function visibility violation |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

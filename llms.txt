@@ -591,7 +591,7 @@ context-specific rules in [E022](docs/diagnostics/E022.md) and
 | [E119](docs/diagnostics/E119.md) | a Region lent to an `@export(c)` fn escapes its call |
 | [E120](docs/diagnostics/E120.md) | a `??` whose grouping changed at dialect 16 |
 | [E121](docs/diagnostics/E121.md) | an import name that is both a local module and a dependency |
-| [E121](docs/diagnostics/E121.md) | a spread of a type parameter without a record shape |
+| [E122](docs/diagnostics/E122.md) | a spread of a type parameter without a record shape |
 | [E420](docs/diagnostics/E420.md) | Function visibility violation |
 
 Retired codes: **E039** (`result.collect` / `collect_map`) and **E040**
