@@ -264,6 +264,12 @@ pub struct CodegenAnnotations {
     /// monomorphic copies, two modules) runs both inline, which is the
     /// sequential evaluation and only gives up the overlap.
     pub inline_fans: HashSet<(usize, usize, usize)>,
+    /// The module fn each minted call symbol names (`almide_rt_env_set` ->
+    /// (`env`, `set`)), recorded where the symbol is minted — ResolveCalls'
+    /// bundled-stdlib rename and StdlibLowering's intra-module rename — so a
+    /// later reader asks the fn's own declaration (`@ordered`, its body)
+    /// instead of reconstructing the module from the spelling.
+    pub minted_call_symbols: HashMap<almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym)>,
 }
 
 impl CodegenAnnotations {

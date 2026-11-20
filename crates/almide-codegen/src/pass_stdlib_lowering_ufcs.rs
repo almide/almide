@@ -318,7 +318,9 @@ pub(crate) fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
 
 /// Rewrite intra-module `CallTarget::Named` calls that match a sibling function
 /// to use the `almide_rt_{module}_{func}` prefix (matching the walker's definition rename).
-fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) -> IrExpr {
+/// Each minted name is recorded in `minted` against (`module`, the sibling
+/// fn) — `CodegenAnnotations::minted_call_symbols`.
+fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String], module: almide_base::intern::Sym, minted: &mut Vec<(almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym))>) -> IrExpr {
     // Special cases: Named calls and FnRef to sibling functions get prefixed
     match &expr.kind {
         IrExprKind::Call { target: CallTarget::Named { name }, .. }
@@ -337,7 +339,8 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             // dotted IR name exactly like the definition side, so a plain module fn
             // that merely STARTS with the module ident is unaffected.
             let prefixed = format!("almide_rt_{}_{}", mod_ident, sanitized);
-            let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings)).collect();
+            minted.push((almide_base::intern::sym(&prefixed), (module, name)));
+            let args = args.into_iter().map(|a| prefix_intra_module_calls(a, mod_name, siblings, module, minted)).collect();
             return IrExpr {
                 kind: IrExprKind::Call { target: CallTarget::Named { name: prefixed.into() }, args, type_args },
                 ty: expr.ty, span: expr.span, def_id: None,
@@ -349,15 +352,17 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             // Same qualified-sibling strip as the Named-call arm above.
             let stripped = if dotted { almide_base::names::strip_module_path(name.as_str(), &mod_ident).unwrap_or(name.as_str()) } else { name.as_str() };
             let base = stripped.replace([' ', '-', '.'], "_");
+            let minted_name = almide_base::intern::sym(&format!("almide_rt_{}_{}", mod_ident, base));
+            minted.push((minted_name, (module, *name)));
             return IrExpr {
-                kind: IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, base).into() },
+                kind: IrExprKind::FnRef { name: minted_name },
                 ty: expr.ty, span: expr.span, def_id: None,
             };
         }
         _ => {}
     }
     // Default: recurse into all children
-    expr.map_children(&mut |e| prefix_intra_module_calls(e, mod_name, siblings))
+    expr.map_children(&mut |e| prefix_intra_module_calls(e, mod_name, siblings, module, minted))
 }
 
 /// Rewrite CallTarget::Module names using versioned name mapping.

@@ -402,7 +402,9 @@ fn rewrite_versioned_module_names(program: &mut IrProgram) {
 
 /// Prefix intra-module Named calls to match renamed definitions.
 fn prefix_intra_module_named_calls(program: &mut IrProgram) {
+    let mut minted = Vec::new();
     for module in &mut program.modules {
+        let module_sym = module.name;
         let sibling_names: Vec<String> = module.functions.iter()
             .map(|f| f.name.to_string())
             .collect();
@@ -410,12 +412,13 @@ fn prefix_intra_module_named_calls(program: &mut IrProgram) {
             .map(|v| v.to_string())
             .unwrap_or_else(|| module.name.to_string());
         for func in &mut module.functions {
-            func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names);
+            func.body = prefix_intra_module_calls(std::mem::take(&mut func.body), &mod_name, &sibling_names, module_sym, &mut minted);
         }
         for tl in &mut module.top_lets {
-            tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names);
+            tl.value = prefix_intra_module_calls(std::mem::take(&mut tl.value), &mod_name, &sibling_names, module_sym, &mut minted);
         }
     }
+    program.codegen_annotations.minted_call_symbols.extend(minted);
 }
 
 /// `Call { target: Module { module, func, .. }, args, type_args }` arm of
