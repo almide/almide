@@ -35,11 +35,11 @@ fn tuple_hash(a: i64, b: i64) -> u32 {
 
 #[test]
 fn the_mirrored_hash_is_the_emitters() {
-    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/map_index_deep.rs")).unwrap();
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/map_index_deep.rs")).expect("read map_index_deep.rs");
     for c in ["DEEP_MUL: u64 = 0x9E37_79B9_7F4A_7C15", "DEEP_SHIFT: i64 = 29", "DEEP_SEED: u64 = 0x243F_6A88_85A3_08D3"] {
         assert!(src.contains(c), "map_index_deep.rs no longer has `{c}`: update this test's mirror");
     }
-    let idx = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/map_index.rs")).unwrap();
+    let idx = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/map_index.rs")).expect("read map_index.rs");
     assert!(idx.contains("HASH_STR_MUL: u64 = 0x9E37_79B1"), "the fold constant moved: update this test's mirror");
 }
 
@@ -112,7 +112,6 @@ fn a_set_of_records_and_a_map_of_variants_build_in_linear_fuel() {
     }
     assert!(small > 10 * u64::from(N), "the build at n={N} cost {small} fuel — too little to gate on");
     let ratio = large as f64 / small as f64;
-    println!("RATCHET deep key fuel n={N}: {small}, n={}: {large}, ratio {ratio:.2}", 4 * N);
     assert!(ratio <= 6.0, "deep-key set and map fuel grew {ratio:.2}x for 4x the keys ({small} -> {large}): linear predicts ~4, the scan ~16");
 }
 
@@ -163,6 +162,5 @@ fn colliding_tuple_keys_leave_the_hash_index_for_the_ordered_one() {
         assert_eq!(out, n * 1_000_000 + n * 10, "the flooded set at n={n} answered wrong");
     }
     let ratio = large as f64 / small as f64;
-    println!("RATCHET deep flood fuel n={N}: {small}, n={}: {large}, ratio {ratio:.2}", 4 * N);
     assert!(ratio <= 6.0, "a flooded deep-key set grew {ratio:.2}x for 4x the keys ({small} -> {large}): the ordered fallback predicts ~4.5, a stuck probe chain ~16");
 }

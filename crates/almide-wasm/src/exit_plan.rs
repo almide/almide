@@ -225,15 +225,21 @@ impl Emitter<'_> {
         saved
     }
 
+    /// Records the exit's plan at the current byte offset for the validator,
+    /// unless the #4854 negative-test switch asks to leave it out.
+    fn record_exit(&mut self, plan: &ExitPlan) {
+        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        }
+    }
+
     /// The ONE writer of a frame's exit releases. Safe by the epilogue's
     /// argument on every edge: a tail call's arguments are lowered and
     /// rc_arg_guard-inc'd already; an err block shares its payload
     /// (`rc_share_guard` in lower_sum); a guard's borrowed value took its
     /// ret-inc before this; rc_owned holds only flat blocks.
     pub(crate) fn emit_exit(&mut self, plan: &ExitPlan) {
-        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
-            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
-        }
+        self.record_exit(plan);
         // Negative-test hook (tests/exit_validation.rs): omit the first
         // release so the validator has a defect to name. Off by default.
         let omit_first = OMIT_FIRST_RELEASE.load(std::sync::atomic::Ordering::Relaxed);
