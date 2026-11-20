@@ -828,14 +828,15 @@ breaks = [
 [[epoch]]
 n = 17
 since = "0.70.0"
-name = "failures-are-errors"
-summary = "A failed command is an err, and the spellings deprecated at epoch 15 are removed: `process.run` answers `ok` only on exit 0 (#4148); `regex.full_match`, `int.pop_count`, `int.bit_width` and `float.sign` reached the end of their windows (#3942, #3985)."
+name = "failures-are-errors-and-bodies-are-bytes"
+summary = "A failed command is an err, a response body is its bytes, and the spellings deprecated at epoch 15 are removed: `process.run` answers `ok` only on exit 0 (#4148); `Body` requires `to_bytes` instead of `to_text` (#4311); `regex.full_match`, `int.pop_count`, `int.bit_width` and `float.sign` reached the end of their windows (#3942, #3985)."
 breaks = [
   "`process.run(c)` answers `Result[Unit, String]` (#4148, C-374): `ok` when the child exits 0, the err `process.run(<cmd>): exited with status <code>` on any other exit and `process.run(<cmd>): ended by a signal` on a signal, so `process.run(c)!` stops on a failed command as `process.exec(cmd, args)!` does. It answered `ok(code)` for every exit. Code that read the exit code (`let code = process.run(c)!`) no longer compiles: run the command with `process.output(c)!` and read `.code` (its output is then captured rather than shown on the terminal), or drop the read and let the `!` stop on a failure",
   "`regex.full_match(re, s)` → rewrite as `regex.is_full_match(re, s)`: the same answer under the `is_*` spelling every Bool question in the stdlib uses (R-regex-01, deprecated since epoch 15)",
   "`int.pop_count(n)` → rewrite as `int.count_ones(n)`: the same answer (R-int-07, deprecated since epoch 15)",
   "`int.bit_width(n)` → rewrite as `int.bit_length(n)`: the same answer (deprecated since epoch 15)",
   "`float.sign(x)` → rewrite as `float.signum(x)`: the same answer, 1.0 for 0.0 and -1.0 for -0.0 (deprecated since epoch 15)",
+  "a type conforming to `Body` hands the response its bytes (#4311, ADR-0032 amendment A1, C-275): `fn T.to_text(self) -> String` is no longer a requirement — write `fn T.to_bytes(self) -> Bytes` (from a String, `bytes.from_string(text)`). A built response now keeps a Bytes body exactly, where every Bytes body was decoded as lossy UTF-8: `http.body_bytes` of a response built from bytes that are not UTF-8 answers them instead of their lossy decoding, and `http.serve` sends them unchanged",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

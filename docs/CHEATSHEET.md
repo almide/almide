@@ -387,7 +387,7 @@ way, with plain method names (never a `__` prefix):
 | `Write` | `effect fn T.write(self, data: Bytes) -> Result[Unit, String]` |
 | `Close` | `effect fn T.close(self) -> Result[Unit, String]` |
 | `HttpMessage` | `header`, `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`, `set_body_bytes` |
-| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_text(self) -> String` |
+| `Body` | `fn T.media_type(self) -> String` (a string literal), `fn T.to_bytes(self) -> Bytes` (the body on the wire, kept exactly) |
 
 `io.read` / `io.write` / `io.close`, `http.header` / `http.body` and
 `http.response` then take your type. A `Body` whose media type runs script

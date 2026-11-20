@@ -193,7 +193,12 @@ fn http_req_repr(req: List[String]) -> String = {
 
 @implements("http.__http_response_repr")
 fn http_resp_repr(resp: List[String]) -> String = {
-  let status = list.get(resp, 0) ?? "0"
+  // A raw body's hex after the status (#4311) is not part of the status.
+  let cell = list.get(resp, 0) ?? "0"
+  let status = match string.index_of(cell, "/") {
+    some(i) => string.slice(cell, 0, i),
+    none => cell,
+  }
   let body = __hq_quote(list.get(resp, 1) ?? "")
   "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
 }

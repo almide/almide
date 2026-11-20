@@ -117,14 +117,28 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())
 }
 
-pub fn almide_rt_http___with_headers(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
-    AlmideHttpResponse::from_headers(status, body.to_string(), &header_pairs(flat))
+/// A `Body`'s bytes (#4311): the text `body` answers is their lossy decoding,
+/// and the bytes themselves are kept in `body_raw` when that decoding lost
+/// any — the fetched response's rule (`AlmideHttpResponse::fetched`), so
+/// `body_bytes` and `http.serve` answer them exactly.
+fn body_from_bytes(body: &[u8]) -> (String, Option<Vec<u8>>) {
+    match std::str::from_utf8(body) {
+        Ok(text) => (text.to_string(), None),
+        Err(_) => (String::from_utf8_lossy(body).into_owned(), Some(body.to_vec())),
+    }
+}
+
+pub fn almide_rt_http___with_headers(status: i64, body: &Vec<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
+    let (text, raw) = body_from_bytes(body);
+    let mut resp = AlmideHttpResponse::from_headers(status, text, &header_pairs(flat));
+    resp.body_raw = raw;
+    resp
 }
 
 /// `http.__http_response_flat`: the pairs as given, each name written once by its
 /// caller (`response`, `redirect`), so it is `__with_headers` without a merge
 /// to do.
-pub fn almide_rt_http___http_response_flat(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
+pub fn almide_rt_http___http_response_flat(status: i64, body: &Vec<u8>, flat: &[AlmideString]) -> AlmideHttpResponse {
     almide_rt_http___with_headers(status, body, flat)
 }
 
@@ -184,6 +198,12 @@ fn flat_pairs(headers: &[(String, String)]) -> Vec<String> {
 pub fn almide_http_set_body(mut resp: AlmideHttpResponse, body: &str) -> AlmideHttpResponse {
     resp.body = body.to_string();
     resp.body_raw = None;
+    resp
+}
+
+/// `with_body` / `set_body` / `set_body_bytes` on a response: a `Body`'s bytes, kept exactly (#4311).
+pub fn almide_http_set_body_bytes(mut resp: AlmideHttpResponse, body: &Vec<u8>) -> AlmideHttpResponse {
+    (resp.body, resp.body_raw) = body_from_bytes(body);
     resp
 }
 
@@ -541,7 +561,8 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
                 AlmideHttpResponse::new(500, http_server_handler_error_body(&id))
             }
         };
-        let _ = http_server_write(conn, resp.status, &resp.headers, &resp.body);
+        // A bytes body is sent as its bytes, never its lossy text (#4311).
+        let _ = http_server_write(conn, resp.status, &resp.headers, resp.body_raw.as_deref().unwrap_or(resp.body.as_bytes()));
     }
     // The responses handed to workers are written before `serve` returns
     // (the listener closed when the accept thread stopped).

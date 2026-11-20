@@ -323,8 +323,9 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
     // (`http.header[M: HttpMessage]`). Both are runtime-backed http types
     // with no `type` declaration, so they are listed by name here.
     // A response body (ADR-0032): the Content-Type it is served with and its
-    // wire text (a built response holds its body as text until #4311 gives it
-    // an exact bytes slot; a Bytes body decodes as lossy UTF-8). `http.response` / `with_headers` / `with_body` take a `Body`, so
+    // bytes on the wire, kept exactly by the built response (#4311: the
+    // requirement was `to_text`, and a Bytes body decoded as lossy UTF-8).
+    // `http.response` / `with_headers` / `with_body` take a `Body`, so
     // a response's Content-Type is its body's type, never a header string.
     // The stdlib-declared conformers name it at their declarations
     // (`html.SafeHtml`, `http.TypedBody`; a package's type under the application's grant, ADR-0032 D7).
@@ -332,7 +333,7 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         name: "Body",
         methods: |s, _| vec![
             method("__self_media_type", &[("b", s)], Ty::String),
-            method("__self_to_text", &[("b", s)], Ty::String),
+            method("__self_to_bytes", &[("b", s)], Ty::Bytes),
         ],
         conformers: &[Ty::String, Ty::Bytes],
         named_conformers: &["Value"],

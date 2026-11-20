@@ -43,7 +43,7 @@ type Csv: Body = { rows: String }
 
 fn Csv.media_type(self) -> String = "text/csv"
 
-fn Csv.to_text(self) -> String = self.rows
+fn Csv.to_bytes(self) -> Bytes = bytes.from_string(self.rows)
 
 test "a user type meets Read, Write and Close with plain names" {
   let t = Tape { data: bytes.from_string("abc") }

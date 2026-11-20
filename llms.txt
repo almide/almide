@@ -435,7 +435,7 @@ prefix: `Read` / `Write` / `Close` (`effect fn T.read(self, max: Int)`,
 `T.write(self, data: Bytes)`, `T.close(self)`), `HttpMessage` (`T.header`,
 `header_values`, `headers`, `body`, `body_bytes`, `set_header`, `set_body`,
 `set_body_bytes`) and `Body` (`fn T.media_type(self) -> String` as a literal,
-`fn T.to_text(self) -> String`).
+`fn T.to_bytes(self) -> Bytes`, the body on the wire).
 
 ```almide check
 import html

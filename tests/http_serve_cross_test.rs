@@ -1431,3 +1431,48 @@ fn out_of_memory_in_the_handler_ends_the_run_on_native_and_the_embedded_lane() {
     }
     assert_eq!(n_err, w_err, "the stderr transcripts differ");
 }
+
+// ── A bytes body is served exactly (#4311) ──
+//
+// A built response kept a Bytes body as its lossy UTF-8 decoding, so a binary
+// body (the 256 byte values, an image) reached the client rewritten: 256 bytes
+// in, 512 out, on both legs. The program is written to a scratch file: it is
+// this test's evidence, not a judge fixture.
+
+const BYTES_PROGRAM: &str = r#"import env
+import http
+
+effect fn handle(req: HttpRequest) -> HttpResponse = match http.path(req) {
+  "/typed" => http.response(200, http.typed("application/x-sweep", bytes.from_list(list.range(0, 256)))),
+  "/with" => http.with_body(http.response(200, ""), bytes.from_list(list.range(128, 256) + list.range(0, 128))),
+  _ => http.response(200, bytes.from_list(list.range(0, 256))),
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
+}
+"#;
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_bytes_body_is_served_byte_for_byte_on_native_and_the_embedded_lane() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let file = dir.path().join("serve_bytes.almd");
+    std::fs::write(&file, BYTES_PROGRAM).expect("write the program");
+    let all: Vec<u8> = (0..=255u8).collect();
+    let rotated: Vec<u8> = (128..=255u8).chain(0..128u8).collect();
+    for wasm in [false, true] {
+        let leg = boot_at(&file, wasm);
+        for (path, want, ty) in [("/", &all, "application/octet-stream"), ("/typed", &all, "application/x-sweep"), ("/with", &rotated, "application/octet-stream")] {
+            let resp = ask_then_close(leg.port, format!("GET {path} HTTP/1.1\r\nHost: a\r\n\r\n").as_bytes());
+            let head = head_of(&resp);
+            assert!(head.starts_with("HTTP/1.1 200"), "wasm={wasm} {path}: {head}");
+            assert!(head.contains(&format!("Content-Type: {ty}\r\n")), "wasm={wasm} {path}: {head}");
+            assert!(head.contains("Content-Length: 256\r\n"), "wasm={wasm} {path}: {head}");
+            assert_eq!(after_head(&resp), want.as_slice(), "wasm={wasm} {path}: the body was rewritten");
+        }
+        leg.stop();
+    }
+}
