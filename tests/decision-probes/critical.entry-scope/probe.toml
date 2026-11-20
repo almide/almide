@@ -1,0 +1,3 @@
+# The probe of critical.entry-scope: --profile critical: the entry calls a user-module fn, which is no profile callee.
+expect = "E074"
+args = ["--profile", "critical"]

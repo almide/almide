@@ -1018,7 +1018,7 @@ fn mode_body(mode: Mode) -> u32 {
     }
 }
 
-fn pattern_binders(p: &Pattern) -> Vec<Sym> {
+pub(crate) fn pattern_binders(p: &Pattern) -> Vec<Sym> {
     let mut out = Vec::new();
     fn go(p: &Pattern, out: &mut Vec<Sym>) {
         match p {

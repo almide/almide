@@ -1,0 +1,6 @@
+@inline_rust("{ {n} }")
+fn tpl(n: Int) -> Int = n
+
+test "tpl" {
+  assert_eq(tpl(1), 1)
+}

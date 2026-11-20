@@ -1450,6 +1450,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DEBUG_EFFECTS` | debug | print the effect inference pass's per-function results (native codegen) |
 | `ALMIDE_DEBUG_MIR_OPS` | harness | print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument) |
 | `ALMIDE_DEBUG_STD_SPLIT` | debug | say why a `--release` native build links with the plain fat-LTO profile instead of the backtrace split (#4459): the missing tool, the moved std symbol, the probe whose panic output differed |
+| `ALMIDE_DECISION_SITES_TSV=value` | harness | a file the decision-site detector (tests/decision_sites_test.rs) writes its found keys to, `key<TAB>item<TAB>owner`, for the Almide judge `tools/almide-gates decision-sites`; unset = nothing written |
 | `ALMIDE_DEFAULTS_DEBUG` | debug | print the record-default resolution when no default keys were found (native codegen) |
 | `ALMIDE_DEPS_CACHE_ONLY` | tool | resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179) |
 | `ALMIDE_DISABLE_OPT` | ablation | run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run) |
@@ -1554,6 +1555,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_TOPLET_DEBUG` | debug | print the cross-module top-let type writes and reads of the checker |
 | `ALMIDE_TRACE_PASSES` | debug | name each optimiser pass BEFORE it runs, so a pass that never returns is identifiable |
 | `ALMIDE_UPDATE_ALLOC` | harness | regenerate the structural leg's allocation baseline |
+| `ALMIDE_UPDATE_DECISION_SITES` | harness | rewrite each decision-site row's `keys` to what the detector finds, append every unowned site as an UNCLASSIFIED row and every unmapped CLI route as `unknown` (tests/decision_sites_test.rs); the test still fails until those are classified |
 | `ALMIDE_UPDATE_DUMPS` | harness | regenerate the structural leg's section-dump goldens |
 | `ALMIDE_UPDATE_GAUNTLET` | harness | regenerate the gauntlet manifest |
 | `ALMIDE_UPDATE_INSPECTION` | harness | add the missing rows to the stdlib inspection ledger and reset the stale ones |

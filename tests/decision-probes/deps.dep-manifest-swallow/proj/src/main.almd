@@ -1,0 +1,3 @@
+import bad
+
+fn main() -> Unit = println(int.to_string(bad.number()))

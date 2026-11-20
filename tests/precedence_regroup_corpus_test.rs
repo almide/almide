@@ -38,13 +38,25 @@ fn tracked_almd() -> Vec<PathBuf> {
     files
 }
 
+/// Parsed on the compiler's 256 MiB stack, as the CLI parses (#4880): the
+/// parser's nesting budget is sized for it, so a tracked fixture nested up to
+/// the budget (tests/decision-probes/front.nesting-budget) overflowed the
+/// test thread's 2 MiB default and aborted the whole binary.
 fn regrouped_sites(source: &str) -> Option<usize> {
-    let mut parser = almide::parser::Parser::new(almide::lexer::Lexer::tokenize(source));
-    let program = parser.parse().ok()?;
-    if !parser.errors.is_empty() {
-        return None;
-    }
-    Some(program.regrouped.len())
+    let source = source.to_string();
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(move || {
+            let mut parser = almide::parser::Parser::new(almide::lexer::Lexer::tokenize(&source));
+            let program = parser.parse().ok()?;
+            if !parser.errors.is_empty() {
+                return None;
+            }
+            Some(program.regrouped.len())
+        })
+        .expect("spawn the parse thread")
+        .join()
+        .expect("the parse thread panicked")
 }
 
 fn rel(p: &Path) -> String {

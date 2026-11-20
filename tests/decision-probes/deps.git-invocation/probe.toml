@@ -1,0 +1,3 @@
+# An option-shaped source is refused on its manifest line; nothing is
+# fetched and no process is started (#4810).
+expect = "begins with `-`"

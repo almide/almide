@@ -1,0 +1,6 @@
+// The probe of env.wasm-skip-stock-audit: an inherited ALMIDE_WASM_SKIP_STOCK_AUDIT under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

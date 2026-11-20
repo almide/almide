@@ -1,0 +1,4 @@
+// The probe of deps.mvs-identity: `codec` is declared by two origins.
+import codec
+
+effect fn main() -> Unit = println(codec.who())

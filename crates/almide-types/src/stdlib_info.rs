@@ -728,6 +728,36 @@ fn marked_stdlib_fns(mark: &str) -> Vec<(&'static str, String, Option<String>)> 
     out
 }
 
+/// The effect-bearing declarations of a stdlib surface (#4855): an
+/// `effect fn`, or a fn marked `@ordered`, `@memory_unsafe` or
+/// `@signals_process`. A module whose source declares one of these does
+/// something besides compute its result.
+pub fn source_declares_effect(src: &str) -> bool {
+    src.lines().any(|line| {
+        let t = line.trim_start();
+        let decl = t.strip_prefix("local ").or_else(|| t.strip_prefix("mod ")).or_else(|| t.strip_prefix("pub ")).unwrap_or(t);
+        let marked = ["@ordered", "@memory_unsafe", "@signals_process"].iter().any(|m| {
+            t.strip_prefix(m).is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+        });
+        decl.starts_with("effect fn ") || marked
+    })
+}
+
+/// Does bundled `module`'s source declare an effect ([`source_declares_effect`])?
+/// `None` when there is no bundled source to read (#4855): the caller that
+/// needs "pure" treats that as not known, never as pure.
+pub fn bundled_module_declares_effect(module: &str) -> Option<bool> {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, bool)>> = OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        BUNDLED_MODULES
+            .iter()
+            .filter_map(|&m| bundled_source(m).map(|src| (m, source_declares_effect(src))))
+            .collect()
+    });
+    table.iter().find(|(m, _)| *m == module).map(|(_, e)| *e)
+}
+
 /// True if `module.func` is an `@ordered` stdlib fn (ADR-0024 D3).
 pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
     ordered_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)

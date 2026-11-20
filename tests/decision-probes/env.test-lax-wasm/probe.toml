@@ -1,0 +1,7 @@
+# A switch the lock holds, inherited: every route that reads it must say IGNORED.
+expect = "ALMIDE_TEST_LAX_WASM is set but IGNORED"
+exit = "any"
+global = ["--lock-switches"]
+
+[env]
+ALMIDE_TEST_LAX_WASM = "1"

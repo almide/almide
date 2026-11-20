@@ -1,0 +1,14 @@
+# Negative control of deps.changed-source (proofs/decision-sites.toml): any package fetching the locked URL lifts the changed-source refusal again.
+# control_test: tests/decision_lock_gaps_test.rs::novel_a_changed_source_is_not_lifted_by_another_package_fetching_the_old_url
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -896,7 +896,7 @@
+         // #4852: the locked source still stands only when THIS dependency's
+         // own resolution came from it — not when some other package in the
+         // walk happened to fetch that URL.
+-        if entry.git == *src || resolved.iter().any(|r| r.lock.name == dep.name && r.lock.git == entry.git) {
++        if entry.git == *src || resolved.iter().any(|r| r.lock.git == entry.git) {
+             continue;
+         }
+         return Err(format!(

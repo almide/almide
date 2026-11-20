@@ -1,0 +1,11 @@
+# A switch the lock holds, inherited: every route that reads it must say IGNORED.
+expect = "ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT is set but IGNORED"
+exit = "any"
+global = ["--lock-switches"]
+
+[env]
+ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT = "1"
+
+[expect_by]
+# The MCP tool reports the child's diagnostics, not its stderr: the lock holding is E110 still refused.
+mcp = "E110"

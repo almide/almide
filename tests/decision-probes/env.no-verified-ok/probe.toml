@@ -1,0 +1,7 @@
+# A switch the lock holds, inherited: every route that reads it must say IGNORED.
+expect = "ALMIDE_NO_VERIFIED_OK is set but IGNORED"
+exit = "any"
+global = ["--lock-switches"]
+args = ["--no-verified"]
+[env]
+ALMIDE_NO_VERIFIED_OK = "1"

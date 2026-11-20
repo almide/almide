@@ -1,0 +1,6 @@
+// The probe of env.control-no-type-sharing: an inherited ALMIDE_CONTROL_NO_TYPE_SHARING under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

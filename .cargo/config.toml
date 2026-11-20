@@ -1,0 +1,7 @@
+# #4858: a harness test that needs an external tool (wasmtime, wasm-tools)
+# FAILS when the tool is missing, by default, in every `cargo test` of this
+# workspace — a local run that cannot judge a leg must not read as a pass.
+# CI sets the same switch explicitly; a run that deliberately has no tool sets
+# its own value (an explicit environment value wins: force = false).
+[env]
+ALMIDE_EXPECT_TOOLS = { value = "1", force = false }

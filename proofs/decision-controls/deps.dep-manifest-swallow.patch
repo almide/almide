@@ -1,0 +1,14 @@
+# Negative control of deps.dep-manifest-swallow (proofs/decision-sites.toml): a dependency's manifest that does not parse is read as no manifest again (#4820)
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -925,7 +925,7 @@
+     }
+     match parse_toml(&dep_toml) {
+         Ok(dep_project) => Ok((dep_project.package.name, src_dir, dep_project.dependencies)),
+-        Err(e) => Err(format!("error: the manifest of dependency `{fallback_name}`{} is refused:\n{e}", chain_text(chain))),
++        Err(_) => Ok((fallback_name.to_string(), src_dir, vec![])),
+     }
+ }
+ 

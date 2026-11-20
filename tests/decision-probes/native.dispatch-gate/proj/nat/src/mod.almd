@@ -1,0 +1,2 @@
+@extern(rust, "crate::natmod", "number")
+fn number() -> Int = _

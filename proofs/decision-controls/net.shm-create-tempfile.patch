@@ -1,0 +1,15 @@
+# Negative control of net.shm-create-tempfile (proofs/decision-sites.toml): the backing file is made under a name in the directory again (the #4850 shape).
+# control_test: crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory
+diff --git a/crates/almide-rt-core/src/net_unix_core.rs b/crates/almide-rt-core/src/net_unix_core.rs
+--- a/crates/almide-rt-core/src/net_unix_core.rs
++++ b/crates/almide-rt-core/src/net_unix_core.rs
+@@ -342,7 +342,8 @@
+ pub fn almide_shm_open_in(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+     use std::os::unix::fs::OpenOptionsExt;
+     // O_TMPFILE = __O_TMPFILE | O_DIRECTORY (uapi fcntl.h, every Linux arch std targets).
+-    std::fs::OpenOptions::new().read(true).write(true).custom_flags(0o20_200_000).mode(0o600).open(dir)
++    let _ = 0o20_200_000;
++    std::fs::OpenOptions::new().read(true).write(true).create(true).custom_flags(0).mode(0o600).open(dir.join("almide-shm-region"))
+ }
+ 
+ #[cfg(all(unix, not(target_os = "linux")))]

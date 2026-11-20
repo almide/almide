@@ -63,9 +63,7 @@ impl Checker {
     pub(crate) fn missing_codec_direction_hint(&self, name: Sym, method: &str) -> Option<String> {
         use crate::canonicalize::protocols::{builtin_protocol, codec_directions, ENCODE_PROTOCOL, DECODE_PROTOCOL};
         let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
-        let declared: Vec<Sym> = [name, sym(bare)].iter()
-            .filter_map(|n| self.env.type_protocols.get(n))
-            .flatten().copied().collect();
+        let declared: Vec<Sym> = self.declared_protocols(name);
         let (enc, dec) = codec_directions(&declared);
         if !enc && !dec {
             return None;
@@ -123,32 +121,53 @@ impl Checker {
                     caller: caller.map(|c| c.to_string()).unwrap_or_else(|| "the caller".to_string()),
                 })
             }
-            Ty::Named(name, _) => {
+            Ty::Named(name, args) => {
                 if let Some(proto) = self.sent_out_as(*name) {
                     return Some(NotInput::SentOut { ty: name.to_string(), proto });
                 }
                 let mut seen = std::collections::HashSet::new();
                 self.nested_sent_out(*name, &mut seen)
+                    .or_else(|| args.iter().find_map(|a| self.not_an_input_type(a, caller)))
             }
             Ty::Variant { name, .. } => self.not_an_input_type(&Ty::Named(*name, Default::default()), caller),
+            // #4861: a container of the decoded type is judged by what it
+            // holds (`List[User]`, `Option[User]`, a tuple, a record field).
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+                args.iter().find_map(|a| self.not_an_input_type(a, caller))
+            }
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().find_map(|(_, t)| self.not_an_input_type(t, caller))
+            }
             _ => None,
         }
     }
 
-    /// The type's declaration, under the spelling the env holds it by.
+    /// The type's declaration under its own name; the bare spelling only when
+    /// the env holds no entry under that name (#4884: never merged with, or
+    /// preferred over, another module's same-named type).
     fn named_def(&self, name: Sym) -> Option<&Ty> {
         let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
         self.env.types.get(&name).or_else(|| self.env.types.get(&sym(bare)))
+    }
+
+    /// The protocols the type itself declared: under its own name, or under
+    /// the bare spelling only when its own name holds none (#4884: the two
+    /// used to be UNIONED, so `acct.User: Decode` read as `Codec` when the
+    /// entry declared `User: Codec`).
+    fn declared_protocols(&self, name: Sym) -> Vec<Sym> {
+        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+        self.env.type_protocols.get(&name)
+            .or_else(|| self.env.type_protocols.get(&sym(bare)))
+            .cloned()
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default()
     }
 
     /// `Some("Codec")` / `Some("Encode")` when the user type is also written
     /// out: its declaration's protocol closure holds `Encode`.
     fn sent_out_as(&self, name: Sym) -> Option<&'static str> {
         use crate::canonicalize::protocols::{protocol_closure, ENCODE_PROTOCOL, PROTOCOL_PARTS};
-        let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
-        let declared: Vec<Sym> = [name, sym(bare)].iter()
-            .filter_map(|n| self.env.type_protocols.get(n))
-            .flatten().copied().collect();
+        let declared: Vec<Sym> = self.declared_protocols(name);
         if !declared.iter().any(|p| protocol_closure(p.as_str()).contains(&ENCODE_PROTOCOL)) {
             return None;
         }

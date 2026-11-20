@@ -1,0 +1,6 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+untrusted = { git = "https://probe-trust.invalid/probe-owner/pkg", tag = "v0.1.0" }

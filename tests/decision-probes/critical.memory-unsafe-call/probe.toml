@@ -1,0 +1,2 @@
+expect = "E100"
+args = ["--profile", "critical"]

@@ -1,0 +1,14 @@
+# Negative control of manifest.gate-check-manifest (proofs/decision-sites.toml): the manifest check no longer judges [permissions].allow names on their line
+# control_test: tests/decision_batch1a_test.rs::novel_the_manifest_gate_refuses_a_fresh_allow_name_on_its_line
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -950,7 +950,7 @@
+     manifest.trust_owners(path, content)?;
+     manifest.target_native_deps(path, content)?;
+     manifest.dependencies(path, content)?;
+-    for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
++    for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default().into_iter().filter(|_| false) {
+         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
+     }
+     // #4829: everything `parse_toml` refuses is refused here too, so the gate

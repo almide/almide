@@ -1,0 +1,8 @@
+// The probe of critical.memory-unsafe-call: an @memory_unsafe ffi call under --profile critical (E100).
+import ffi
+
+effect fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let c = ffi.read(ffi.region(b), 0, 3)!
+  println(int.to_string(bytes.len(c)))
+}

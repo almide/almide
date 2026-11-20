@@ -81,7 +81,7 @@ fn code_actions_for_repair(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Vec<
         let title = if replacement.is_empty() {
             "Delete the highlighted text".to_string()
         } else {
-            format!("Replace with `{}`", replacement)
+            format!("Replace with `{}`", almide_base::err_text::escape_hidden(replacement))
         };
         Some(CodeActionOrCommand::CodeAction(CodeAction {
             title,
@@ -364,7 +364,13 @@ fn diag_from_almide(d: &crate::diagnostic::Diagnostic, lines: &[&str]) -> Diagno
         severity: Some(if d.level == crate::diagnostic::Level::Error { DiagnosticSeverity::ERROR } else { DiagnosticSeverity::WARNING }),
         code: d.code.as_ref().map(|c| NumberOrString::String(c.to_string())),
         source: Some("almide".to_string()),
-        message: if d.hint.is_empty() { d.message.clone() } else { format!("{}\nhint: {}", d.message, d.hint) },
+        // #4879: the text an editor renders goes through C-418's escaper, as
+        // every other diagnostic sink does (#4819) — a raw bidi control the
+        // message quotes would reorder what the reader sees.
+        message: almide_base::err_text::escape_hidden(
+            &if d.hint.is_empty() { d.message.clone() } else { format!("{}\nhint: {}", d.message, d.hint) },
+        )
+        .into_owned(),
         data,
         ..Default::default()
     }

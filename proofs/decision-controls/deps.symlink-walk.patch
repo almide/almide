@@ -1,0 +1,14 @@
+# Negative control of deps.symlink-walk (proofs/decision-sites.toml): the package walk follows links again (an entry's type is read through the link), so a linked directory under a dependency's src/ is loaded
+# control_test: tests/decision_deps_novel_test.rs::novel_a_fresh_link_under_a_dependency_src_is_never_followed
+diff --git a/src/package_tree.rs b/src/package_tree.rs
+--- a/src/package_tree.rs
++++ b/src/package_tree.rs
+@@ -229,7 +229,7 @@
+ pub fn dir_entries(dir: &Path, links: Links) -> Result<(Vec<PathBuf>, Vec<PathBuf>), PackageFormatError> {
+     let (mut files, mut dirs) = (Vec::new(), Vec::new());
+     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+-        let (Ok(kind), p) = (e.file_type(), e.path()) else { continue };
++        let (Ok(kind), p) = (std::fs::metadata(e.path()).map(|m| m.file_type()), e.path()) else { continue };
+         if kind.is_dir() {
+             dirs.push(p);
+         } else if kind.is_file() {

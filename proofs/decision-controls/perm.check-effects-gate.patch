@@ -1,0 +1,14 @@
+# Negative control of perm.check-effects-gate (proofs/decision-sites.toml): check --effects skips the whole-program gate and judges the entry's IR alone again (#4815)
+# control_test: tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module
+diff --git a/src/cli/check.rs b/src/cli/check.rs
+--- a/src/cli/check.rs
++++ b/src/cli/check.rs
+@@ -526,7 +526,7 @@
+         if proj.permissions.is_some() || proj.proc_allow.is_some() {
+             let whole = crate::compile_driver::whole_program_ir(file)
+                 .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+-            if super::enforce_project_permissions(&whole, &proj).is_err() {
++            if false && super::enforce_project_permissions(&whole, &proj).is_err() {
+                 std::process::exit(1);
+             }
+         }

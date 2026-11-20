@@ -1,0 +1,3 @@
+# The editor and MCP routes resolve dependencies from the cache only.
+expect = "not fetched yet"
+exit = "any"

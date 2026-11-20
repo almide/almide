@@ -1,0 +1,14 @@
+# Negative control of ownership.e087-scoped-callee (proofs/decision-sites.toml): a bare callee the scoped walk does not name is left unrefused again (#4860)
+# control_test: tests/decision_gap_fixes_test.rs::novel_e087_an_unnamed_builtin_in_a_scoped_fn
+diff --git a/crates/almide-frontend/src/check/scoped.rs b/crates/almide-frontend/src/check/scoped.rs
+--- a/crates/almide-frontend/src/check/scoped.rs
++++ b/crates/almide-frontend/src/check/scoped.rs
+@@ -614,7 +614,7 @@
+                 // Any other bare callee (a builtin such as `assert_ne`, a fn
+                 // this walk was not given) is refused: the region admits only
+                 // what it can see, never what it does not know (#4860).
+-                self.refuse(&format!("`{n}`"), "a call the allocation region cannot follow (it is not a `scoped fn`)", "return the value and make the call outside the scope", call.span);
++                let _ = n;
+                 false
+             }
+             ast::ExprKind::Member { object, field } => {

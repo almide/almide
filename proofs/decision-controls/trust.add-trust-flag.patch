@@ -1,0 +1,14 @@
+# Negative control of trust.add-trust-flag (proofs/decision-sites.toml): `almide add` no longer refuses an owner neither the manifest nor --trust names
+# control_test: tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it
+diff --git a/src/dispatch.rs b/src/dispatch.rs
+--- a/src/dispatch.rs
++++ b/src/dispatch.rs
+@@ -381,7 +381,7 @@
+         format!("owner {owner}, NOT trusted")
+     };
+     err(&format!("Resolved {name} → {git_url} ({verdict})"));
+-    if granted.is_none() && !by_manifest {
++    if false && granted.is_none() && !by_manifest {
+         fail(&crate::trust::add_refusal(&name, &git_url, &retry));
+     }
+     // #4838: the tag is a ref name, read before anything is fetched.

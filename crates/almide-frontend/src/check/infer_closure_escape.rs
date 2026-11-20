@@ -16,8 +16,20 @@ impl Checker {
         if !self.env.mutable_vars.contains(&name) || self.env.can_call_effect {
             return;
         }
-        let Some(&decl_depth) = self.env.var_lambda_depth.get(&name) else { return };
-        if self.env.lambda_depth > decl_depth {
+        use crate::type_env::MutableDecl;
+        // Decided from how the binding was declared (#4859 ruling): E011 is
+        // about a LOCAL mutable binding a closure captures. A module-level
+        // `var` may be written by a pure fn directly or through an inlined
+        // callback (#3317, C-187 family), and a `mut` parameter writes through
+        // to the caller's binding, which the fn may write directly. A binding
+        // whose declaration was not recorded is refused inside a closure,
+        // never admitted.
+        let refused = match self.env.mutable_decl.get(&name).copied() {
+            Some(MutableDecl::Local { lambda_depth }) => self.env.lambda_depth > lambda_depth,
+            Some(MutableDecl::TopLevel) | Some(MutableDecl::Param) => false,
+            None => self.env.lambda_depth > 0,
+        };
+        if refused {
             self.emit(super::err(
                 format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
                 "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",

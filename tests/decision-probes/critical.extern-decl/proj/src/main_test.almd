@@ -1,0 +1,5 @@
+// The probe of critical.extern-decl: an @extern fn under --profile critical (E100).
+@extern(rs, "std::cmp", "max")
+fn imax(a: Int, b: Int) -> Int
+
+fn main() -> Unit = println(int.to_string(imax(1, 2)))

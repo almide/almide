@@ -1,0 +1,9 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+pathref = { git = "https://probe-ref.invalid/probe-owner/pkg", tag = "/etc" }
+
+[trust]
+owners = ["probe-ref.invalid/probe-owner"]

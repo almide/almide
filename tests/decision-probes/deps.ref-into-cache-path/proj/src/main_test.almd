@@ -1,0 +1,6 @@
+// The probe of deps.ref-into-cache-path: a tag that is an absolute path.
+import pathref
+
+test "a tag that is a path" {
+  assert_eq(pathref.hello(), "x")
+}

@@ -1,0 +1,14 @@
+# Negative control of front.checker-budgets (proofs/decision-sites.toml): E111 is never reported: a type past the type-size budget is admitted.
+# control_test: tests/decision_novel_test.rs::novel_budget_shapes_with_fresh_names
+diff --git a/crates/almide-frontend/src/check/type_budget.rs b/crates/almide-frontend/src/check/type_budget.rs
+--- a/crates/almide-frontend/src/check/type_budget.rs
++++ b/crates/almide-frontend/src/check/type_budget.rs
+@@ -41,7 +41,7 @@
+     /// stopped (it stops just past the budget, so it is a lower bound).
+     pub(crate) fn report_type_budget_at(&mut self, span: Option<crate::ast::Span>, counted: Option<u64>) {
+         let key = span.map(|s| (s.line, s.col)).unwrap_or((0, 0));
+-        if !self.type_budget_sites.insert(key) {
++        if !self.type_budget_sites.insert(key) || key.0 < usize::MAX {
+             return;
+         }
+         let cap = budget::limit(BudgetId::TypeSize);

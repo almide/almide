@@ -1,0 +1,3 @@
+# A tag that is a path is refused on its manifest line before anything is
+# read or fetched (#4838).
+expect = "is not a ref name"

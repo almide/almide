@@ -576,6 +576,13 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     let resolved_ty = env.types.get(&sym(&type_key)).cloned().unwrap_or(Ty::Unknown);
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Type, resolved_ty);
     env.def_map.insert(sym(&type_key), did);
+    // #4886: the entry program's type owns its bare key, derived or not. A
+    // module's same-named type registered there first (it keeps its own
+    // `module.Name` key), and the union read the entry's `: Decode` type as
+    // the module's `: Codec` one (E110).
+    if prefix.is_none() && env.alias_owner_module.is_none() && owner.is_none() {
+        env.type_protocols.remove(&sym(name));
+    }
     if let Some(derives) = deriving {
         // Recorded under the bare name AND the canonical prefixed one: a
         // `[T: Codec]` bound resolves its argument to `Ty::Named("lib.P")` and

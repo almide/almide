@@ -1,0 +1,14 @@
+# Negative control of manifest.control-text (proofs/decision-sites.toml): no manifest string or key is judged for a control or bidi character
+# control_test: tests/decision_batch1a_test.rs::novel_a_control_or_bidi_character_in_a_manifest_is_refused
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -313,7 +313,7 @@
+ /// may hold a newline or a tab. Every other such character is refused.
+ fn refuse_control_text(path: &Path, content: &str, table: &toml::de::DeTable<'_>, trail: &[&str]) -> Result<(), String> {
+     let bad = |s: &str, strict: bool| {
+-        s.chars().any(|c| almide_base::err_text::almide_rt_errtext_is_escaped(c) && (strict || !matches!(c, '\n' | '\t' | '\r')))
++        false && s.chars().any(|c| almide_base::err_text::almide_rt_errtext_is_escaped(c) && (strict || !matches!(c, '\n' | '\t' | '\r')))
+     };
+     for (key, value) in table {
+         let k: &str = key.get_ref().as_ref();

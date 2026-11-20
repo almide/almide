@@ -1,0 +1,6 @@
+// The probe of env.skip-version-check: an inherited ALMIDE_SKIP_VERSION_CHECK under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

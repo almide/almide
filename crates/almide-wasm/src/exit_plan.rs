@@ -231,7 +231,9 @@ impl Emitter<'_> {
     /// (`rc_share_guard` in lower_sum); a guard's borrowed value took its
     /// ret-inc before this; rc_owned holds only flat blocks.
     pub(crate) fn emit_exit(&mut self, plan: &ExitPlan) {
-        self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        if !OMIT_EXIT_RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+            self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        }
         // Negative-test hook (tests/exit_validation.rs): omit the first
         // release so the validator has a defect to name. Off by default.
         let omit_first = OMIT_FIRST_RELEASE.load(std::sync::atomic::Ordering::Relaxed);
@@ -320,6 +322,17 @@ static OMIT_FIRST_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::At
 #[doc(hidden)]
 pub fn test_omit_first_release(on: bool) {
     OMIT_FIRST_RELEASE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The second negative-test switch (#4854): when set, `emit_exit` writes the
+/// exit but records no plan for it — an exit the validator never saw.
+static OMIT_EXIT_RECORD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Test hook (#4854): make the emitter leave its exits out of the ledger, so
+/// the validator meets an exit no plan accounts for.
+#[doc(hidden)]
+pub fn test_omit_exit_record(on: bool) {
+    OMIT_EXIT_RECORD.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// One exit as `emit_exit` wrote it: the plan, and the function-body byte
@@ -716,9 +729,6 @@ pub(crate) fn validate_exits(
     drop_fns: &[u32],
     name_of: impl Fn(u32) -> String,
 ) -> Result<(), EmitError> {
-    if ledger.is_empty() {
-        return Ok(());
-    }
     let d = Defects { function };
     let ops = read_ops(f, &d)?;
     // Windows may nest (an early exit lowered inside a later-started
@@ -739,6 +749,19 @@ pub(crate) fn validate_exits(
         let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, drop_fns, &d)?;
         claimed.push((rec.start, ops[tj].0));
         check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
+    }
+    // #4854: every exit the bytes hold is one a plan accounts for. An exit
+    // no window claims was emitted without an ExitPlan, so its releases were
+    // never judged: refuse it rather than read only the recorded windows.
+    for &(off, kind) in &ops {
+        if matches!(kind, Op::Return | Op::ReturnCall) && !claimed.iter().any(|&(s, e)| off >= s && off <= e) {
+            return Err(d.at(
+                "an emitted exit has no ExitPlan",
+                format!("byte {off}"),
+                "an exit lowered through emit_exit",
+                "a return the exit ledger does not record",
+            ));
+        }
     }
     Ok(())
 }

@@ -1,0 +1,8 @@
+@intrinsic("almide_rt_fs_write_text")
+effect fn w(p: String, s: String) -> Result[Unit, String]
+
+effect fn main() -> Unit = w("out.txt", "hi")!
+
+test "a layout named like the stdlib" {
+  assert_eq(1, 1)
+}

@@ -1,0 +1,7 @@
+effect fn shout() -> Unit = println("effect ran")
+
+fn quiet() -> Unit = shout()
+
+test "a pure fn reaches an effect fn" {
+  quiet()
+}

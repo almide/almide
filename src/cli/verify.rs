@@ -249,13 +249,13 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&
     });
     let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
-    // The hand-off the verifier reads back, in the private cache base
-    // (#4835), not under a pid-keyed name in the shared temp dir.
-    let id = std::process::id();
-    let (art, bun) = (super::private_path(&format!("build-{id}.wasm")), super::private_path(&format!("build-{id}.bundle")));
+    // #4853: the bytes and bundle the verifier judges live in a directory only
+    // this user can enter, created fresh — never at a predictable shared name.
+    let dir = almide_base::private_dir::private_scratch_dir("almide-build")
+        .map_err(|e| format!("cannot make a private directory for the certificate: {e}"))?;
+    let (art, bun) = (dir.join("artifact.wasm"), dir.join("certificate.bundle"));
     let cleanup = || {
-        let _ = std::fs::remove_file(&art);
-        let _ = std::fs::remove_file(&bun);
+        let _ = std::fs::remove_dir_all(&dir);
     };
     use sha2::Digest;
     let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
@@ -376,7 +376,19 @@ pub fn cmd_verify(args: &[String]) -> i32 {
     if verifier.is_none() && emit.is_none() {
         return no_verifier();
     }
-    let scratch = super::private_path(&format!("verify-{}.bundle", std::process::id()));
+    // #4853: a private, freshly created directory, as in `gate_build`.
+    let scratch_dir = if emit.is_none() {
+        match almide_base::private_dir::private_scratch_dir("almide-verify") {
+            Ok(d) => Some(d),
+            Err(e) => {
+                err(&format!("cannot make a private directory for the bundle: {e}"));
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+    let scratch = scratch_dir.as_ref().map_or_else(PathBuf::new, |d| d.join("certificate.bundle"));
     let bundle = emit.map_or(scratch.clone(), PathBuf::from);
     let pin = artifact.map_or(Pin::Default, Pin::Named);
     let produced = if mir { produce_mir(file, &bundle) } else { produce(file, pin, &bundle) };
@@ -390,8 +402,8 @@ pub fn cmd_verify(args: &[String]) -> i32 {
             no_verifier()
         }
     };
-    if emit.is_none() {
-        let _ = std::fs::remove_file(&scratch);
+    if let Some(d) = scratch_dir {
+        let _ = std::fs::remove_dir_all(d);
     }
     code
 }

@@ -17,9 +17,17 @@ pub struct Body<'a> {
     pub args: Vec<Vec<Option<usize>>>,
 }
 
+/// The proposals whose control flow this checker does not classify (#4854):
+/// GC's `br_on_cast*`, the legacy exception handling's `try` / `delegate`,
+/// stack switching's `resume` / `switch`. A module using any of them is
+/// REFUSED by validation rather than read as if those operators did not
+/// branch — the checker's domain is declared here, not defaulted.
+pub const UNCLASSIFIED_PROPOSALS: WasmFeatures =
+    WasmFeatures::GC.union(WasmFeatures::LEGACY_EXCEPTIONS).union(WasmFeatures::STACK_SWITCHING);
+
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
-    let mut v = Validator::new_with_features(WasmFeatures::all());
+    let mut v = Validator::new_with_features(WasmFeatures::all().difference(UNCLASSIFIED_PROPOSALS));
     let mut out = Vec::new();
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
@@ -38,7 +46,6 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
     let mut r = wasmparser::OperatorsReader::new(br);
     let (mut ops, mut depth, mut addr, mut args) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut shadow: Vec<Option<usize>> = Vec::new();
-    let mut d = 0u32;
     while !r.eof() {
         let off = r.original_position();
         let op = r.read().map_err(|e| e.to_string())?;
@@ -56,17 +63,13 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         } else {
             None
         });
+        // The depth is the validator's own control stack (the function's
+        // frame not counted), so every block-opening operator counts (#4854).
+        let d = fv.control_stack_height().saturating_sub(1);
         depth.push(d);
         fv.op(off, &op).map_err(|e| e.to_string())?;
         let post = fv.operand_stack_height() as usize;
         reshadow(&mut shadow, arity, (pre, post, floor), i);
-        match op {
-            Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => {
-                d += 1
-            }
-            Op::End => d = d.saturating_sub(1),
-            _ => {}
-        }
         ops.push(op);
     }
     Ok(Body { ops, depth, addr, args })

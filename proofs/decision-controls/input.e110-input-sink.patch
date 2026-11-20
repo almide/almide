@@ -1,0 +1,15 @@
+# Negative control of input.e110-input-sink (proofs/decision-sites.toml): a container of the decoded type is not judged again (#4861)
+# control_test: tests/decision_gap_fixes_test.rs::novel_e110_a_sent_out_type_inside_a_list
+diff --git a/crates/almide-frontend/src/check/input_sink.rs b/crates/almide-frontend/src/check/input_sink.rs
+--- a/crates/almide-frontend/src/check/input_sink.rs
++++ b/crates/almide-frontend/src/check/input_sink.rs
+@@ -135,7 +135,8 @@
+             // #4861: a container of the decoded type is judged by what it
+             // holds (`List[User]`, `Option[User]`, a tuple, a record field).
+             Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+-                args.iter().find_map(|a| self.not_an_input_type(a, caller))
++                let _ = args;
++                None
+             }
+             Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                 fields.iter().find_map(|(_, t)| self.not_an_input_type(t, caller))

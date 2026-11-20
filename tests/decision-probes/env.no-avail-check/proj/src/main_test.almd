@@ -1,0 +1,6 @@
+// The probe of env.no-avail-check: an inherited ALMIDE_NO_AVAIL_CHECK under the switch lock.
+effect fn main() -> Unit = println("probe ran")
+
+test "probe" {
+  assert_eq(1, 1)
+}

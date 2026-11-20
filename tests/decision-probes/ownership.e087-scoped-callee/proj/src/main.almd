@@ -1,0 +1,8 @@
+// The probe of ownership.e087-scoped-callee: a scoped fn calls a builtin the
+// scoped walk does not name (E087, #4860).
+scoped fn chk(n: Int) -> Int = {
+  assert_ne(n, 0)
+  n
+}
+
+effect fn main() -> Unit = println(int.to_string(chk(3)))

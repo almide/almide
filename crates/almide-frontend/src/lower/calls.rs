@@ -142,6 +142,15 @@ fn rewrite_crossmodule_ufcs(ctx: &LowerCtx, target: &mut CallTarget, ir_args: &m
     if !mod_str.chars().next().is_some_and(|c| c.is_lowercase()) {
         return;
     }
+    // #4886: a module type's DERIVED method in its qualified spelling
+    // (`oth.User.encode`, emitted when the bare slot is another type's) is
+    // defined under that full name, not as the module member `User.encode`:
+    // it stays a convention call, which `rewrite_local_ufcs` makes `Named`.
+    if matches!(&object.ty, Ty::Named(t, _) if func_str.rsplit_once('.').is_some_and(|(ty, _)| format!("{mod_str}.{ty}") == t.as_str()))
+        && !ctx.env.explicit_convention_fns.contains(method)
+    {
+        return;
+    }
     ir_args.insert(0, (**object).clone());
     *target = CallTarget::Module {
         module: sym(mod_str),

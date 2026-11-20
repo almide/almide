@@ -1,0 +1,14 @@
+# Negative control of perm.check-route-gate (proofs/decision-sites.toml): `almide check` no longer applies [permissions] (allow and proc) to the program
+# control_test: tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest
+diff --git a/src/cli/check.rs b/src/cli/check.rs
+--- a/src/cli/check.rs
++++ b/src/cli/check.rs
+@@ -233,7 +233,7 @@
+         if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+             std::process::exit(1);
+         }
+-        if proj.permissions.is_some() || proj.proc_allow.is_some() {
++        if false && (proj.permissions.is_some() || proj.proc_allow.is_some()) {
+             let ir = whole_ir.unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+             if super::enforce_project_permissions(&ir, &proj).is_err() {
+                 std::process::exit(1);

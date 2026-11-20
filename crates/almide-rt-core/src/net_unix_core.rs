@@ -342,25 +342,45 @@ impl AlmideUnixTables {
     }
 }
 
-/// A fresh file in the session's runtime directory (a tmpfs on Linux), else
-/// the system temp dir, unlinked at once: the name exists only between the
-/// create and the unlink.
+/// A shared-memory region's backing file: storage NO path names (#4850).
+/// `[permissions] fs` bounds the paths a program reaches; a region is not
+/// one, so its file is never reachable by a path, the program's or another
+/// user's. Linux: an unnamed `O_TMPFILE` inode in the session's runtime
+/// directory (a tmpfs), else the temp dir. Elsewhere: a fresh 0700 directory,
+/// the file made in it, both unlinked at once.
 #[cfg(unix)]
 fn almide_shm_open() -> std::io::Result<std::fs::File> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
         .filter(|d| d.is_dir())
         .unwrap_or_else(std::env::temp_dir);
+    almide_shm_open_in(&dir)
+}
+
+#[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub fn almide_shm_open_in(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    // O_TMPFILE = __O_TMPFILE | O_DIRECTORY (uapi fcntl.h, every Linux arch std targets).
+    std::fs::OpenOptions::new().read(true).write(true).custom_flags(0o20_200_000).mode(0o600).open(dir)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+#[doc(hidden)]
+pub fn almide_shm_open_in(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     for attempt in 0..16u32 {
-        let path = dir.join(format!("almide-shm-{}-{}-{}", std::process::id(), stamp, attempt));
-        match std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
-            Ok(file) => {
-                let _ = std::fs::remove_file(&path);
-                return Ok(file);
-            }
+        let private = dir.join(format!("almide-shm-{}-{}-{}", std::process::id(), stamp, attempt));
+        match std::fs::DirBuilder::new().mode(0o700).create(&private) {
+            Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
         }
+        let path = private.join("region");
+        let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o600).open(&path);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&private);
+        return file;
     }
     Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
