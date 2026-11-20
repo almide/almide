@@ -96,21 +96,31 @@ impl Emitter<'_> {
             And => {
                 self.lower(left, Some(BOOL))?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
+                let then_at = self.arm_anchor_here();
                 self.witness_branch_open();
                 self.witness_branch_arm();
+                self.witness_branch_anchor(then_at);
                 self.lower(right, Some(BOOL))?;
+                self.f.instructions().else_();
+                let else_at = self.arm_anchor_here();
                 self.witness_branch_arm();
+                self.witness_branch_anchor(else_at);
                 self.witness_branch_close();
-                self.f.instructions().else_().i32_const(0).end();
+                self.f.instructions().i32_const(0).end();
                 Ok(BOOL)
             }
             Or => {
                 self.lower(left, Some(BOOL))?;
-                self.f.instructions().if_(BlockType::Result(ValType::I32)).i32_const(1).else_();
+                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                let then_at = self.arm_anchor_here();
+                self.f.instructions().i32_const(1).else_();
+                let else_at = self.arm_anchor_here();
                 self.witness_branch_open();
                 self.witness_branch_arm();
+                self.witness_branch_anchor(else_at);
                 self.lower(right, Some(BOOL))?;
                 self.witness_branch_arm();
+                self.witness_branch_anchor(then_at);
                 self.witness_branch_close();
                 self.f.instructions().end();
                 Ok(BOOL)

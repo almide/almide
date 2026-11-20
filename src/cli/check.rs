@@ -43,7 +43,7 @@ fn report_check_errors_or_exit(
 /// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
 /// at exactly its original point in the control flow.
 fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str, critical: Option<&[String]>) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
@@ -493,6 +493,19 @@ pub fn cmd_check_effects(file: &str) {
 
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+
+    // #4847: the value gate (E109, E110's flow half) every route that judges
+    // one judges both (effect_value_gate.rs) — over every module when there
+    // are user modules, as `check` runs it.
+    let whole = (!checker.env.user_modules.is_empty()).then(|| crate::compile_driver::whole_program_ir(file)).flatten();
+    let refused = almide::effect_value_gate::effect_value_diagnostics(whole.as_ref().unwrap_or(&ir), file);
+    if !refused.is_empty() {
+        for d in &refused {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
+        }
+        err(&format!("\n{} error(s) found", refused.len()));
+        std::process::exit(1);
+    }
 
     // Run effect inference
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};

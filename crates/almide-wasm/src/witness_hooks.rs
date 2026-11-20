@@ -596,6 +596,39 @@ impl Emitter<'_> {
         }
     }
 
+    /// #4631: an anchor window naming the instruction just emitted (the
+    /// `if`, `else` or `end` that delimits an arm), for
+    /// [`Self::witness_branch_anchor`]. `None` when nothing is recorded.
+    pub(crate) fn arm_anchor_here(&self) -> Option<u64> {
+        let id = self.arm_anchor();
+        self.arm_anchor_bind(id);
+        id
+    }
+
+    /// An arm anchor whose instruction is not emitted yet (an arm that
+    /// begins before its `else` or `end`): [`Self::arm_anchor_bind`] names
+    /// it once emitted, before the frame ends.
+    pub(crate) fn arm_anchor(&self) -> Option<u64> {
+        self.witness.as_ref()?;
+        Some(crate::witness::rc::site_id())
+    }
+
+    /// The anchor `id` names the instruction just emitted.
+    pub(crate) fn arm_anchor_bind(&self, id: Option<u64>) {
+        if let Some(id) = id {
+            let at = self.f.byte_len();
+            crate::witness::rc::site_window(id, at - 1, at);
+        }
+    }
+
+    /// #4631: the current arm of the innermost open site is the shipped arm
+    /// `anchor` (from [`Self::arm_anchor_here`]) names.
+    pub(crate) fn witness_branch_anchor(&mut self, anchor: Option<u64>) {
+        if let (Some(w), Some(a)) = (self.witness.as_mut(), anchor) {
+            w.branch_anchor(a);
+        }
+    }
+
     pub(crate) fn witness_branch_close(&mut self) {
         if let Some(w) = self.witness.as_mut() {
             w.branch_close();

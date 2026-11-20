@@ -20,6 +20,10 @@ fn write_tmp(name: &str, body: &str) -> String {
 /// race inside the shared `/tmp/almide-run/src/main.rs` otherwise.
 fn run_cmd() -> (Command, tempfile::TempDir) {
     let td = tempfile::TempDir::new().expect("tempdir");
+    // The run dir override must be closed to other writers (#4842); the
+    // tempdir follows the umask.
+    #[cfg(unix)]
+    std::fs::set_permissions(td.path(), std::os::unix::fs::PermissionsExt::from_mode(0o700)).expect("chmod 0700");
     let mut cmd = Command::new(almide());
     cmd.env("ALMIDE_RUN_PROJECT_DIR", td.path());
     (cmd, td)

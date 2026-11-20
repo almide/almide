@@ -265,13 +265,6 @@ fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
     Ok(())
 }
 
-/// The project manifest in the working directory, if there is one that
-/// parses — the same lookup every command makes.
-pub(crate) fn cwd_project() -> Option<project::Project> {
-    let path = std::path::Path::new("almide.toml");
-    // #4829: one that exists but does not parse is refused, never "none".
-    path.exists().then(|| project::governing_manifest(path))
-}
 
 /// The post-lowering pipeline every build route runs: the driver's optimize
 /// half, the route's integrity check (`verify`), the `[permissions]` gate,
@@ -356,9 +349,8 @@ fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Ve
 
     // An absolute entry path can belong to a different project from the
     // caller's cwd. Resolve dependencies and permissions from the same owner.
-    let parsed_project = project::permissions_project_for(file).or_else(|| {
-        project::parse_toml(std::path::Path::new("almide.toml")).ok()
-    });
+    // The entry's own project, by the one lookup (#4830): never the cwd's.
+    let parsed_project = project::permissions_project_for(file);
 
     if let Some(ref proj) = parsed_project {
         project::check_compiler_version(proj)
@@ -502,7 +494,7 @@ fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTi
 
     // `[permissions]` come from the entry file's own project (#4159 audit),
     // whatever directory the command runs in.
-    let permissions_project = project::permissions_project_for(file).or(parsed_project);
+    let permissions_project = parsed_project;
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
     t.lap("optimize+link");
     Ok((ir_program, outside_guarantee, native_input, source_text))
@@ -597,8 +589,12 @@ impl TestRunContext {
     }
 }
 
-pub(crate) fn test_run_context() -> Result<TestRunContext, String> {
-    let project = cwd_project();
+/// The context of a test run whose files are all governed by `manifest`
+/// (the one lookup, `project::manifest_for_entry`; `None` for no project).
+/// A run of files from several projects is several runs: see
+/// [`project::group_by_manifest`].
+pub(crate) fn test_run_context(manifest: Option<&std::path::Path>) -> Result<TestRunContext, String> {
+    let project = manifest.map(project::governing_manifest);
     let dep_paths = match project {
         Some(ref proj) => {
             project::check_compiler_version(proj)?;
@@ -863,7 +859,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         let culprits = batch.iter().filter(|p| failing.iter().any(|f| **f == p.file)).map(|p| p.file.clone()).collect();
         return Err(BatchFailure { message: format!("errors in {} module(s)", failing.len()), culprits });
     }
-    let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
+    // The run's own project: every file of the batch is governed by it.
+    let permissions_project = plan.project.clone();
     let native_input = (ir_program.clone().ok_or_else(|| unattributed("the test run did not lower".into()))?, checker);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
     let native_text = cli::native_rust_text(&first);
@@ -871,6 +868,7 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         Some(ir) => host_source(ir, &codegen::CodegenOptions::default(), &native_text),
         None => Box::new(String::new),
     };
-    let rs_code = render_native_tests("", native_text, host, native_input).map_err(unattributed)?;
+    let fs_scope = plan.project.as_ref().and_then(|p| p.fs_allow.clone());
+    let rs_code = render_native_tests("", native_text, host, native_input, fs_scope).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

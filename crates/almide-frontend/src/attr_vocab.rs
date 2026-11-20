@@ -77,6 +77,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Signals or probes a pid (#4125): `[permissions] proc` bounds it as the
     // `kill` command; crates/almide-types `signals_process_stdlib_fns`
     "signals_process",
+    // Starts a child process; names the parameter carrying the command
+    // (#4817): `[permissions] proc` charges every fn reaching one (src/cli/proc_spawn.rs)
+    "spawns_process",
     // Decodes untrusted input into its `Decode`-bounded type parameters
     // (row 22, C-436): each must bind an input type — a `: Decode` record
     // that is not also `Encode` — or the call is E110 (crates/almide-frontend

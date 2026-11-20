@@ -45,9 +45,12 @@ impl Emitter<'_> {
 
     /// The verdict site's other arm (the pattern did not match: the `else`
     /// that pushes 0) and its join.
-    pub(crate) fn witness_verdict_close(&mut self, split: bool) {
+    /// `failed`: the anchor of that `else` (`arm_anchor`, bound once it is
+    /// emitted).
+    pub(crate) fn witness_verdict_close(&mut self, split: bool, failed: Option<u64>) {
         if split {
             self.witness_branch_arm();
+            self.witness_branch_anchor(failed);
             self.witness_branch_close();
         }
     }
@@ -91,9 +94,14 @@ impl Emitter<'_> {
         let Some(sources) = self.witness_if_sources(value) else { return false };
         let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(value) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        select_open(w, site);
-        for src in sources {
-            select_arm(w, site);
+        select_open(w, site.map(|s| s.0));
+        for (k, src) in sources.into_iter().enumerate() {
+            select_arm(w, site.map(|s| s.0));
+            // #4631: the arm's events are the +1 past the join on the value
+            // that arm chose: held to that shipped arm (or past its join).
+            if let Some(a) = site.and_then(|s| s.1[k]) {
+                w.branch_anchor(a);
+            }
             match src {
                 Some(l) if w.bind_alias(idx, l) => {}
                 Some(_) => w.poison(),
@@ -111,9 +119,14 @@ impl Emitter<'_> {
         let Some(sources) = self.witness_if_sources(e) else { return false };
         let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(e) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        select_open(w, site);
-        for src in sources {
-            select_arm(w, site);
+        select_open(w, site.map(|s| s.0));
+        for (k, src) in sources.into_iter().enumerate() {
+            select_arm(w, site.map(|s| s.0));
+            // #4631: the arm's events are the +1 past the join on the value
+            // that arm chose: held to that shipped arm (or past its join).
+            if let Some(a) = site.and_then(|s| s.1[k]) {
+                w.branch_anchor(a);
+            }
             match src {
                 Some(l) if w.arg_share_move(l) => {}
                 Some(_) => w.poison(),

@@ -78,16 +78,13 @@ fn delegate(verifier: &Path, args: &[String]) -> i32 {
     }
 }
 
-/// `[permissions].allow` from `./almide.toml`, when the key is written — the
-/// same manifest `almide check` enforces; it makes the caps witness able to
-/// reject. An explicit `allow = []` grants nothing (#4101).
-fn manifest_allow() -> Option<Vec<String>> {
-    let path = Path::new("almide.toml");
-    if !path.exists() {
-        return None;
-    }
+/// `[permissions].allow` of `file`'s own project (the one lookup,
+/// `project::manifest_for_entry`; #4830: it read `./almide.toml`), when the
+/// key is written — the same manifest `almide check` enforces; it makes the
+/// caps witness able to reject. An explicit `allow = []` grants nothing (#4101).
+fn manifest_allow(file: &str) -> Option<Vec<String>> {
     // #4829: a manifest that does not parse is refused, never "no allow".
-    crate::project::governing_manifest(path).permissions
+    crate::project::permissions_project_for(file).and_then(|p| p.permissions)
 }
 
 /// What the bundle is pinned to: the shipped file, if one is named or
@@ -118,7 +115,7 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
             return Err(1);
         }
     };
-    let allow = manifest_allow();
+    let allow = manifest_allow(file);
     let (records, uncertified) = almide_wasm::witness::bundle::records(&emitted, &shipped, allow.as_deref()).map_err(|e| {
         err(&format!("error: {file}: the structural build recorded no complete certificate: {e}"));
         1
@@ -175,6 +172,73 @@ pub(super) fn verifier_present() -> bool {
     locate_verifier().is_some()
 }
 
+/// The build gate on a route that RUNS the module it makes instead of
+/// writing it (#4836): `run`, `bench` and `test` on wasm judged nothing, so a
+/// module `almide build` refuses ran. With a verifier installed, the witness
+/// sinks are armed for `make`, and the module is run only when
+/// [`gate_build`] accepts it; a rejection exits 1. The sinks are process-wide,
+/// so a parallel test lane makes and judges one module at a time while a
+/// verifier is installed; without one nothing changes.
+pub(super) fn certified(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
+    certified_with(file, &[], make)
+}
+
+/// The grants the test runner's own calls need (#4836): its abort-site
+/// selector reads how the run was launched (`Env.read`) and a site's child
+/// run starts a fresh instance (`Proc`) — the `testing` host ops the
+/// compiler's runner `main` makes, not the program's. The program's own
+/// calls were already held to `[permissions]` by the front gate.
+/// `the_test_runner_grants_cover_the_testing_host_ops` ties this to the
+/// host-op table.
+pub(super) const TEST_RUNNER_GRANTS: &[&str] = &["Env.read", "Proc"];
+
+/// [`certified`] for a test lane's module: the runner's grants
+/// ([`TEST_RUNNER_GRANTS`]) join the manifest's allow when it has one.
+pub(super) fn certified_test(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
+    certified_with(file, TEST_RUNNER_GRANTS, make)
+}
+
+fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    if !verifier_present() {
+        return make();
+    }
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
+    super::wasm_run_cache::reset_judged();
+    almide_wasm::witness::start_collecting();
+    let (bytes, rest) = make()?;
+    // A run-cache hit on this route is a module this verifier accepted
+    // before (entries are written only after acceptance, keyed by it).
+    if super::wasm_run_cache::took_judged_hit() {
+        let _ = almide_wasm::witness::take();
+        return Ok((bytes, rest));
+    }
+    // A program `almide build` packages as a component is not judged there
+    // either (#4877: the core module of such a program is not certified yet),
+    // so the routes that run it judge it as build does.
+    if super::build_wasm::packaged_as_component(&rest) {
+        let _ = almide_wasm::witness::take();
+        return Ok((bytes, rest));
+    }
+    if let Err(e) = gate_build(file, &bytes, &bytes, runner) {
+        err(&format!(
+            "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"
+        ));
+        std::process::exit(1);
+    }
+    super::wasm_run_cache::commit_judged();
+    Ok((bytes, rest))
+}
+
+/// The installed verifier's identity — its path, size and mtime — for the
+/// run cache's judged entries (hashing it would cost more than a render).
+pub(super) fn verifier_identity() -> String {
+    let Some(p) = locate_verifier() else { return "none".into() };
+    let meta = std::fs::metadata(&p).ok();
+    let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    format!("{} {} {mtime}", p.display(), meta.map_or(0, |m| m.len()))
+}
+
 /// The build gate (#4011, row 3 of the security table): the certificate of
 /// the build that just ran — the witness sinks were armed before it — pinned
 /// to the exact bytes about to be written, judged by the installed
@@ -184,9 +248,12 @@ pub(super) fn verifier_present() -> bool {
 /// when it REJECTS a witness or the bundle (exit 1 / 2), or cannot be run:
 /// the build then refuses to write the artifact. The compiler still never
 /// judges its own certificate — the verdict is the separate binary's.
-pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(), String> {
+pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<(), String> {
     let Some(verifier) = locate_verifier() else { return Ok(()) };
-    let allow = manifest_allow();
+    let allow = manifest_allow(file).map(|mut a| {
+        a.extend(runner.iter().map(|g| g.to_string()));
+        a
+    });
     let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
     // #4853: the bytes and bundle the verifier judges live in a directory only
@@ -199,7 +266,10 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(
     };
     use sha2::Digest;
     let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
-    let art_path = art.display().to_string();
+    // The verifier runs in the hand-off dir and is handed both files by
+    // name: the dir sits under TMPDIR, which need not be UTF-8, and its
+    // argv and the bundle's artifact line must be text.
+    let art_path = art.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let text = almide_wasm::witness::bundle::render(
         &format!("almide {}", env!("ALMIDE_VERSION_LINE")),
         file,
@@ -211,7 +281,13 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8]) -> Result<(
         cleanup();
         return Err(format!("cannot write the certificate for {}: {e}", verifier.display()));
     }
-    let run = Command::new(&verifier).arg("bundle").arg(&bun).output();
+    let mut cmd = Command::new(&verifier);
+    if let (Some(dir), Some(name)) = (bun.parent(), bun.file_name()) {
+        cmd.current_dir(dir).arg("bundle").arg(name);
+    } else {
+        cmd.arg("bundle").arg(&bun);
+    }
+    let run = cmd.output();
     cleanup();
     let out = run.map_err(|e| format!("could not start {}: {e}", verifier.display()))?;
     match out.status.code() {
@@ -240,7 +316,7 @@ fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
     let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
     let modules: Vec<(String, almide_lang::ast::Program, bool)> =
         resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
-    let allow = manifest_allow();
+    let allow = manifest_allow(file);
     let w = almide_mir::pipeline::program_witnesses(&source_text, &modules, allow.as_deref()).map_err(|e| {
         err(&format!("error: {file} cannot be certified — it does not lower as a whole program: {e}"));
         1
@@ -337,4 +413,26 @@ pub fn cmd_verify(args: &[String]) -> i32 {
         let _ = std::fs::remove_dir_all(d);
     }
     code
+}
+
+#[cfg(test)]
+mod runner_grant_tests {
+    /// The runner's grants cover every capability a `testing` host op
+    /// reaches, and nothing a non-`testing` op needs beyond them.
+    #[test]
+    fn the_test_runner_grants_cover_the_testing_host_ops() {
+        let granted = almide_mir::certificate::manifest_caps(&super::TEST_RUNNER_GRANTS.iter().map(|g| g.to_string()).collect::<Vec<_>>());
+        let testing: Vec<_> = almide_mir::host_ops::HOST_OPS.iter().filter(|o| o.module == "testing").collect();
+        assert!(!testing.is_empty(), "no testing host op in the table");
+        let mut needed = Vec::new();
+        for o in testing {
+            for c in o.caps {
+                assert!(granted.contains(c), "testing.{} reaches {c:?}, which the runner grants do not cover", o.func);
+                if !needed.contains(c) {
+                    needed.push(*c);
+                }
+            }
+        }
+        assert_eq!(granted.len(), needed.len(), "the runner grants {granted:?} exceed what the testing host ops reach {needed:?}");
+    }
 }

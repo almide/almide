@@ -1,5 +1,6 @@
 /// CLI command implementations.
 
+mod proc_spawn;
 mod run;
 mod build_dir;
 pub(crate) mod build;
@@ -61,6 +62,7 @@ use cargo_build::{cargo_build_cdylib, cargo_build_generated, cargo_build_generat
 
 pub use run::{cmd_run, RunArgs};
 pub(crate) use run::{phase_lap, PhaseTimer};
+pub(crate) use build_dir::private_path;
 pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
@@ -174,37 +176,25 @@ pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> 
     Ok(())
 }
 
-/// The subprocess fns that START a child, with how the call names its
-/// command (#2589): `exec`'s first argument, or the `cmd` field of the
-/// `ProcessCommand` record `output` / `run` / `start` take (R-process-02).
-const PROC_SPAWNING: &[(&str, ProcCommandAt)] = &[
-    ("exec", ProcCommandAt::Arg),
-    ("output", ProcCommandAt::RecordCmd),
-    ("run", ProcCommandAt::RecordCmd),
-    ("start", ProcCommandAt::RecordCmd),
-];
-
 /// The command a `@signals_process` stdlib fn (#4125: it starts no child but
 /// signals or probes a pid) is bounded as by `[permissions] proc` — the one
 /// it used to run. The embedded host applies the same rule at run time
 /// (host_process.rs, ops 87 / 88).
 const PROC_SIGNAL_COMMAND: &str = "kill";
-#[derive(Clone, Copy)]
-enum ProcCommandAt {
-    /// The first argument is the command.
-    Arg,
-    /// The first argument is a `ProcessCommand`; its `cmd` field is the command.
-    RecordCmd,
-}
+/// The subprocess fns that START a child, and which argument of a call names
+/// its command (#2589, R-process-02), are read off what each stdlib fn
+/// reaches (#4817: a name list missed the `__os_*` leaves): `proc_spawn`.
+use proc_spawn::CommandAt as ProcCommandAt;
 
 /// The command literal a spawning call names, if it names one.
-fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
+fn proc_command_literal<'a>(at: &ProcCommandAt, args: &'a [almide::ir::IrExpr]) -> Option<&'a str> {
     use almide::ir::IrExprKind;
-    let first = &args.first()?.kind;
-    let cmd = match (at, first) {
-        (ProcCommandAt::Arg, k) => k,
-        (ProcCommandAt::RecordCmd, IrExprKind::Record { fields, .. }) => &fields.iter().find(|(n, _)| n.as_str() == "cmd")?.1.kind,
-        (ProcCommandAt::RecordCmd, _) => return None,
+    let cmd = match at {
+        ProcCommandAt::Arg(i) => &args.get(*i)?.kind,
+        ProcCommandAt::Field(i, f) => match &args.get(*i)?.kind {
+            IrExprKind::Record { fields, .. } => &fields.iter().find(|(n, _)| n.as_str() == f)?.1.kind,
+            _ => return None,
+        },
     };
     match cmd {
         IrExprKind::LitStr { value } => Some(value.as_str()),
@@ -227,35 +217,33 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
-                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                    if module.as_str() == "process" =>
-                {
-                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                    if almide_types::stdlib_info::is_signals_process_stdlib_fn(module.as_str(), func.as_str())
                         && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
                     {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
                         self.bad.push(format!(
-                            "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                            "{module}.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
                         ));
                     }
-                    if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
+                    if let Some(at) = proc_spawn::spawning().get(&(module.to_string(), func.to_string())) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
-                        match proc_command_literal(at, args) {
+                        match at.as_ref().and_then(|at| proc_command_literal(at, args)) {
                             Some(value) if self.allow.iter().any(|c| c == value) => {}
                             Some(value) => {
-                                self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
+                                self.bad.push(format!("{module}.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
                             }
                             None => self.bad.push(format!(
-                                "process.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
-                                if matches!(at, ProcCommandAt::RecordCmd) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
+                                "{module}.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
+                                if matches!(at, Some(ProcCommandAt::Field(..))) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
                             )),
                         }
                     }
                 }
                 IrExprKind::FnRef { name } => {
                     let n = name.as_str();
-                    if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
-                        self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    if let Some((m, f)) = n.split_once('.').filter(|(m, f)| proc_spawn::spawning().contains_key(&(m.to_string(), f.to_string()))) {
+                        self.bad.push(format!("{m}.{f} passed as a value: [permissions] proc cannot check its command"));
                     }
                     if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
                         if !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
@@ -271,7 +259,10 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
         }
     }
     let mut scan = Scan { allow, bad: Vec::new() };
-    for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+    // The bundled stdlib's own bodies (a wrapper handing its record's `cmd`
+    // to its leaf) are judged at the program's calls into them, not here.
+    let user_modules = ir.modules.iter().filter(|m| !almide_types::stdlib_info::BUNDLED_MODULES.contains(&m.name.as_str()));
+    for f in ir.functions.iter().chain(user_modules.flat_map(|m| m.functions.iter())) {
         scan.visit_expr(&f.body);
     }
     if scan.bad.is_empty() {
@@ -337,15 +328,17 @@ pub(crate) fn enforce_native_grants(
     Ok(())
 }
 
-/// Resolve `./almide.toml`'s dependencies before a command that builds runs
-/// (#4093): a fetch error (an untrusted owner, a source changed under the
-/// lock, a `--locked` miss, a missing repository) and an ungranted native
-/// dependency ([`enforce_native_grants`]) are printed and exit 1. Several
-/// build routes read the dependencies with errors swallowed (the wasm test
-/// lane resolved against an empty set), so the refusal is made once, here,
-/// for every route. A manifest that does not parse is left to the command.
-pub(crate) fn resolve_cwd_deps_or_exit() {
-    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+/// Resolve the dependencies of the project governing `entry` (the one
+/// lookup, `project::manifest_for_entry`; #4830: it read `./almide.toml`
+/// while the build compiled the entry's own project) before a command that
+/// builds runs (#4093): a fetch error (an untrusted owner, a source changed
+/// under the lock, a `--locked` miss, a missing repository) and an ungranted
+/// native dependency ([`enforce_native_grants`]) are printed and exit 1.
+/// Several build routes read the dependencies with errors swallowed (the
+/// wasm test lane resolved against an empty set), so the refusal is made
+/// once, here, for every route.
+pub(crate) fn resolve_deps_or_exit(entry: &str) {
+    let Some(proj) = crate::project::permissions_project_for(entry) else { return };
     if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
         return;
     }
@@ -374,8 +367,8 @@ fn enforce_media_grants_or_exit(proj: &crate::project::Project, fetched: &[crate
 
 /// `almide check`'s share of the dependency gate: the media grant only, as
 /// it is a check-time rule (ADR-0032 D7). Fetch errors are left to the check.
-pub(crate) fn check_cwd_media_grants_or_exit() {
-    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+pub(crate) fn check_media_grants_or_exit(entry: &str) {
+    let Some(proj) = crate::project::permissions_project_for(entry) else { return };
     if proj.dependencies.is_empty() && proj.media_grants.is_empty() {
         return;
     }
@@ -436,6 +429,7 @@ pub(crate) fn render_v1_native_or_fallback(
 ) -> String {
     let source_text = std::mem::take(&mut pending.source);
     let native_input = pending.native_input.take();
+    let fs_scope = pending.fs_scope.clone();
     let host = pending.host_source();
     let _callbacks = almide_mir::native_callbacks::Scope::enter(std::mem::take(&mut pending.native_text)).with_host_source(host);
     let rs_code = move || pending.generate();
@@ -453,7 +447,7 @@ pub(crate) fn render_v1_native_or_fallback(
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
     let rendered = match native_input {
-        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, almide_wasm_run::fs_scope())
+        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, fs_scope)
             .map(|(rust, _)| rust),
         // A caller without checked IR retains the standalone source route.
         None => almide_mir::pipeline::try_render_rust_source(&source_text),
@@ -541,51 +535,44 @@ fn meter_in_codegen(metered: almide::ir::IrProgram, opts: &crate::codegen::Codeg
     crate::codegen_metered(metered, opts)
 }
 
-/// Resolve `[dependencies]` search paths from `almide.toml` in the current
-/// directory (if present), exiting the process on a fetch failure. Shared
-/// by `cmd_emit`, `resolve_module_to_file` and `cmd_compile` (`compile.rs`)
-/// — all three had identical copies of this almide.toml lookup + exit-on-
-/// error handling.
-pub(crate) fn dep_paths_from_cwd_toml() -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = crate::project::parse_toml(std::path::Path::new("almide.toml")) {
-            crate::project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
+/// The `[dependencies]` search paths of `entry`'s own project (the one
+/// lookup, `project::manifest_for_entry`: never the working directory's,
+/// #4830), exiting the process on a fetch failure; none outside a package.
+/// Shared by `check`, `emit`, `fix`, `compile` and `survive`.
+pub(crate) fn dep_paths_for(entry: &str) -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
+    match crate::project::permissions_project_for(entry) {
+        Some(proj) => crate::project_fetch::fetch_all_deps(&proj)
+            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); })
+            .into_iter()
+            .map(|fd| (fd.pkg_id, fd.source_dir))
+            .collect(),
+        None => vec![],
     }
 }
 
-/// Load `[native-deps]` and dependency-presence info from `almide.toml`,
-/// searching first in `file`'s directory then CWD. `source_root` (the
-/// directory containing `almide.toml`, where `native/*.rs` lives) is
-/// `Some` whenever there's anything to inject — native deps or
-/// `[dependencies]` — `None` otherwise, matching the previous inline
-/// `!native_deps.is_empty() || has_deps` gate. Shared by `cmd_build`
-/// (`build.rs`) and `compile_to_binary_with` (`run.rs`), which had
-/// identical copies of this almide.toml lookup.
+/// The `[permissions] fs` roots of `file`'s own project (the one lookup):
+/// what a native build of `file` bakes in (#4833: it read the process-wide
+/// copy, which a parallel check of another file could have set).
+pub(crate) fn fs_scope_for(file: &str) -> Option<Vec<String>> {
+    crate::project::permissions_project_for(file).and_then(|p| p.fs_allow)
+}
+
+/// Load `[native-deps]` and dependency-presence info from the `almide.toml`
+/// governing `file` (the one lookup, `project::manifest_for_entry`, #4830:
+/// it used to read only `file`'s own directory and then the cwd, so a
+/// `src/main.almd` entry got no `source_root` and the `CrateInputs` native-
+/// grant backstop never ran). `source_root` (the directory containing
+/// `almide.toml`, where `native/*.rs` lives) is `Some` whenever there's
+/// anything to inject — native deps or `[dependencies]` — `None` otherwise.
+/// Shared by `cmd_build` (`build.rs`) and `compile_to_binary_with` (`run.rs`).
 pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::NativeDep>, Option<std::path::PathBuf>) {
-    let file_dir = std::path::Path::new(file).parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let toml_path = {
-        let candidate = file_dir.join("almide.toml");
-        if candidate.exists() { candidate } else { std::path::PathBuf::from("almide.toml") }
-    };
+    let Some(toml_path) = crate::project::manifest_for_entry(file) else { return (Vec::new(), None) };
     // A broken almide.toml is refused (#4829): ignoring it with a warning
     // dropped its [permissions] and [native-deps] alike.
-    let parsed = toml_path.exists().then(|| crate::project::governing_manifest(&toml_path));
-    let native_deps = parsed.as_ref().map(|p| p.native_deps.clone()).unwrap_or_default();
-    let toml_dir = toml_path.parent()
-        .map(|p| if p.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { p.to_path_buf() })
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
+    let parsed = crate::project::governing_manifest(&toml_path);
+    let native_deps = parsed.native_deps.clone();
+    let toml_dir = toml_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(|| std::path::PathBuf::from("."));
+    let has_deps = !parsed.dependencies.is_empty();
     // A `native/` DIRECTORY is itself something to inject (#886): a package
     // whose only native requirement is a `native/*.rs` module — no
     // [native-deps], no [dependencies] — got `None` here, so the module was

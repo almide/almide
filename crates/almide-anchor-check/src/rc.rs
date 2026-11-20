@@ -416,6 +416,12 @@ struct Frame<'x, 'a> {
     /// (The direct read only: a pooled hold also shows up among the
     /// locals an unrelated value may have passed through.)
     hold_claimed: Vec<bool>,
+    /// #4631: per event, along its path through the recorder's sites, the
+    /// shipped arm each anchored recorder arm is (`Flow::arm_region`: the
+    /// open interval of the arm and its `if`'s join): the instruction it
+    /// takes must lie inside each, so the recorder's arm k is the bytes of
+    /// arm k.
+    regions: Vec<Vec<Option<(usize, usize, usize)>>>,
 }
 
 impl<'x, 'a> Frame<'x, 'a> {
@@ -448,7 +454,9 @@ impl<'x, 'a> Frame<'x, 'a> {
             holding: RefCell::default(),
             temp_arg: Vec::new(),
             hold_claimed: Vec::new(),
+            regions: Vec::new(),
         };
+        fr.regions = fr.arm_regions()?;
         let dead = dead(b);
         fr.collect_calls(&dead, rc_fns);
         fr.collect_takers(&dead);
@@ -579,6 +587,25 @@ impl<'x, 'a> Frame<'x, 'a> {
         self.ev.evwin[e].is_some_and(|(a, z)| a <= k && k <= z)
     }
 
+    /// #4631: each event's anchored arms, as shipped instruction intervals;
+    /// an anchor naming no `if` arm is refused.
+    fn arm_regions(&self) -> Result<Vec<Vec<Option<(usize, usize, usize)>>>, String> {
+        let mut region: HashMap<(usize, usize), (usize, usize, usize)> = HashMap::new();
+        for (&arm, &x) in &self.ev.arm_op {
+            let r = self.fl.arm_region(x).ok_or_else(|| format!("rc: function {}: an arm anchored to instruction {x}, which opens no arm of an `if`", self.pos))?;
+            region.insert(arm, r);
+        }
+        Ok(self.ev.evpath.iter().map(|path| path.iter().map(|a| region.get(a).copied()).collect()).collect())
+    }
+
+    /// Instruction `k` lies, for every shipped arm event `e`'s recorder
+    /// arms are anchored to, inside that arm or past its `if`'s join (the
+    /// `+1` on the value the arms chose, `share` / `pair_arms`) — never in
+    /// another arm of that `if`, nor before it.
+    fn in_arms(&self, e: usize, k: usize) -> bool {
+        self.regions[e].iter().flatten().all(|&(lo, hi, join)| (lo < k && k < hi) || join < k)
+    }
+
     /// A call inside an arm or routine window.
     fn in_window(&self, k: usize) -> bool {
         self.windows.iter().flatten().any(|&(p, a, b)| p == self.pos && a <= k && k <= b)
@@ -588,12 +615,11 @@ impl<'x, 'a> Frame<'x, 'a> {
     /// argument (`nc + t`).
     fn fits(&self, e: usize, i: usize) -> bool {
         if i >= self.nc {
-            self.fits_taker(e, i - self.nc)
+            self.in_arms(e, self.takers[i - self.nc].0) && self.fits_taker(e, i - self.nc)
         } else {
-            self.fits_call(e, i)
+            self.in_arms(e, self.calls[i].0) && self.fits_call(e, i)
         }
     }
-
     fn fits_taker(&self, e: usize, t: usize) -> bool {
         let (k, j, g) = self.takers[t];
         match self.ev.evs[e] {

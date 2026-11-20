@@ -376,16 +376,37 @@ fn diag_from_almide(d: &crate::diagnostic::Diagnostic, lines: &[&str]) -> Diagno
     }
 }
 
-/// Walk up from `file_path` to the almide.toml governing it, if any.
+/// The almide.toml governing `file_path`: the one lookup every command
+/// makes (`project::manifest_for_entry`, #4846).
 fn find_project_toml(file_path: &str) -> Option<std::path::PathBuf> {
-    let mut dir = std::path::Path::new(file_path).parent()?;
-    loop {
-        let toml = dir.join("almide.toml");
-        if toml.exists() {
-            return Some(toml);
-        }
-        dir = dir.parent()?;
+    crate::project::manifest_for_entry(file_path)
+}
+
+/// Why the project governing `file_path` refuses this compiler (#4846): its
+/// manifest does not read (#4829), or it pins a newer `almide`. The editor
+/// cannot exit as a command does, so it reports this as an error on the
+/// document; `None` when there is no manifest or nothing to refuse.
+fn project_refusal_for(file_path: Option<&str>) -> Option<Diagnostic> {
+    let toml = file_path.and_then(find_project_toml)?;
+    let why = match crate::project::read_governing_manifest(&toml) {
+        Ok(proj) => crate::project::check_compiler_version(&proj).err()?,
+        Err(e) => e,
+    };
+    Some(Diagnostic {
+        range: Range { start: Position { line: 0, character: 0 }, end: Position { line: 0, character: 0 } },
+        severity: Some(DiagnosticSeverity::ERROR),
+        source: Some("almide".to_string()),
+        message: format!("{}: {why}", toml.display()),
+        ..Default::default()
+    })
+}
+
+/// [`project_refusal_for`]'s diagnostic, added in front of `doc`'s own.
+fn with_project_refusal(mut diags: Vec<Diagnostic>, file_path: Option<&str>) -> Vec<Diagnostic> {
+    if let Some(d) = project_refusal_for(file_path) {
+        diags.insert(0, d);
     }
+    diags
 }
 
 /// Dependency source dirs for the project owning `file_path`, cached per
@@ -415,7 +436,11 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
         None if !allow_fetch => return Vec::new(),
         None => {}
     }
-    let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::parse_toml(&toml).ok()
+    // The same reader as every command (#4846): a manifest it refuses, or
+    // one pinning a newer compiler, resolves no dependencies; the refusal is
+    // on the document ([`project_refusal_for`]).
+    let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::read_governing_manifest(&toml).ok()
+        .filter(|proj| crate::project::check_compiler_version(proj).is_ok())
         .and_then(|proj| crate::project_fetch::resolve_cached_deps(&proj).ok())
         .map(|deps| deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect())
         .unwrap_or_default();
@@ -475,6 +500,26 @@ mod dep_cache_tests {
             ["one", "two"],
             "the added dependency was not seen until a restart"
         );
+    }
+
+    /// #4846: the editor reads the pin through the same lookup as every
+    /// command, and reports a pin this compiler cannot satisfy (and a manifest
+    /// that does not read) on the document; a satisfied pin reports nothing.
+    #[test]
+    fn a_pin_this_compiler_cannot_satisfy_is_an_error_on_the_document() {
+        let td = tempfile::tempdir().unwrap();
+        let toml = td.path().join("app/almide.toml");
+        let main = td.path().join("app/src/main.almd");
+        write(main.clone(), "effect fn main() -> Unit = ()\n");
+        let main = main.to_str().unwrap();
+        write(toml.clone(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\nalmide = \"999.0.0\"\n");
+        let d = project_refusal_for(Some(main)).expect("a pin to 999.0.0 must be reported");
+        assert!(d.message.contains("requires almide >= 999.0.0"), "{}", d.message);
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        write(toml.clone(), "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\n");
+        assert!(project_refusal_for(Some(main)).is_some(), "a manifest that does not read must be reported");
+        write(toml, "[package]\nname = \"app\"\nversion = \"0.1.0\"\nalmide = \"0.1.0\"\n");
+        assert!(project_refusal_for(Some(main)).is_none());
     }
 }
 

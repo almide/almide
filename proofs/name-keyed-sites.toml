@@ -1101,11 +1101,6 @@ class = "legacy"
 names = 12
 
 [[site]]
-id = "src/cli/mod.rs::PROC_SPAWNING::table"
-class = "legacy"
-names = 4
-
-[[site]]
 id = "crates/almide-ir/src/meter_plan.rs::INLINED_CALLBACK_MODULES::table"
 class = "justified"
 names = 7

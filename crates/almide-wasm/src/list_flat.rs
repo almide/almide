@@ -199,6 +199,7 @@ impl Emitter<'_> {
         };
         let b = self.types.el(oi);
         self.f.instructions().local_tee(hr).if_(BlockType::Empty);
+        let some_at = self.arm_anchor_here();
         self.f.instructions().local_get(hacc).local_get(hr);
         self.load_ty_slot(b, almide_layout::OPTION_FIELD);
         if b.val_type() == ValType::F64 {
@@ -214,10 +215,14 @@ impl Emitter<'_> {
         // #2755: on the `some` arm the payload's share moves into the result.
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(some_at);
         self.witness_payload_share(b);
+        let none_at = self.arm_anchor();
         self.witness_branch_arm();
+        self.witness_branch_anchor(none_at);
         self.witness_branch_close();
         self.f.instructions().call(push).local_set(hacc).end();
+        self.arm_anchor_bind(none_at);
         // ...released here when the body handed it over OWNED (a fresh
         // `some(..)`, a call result): every element's Option block leaked
         // (#2977). A `none` is NULL_ADDR, which the drop no-ops; a borrowed

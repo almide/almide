@@ -39,6 +39,8 @@ fn scratch(tag: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("almide-issue3425-{}-{}", tag, std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("mkdir");
+    #[cfg(unix)]
+    std::fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap(); // closed run dir override (#4842)
     root
 }
 
