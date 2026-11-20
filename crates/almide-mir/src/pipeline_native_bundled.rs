@@ -365,6 +365,10 @@ struct Resolve<'a> {
     identities: &'a HashMap<String, String>,
     root_functions: &'a HashSet<String>,
     owner: Option<&'a str>,
+    /// Each minted call symbol with the module fn it names
+    /// (`CodegenAnnotations::minted_call_symbols`): the fan pass asks that
+    /// fn's declaration (`@ordered`), never the symbol's spelling (#4893).
+    minted: std::cell::RefCell<Vec<(almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym))>>,
 }
 
 impl Resolve<'_> {
@@ -378,7 +382,9 @@ impl Resolve<'_> {
             else if names.contains(&canonical) { canonical.as_str() }
             else { return None };
         let identity = self.identities.get(m).map(String::as_str).unwrap_or(m);
-        Some(super::user_module_fn_name(identity, defined))
+        let name = super::user_module_fn_name(identity, defined);
+        self.minted.borrow_mut().push((sym(&name), (sym(m), sym(defined))));
+        Some(name)
     }
     fn reference(&self, name: &str) -> Option<String> {
         if let Some(m) = self.owner {
@@ -483,7 +489,7 @@ pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::int
         m.name.to_string(), m.versioned_name.unwrap_or(m.name).to_string(),
     )).collect();
     let roots: HashSet<String> = ir.functions.iter().map(|f| f.name.to_string()).collect();
-    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities, root_functions: &roots, owner: None };
+    let mut resolve = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities, root_functions: &roots, owner: None, minted: Default::default() };
     for f in &mut ir.functions { resolve.visit_expr_mut(&mut f.body); }
     for t in &mut ir.top_lets { resolve.visit_expr_mut(&mut t.value); }
     defaults(&mut ir.type_decls, |e| resolve.visit_expr_mut(e));
@@ -494,6 +500,8 @@ pub(super) fn flatten(mut ir: IrProgram, user_modules: &HashSet<almide_lang::int
         for t in &mut m.top_lets { resolve.visit_expr_mut(&mut t.value); }
         defaults(&mut m.type_decls, |e| resolve.visit_expr_mut(e));
     }
+    let minted = resolve.minted.take();
+    ir.codegen_annotations.minted_call_symbols.extend(minted);
     use almide_codegen::pass::{NanoPass, Target};
     ir = almide_codegen::pass_unify_var_tables::UnifyVarTablesPass.run(ir, Target::Rust).program;
     almide_frontend::ir_link::ir_link_flatten(&mut ir);
@@ -587,7 +595,7 @@ mod scope_tests {
         let mut roots = HashSet::new();
         let resolve = |bodies: &HashMap<String, HashSet<String>>, roots: &HashSet<String>| {
             Resolve { bodies, declarations: &declarations, identities: &identities,
-                root_functions: roots, owner: None }.reference("Point.repr")
+                root_functions: roots, owner: None, minted: Default::default() }.reference("Point.repr")
         };
         assert_eq!(resolve(&bodies, &roots), Some(super::super::user_module_fn_name("geometry_v2", "Point.repr")));
         roots.insert("Point.repr".into());
@@ -599,7 +607,7 @@ mod scope_tests {
         bodies.insert("geometry".into(), HashSet::from(["geometry.Point.repr".into()]));
         assert_eq!(resolve(&bodies, &roots), Some(super::super::user_module_fn_name("geometry_v2", "geometry.Point.repr")));
         let resolver = Resolve { bodies: &bodies, declarations: &declarations, identities: &identities,
-            root_functions: &roots, owner: None };
+            root_functions: &roots, owner: None, minted: Default::default() };
         assert_eq!(resolver.qualified("geometry", "Point.repr"), resolve(&bodies, &roots));
         bodies.insert("other".into(), HashSet::from(["other.Point.repr".into()]));
         assert_eq!(resolve(&bodies, &roots), None);
@@ -614,7 +622,7 @@ mod scope_tests {
             let mut expr = IrExpr { kind: IrExprKind::Call {
                 target: CallTarget::Named { name: sym(name) }, args: vec![], type_args: vec![],
             }, ty: almide_lang::types::Ty::Unit, span: None, def_id: None };
-            Resolve { bodies: &bodies, declarations: &declarations, identities: &HashMap::new(), root_functions: &HashSet::new(), owner }.visit_expr_mut(&mut expr);
+            Resolve { bodies: &bodies, declarations: &declarations, identities: &HashMap::new(), root_functions: &HashSet::new(), owner, minted: Default::default() }.visit_expr_mut(&mut expr);
             let IrExprKind::Call { target, .. } = expr.kind else { panic!("call lost") };
             match (target, module) {
                 (CallTarget::Module { module, func, .. }, Some(expected)) => {
