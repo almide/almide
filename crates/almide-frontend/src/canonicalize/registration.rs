@@ -349,6 +349,17 @@ pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Opti
             {
                 return sym(&qualified);
             }
+            // #4886: the bare slot is held by ANOTHER type's method (the
+            // entry program's own same-named type takes it back), so the bare
+            // spelling would link that method against this module's value.
+            // The receiver's own method links under the qualified spelling.
+            let held_by_other = env.functions.get(&sym(&format!("{}.{}", bare, method))).is_some_and(|s| {
+                let mut own = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == type_name);
+                !(s.params.iter().any(|(_, t)| t.any_node(&mut own)) || s.ret.any_node(&mut own))
+            });
+            if held_by_other && env.functions.contains_key(&sym(&qualified)) {
+                return sym(&qualified);
+            }
         }
         sym(&format!("{}.{}", bare_type_name(type_name), method))
     })

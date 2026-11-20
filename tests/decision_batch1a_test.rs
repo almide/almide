@@ -1040,3 +1040,30 @@ fn novel_a_derived_method_belongs_to_its_own_type_not_a_same_named_one() {
         }
     }
 }
+
+/// #4886, the direct call: the entry declares its own `T` and calls a module
+/// `T`'s DERIVED method on a module value (`m.load()!.encode()`). The bare
+/// slot `T.encode` is the entry's, so the call must link the module type's
+/// own method: before, native emitted invalid Rust and wasm refused (E082).
+/// The control line calls nothing derived and runs either way; the `Decode`
+/// entry (no `encode` of its own) leaves the bare slot to the module.
+#[test]
+fn novel_a_module_value_calls_its_own_derived_method_beside_a_same_named_entry_type() {
+    let (m, t) = (novel::module(), novel::ident("T"));
+    let t = format!("{}{}", t[..1].to_uppercase(), &t[1..]);
+    let module = fill("import json\n\ntype @T@: Codec, Repr = { size: Int, tag: String = \"o\" }\n\neffect fn load() -> @T@ = @T@.decode(json.parse(\"{\\\"size\\\": 3}\")!)!\n", &[("@T@", &t)]);
+    for entry_p in ["Codec", "Codec, Repr", "Decode"] {
+        let main = fill(&format!("import json\nimport self.@M@\n\ntype @T@: {entry_p} = {{ name: String, age: Int = 7 }}\n\neffect fn main() -> Unit = {{\n  let u = @T@.decode(json.parse(\"{{\\\"name\\\": \\\"x\\\"}}\")!)!\n  println(\"entry ${{u.name}} ${{u.age}}\")\n  let o = @M@.load()!\n  println(\"control ${{o.size}} ${{o.tag}}\")\n  println(json.stringify(o.encode()))\n  println(o.repr())\n}}\n"), &[("@T@", &t), ("@M@", &m)]);
+        let tr = tree(&manifest(""), &[("src/main.almd", main), (format!("src/{m}.almd").as_str(), module.clone())]);
+        let what = format!("entry {t}: {entry_p}, module {t}: Codec, Repr, derived call on a module value");
+        admitted(&format!("{what}: check"), &inside(&tr, &["check", "{main}"]));
+        for target in ["rust", "wasm"] {
+            let o = inside(&tr, &["run", "{main}", "--target", target]);
+            admitted(&format!("{what}: run --target {target}"), &o);
+            let out = String::from_utf8_lossy(&o.stdout).to_string();
+            for want in ["entry x 7", "control 3 o", "{\"size\":3,\"tag\":\"o\"}", "size: 3"] {
+                assert!(out.contains(want), "{what}: run --target {target}: no `{want}` in:\n{out}");
+            }
+        }
+    }
+}
