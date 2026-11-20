@@ -1069,6 +1069,8 @@ fn lsp_diagnostics_never_quote_a_hidden_character_raw() {
         assert!(found.is_empty(), "U+{:04X} quoted raw in the LSP payload: {found:?}", *ch as u32);
     }
     c.shutdown();
+}
+
 /// The probe project of #4869: a path dependency whose `src/ext` is a link
 /// out of the package (`linked`), or the same files with `src/ext` a real
 /// directory inside it (the control).
