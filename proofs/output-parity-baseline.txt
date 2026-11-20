@@ -152,6 +152,7 @@ spec/wasm_cross/availability_pure_batch.almd
 spec/wasm_cross/bang_in_record_literal_field.almd
 spec/wasm_cross/base64_decode_canonical.almd
 spec/wasm_cross/base64_encode.almd
+spec/wasm_cross/bigint_protocol_order.almd
 spec/wasm_cross/bigint_text_and_pow_limits.almd
 spec/wasm_cross/binary_operators.almd
 spec/wasm_cross/binary_search_duplicate_keys.almd
