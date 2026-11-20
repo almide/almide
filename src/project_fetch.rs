@@ -1192,17 +1192,33 @@ pub fn resolve_add_target(pkg: String, git: Option<String>, tag: Option<String>,
 /// Add a dependency to almide.toml. `subdir` must already be normalized
 /// (`crate::project::normalize_subdir`); `git` is written in its canonical
 /// form.
-pub fn add_dep_to_toml(name: &str, git: &GitSource, tag: Option<&str>, subdir: Option<&str>) -> Result<(), String> {
-    // Package names must be valid Almide identifiers (no hyphens).
-    // The package name IS the import name — no implicit conversion.
+/// A dependency name is the name programs import it by (#4867): an Almide
+/// identifier, nothing else. Anything that is not one is refused before it
+/// reaches a probe, a fetch or the manifest.
+pub fn validate_package_name(name: &str) -> Result<(), String> {
     if name.contains('-') {
         return Err(format!(
             "package name '{}' contains hyphens — use underscores instead\n  \
              hint: use '{}' as the package name (rename in the dependency's almide.toml)",
-            name,
-            name.replace('-', "_"),
+            name.escape_debug(),
+            name.replace('-', "_").escape_debug(),
         ));
     }
+    let mut chars = name.chars();
+    let ident = chars.next().is_some_and(crate::lexer::is_ident_start_char) && chars.all(crate::lexer::is_ident_continue_char);
+    if !ident {
+        return Err(format!(
+            "package name `{}` is not a name a program can import: it must be an identifier (letters, digits and `_`, starting with a letter)",
+            name.escape_debug()
+        ));
+    }
+    Ok(())
+}
+
+pub fn add_dep_to_toml(name: &str, git: &GitSource, tag: Option<&str>, subdir: Option<&str>) -> Result<(), String> {
+    // The package name IS the import name — no implicit conversion; it is
+    // written as a bare key only once it is an identifier (#4867).
+    validate_package_name(name)?;
 
     let toml_path = Path::new("almide.toml");
     if !toml_path.exists() {
@@ -1211,9 +1227,11 @@ pub fn add_dep_to_toml(name: &str, git: &GitSource, tag: Option<&str>, subdir: O
 
     let mut content = crate::project::read_project_file(toml_path)?;
 
-    let tag_part = tag.map(|t| format!(", tag = \"{t}\"")).unwrap_or_default();
-    let subdir_part = subdir.map(|s| format!(", subdir = \"{s}\"")).unwrap_or_default();
-    let dep_line = format!("{} = {{ git = \"{}\"{}{} }}", name, git, tag_part, subdir_part);
+    // Every value goes through the TOML encoder, never spliced as text.
+    let quoted = |v: &str| toml::Value::String(v.to_string()).to_string();
+    let tag_part = tag.map(|t| format!(", tag = {}", quoted(t))).unwrap_or_default();
+    let subdir_part = subdir.map(|s| format!(", subdir = {}", quoted(s))).unwrap_or_default();
+    let dep_line = format!("{} = {{ git = {}{}{} }}", name, quoted(&git.to_string()), tag_part, subdir_part);
 
     if content.contains("[dependencies]") {
         content = content.replacen("[dependencies]", &format!("[dependencies]\n{}", dep_line), 1);

@@ -179,7 +179,7 @@ fn every_accepted_key_changes_the_parse() {
         // `media` is a table from a package source to its media types
         // (ADR-0032 D7); `owners` a list of owners.
         let value = match *key {
-            "media" => "{ \"almide/svg\" = [\"image/svg+xml\"] }",
+            "media" => "{ \"github.com/almide/svg\" = [\"image/svg+xml\"] }",
             _ => "[\"github.com/alice\"]",
         };
         let text = format!("{pkg}[trust]\n{key} = {value}\n");

@@ -204,10 +204,15 @@ fn resolve_source(
     tag: Option<&str>,
     branch: Option<&str>,
 ) -> Result<PathBuf, String> {
-    // Local path takes precedence: lets users iterate locally
-    // (`almide install .`) without committing first.
-    let p = Path::new(spec);
-    if p.exists() && p.is_dir() {
+    // A path spelled as one (`almide install .`) installs that directory,
+    // so users iterate without committing first. The spelling decides, not
+    // what exists on disk (#4864): `github.com/x/y` is a source even when a
+    // directory by that name is in the working directory.
+    if spelled_local(spec) {
+        let p = Path::new(spec);
+        if !p.is_dir() {
+            return Err(format!("error: {spec} is not a directory"));
+        }
         return p
             .canonicalize()
             .map_err(|e| format!("canonicalize {}: {}", p.display(), e));
@@ -320,8 +325,16 @@ pub struct InstallGrants<'a> {
 }
 
 /// The source a spec resolves to, or `None` for a local directory.
+/// Is `spec` spelled as a local directory (#4864)? Only an explicit path is:
+/// `.`, `..`, or one starting with `./`, `../` or `/`. Anything else is read
+/// as a source and goes through the trust check, whatever happens to exist
+/// on disk under that name.
+fn spelled_local(spec: &str) -> bool {
+    matches!(spec, "." | "..") || spec.starts_with("./") || spec.starts_with("../") || Path::new(spec).is_absolute()
+}
+
 fn spec_source(spec: &str) -> Option<Result<crate::git_source::GitSource, String>> {
-    if Path::new(spec).is_dir() {
+    if spelled_local(spec) {
         return None;
     }
     Some(written_source(spec).unwrap_or_else(|| {

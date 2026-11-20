@@ -1285,3 +1285,9 @@ id = "crates/almide-frontend/src/bundled_reach/live.rs::REWRITE_INSERTED::table"
 class = "justified"
 names = 10
 why = "Which bundled functions the value-fusion rewrite calls, and which call each one replaces (json.parse for the directed reader, json.stringify for the array writer), is a fact about that rewrite site, not about the functions: no source spells them, so the reach pruning (#4328) must be told when to keep them. Keeping them only once their trigger is live stops every program that loads json from entering the reader's bytes and float sources. tests/compiler_inserted_calls_test.rs scans for every literal module.__name call the compiler builds and refuses one no table lists, and checks every row's function and trigger is declared by its module."
+
+[[site]]
+id = "crates/almide-frontend/src/attr_vocab.rs::KNOWN_ATTRS::table"
+class = "justified"
+names = 2
+why = "KNOWN_ATTRS is the attribute vocabulary the parser accepts (`@region`, `@fs_glob`, ...), not a group of stdlib functions: two attribute names happen to spell stdlib names (`region`, and `fs_glob` for the fs runtime symbol). Each attribute is the declaration the other legs read (#4825 reads @fs_path / @fs_glob / @fs_temp / @fs_root off the intrinsics), so this list is where declarations are admitted, not a copy of a property."

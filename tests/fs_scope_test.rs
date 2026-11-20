@@ -380,3 +380,44 @@ effect fn main() -> Unit = {
         assert_eq!(run(&proj, args), "almide_rt_fs_write(x)\nhello\n");
     }
 }
+
+const SOCKETS: &str = r#"import unix
+
+fn show[T](label: String, r: Result[T, String]) -> Unit = match r {
+  ok(_) => println("${label}: ok"),
+  err(e) => println("${label}: err ${e}"),
+}
+
+effect fn main() -> Unit = {
+  show("listen outside", unix.listen("../outside/out.sock"))
+  show("listen through link", unix.listen("data/link/link.sock"))
+  show("connect outside", unix.connect("../outside/any.sock"))
+  show("listen inside", unix.listen("data/in.sock"))
+}
+"#;
+
+/// #4832 (C-393): `unix.listen` / `unix.connect` take a path, and the scope
+/// judges it as it judges an fs call — the same refusal on both targets, and
+/// no socket file outside the granted directories.
+#[test]
+fn unix_socket_paths_are_bounded_by_permissions_fs_on_both_targets() {
+    let mut outs = Vec::new();
+    for args in [&[][..], &["--target", "wasm"][..]] {
+        let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+        std::fs::write(proj.join("main.almd"), SOCKETS).expect("write");
+        let out = run(&proj, args);
+        assert!(!proj.join("../outside/out.sock").exists(), "{args:?}: a socket file was made outside the granted directories");
+        assert!(!proj.join("../outside/link.sock").exists(), "{args:?}: a socket file was made through a link out");
+        assert!(proj.join("data/in.sock").exists(), "{args:?}: the granted directory refused a socket:\n{out}");
+        outs.push(out);
+    }
+    assert_eq!(outs[0], outs[1], "native and wasm differ");
+    for line in [
+        "listen outside: err fs: \"../outside/out.sock\" is outside [permissions] fs",
+        "listen through link: err fs: \"data/link/link.sock\" is outside [permissions] fs",
+        "connect outside: err fs: \"../outside/any.sock\" is outside [permissions] fs",
+        "listen inside: ok",
+    ] {
+        assert!(outs[0].lines().any(|l| l == line), "missing `{line}` in:\n{}", outs[0]);
+    }
+}

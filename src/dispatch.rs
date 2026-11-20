@@ -370,6 +370,10 @@ fn dispatch_add(cmd: AddCmd) {
     });
     let retry = add_command_line(&cmd);
     let (name, git_text, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
+    // #4867: the name is an identifier before anything is probed or written.
+    if let Err(e) = project_fetch::validate_package_name(&name) {
+        fail(&format!("error: {e}"));
+    }
     // ADR-0035 D1: the source is read once, here; everything below uses the
     // typed value, and the manifest gets its canonical form.
     let git_url = crate::git_source::GitSource::parse(&git_text).unwrap_or_else(|e| fail(&format!("error: {e}")));
