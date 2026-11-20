@@ -36,4 +36,5 @@ jobs:
           path: |
             ${{ runner.temp }}/census/rows.tsv
             ${{ runner.temp }}/census/fnrows.tsv
+            ${{ runner.temp }}/census/fxrows.tsv
             ${{ runner.temp }}/census/keep
