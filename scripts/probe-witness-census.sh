@@ -65,6 +65,10 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     census="$("$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>&1 | grep -m1 '^CENSUS' || echo -)"
   fi
+  if [ "$arc" -eq 0 ]; then
+    "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | grep '^CENSUSFN' > "$W/a.fn" || true
+    python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
+  fi
   local verdict
   verdict="$(grep -m1 -E 'REJECT|OK' "$W/a.anchor" | cut -c1-240 | tr '\t' ' ')"
   printf '%s\t%s\tyes\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$leg" "$f" \
@@ -117,3 +121,29 @@ for leg in ("fixtures", "tests"):
         if r["anchor_rc"] != "0":
             print(f"   REJECT {r['file']}: {r['verdict']}")
 PY
+
+python3 - "$OUT/fnrows.tsv" <<'PY2'
+import sys, collections
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1])]
+hows = collections.Counter()
+seen = set()
+agg = collections.defaultdict(lambda: [0] * 9)
+for r in rows:
+    leg, file, how, klass, name = r[:5]
+    func, frame = r[5], r[6]
+    n = [int(x) for x in r[7:15]]
+    if (leg, file) not in seen:
+        seen.add((leg, file))
+        hows[(leg, how)] += 1
+    key = (leg, klass, "frame" if frame == "1" else "not-frame")
+    a = agg[key]
+    a[0] += 1
+    for i, v in enumerate(n):
+        a[i + 1] += v
+print("== per-function split (how each artifact's names were placed): " + ", ".join(f"{k[0]}/{k[1]} {v}" for k, v in sorted(hows.items())))
+print("   leg      class    frame      fns  accesses located  (linear) header   bulk  other-load other-store other-byte  located%  located+header+bulk%")
+for key in sorted(agg):
+    a = agg[key]
+    acc = a[1] or 1
+    print(f"   {key[0]:8} {key[1]:8} {key[2]:9} {a[0]:6} {a[1]:8} {a[2]:7} {a[3]:9} {a[4]:6} {a[5]:6} {a[6]:10} {a[7]:11} {a[8]:10}  {100 * a[2] / acc:7.1f}%  {100 * (a[2] + a[4] + a[5]) / acc:7.1f}%")
+PY2

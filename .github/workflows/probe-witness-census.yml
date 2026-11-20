@@ -35,4 +35,5 @@ jobs:
           name: witness-census
           path: |
             ${{ runner.temp }}/census/rows.tsv
+            ${{ runner.temp }}/census/fnrows.tsv
             ${{ runner.temp }}/census/keep
