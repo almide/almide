@@ -546,6 +546,7 @@ decision = "no"
 [E121]
 severity = "error"
 since = "0.70.0"
+decision = "deps"
 
 [E420]
 severity = "error"
