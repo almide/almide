@@ -353,32 +353,49 @@ fn dispatch_add(cmd: AddCmd) {
         project::normalize_subdir(s).unwrap_or_else(|why| fail(&format!("invalid --subdir `{s}`: {why}")))
     });
     let retry = add_command_line(&cmd);
-    let (name, git_url, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
-    let owner = crate::trust::source_owner(&git_url).unwrap_or_else(|e| fail(&format!("error: {e}")));
-    let granted = match (&cmd.trust, &owner) {
-        (Some(t), Some(o)) if crate::trust::owner_arg(t) == *o => true,
-        (Some(t), Some(o)) => fail(&format!(
-            "error: --trust {t} does not match the owner of {git_url} ({o})\n  \
-             hint: --trust must name the owner the source belongs to; check that this is the repository the user asked for"
-        )),
-        (Some(t), None) => fail(&format!("error: --trust {t}: {git_url} is on the local filesystem, which needs no trust")),
-        (None, _) => false,
+    let (name, git_text, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
+    // #4867: the name is an identifier before anything is probed or written.
+    if let Err(e) = project_fetch::validate_package_name(&name) {
+        fail(&format!("error: {e}"));
+    }
+    // ADR-0035 D1: the source is read once, here; everything below uses the
+    // typed value, and the manifest gets its canonical form.
+    let git_url = crate::git_source::GitSource::parse(&git_text).unwrap_or_else(|e| fail(&format!("error: {e}")));
+    let owner = git_url.owner();
+    let granted = match &cmd.trust {
+        Some(t) => match crate::trust::owner_arg(t) {
+            Ok(p) if p.covers(&git_url) => Some(p),
+            Ok(_) => fail(&format!(
+                "error: --trust {t} does not match the owner of {git_url} ({owner})\n  \
+                 hint: --trust must name the owner the source belongs to; check that this is the repository the user asked for"
+            )),
+            Err(e) => fail(&format!("error: --trust {t}: {e}")),
+        },
+        None => None,
     };
-    let verdict = match &owner {
-        None => "a local source (no trust needed)".to_string(),
-        Some(o) if o == crate::trust::DEFAULT_TRUSTED_OWNER => format!("owner {o}, trusted by default"),
-        Some(o) if crate::trust::is_trusted(&proj.trust_owners, o) => format!("owner {o}, trusted by [trust] owners"),
-        Some(o) if granted => format!("owner {o}, trusted by --trust"),
-        Some(o) => format!("owner {o}, NOT trusted"),
+    let by_default = crate::trust::is_trusted(&[], &git_url);
+    let by_manifest = crate::trust::is_trusted(&proj.trust_owners, &git_url);
+    let verdict = if by_default {
+        format!("owner {owner}, trusted by default")
+    } else if by_manifest {
+        format!("owner {owner}, trusted by [trust] owners")
+    } else if granted.is_some() {
+        format!("owner {owner}, trusted by --trust")
+    } else {
+        format!("owner {owner}, NOT trusted")
     };
     err(&format!("Resolved {name} → {git_url} ({verdict})"));
-    if let Some(o) = owner.as_deref().filter(|o| !granted && !crate::trust::is_trusted(&proj.trust_owners, o)) {
-        fail(&crate::trust::add_refusal(&name, &git_url, o, &retry));
+    if granted.is_none() && !by_manifest {
+        fail(&crate::trust::add_refusal(&name, &git_url, &retry));
     }
+    // #4838: the tag is a ref name, read before anything is fetched.
+    let tag_ref = tag.as_deref().map(crate::git_source::GitRef::parse).transpose().unwrap_or_else(|why| {
+        fail(&format!("error: --tag `{}` is not a ref name: {why}", tag.as_deref().unwrap_or("").escape_debug()))
+    });
     let dep = project::Dependency {
         name: name.clone(),
-        git: git_url.clone(),
-        tag: tag.clone(),
+        git: Some(git_url.clone()),
+        tag: tag_ref,
         branch: None,
         version: None,
         path: None,
@@ -430,8 +447,8 @@ fn dispatch_add(cmd: AddCmd) {
         }
     };
     let written = (|| -> Result<bool, String> {
-        let trusted_now = match (granted, owner.as_deref()) {
-            (true, Some(o)) => project::add_trust_owner(manifest, o)?,
+        let trusted_now = match (&granted, by_manifest || by_default) {
+            (Some(p), false) => project::add_trust_owner(manifest, &p.to_string())?,
             _ => false,
         };
         project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())?;
@@ -442,7 +459,7 @@ fn dispatch_add(cmd: AddCmd) {
     match written {
         Ok(trusted_now) => {
             if trusted_now {
-                err(&format!("Trusted {} in almide.toml [trust] owners", owner.as_deref().unwrap_or("")));
+                err(&format!("Trusted {} in almide.toml [trust] owners", granted.as_ref().map(|p| p.to_string()).unwrap_or_default()));
             }
             err(&format!("Added {name} to almide.toml"));
         }
@@ -473,8 +490,14 @@ fn dispatch_trust(owner: String) {
         err("almide.toml not found. Run 'almide init' first.");
         std::process::exit(1);
     }
-    let owner = crate::trust::owner_arg(&owner);
-    if owner == crate::trust::DEFAULT_TRUSTED_OWNER {
+    let owner = match crate::trust::owner_arg(&owner) {
+        Ok(p) => p.to_string(),
+        Err(e) => {
+            err(&format!("error: {e}"));
+            std::process::exit(1);
+        }
+    };
+    if owner.eq_ignore_ascii_case(crate::trust::DEFAULT_TRUSTED_OWNER) {
         err(&format!("{owner} is trusted by default; nothing to add"));
         return;
     }
@@ -554,20 +577,26 @@ fn dependency_source_line(dep: &project::Dependency) -> String {
         return format!("{} = path {}", dep.name, path);
     }
     let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+    let git = dep.git.as_ref().map(|g| g.to_string()).unwrap_or_default();
     match &dep.subdir {
-        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub),
-        None => format!("{} = {} ({})", dep.name, dep.git, ref_name),
+        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, git, ref_name, sub),
+        None => format!("{} = {} ({})", dep.name, git, ref_name),
     }
 }
 
 /// The capability sets of every dependency package, measured over a program
 /// that imports the direct ones; `None` when they do not compile.
 fn dependency_capabilities_report(proj: &project::Project) -> Option<std::collections::HashMap<String, std::collections::BTreeSet<String>>> {
-    let dir = std::env::temp_dir().join(format!("almide-deps-{}", std::process::id()));
+    // Written in the private cache base and governed by the reported
+    // project itself (#4835): found by walking up from a temp dir, an
+    // `almide.toml` above it decided the dependencies and their trust.
+    let dir = cli::private_path(&format!("deps-{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
     let entry = dir.join("deps_entry.almd");
     let imports: String = proj.dependencies.iter().map(|d| format!("import {}\n", d.name)).collect();
     std::fs::write(&entry, imports).ok()?;
+    let manifest = proj.root.join("almide.toml").canonicalize().ok()?;
+    project::register_generated_entry(&entry, Some(manifest)).ok()?;
     crate::SUPPRESS_WARNINGS.store(true, std::sync::atomic::Ordering::Relaxed);
     let caps = crate::compile_driver::dependency_capabilities(&entry.to_string_lossy()).ok();
     crate::SUPPRESS_WARNINGS.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -695,7 +724,8 @@ fn dispatch_packages(command: Commands) {
     }
 }
 
-/// Refuse a `./almide.toml` that declares a key twice (#2583), is not TOML
+/// Refuse each manifest governing the command ([`governing_manifests`]:
+/// the one lookup from each entry it names, #4846) that declares a key twice (#2583), is not TOML
 /// (#3253), or whose `[permissions].allow` names something that is not a
 /// capability (#3247), before any command runs. Most readers of the manifest treat a parse error as "no
 /// project" (`parse_toml(..).ok()`), which is right for a missing file but
@@ -720,25 +750,103 @@ fn refuse_invalid_manifest(command: &Commands) {
     ) {
         return;
     }
-    let path = std::path::Path::new("almide.toml");
-    if !path.exists() {
-        return;
-    }
-    // Bounded and regular-file only (#4194): a manifest linked to /dev/zero
-    // is refused here, on every command, instead of read until memory runs out.
-    let content = match project::read_project_file(path) {
-        Ok(c) => c,
-        Err(e) => {
+    for path in governing_manifests(command) {
+        let path = path.as_path();
+        // Bounded and regular-file only (#4194): a manifest linked to /dev/zero
+        // is refused here, on every command, instead of read until memory runs out.
+        let content = match project::read_project_file(path) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: {}", e));
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = project::check_manifest(path, &content) {
             err(&format!("error: {}", e));
             std::process::exit(1);
         }
-    };
-    if let Err(e) = project::check_manifest(path, &content) {
-        err(&format!("error: {}", e));
-        std::process::exit(1);
+        refuse_older_compiler(command, path);
+        report_manifest_warnings(command, path, &content);
     }
-    refuse_older_compiler(command, path);
-    report_manifest_warnings(command, path, &content);
+}
+
+/// [`command_entries`], or the working directory when the command names
+/// none: what the dependency gates resolve the project from (#4830).
+fn entries_or_cwd(command: &Commands) -> Vec<String> {
+    let entries = command_entries(command);
+    if entries.is_empty() { vec![".".to_string()] } else { entries }
+}
+
+/// The manifests that govern `command` (#4846, #4829): for each source file
+/// or directory it names, the one lookup's (`project::manifest_for_entry`,
+/// walking up from that entry, never the cwd); a command that names none
+/// works on the working directory's package, `./almide.toml`.
+fn governing_manifests(command: &Commands) -> Vec<std::path::PathBuf> {
+    let entries = command_entries(command);
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    if entries.is_empty() {
+        let cwd = std::path::Path::new("almide.toml");
+        if cwd.exists() {
+            out.push(cwd.to_path_buf());
+        }
+        return out;
+    }
+    for e in &entries {
+        if let Some(m) = project::manifest_for_entry(e) {
+            if !out.contains(&m) {
+                out.push(m);
+            }
+        }
+    }
+    out
+}
+
+/// The source files or directories `command` names as what it compiles,
+/// checks or runs: empty when it names none (it then works on the cwd's
+/// package). Each variant is listed: a new command must say what it reads.
+fn command_entries(command: &Commands) -> Vec<String> {
+    match command {
+        Commands::Run { file, .. }
+        | Commands::Bench { file, .. }
+        | Commands::Build { file, .. }
+        | Commands::Test { file, .. }
+        | Commands::Check { file, .. }
+        | Commands::Fix { file, .. } => file.iter().cloned().collect(),
+        Commands::Emit { file, .. } | Commands::Apply { file, .. } | Commands::SurviveTestLeg { file, .. } => vec![file.clone()],
+        Commands::TestRunCompile { files, .. } => files.iter().filter_map(|f| f.split_once('=').map(|(_, f)| f.to_string())).collect(),
+        // A module is named by file (`x.almd`) or by name (the cwd package's).
+        Commands::Compile { module, .. } | Commands::Query { cmd: QueryCommand::Interface { module, .. } } => {
+            module.iter().filter(|m| m.ends_with(".almd")).cloned().collect()
+        }
+        Commands::Verify { args } => args.iter().filter(|a| a.ends_with(".almd")).cloned().collect(),
+        // These name no source they compile: they work on the cwd's package
+        // (or on none).
+        Commands::Init { .. }
+        | Commands::Lsp
+        | Commands::Mcp
+        | Commands::Explain { .. }
+        | Commands::Fmt { .. }
+        | Commands::Update { .. }
+        | Commands::Clean { .. }
+        | Commands::Add { .. }
+        | Commands::Remove { .. }
+        | Commands::Trust { .. }
+        | Commands::Deps { .. }
+        | Commands::Tool { .. }
+        | Commands::Upgrade { .. }
+        | Commands::Repl
+        | Commands::Survive { .. }
+        | Commands::Ide { .. }
+        | Commands::SelfUpdate { .. }
+        | Commands::Install { .. }
+        | Commands::DepPath { .. }
+        | Commands::Query {
+            cmd: QueryCommand::Outline { .. } | QueryCommand::Doc { .. } | QueryCommand::Stdlib { .. },
+        }
+        | Commands::DocsGen { .. }
+        | Commands::Budgets { .. }
+        | Commands::Switches { .. } => Vec::new(),
+    }
 }
 
 /// #4172: the package's `almide = "X.Y.Z"` minimum holds on every command
@@ -893,10 +1001,14 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Run { .. } | Commands::Test { .. } | Commands::Bench { .. }
             | Commands::Build { print_release_rustflags: false, .. }
     ) {
-        cli::resolve_cwd_deps_or_exit();
+        for entry in entries_or_cwd(&command) {
+            cli::resolve_deps_or_exit(&entry);
+        }
     }
     if matches!(command, Commands::Check { .. }) {
-        cli::check_cwd_media_grants_or_exit();
+        for entry in entries_or_cwd(&command) {
+            cli::check_media_grants_or_exit(&entry);
+        }
     }
     match command {
         Commands::Init { json: _ } => cli::cmd_init(),

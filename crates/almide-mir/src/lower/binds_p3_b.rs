@@ -22,10 +22,18 @@ impl LowerCtx {
             })
             // The native render frees a tuple by its slot types and a list by its element type:
             // there any heap tuple or list (`List[Tok]`) it types is an element, per-shape identity.
+            // An option or result over a heap payload (`Option[List[String]]`,
+            // `Option[Option[String]]`, `Result[List[String], String]`, #4806) is the same:
+            // the render drops the typed carrier and its payload with it.
             .or_else(|| {
+                use almide_lang::types::constructor::TypeConstructorId as TC;
+                let heap_ctor = matches!(elem_ty, Ty::Applied(TC::Option | TC::Result, a)
+                    if a.iter().any(is_heap_ty)
+                        && a.iter().all(|t| !is_heap_ty(t) || self.bang_tuple_slots_typed(t)));
                 (crate::lower::owned_tco_slots()
-                    && (crate::lower::tuple_needs_recursive_drop(elem_ty) || crate::lower::is_heap_list_ty(elem_ty))
-                    && self.bang_tuple_slots_typed(elem_ty))
+                    && (heap_ctor
+                        || ((crate::lower::tuple_needs_recursive_drop(elem_ty) || crate::lower::is_heap_list_ty(elem_ty))
+                            && self.bang_tuple_slots_typed(elem_ty))))
                 .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
             })
     }

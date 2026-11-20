@@ -130,8 +130,10 @@ impl Emitter<'_> {
             .local_get(c.hold)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         for o in carriers.iter().enumerate().filter(|&(j, o)| j != k && o.owned).map(|(_, o)| o) {
             let dec = self.dec_fn_of(o.ty);
             self.f.instructions().local_get(o.hold).call(dec);
@@ -165,7 +167,9 @@ impl Emitter<'_> {
             w.frame_replaced();
         }
         self.f.instructions().end();
+        let through_at = self.arm_anchor_here();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         Ok(())
     }
@@ -338,15 +342,19 @@ impl Emitter<'_> {
     /// rendered from its err value (a fresh block the abort takes with it).
     fn fan_typed_abort_site(&mut self, first: u32, id: i32, hp: u32, ert: SliceTy, err_ir: Option<&Ty>) -> Result<(), EmitError> {
         self.f.instructions().local_get(first).i32_const(id).i32_eq().if_(BlockType::Empty);
+        let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         let fresh = self.emit_abort_message(ert, err_ir, |s| {
             s.f.instructions().local_get(hp);
         })?;
         self.witness_abort_built(fresh);
         self.abort_frame();
         self.f.instructions().end();
+        let through_at = self.arm_anchor_here();
         self.witness_branch_arm();
+        self.witness_branch_anchor(through_at);
         self.witness_branch_close();
         Ok(())
     }

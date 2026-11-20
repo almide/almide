@@ -51,12 +51,49 @@ pub struct MediaGrant {
     pub line: usize,
 }
 
+/// Where a package comes from (#4834): the typed git source and the
+/// directory in it, or the canonical local directory of a `path`
+/// dependency. Two packages with one declared name but different origins
+/// are two packages, never one selected over the other.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PackageOrigin {
+    Git { source: crate::git_source::GitSource, subdir: Option<String> },
+    Path(PathBuf),
+}
+
+impl PackageOrigin {
+    /// The origin a dependency entry names.
+    pub fn of(dep: &Dependency) -> PackageOrigin {
+        match (&dep.path, &dep.git) {
+            (Some(p), _) => PackageOrigin::Path(std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p))),
+            (None, Some(g)) => PackageOrigin::Git { source: g.clone(), subdir: dep.subdir.clone() },
+            (None, None) => PackageOrigin::Path(PathBuf::new()),
+        }
+    }
+}
+
+impl std::fmt::Display for PackageOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PackageOrigin::Git { source, subdir: None } => write!(f, "{source}"),
+            PackageOrigin::Git { source, subdir: Some(s) } => write!(f, "{source} subdir {s}"),
+            PackageOrigin::Path(p) => write!(f, "path {}", p.display()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FetchedDep {
     pub pkg_id: PkgId,
-    /// The git URL it was fetched from; empty for a path dependency. Read by
-    /// the media grant, which names a package by its source (ADR-0032 Q17).
-    pub source: String,
+    /// Where the selected package comes from (#4834).
+    pub origin: PackageOrigin,
+    /// The chain of dependency names from the root that first required it,
+    /// for the refusal two origins of one name get.
+    pub required_by: String,
+    /// The git source it was fetched from; `None` for a path dependency.
+    /// Read by the media grant, which names a package by its source
+    /// (ADR-0032 Q17).
+    pub source: Option<crate::git_source::GitSource>,
     /// The requested version this entry currently holds — MVS keeps the
     /// maximum requested version per `PkgId` (#1458).
     pub version: String,
@@ -80,9 +117,12 @@ pub struct Package {
 #[derive(Debug, Clone)]
 pub struct Dependency {
     pub name: String,
-    pub git: String,
-    pub tag: Option<String>,
-    pub branch: Option<String>,
+    /// The git source, read once (ADR-0035 D1); `None` for a `path`
+    /// dependency.
+    pub git: Option<crate::git_source::GitSource>,
+    /// The `tag` / `branch`, read as ref names (#4838): never a path.
+    pub tag: Option<crate::git_source::GitRef>,
+    pub branch: Option<crate::git_source::GitRef>,
     pub version: Option<String>,
     pub path: Option<String>,
     /// `subdir = "…"` (#3381): the package directory inside the git
@@ -453,7 +493,7 @@ impl Manifest<'_> {
         let Some(trust) = spanned_entry(&self.spans, "trust") else { return Ok(Vec::new()) };
         let Some(trust) = trust.get_ref().as_table() else { return Ok(Vec::new()) };
         let Some(media) = spanned_entry(trust, "media") else { return Ok(Vec::new()) };
-        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"almide/svg\" = [\"image/svg+xml\"] }`";
+        let shape = "[trust].media must be a table from a package source to its media types, like `media = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }`";
         let table = media.get_ref().as_table().ok_or_else(|| located(path, content, media.span().start, shape))?;
         table
             .iter()
@@ -464,7 +504,9 @@ impl Manifest<'_> {
                     .iter()
                     .map(|i| i.get_ref().as_str().map(str::to_ascii_lowercase).ok_or_else(|| located(path, content, i.span().start, shape)))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(MediaGrant { key: k.get_ref().as_ref().to_ascii_lowercase(), media, line: line_of(content, at) })
+                let key = k.get_ref().as_ref().to_ascii_lowercase();
+                crate::media_grant::check_grant_key(&key).map_err(|e| located(path, content, k.span().start, &e))?;
+                Ok(MediaGrant { key, media, line: line_of(content, at) })
             })
             .collect()
     }
@@ -504,9 +546,9 @@ fn dependency_from(
         debug_assert!(DEPENDENCY_KEYS.contains(&k), "dependency key `{k}` is read but not in DEPENDENCY_KEYS");
         table.get(k).map(value_text)
     };
-    let git = field("git").unwrap_or_default();
+    let git_text = field("git").unwrap_or_default();
     let dep_path = field("path");
-    if git.is_empty() && dep_path.is_none() {
+    if git_text.is_empty() && dep_path.is_none() {
         return Ok(None);
     }
     // The byte offset of `key` in this entry (its value), else of the entry.
@@ -519,6 +561,14 @@ fn dependency_from(
             .map_or(entry.span().start, |v| v.span().start)
     };
     let declared_at = Some(format!("{}:{}", path.display(), lines.line(offset_of("git"))));
+    // ADR-0035 D1: the source is read here, once; everything after uses the
+    // typed value. A refused form is an error on its manifest line.
+    let git = match git_text.is_empty() {
+        true => None,
+        false => Some(crate::git_source::GitSource::parse(&git_text).map_err(|e| {
+            located(path, content, offset_of("git"), &format!("dependency `{name}`: {e}"))
+        })?),
+    };
     let subdir = match table.get("subdir") {
         None => None,
         Some(raw) => {
@@ -542,11 +592,27 @@ fn dependency_from(
             })?)
         }
     };
+    // #4838: a `tag` / `branch` is a ref name, refused on its own line
+    // otherwise (an absolute or `..` value was joined into the cache path).
+    let git_ref = |key: &str| -> Result<Option<crate::git_source::GitRef>, String> {
+        match field(key) {
+            None => Ok(None),
+            Some(text) => crate::git_source::GitRef::parse(&text).map(Some).map_err(|why| {
+                located(
+                    path,
+                    content,
+                    offset_of(key),
+                    &format!("dependency `{name}`: `{key} = \"{}\"` is not a ref name: {why}\n  hint: a {key} is a name like `v1.2.0` or `feat/x`", text.escape_debug()),
+                )
+            }),
+        }
+    };
+    let (tag, branch) = (git_ref("tag")?, git_ref("branch")?);
     Ok(Some(Dependency {
         name,
         git,
-        tag: field("tag"),
-        branch: field("branch"),
+        tag,
+        branch,
         version: field("version"),
         path: dep_path,
         subdir,
@@ -835,30 +901,110 @@ pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<alm
     Ok(out)
 }
 
-/// The manifest whose `[permissions]` govern `entry`: the nearest
-/// `almide.toml` in the entry file's directory or above it, else the one in
-/// the working directory. Before, only the working directory was read, so
-/// `almide run sub/app.almd` from outside the project ran with no
-/// `[permissions]` at all.
+/// The ONE manifest lookup (#4829, #4830, #4835, #4846): the `almide.toml`
+/// that governs `entry`, a source file or a directory of them. It is the
+/// nearest one in the entry's own directory (the directory itself for a
+/// directory) or above it, and nothing else: never the working directory and
+/// never a temp directory's parents. Every route reads its project here: the
+/// up-front manifest gate and version pin, the dependency and grant gates,
+/// the compile driver, the native build's `CrateInputs` backstop, `verify`,
+/// both test lanes and the editor server. A file the compiler writes itself
+/// is looked up in [`register_generated_entry`]'s table instead, never by its
+/// location.
 pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
-    let start = std::path::Path::new(entry).parent().map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p });
-    let mut dir = start.and_then(|d| d.canonicalize().ok());
+    let path = std::path::Path::new(entry);
+    let canon = path.canonicalize().ok();
+    if let Some(c) = &canon {
+        if let Some(gov) = generated_entries().lock().unwrap_or_else(|p| p.into_inner()).get(c) {
+            return gov.clone();
+        }
+    }
+    let start = match &canon {
+        Some(c) if c.is_dir() => Some(c.clone()),
+        Some(c) => c.parent().map(std::path::Path::to_path_buf),
+        // An entry that does not exist yet: its directory decides.
+        None => path
+            .parent()
+            .map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p })
+            .and_then(|d| d.canonicalize().ok()),
+    };
+    let mut dir = start;
     while let Some(d) = dir {
         let candidate = d.join("almide.toml");
-        if candidate.is_file() {
+        // Whatever stands there governs — a link to a device, a dangling
+        // link, a directory — and the reader refuses what is not a regular
+        // file; skipping it would build under the manifest above, or none.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             return Some(candidate);
         }
         dir = d.parent().map(std::path::Path::to_path_buf);
     }
-    let cwd = std::path::Path::new("almide.toml");
-    cwd.is_file().then(|| cwd.to_path_buf())
+    None
 }
 
-/// The project [`manifest_for_entry`] names, parsed (`None` when there is
-/// none or it does not parse — the manifest gate in `main` has already
-/// refused a broken one in the working directory).
+/// `files` split by the manifest that governs each ([`manifest_for_entry`]),
+/// in first-seen order: a run that compiles several files as one program
+/// takes one project, so files of different projects are different runs.
+pub fn group_by_manifest(files: &[String]) -> Vec<(Option<PathBuf>, Vec<String>)> {
+    let mut groups: Vec<(Option<PathBuf>, Vec<String>)> = Vec::new();
+    for f in files {
+        let m = manifest_for_entry(f);
+        match groups.iter_mut().find(|(k, _)| *k == m) {
+            Some((_, members)) => members.push(f.clone()),
+            None => groups.push((m, vec![f.clone()])),
+        }
+    }
+    groups
+}
+
+fn generated_entries() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>> {
+    static TABLE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Option<PathBuf>>>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(Default::default)
+}
+
+/// Declare `entry`, a file the compiler wrote itself (`almide deps`'s import
+/// list, `almide compile <stdlib module>`'s staged source), as governed by
+/// `manifest` — the project the command is about, or `None` for no project.
+/// Its location (a temp directory, whose parents anyone may write to) then
+/// decides nothing (#4835).
+pub fn register_generated_entry(entry: &Path, manifest: Option<PathBuf>) -> Result<(), String> {
+    let canon = entry.canonicalize().map_err(|e| format!("cannot resolve {}: {e}", entry.display()))?;
+    generated_entries().lock().unwrap_or_else(|p| p.into_inner()).insert(canon, manifest);
+    Ok(())
+}
+
+/// The project [`manifest_for_entry`] names, parsed; `None` only when there
+/// is no manifest. A manifest that exists but does not parse governs the
+/// command all the same (#4829: read as "no manifest", its `[permissions]`
+/// were dropped), so the command is refused with its error.
 pub fn permissions_project_for(entry: &str) -> Option<Project> {
-    manifest_for_entry(entry).and_then(|p| parse_toml(&p).ok())
+    manifest_for_entry(entry).map(|p| governing_manifest(&p))
+}
+
+/// `path`, an `almide.toml` that exists and governs the command, read by the
+/// one reader every route uses: the gate's checks (`check_manifest`) and
+/// `parse_toml`; any error ends the command (#4829).
+///
+/// Every caller compiles or checks under the project, so its `almide =
+/// "X.Y.Z"` minimum holds here too (#4846): the pin is read off the same
+/// manifest on every route, not off `./almide.toml` alone.
+pub fn governing_manifest(path: &Path) -> Project {
+    let proj = read_governing_manifest(path).unwrap_or_else(|e| {
+        eprintln!("error: {}", naming(path, e));
+        std::process::exit(1)
+    });
+    if let Err(e) = check_compiler_version(&proj) {
+        eprintln!("error: {e}");
+        std::process::exit(1)
+    }
+    proj
+}
+
+/// [`governing_manifest`]'s reader, for a caller that must not exit (the
+/// editor server reports the error as a diagnostic instead).
+pub fn read_governing_manifest(path: &Path) -> Result<Project, String> {
+    read_project_file(path).and_then(|content| check_manifest(path, &content)).and_then(|()| parse_toml(path))
 }
 
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
@@ -869,6 +1015,7 @@ pub fn permissions_project_for(entry: &str) -> Option<Project> {
 pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
+    refuse_unknown_security_keys(path, content, &manifest)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.permission_list(path, content, "fs")?;
     manifest.trust_owners(path, content)?;
@@ -877,7 +1024,16 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
-    Ok(())
+    // #4829: everything `parse_toml` refuses is refused here too, so the gate
+    // and the readers cannot accept different manifests. The error names the
+    // manifest, which the command may not have read from the cwd.
+    parse_toml(path).map(|_| ()).map_err(|e| naming(path, e))
+}
+
+/// `e`, prefixed with `path` unless it already names it.
+fn naming(path: &Path, e: String) -> String {
+    let shown = path.display().to_string();
+    if e.contains(&shown) { e } else { format!("{shown}: {e}") }
 }
 
 // ── Unknown keys (#3382) ────────────────────────────────────────────
@@ -967,6 +1123,55 @@ fn unknown_key_warnings(
             manifest_warning(path, lines, at, message, hint)
         })
         .collect()
+}
+
+/// The tables that restrict the program, with the keys each reads.
+const SECURITY_TABLES: &[(&str, &[&str])] = &[("permissions", PERMISSION_KEYS), ("trust", TRUST_KEYS)];
+
+/// #4851: in a table that restricts the program, a key no reader reads is
+/// refused, never a warning: `alow = []` in `[permissions]`, or a
+/// `[permission]` table, left the bound unset and granted every capability.
+/// An unknown top-level table one edit from a security table is its
+/// misspelling and refused the same way. Other unknown keys stay warnings
+/// ([`manifest_warnings`], #3382).
+fn refuse_unknown_security_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
+    for (k, _) in manifest.spans.iter() {
+        let name = k.get_ref().as_ref();
+        if TOP_LEVEL_KEYS.contains(&name) {
+            continue;
+        }
+        if let Some((table, _)) = SECURITY_TABLES.iter().find(|(t, _)| within_one_edit(&name.to_ascii_lowercase(), t)) {
+            return Err(located(
+                path,
+                content,
+                k.span().start,
+                &format!(
+                    "unknown table `{}` is refused — it is one edit from [{table}], which restricts the program, and a misspelled bound would grant everything\n  hint: write it as [{table}]",
+                    shown(name)
+                ),
+            ));
+        }
+    }
+    for (table, keys) in SECURITY_TABLES {
+        let Some(t) = spanned_entry(&manifest.spans, table).and_then(|t| t.get_ref().as_table()) else { continue };
+        let mut unknown: Vec<(usize, String)> =
+            t.iter().filter(|(k, _)| !keys.contains(&k.get_ref().as_ref())).map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect();
+        unknown.sort();
+        if let Some((at, key)) = unknown.into_iter().next() {
+            let list = keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+            let hint = match keys.iter().find(|k| within_one_edit(&key, k)) {
+                Some(k) => format!("did you mean `{k}`? [{table}] reads only {list}"),
+                None => format!("[{table}] reads only {list}; delete it or write one of them"),
+            };
+            return Err(located(
+                path,
+                content,
+                at,
+                &format!("unknown key `{}` in [{table}] is refused — a key the table does not read would leave its bound unset\n  hint: {hint}", shown(&key)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The warnings for keys `almide.toml` writes that no reader reads (#3382):
@@ -1118,13 +1323,18 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(home).join(".almide").join("cache")
 }
 
-/// A locked dependency entry for almide.lock
+/// A locked dependency entry for almide.lock. Every field is typed on read
+/// (ADR-0035 D4): `git` through the manifest's own source grammar, `commit`
+/// as 40 or 64 lowercase hex, `sum` as an `h1:` tree hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedDep {
     pub name: String,
-    pub git: String,
+    pub git: crate::git_source::GitSource,
     pub ref_name: String,
-    pub commit: String,
+    pub commit: crate::git_source::CommitId,
+    /// The tree hash of the package content (`None` only in a lock written
+    /// before ADR-0035: read old, write new; `--locked` refuses it).
+    pub sum: Option<crate::package_tree::TreeSum>,
     /// The package directory inside the repository (#3381), as the
     /// manifest's normalized `subdir`; `None` = the repository root. Several
     /// entries may share one `(git, commit)` — one clone, distinct packages.
@@ -1184,8 +1394,23 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
                 )
             })
         };
-        let git = required("git")?;
-        let commit = required("commit")?;
+        let regenerate = "hint: almide.lock is generated; delete the entry and the next `almide check` rewrites it";
+        let git = crate::git_source::GitSource::parse(&required("git")?)
+            .map_err(|e| format!("{}: lock entry '{}': {e}\n  {regenerate}", path.display(), name))?;
+        // #4812: the commit is typed — 40 or 64 lowercase hex — so it can
+        // never be a path or an option.
+        let commit = crate::git_source::CommitId::parse(&required("commit")?).map_err(|e| {
+            format!("{}: lock entry '{}' has a `commit` that is not a hex commit hash: {e}\n  {regenerate}", path.display(), name)
+        })?;
+        let sum = match entry.get("sum") {
+            None => None,
+            Some(v) => Some(
+                v.as_str()
+                    .ok_or_else(|| "not a string".to_string())
+                    .and_then(crate::package_tree::TreeSum::parse)
+                    .map_err(|e| format!("{}: lock entry '{}' has a `sum` that is not a tree sum: {e}\n  {regenerate}", path.display(), name))?,
+            ),
+        };
         let ref_name =
             entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let subdir = entry
@@ -1196,7 +1421,7 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
                 })
             })
             .transpose()?;
-        locked.push(LockedDep { name, git, ref_name, commit, subdir });
+        locked.push(LockedDep { name, git, ref_name, commit, sum, subdir });
     }
     Ok(locked)
 }
@@ -1218,12 +1443,14 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
         // `subdir` only when there is one, so a lock without subdir
         // dependencies stays byte-identical to what earlier compilers wrote.
         let subdir = dep.subdir.as_deref().map(|s| format!(", subdir = {}", toml_quoted(s))).unwrap_or_default();
+        let sum = dep.sum.map(|s| format!(", sum = {}", toml_quoted(&s.to_string()))).unwrap_or_default();
         content.push_str(&format!(
-            "{} = {{ git = {}, ref = {}, commit = {}{} }}\n",
+            "{} = {{ git = {}, ref = {}, commit = {}{}{} }}\n",
             dep.name,
-            toml_quoted(&dep.git),
+            toml_quoted(&dep.git.to_string()),
             toml_quoted(&dep.ref_name),
-            toml_quoted(&dep.commit),
+            toml_quoted(dep.commit.as_str()),
+            sum,
             subdir
         ));
     }

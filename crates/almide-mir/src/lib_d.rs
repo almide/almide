@@ -44,13 +44,32 @@ impl OwnershipScan {
 impl OwnershipScan {
     fn end_rebound_children(&mut self, local: ValueId) {
         let Some(&slot) = self.object_of.get(&local) else { return };
-        let root = |mut o: ValueId| {
+        // A child is a view of the old block only through parents the frame
+        // holds no reference of its own to: a parent it took a `Dup` of keeps
+        // that parent's block, and the child in its slot, after the old block
+        // goes (#4749 shape 5: the elements of a list field the loop copied
+        // before its root was rebound). The certificate's rule, mirrored.
+        // A slot whose old block is a borrowed param's (`var out = raw`) leaves
+        // that block to the caller, alive for the whole call: no child of it
+        // ends here.
+        let caller_keeps_old = self.borrowed.contains(&slot);
+        let viewed_from_slot = |c: ValueId| {
+            if caller_keeps_old {
+                return false;
+            }
+            let mut o = c;
             while let Some(&p) = self.child_parent.get(&o) {
+                if p == slot {
+                    return true;
+                }
+                if self.rc.get(&p).copied().unwrap_or(0) >= 1 {
+                    return false;
+                }
                 o = p;
             }
-            o
+            o == slot
         };
-        let mut ended: Vec<ValueId> = self.child_parent.keys().copied().filter(|&c| root(c) == slot).collect();
+        let mut ended: Vec<ValueId> = self.child_parent.keys().copied().filter(|&c| viewed_from_slot(c)).collect();
         ended.extend(self.addr_of.iter().filter(|(_, &o)| o == slot).map(|(&a, _)| a));
         ended.extend(self.carriers.iter().copied().filter(|&c| c != local && self.object_of.get(&c) == Some(&slot)));
         self.rebound.extend(ended);

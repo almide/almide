@@ -81,12 +81,17 @@ impl Emitter<'_> {
                         .local_tee(self.scr_i32_local)
                         .i32_eqz()
                         .if_(BlockType::Result(et.val_type()));
+                    let then_at = self.arm_anchor_here();
                     self.witness_branch_open();
                     self.witness_branch_arm();
+                    self.witness_branch_anchor(then_at);
                     self.lower(fallback, Some(et))?;
                     self.witness_unwrap_or_arm(e, Some(fallback), et);
-                    self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.f.instructions().else_();
+                    let else_at = self.arm_anchor_here();
+                    self.f.instructions().local_get(self.scr_i32_local);
                     self.witness_branch_arm();
+                    self.witness_branch_anchor(else_at);
                     self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
                     self.witness_unwrap_or_arm(e, None, et);
@@ -106,12 +111,17 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne()
                         .if_(BlockType::Result(et.val_type()));
+                    let then_at = self.arm_anchor_here();
                     self.witness_branch_open();
                     self.witness_branch_arm();
+                    self.witness_branch_anchor(then_at);
                     self.lower(fallback, Some(et))?;
                     self.witness_unwrap_or_arm(e, Some(fallback), et);
-                    self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.f.instructions().else_();
+                    let else_at = self.arm_anchor_here();
+                    self.f.instructions().local_get(self.scr_i32_local);
                     self.witness_branch_arm();
+                    self.witness_branch_anchor(else_at);
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
                     self.witness_unwrap_or_arm(e, None, et);
@@ -697,8 +707,10 @@ impl Emitter<'_> {
             .i32_const(0)
             .i32_ne()
             .if_(BlockType::Result(et.val_type()));
+        let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
         self.f.instructions().local_get(self.scr_i32_local).call(carrier_dec);
         if let (Some(w), Some(t)) = (self.witness.as_mut(), temp) {
             w.temp_ops(t, "d");
@@ -710,8 +722,11 @@ impl Emitter<'_> {
             }
             self.witness_share_or_move(fallback, "unwrap-or:owned-carrier-fallback");
         }
-        self.f.instructions().else_().local_get(self.scr_i32_local);
+        self.f.instructions().else_();
+        let else_at = self.arm_anchor_here();
+        self.f.instructions().local_get(self.scr_i32_local);
         self.witness_branch_arm();
+        self.witness_branch_anchor(else_at);
         self.load_ty_slot(et, almide_layout::SUM_FIELD);
         self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
         if let (Some(w), Some(t)) = (self.witness.as_mut(), temp) {

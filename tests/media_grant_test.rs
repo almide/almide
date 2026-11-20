@@ -4,15 +4,19 @@
 //! one type, are refused too. Every refusal is E118.
 //!
 //! No network, as in `dependency_trust_test.rs`: each "host" is a directory
-//! of bare repositories that git's `url.<base>.insteadOf` maps
-//! `https://github.com/` onto, so the manifests name the real source URLs a
-//! grant is keyed by.
+//! of bare repositories served by `support/git_host.rs` at their real
+//! `https://github.com/` URLs, so the manifests name the source URLs a grant
+//! is keyed by.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 struct Hosts {
     root: PathBuf,
+    host: git_host::GitHost,
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -43,7 +47,8 @@ impl Hosts {
         let root = std::env::temp_dir().join(format!("almide-media-grant-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("mkdir");
-        let h = Hosts { root };
+        let host = git_host::GitHost::start(&root);
+        let h = Hosts { root, host };
         h.repo("almide", "svg", "svg", &body_pkg("image/svg+xml", "image/svg+xml"), "");
         h.repo("almide", "svgtoo", "svgtoo", &body_pkg("image/svg+xml", "image/svg+xml"), "");
         h.repo("almide", "csvbody", "csvbody", &body_pkg("text/csv", "text/csv"), "");
@@ -70,6 +75,7 @@ impl Hosts {
         let bare = self.root.join("hosts").join(owner);
         std::fs::create_dir_all(&bare).unwrap();
         git(&bare, &["clone", "-q", "--bare", work.to_str().unwrap(), repo]);
+        self.host.serve(&format!("https://github.com/{owner}/{repo}"), &bare.join(repo));
     }
 
     /// A project `name` with `manifest`, whose main prints the Content-Type
@@ -87,18 +93,12 @@ impl Hosts {
     }
 
     fn almide(&self, dir: &Path, args: &[&str]) -> Output {
-        let base = format!("file://{}/", self.root.join("hosts").display());
-        Command::new(env!("CARGO_BIN_EXE_almide"))
-            .current_dir(dir)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.current_dir(dir)
             .env("HOME", self.root.join("home"))
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", format!("url.{base}.insteadOf"))
-            .env("GIT_CONFIG_VALUE_0", "https://github.com/")
-            .env("GIT_TERMINAL_PROMPT", "0")
             .env("ALMIDE_RUN_PROJECT_DIR", self.root.join(".run"))
-            .args(args)
-            .output()
-            .expect("spawn almide")
+            .args(args);
+        self.host.env(&mut cmd).output().expect("spawn almide")
     }
 }
 
@@ -118,7 +118,7 @@ fn stdout(o: &Output) -> String {
 
 const RUN: &[&str] = &["run", "src/main.almd", "--target", "wasm"];
 const SVG_DEP: &str = "\n[dependencies]\nsvg = { git = \"https://github.com/almide/svg\", tag = \"v0.1.0\" }\n";
-const SVG_GRANT: &str = "\n[trust]\nmedia = { \"almide/svg\" = [\"image/svg+xml\"] }\n";
+const SVG_GRANT: &str = "\n[trust]\nmedia = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }\n";
 
 #[test]
 fn a_granted_owner_builds_and_serves_its_type() {
@@ -131,7 +131,7 @@ fn a_granted_owner_builds_and_serves_its_type() {
     let listing = stdout(&o);
     assert!(listing.contains("media owners:"), "{listing}");
     assert!(listing.contains("html (stdlib, granted implicitly): text/html, application/xhtml+xml"), "{listing}");
-    assert!(listing.contains("svg (almide/svg): image/svg+xml (granted at"), "{listing}");
+    assert!(listing.contains("svg (github.com/almide/svg): image/svg+xml (granted at"), "{listing}");
 }
 
 #[test]
@@ -143,9 +143,9 @@ fn the_grant_removed_refuses_the_build_naming_the_line_to_add() {
         let err = stderr(&o);
         assert_eq!(o.status.code(), Some(1), "`almide {}`:\n{err}", args.join(" "));
         for needle in [
-            "error[E118]: dependency `svg` (almide/svg) owns `image/svg+xml`, which runs script in a browser",
+            "error[E118]: dependency `svg` (github.com/almide/svg) owns `image/svg+xml`, which runs script in a browser",
             "does not grant it",
-            "media = { \"almide/svg\" = [\"image/svg+xml\"] }",
+            "media = { \"github.com/almide/svg\" = [\"image/svg+xml\"] }",
         ] {
             assert!(err.contains(needle), "missing `{needle}`:\n{err}");
         }
@@ -164,7 +164,7 @@ fn a_forged_owner_in_a_transitive_dependency_is_refused() {
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
     assert!(
-        err.contains("error[E118]: dependency `sneaky` (required by another dependency) (bob/sneaky) owns `image/svg+xml`"),
+        err.contains("error[E118]: dependency `sneaky` (required by another dependency) (github.com/bob/sneaky) owns `image/svg+xml`"),
         "{err}"
     );
 }
@@ -174,23 +174,23 @@ fn two_granted_owners_of_one_type_are_refused() {
     let h = Hosts::new("duplicate");
     let manifest = "\n[dependencies]\nsvg = { git = \"https://github.com/almide/svg\", tag = \"v0.1.0\" }\n\
                     svgtoo = { git = \"https://github.com/almide/svgtoo\", tag = \"v0.1.0\" }\n\n\
-                    [trust]\nmedia = { \"almide/svg\" = [\"image/svg+xml\"], \"almide/svgtoo\" = [\"image/svg+xml\"] }\n";
+                    [trust]\nmedia = { \"github.com/almide/svg\" = [\"image/svg+xml\"], \"github.com/almide/svgtoo\" = [\"image/svg+xml\"] }\n";
     let dir = h.project("app", manifest, "svg");
     let o = h.almide(&dir, RUN);
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
-    assert!(err.contains("error[E118]: dependency `svgtoo` (almide/svgtoo) owns `image/svg+xml` and dependency `svg` (almide/svg) owns `image/svg+xml`"), "{err}");
+    assert!(err.contains("error[E118]: dependency `svgtoo` (github.com/almide/svgtoo) owns `image/svg+xml` and dependency `svg` (github.com/almide/svg) owns `image/svg+xml`"), "{err}");
 }
 
 #[test]
 fn a_grant_for_a_type_the_package_does_not_declare_is_refused() {
     let h = Hosts::new("overgrant");
-    let manifest = format!("{SVG_DEP}\n[trust]\nmedia = {{ \"almide/svg\" = [\"image/svg+xml\", \"text/html\"] }}\n");
+    let manifest = format!("{SVG_DEP}\n[trust]\nmedia = {{ \"github.com/almide/svg\" = [\"image/svg+xml\", \"text/html\"] }}\n");
     let dir = h.project("app", &manifest, "svg");
     let o = h.almide(&dir, RUN);
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "{err}");
-    assert!(err.contains("grants `almide/svg` the media type `text/html`, which it does not declare"), "{err}");
+    assert!(err.contains("grants `github.com/almide/svg` the media type `text/html`, which it does not declare"), "{err}");
 }
 
 #[test]
@@ -200,4 +200,15 @@ fn an_owner_of_a_type_that_runs_no_script_needs_no_grant() {
     let o = h.almide(&dir, RUN);
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(stdout(&o), "text/csv\n");
+}
+
+/// #4868: a grant in the old `owner/repo` form (github.com implied) is
+/// refused with the form it is now, never read as a narrower or wider grant.
+#[test]
+fn an_old_owner_repo_grant_key_is_refused_with_its_new_form() {
+    let h = Hosts::new("oldkey");
+    let dir = h.project("app", &format!("{SVG_DEP}\n[trust]\nmedia = {{ \"almide/svg\" = [\"image/svg+xml\"] }}\n"), "svg");
+    let o = h.almide(&dir, &["check", "src/main.almd"]);
+    assert!(!o.status.success(), "an old-form key was read:\n{}", stderr(&o));
+    assert!(stderr(&o).contains("\"github.com/almide/svg\""), "the refusal does not give the new form:\n{}", stderr(&o));
 }

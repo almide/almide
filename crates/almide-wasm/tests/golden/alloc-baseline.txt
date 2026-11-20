@@ -31,6 +31,7 @@
 66416	spec/wasm_cross/bang_in_record_literal_field.almd
 67024	spec/wasm_cross/base64_decode_canonical.almd
 66928	spec/wasm_cross/base64_encode.almd
+70032	spec/wasm_cross/bigint_protocol_order.almd
 2942224	spec/wasm_cross/bigint_text_and_pow_limits.almd
 66560	spec/wasm_cross/binary_operators.almd
 66336	spec/wasm_cross/binary_search_duplicate_keys.almd

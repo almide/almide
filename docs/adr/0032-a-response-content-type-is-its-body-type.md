@@ -76,7 +76,7 @@ Patterns follow RFC 6839: `*` is any type, and `*<suffix>` matches a longer subt
 
 ```toml
 [trust]
-media = { "almide/svg" = ["image/svg+xml"] }
+media = { "github.com/almide/svg" = ["image/svg+xml"] }
 ```
 
 - **Who is named.** The key is the dependency's source `owner/repo` (github.com implied; `host/owner/repo` for another host; a path dependency by its `[dependencies]` name). A dependency name can be pointed at another repository, a source cannot (Q17).
@@ -170,3 +170,7 @@ Answers (2026-10-29): Q1 ○, Q2 ○ (owner), Q3 ○, Q4 ○, Q5 ○ as amended 
 3. The media grant (D7): `[trust] media`, the dependency survey, E118, and the owners section of `almide deps`. SVG is the almide/svg package's.
 4. The new http surface, then `almide fix` rewrites and the epoch break, in the same change as the removal of the interim guard and E115.
 5. Gates: a matrix test that every `Body` conformer's media type is the one its declaration states; that `http.typed` refuses exactly the union of `@media_owns`; and that no header writer reaches Content-Type. Negative controls for each.
+
+## Amendment (2026-11-20, #4868): a grant names the package's typed origin
+
+Q17 named a package by its source's `owner/repo` (github.com implied; `host/owner/repo` elsewhere). That is the host plus the first two path segments, so on a host with deeper paths a grant could not name one repository (`gitlab.example/g/s` covered every repository under `g/s/`), and the port was dropped. The key is now the dependency's typed origin as ADR-0035 defines identity: the host, the port when it is not the transport's default, and the full path, always with the host written — `"github.com/almide/svg"`, `"gitlab.example:8443/g/s/a"`. A path dependency is still named by its package name. A key in the old two-segment form (`"almide/svg"`) is refused on its line with the new form as the hint, so no existing grant silently widens or narrows. E118's hints print the new key (`src/media_grant.rs` `grant_key`, `check_grant_key`; `tests/media_grant_test.rs`).

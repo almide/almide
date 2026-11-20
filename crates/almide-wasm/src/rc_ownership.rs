@@ -382,16 +382,19 @@ impl Emitter<'_> {
         // #4277: the site is anchored to this `if` and its `else`, so the RC
         // check reads the recorder's first arm as the shipped then-arm.
         let site = crate::witness::rc::site_id();
-        self.if_sites.insert(e as *const _, site);
+        let (then_at, else_at) = (self.arm_anchor(), self.arm_anchor());
+        self.if_sites.insert(e as *const _, (site, [then_at, else_at]));
         let if_at = self.f.byte_len();
         self.f
             .instructions()
             .if_(wasm_encoder::BlockType::Result(ty.val_type()));
+        self.arm_anchor_bind(then_at);
         self.branch_depth += 1;
         // The witness (#2756) sees each arm and the credit it hands the join.
         self.witness_branch_open_at(site);
         let arms = (|| {
             self.witness_branch_arm();
+            self.witness_branch_anchor(then_at);
             self.in_tail = tail;
             self.lower(then, Some(ty))?;
             let then_owned = self.rc_owned_result(then);
@@ -402,8 +405,10 @@ impl Emitter<'_> {
                 self.witness_arm_value(then);
             }
             self.f.instructions().else_();
+            self.arm_anchor_bind(else_at);
             crate::witness::rc::site_window(site, if_at, self.f.byte_len());
             self.witness_branch_arm_at(site);
+            self.witness_branch_anchor(else_at);
             self.in_tail = tail;
             self.lower(else_, Some(ty))?;
             let join = normalize || (then_owned && self.rc_droppable(ty));

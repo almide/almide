@@ -14,7 +14,19 @@ pub(crate) fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::D
         .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
 
     if file.ends_with(".json") {
-        let prog = serde_json::from_str(&input)
+        let value: serde_json::Value = serde_json::from_str(&input)
+            .unwrap_or_else(|e| { err(&format!("JSON parse error: {}", e)); std::process::exit(1); });
+        // #4820: an AST entry is source like a `.almd` file (row 13): a
+        // hidden character in any of its names or strings — raw or written as
+        // a JSON escape — is refused as E101 refuses it in source text.
+        if let Some(s) = first_hidden_string(&value) {
+            err(&format!(
+                "error[E101]: {file}: the AST entry holds a hidden character in `{}`\n  hint: hidden characters are refused in source; write the text without it, or as an escape in a string literal",
+                almide_base::err_text::escape_hidden(s)
+            ));
+            std::process::exit(1);
+        }
+        let prog = serde_json::from_value(value)
             .unwrap_or_else(|e| { err(&format!("JSON parse error: {}", e)); std::process::exit(1); });
         (prog, input, Vec::new())
     } else {
@@ -24,6 +36,17 @@ pub(crate) fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::D
             .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
         let parse_errors = std::mem::take(&mut parser.errors);
         (prog, input, parse_errors)
+    }
+}
+
+/// The first key or string of `v` holding a C-418 hidden character.
+fn first_hidden_string(v: &serde_json::Value) -> Option<&str> {
+    let hidden = |s: &str| matches!(almide_base::err_text::escape_hidden(s), std::borrow::Cow::Owned(_));
+    match v {
+        serde_json::Value::String(s) => hidden(s).then_some(s.as_str()),
+        serde_json::Value::Array(xs) => xs.iter().find_map(first_hidden_string),
+        serde_json::Value::Object(m) => m.iter().find_map(|(k, x)| if hidden(k) { Some(k.as_str()) } else { first_hidden_string(x) }),
+        _ => None,
     }
 }
 
@@ -242,12 +265,6 @@ fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
     Ok(())
 }
 
-/// The project manifest in the working directory, if there is one that
-/// parses — the same lookup every command makes.
-pub(crate) fn cwd_project() -> Option<project::Project> {
-    let path = std::path::Path::new("almide.toml");
-    if path.exists() { project::parse_toml(path).ok() } else { None }
-}
 
 /// The post-lowering pipeline every build route runs: the driver's optimize
 /// half, the route's integrity check (`verify`), the `[permissions]` gate,
@@ -332,9 +349,8 @@ fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Ve
 
     // An absolute entry path can belong to a different project from the
     // caller's cwd. Resolve dependencies and permissions from the same owner.
-    let parsed_project = project::permissions_project_for(file).or_else(|| {
-        project::parse_toml(std::path::Path::new("almide.toml")).ok()
-    });
+    // The entry's own project, by the one lookup (#4830): never the cwd's.
+    let parsed_project = project::permissions_project_for(file);
 
     if let Some(ref proj) = parsed_project {
         project::check_compiler_version(proj)
@@ -478,7 +494,7 @@ fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTi
 
     // `[permissions]` come from the entry file's own project (#4159 audit),
     // whatever directory the command runs in.
-    let permissions_project = project::permissions_project_for(file).or(parsed_project);
+    let permissions_project = parsed_project;
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
     t.lap("optimize+link");
     Ok((ir_program, outside_guarantee, native_input, source_text))
@@ -573,8 +589,12 @@ impl TestRunContext {
     }
 }
 
-pub(crate) fn test_run_context() -> Result<TestRunContext, String> {
-    let project = cwd_project();
+/// The context of a test run whose files are all governed by `manifest`
+/// (the one lookup, `project::manifest_for_entry`; `None` for no project).
+/// A run of files from several projects is several runs: see
+/// [`project::group_by_manifest`].
+pub(crate) fn test_run_context(manifest: Option<&std::path::Path>) -> Result<TestRunContext, String> {
+    let project = manifest.map(project::governing_manifest);
     let dep_paths = match project {
         Some(ref proj) => {
             project::check_compiler_version(proj)?;
@@ -829,7 +849,8 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         let culprits = batch.iter().filter(|p| failing.iter().any(|f| **f == p.file)).map(|p| p.file.clone()).collect();
         return Err(BatchFailure { message: format!("errors in {} module(s)", failing.len()), culprits });
     }
-    let permissions_project = project::permissions_project_for(&first).or_else(|| plan.project.clone());
+    // The run's own project: every file of the batch is governed by it.
+    let permissions_project = plan.project.clone();
     let native_input = (ir_program.clone().ok_or_else(|| unattributed("the test run did not lower".into()))?, checker);
     optimize_verify_and_link(&mut ir_program, &permissions_project, (&first, "")).map_err(unattributed)?;
     let native_text = cli::native_rust_text(&first);
@@ -837,6 +858,7 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         Some(ir) => host_source(ir, &codegen::CodegenOptions::default(), &native_text),
         None => Box::new(String::new),
     };
-    let rs_code = render_native_tests("", native_text, host, native_input).map_err(unattributed)?;
+    let fs_scope = plan.project.as_ref().and_then(|p| p.fs_allow.clone());
+    let rs_code = render_native_tests("", native_text, host, native_input, fs_scope).map_err(unattributed)?;
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

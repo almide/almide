@@ -259,8 +259,11 @@ impl<'a> Interpreter<'a> {
         }
         ok_val(match hof {
             "sort_by" => {
-                let order = crate::value::TotalOrder::new(&self.variant_tags);
-                keyed.sort_by(|(ka, _), (kb, _)| order.cmp(ka, kb).unwrap_or(std::cmp::Ordering::Equal));
+                if let Err(flow) = self.with_total_order(|order| {
+                    keyed.sort_by(|(ka, _), (kb, _)| order.cmp(ka, kb).unwrap_or(std::cmp::Ordering::Equal))
+                }) {
+                    return flow;
+                }
                 Value::list(keyed.into_iter().map(|(_, x)| x).collect())
             }
             "group_by" => {

@@ -204,34 +204,43 @@ fn resolve_source(
     tag: Option<&str>,
     branch: Option<&str>,
 ) -> Result<PathBuf, String> {
-    // Local path takes precedence: lets users iterate locally
-    // (`almide install .`) without committing first.
-    let p = Path::new(spec);
-    if p.exists() && p.is_dir() {
+    // A path spelled as one (`almide install .`) installs that directory,
+    // so users iterate without committing first. The spelling decides, not
+    // what exists on disk (#4864): `github.com/x/y` is a source even when a
+    // directory by that name is in the working directory.
+    if spelled_local(spec) {
+        let p = Path::new(spec);
+        if !p.is_dir() {
+            return Err(format!("error: {spec} is not a directory"));
+        }
         return p
             .canonicalize()
             .map_err(|e| format!("canonicalize {}: {}", p.display(), e));
     }
 
-    // Otherwise resolve as a package spec or git URL.
-    let (name, git_url, default_tag) =
-        if spec.starts_with("https://") || spec.starts_with("git@") || spec.starts_with("ssh://") || spec.starts_with("file://") {
-            let name = spec
-                .rsplit('/')
-                .next()
-                .unwrap_or("unknown")
-                .trim_end_matches(".git")
-                .to_string();
-            (name, spec.to_string(), None)
-        } else {
-            project_fetch::resolve_package_spec(spec)
-        };
+    // Otherwise resolve as a package spec or git URL, read once into a
+    // typed source (ADR-0035 D1).
+    let (name, src, default_tag) = match written_source(spec) {
+        Some(src) => {
+            let src = src?;
+            let name = src.path.last().map(|s| s.as_str().to_string()).unwrap_or_else(|| "unknown".to_string());
+            (name, src, None)
+        }
+        None => {
+            let (name, url, tag) = project_fetch::resolve_package_spec(spec);
+            let src = crate::git_source::GitSource::parse(&url).map_err(|e| format!("error: {e}"))?;
+            (name, src, tag)
+        }
+    };
 
+    let as_ref = |what: &str, text: String| {
+        crate::git_source::GitRef::parse(&text).map_err(|why| format!("error: --{what} `{}` is not a ref name: {why}", text.escape_debug()))
+    };
     let dep = Dependency {
         name,
-        git: git_url,
-        tag: tag.map(String::from).or(default_tag),
-        branch: branch.map(String::from),
+        git: Some(src.clone()),
+        tag: tag.map(String::from).or(default_tag).map(|t| as_ref("tag", t)).transpose()?,
+        branch: branch.map(String::from).map(|b| as_ref("branch", b)).transpose()?,
         version: None,
         path: None,
         subdir: None,
@@ -240,16 +249,24 @@ fn resolve_source(
     // A tag names an immutable snapshot and keeps its cache entry. A branch
     // (or the remote's default HEAD) MOVES: resolve the remote head now and
     // build that commit — `go install pkg@latest` semantics — instead of
-    // reusing whatever clone the cache holds from an earlier install, which
+    // reusing whatever the cache holds from an earlier install, which
     // silently reinstalled a stale version (#1956). The commit is printed so
     // what was built is visible.
     if dep.tag.is_none() {
-        let ref_name = dep.branch.clone().unwrap_or_else(|| "HEAD".to_string());
-        let head = project_fetch::git_remote_head(&dep.git, &ref_name)?;
-        err(&format!("Resolved {} {} -> {}", dep.name, ref_name, &head[..12.min(head.len())]));
+        let ref_name = dep.branch.as_deref().unwrap_or("HEAD").to_string();
+        let head = project_fetch::git_remote_head(&src, &ref_name)?;
+        err(&format!("Resolved {} {} -> {}", dep.name, ref_name, head.short()));
         return project_fetch::fetch_dep_with_lock(&dep, Some(&head));
     }
     project_fetch::fetch_dep(&dep)
+}
+
+/// A spec written as a source URL (`scheme://…`, or the scp-like
+/// `user@host:path`), read into a [`crate::git_source::GitSource`]; `None`
+/// for a package spec (`json`, `almide/json`, `host/owner/repo`).
+fn written_source(spec: &str) -> Option<Result<crate::git_source::GitSource, String>> {
+    (spec.contains("://") || spec.contains('@') && spec.contains(':'))
+        .then(|| crate::git_source::GitSource::parse(spec).map_err(|e| format!("error: {e}")))
 }
 
 /// The installed binary's name must be one plain identifier (#4183): it is
@@ -307,37 +324,44 @@ pub struct InstallGrants<'a> {
     pub allow_native: bool,
 }
 
-/// The git URL a spec resolves to, or `None` for a local directory.
-fn spec_url(spec: &str) -> Option<String> {
-    let p = Path::new(spec);
-    if p.is_dir() {
+/// The source a spec resolves to, or `None` for a local directory.
+/// Is `spec` spelled as a local directory (#4864)? Only an explicit path is:
+/// `.`, `..`, or one starting with `./`, `../` or `/`. Anything else is read
+/// as a source and goes through the trust check, whatever happens to exist
+/// on disk under that name.
+fn spelled_local(spec: &str) -> bool {
+    matches!(spec, "." | "..") || spec.starts_with("./") || spec.starts_with("../") || Path::new(spec).is_absolute()
+}
+
+fn spec_source(spec: &str) -> Option<Result<crate::git_source::GitSource, String>> {
+    if spelled_local(spec) {
         return None;
     }
-    if spec.starts_with("https://") || spec.starts_with("git@") || spec.starts_with("ssh://") || spec.starts_with("file://") {
-        return Some(spec.to_string());
-    }
-    Some(project_fetch::resolve_package_spec(spec).1)
+    Some(written_source(spec).unwrap_or_else(|| {
+        crate::git_source::GitSource::parse(&project_fetch::resolve_package_spec(spec).1).map_err(|e| format!("error: {e}"))
+    }))
 }
 
 /// #4184: a remote spec's owner is trusted by default (github.com/almide) or
 /// named by `--trust`; anything else is refused before it is fetched.
 fn check_install_trust(spec: &str, trust: Option<&str>) -> Result<(), String> {
-    let Some(url) = spec_url(spec) else {
+    let Some(src) = spec_source(spec) else {
         return match trust {
             Some(t) => Err(format!("error: --trust {t}: {spec} is a local directory, which needs no trust")),
             None => Ok(()),
         };
     };
-    let owner = crate::trust::source_owner(&url).map_err(|e| format!("error: {e}"))?;
-    let Some(owner) = owner else { return Ok(()) };
+    let src = src?;
+    let owner = src.owner();
     match trust.map(crate::trust::owner_arg) {
-        Some(t) if t == owner => Ok(()),
-        Some(t) => Err(format!(
-            "error: --trust {t} does not match the owner of {url} ({owner})\n  hint: --trust must name the owner the source belongs to"
+        Some(Ok(t)) if t.covers(&src) => Ok(()),
+        Some(Ok(t)) => Err(format!(
+            "error: --trust {t} does not match the owner of {src} ({owner})\n  hint: --trust must name the owner the source belongs to"
         )),
-        None if owner == crate::trust::DEFAULT_TRUSTED_OWNER => Ok(()),
+        Some(Err(e)) => Err(format!("error: --trust: {e}")),
+        None if crate::trust::is_trusted(&[], &src) => Ok(()),
         None => Err(format!(
-            "error: refusing to install {spec}: its owner is not trusted\n  source: {url}\n  owner: {owner}\n  hint: if you asked for this exact repository, rerun with --trust {owner}"
+            "error: refusing to install {spec}: its owner is not trusted\n  source: {src}\n  owner: {owner}\n  hint: if you asked for this exact repository, rerun with --trust {owner}"
         )),
     }
 }

@@ -1,0 +1,2 @@
+expects_error = "expected Duration, found Int"
+hint_substring = "fan.timeout(duration.ms(100))"

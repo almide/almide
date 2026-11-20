@@ -444,24 +444,31 @@ pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String
 }
 
 /// The capabilities an `almide.toml [permissions].allow` list grants an
-/// `effect fn` — the same reading as the MIR producer's
-/// `certificate::manifest_caps`: `IO` the console, stdin and the file
-/// system, `Rand` entropy, `Env` arguments, environment and processes,
-/// `Time` the clock, `Net` the network. A name outside the list grants
-/// nothing.
+/// `effect fn` — read as the MIR producer's `certificate::manifest_caps`
+/// reads it: each name grants its ADR-0026 D2 leaves (`Effect::granted_by`,
+/// a parent its leaves), each leaf the capability its host ops reach. An
+/// unknown name grants nothing. This used to spell its own name table, from
+/// before files left `IO` (dialect epoch 15): `IO` granted the file system,
+/// and `FS`, `Proc` and every leaf granted nothing.
 pub fn manifest_bound(allow: &[String]) -> BTreeSet<u32> {
+    use almide_ir::effect::Effect;
     use cap::*;
     allow
         .iter()
-        .flat_map(|p| match p.as_str() {
-            "IO" => &[STDOUT, STDIN, FS_READ, FS_WRITE][..],
-            "Rand" => &[ENTROPY][..],
-            "Env" => &[ENV, PROC][..],
-            "Time" => &[CLOCK][..],
-            "Net" => &[NET][..],
-            _ => &[][..],
+        .filter_map(|p| Effect::granted_by(p))
+        .flatten()
+        .filter_map(|leaf| match leaf {
+            Effect::FsRead => Some(FS_READ),
+            Effect::FsWrite => Some(FS_WRITE),
+            Effect::IoStdin => Some(STDIN),
+            Effect::IoStdout => Some(STDOUT),
+            Effect::EnvRead => Some(ENV),
+            Effect::Proc => Some(PROC),
+            Effect::Time => Some(CLOCK),
+            Effect::Rand => Some(ENTROPY),
+            Effect::NetFetch | Effect::NetListen => Some(NET),
+            Effect::IoStderr | Effect::EnvWrite | Effect::Fan | Effect::Abort => None,
         })
-        .copied()
         .collect()
 }
 
@@ -763,3 +770,26 @@ fn reach(direct: &[BTreeSet<u32>], callees: &[BTreeSet<usize>], start: usize) ->
 #[cfg(test)]
 #[path = "cert_project_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod manifest_bound_tests {
+    use super::cap::*;
+    use super::manifest_bound;
+
+    fn of(names: &[&str]) -> Vec<u32> {
+        manifest_bound(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>()).into_iter().collect()
+    }
+
+    /// The structural projection grants what the MIR producer grants: `IO`
+    /// is the console, the files are `FS`, a leaf grants itself.
+    #[test]
+    fn the_manifest_bound_reads_the_grants_as_the_effect_system_does() {
+        assert!(!of(&["IO"]).contains(&FS_READ), "IO no longer grants the file system");
+        assert!(of(&["FS"]).contains(&FS_READ) && of(&["FS"]).contains(&FS_WRITE));
+        assert_eq!(of(&["FS.read"]), vec![FS_READ]);
+        assert_eq!(of(&["Env.read"]), vec![ENV]);
+        assert_eq!(of(&["Proc"]), vec![PROC]);
+        assert!(!of(&["Env"]).contains(&PROC), "Env does not grant processes");
+        assert!(of(&["Nonsense"]).is_empty());
+    }
+}

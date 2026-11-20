@@ -16,6 +16,9 @@
 //! fetched or written. The lock writer never emits a name twice, and a lock an
 //! affected compiler already wrote gets a message saying what to do.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -93,12 +96,9 @@ fn write_project(root: &Path, dep_lines: &[String]) -> PathBuf {
 }
 
 fn run(proj: &Path, home: &Path, args: &[&str]) -> (bool, String) {
-    let out = Command::new(almide_bin())
-        .args(args)
-        .current_dir(proj)
-        .env("HOME", home)
-        .output()
-        .expect("spawn almide");
+    let mut cmd = Command::new(almide_bin());
+    cmd.args(args).current_dir(proj).env("HOME", home);
+    let out = git_host::shared().env(&mut cmd).output().expect("spawn almide");
     (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
 }
 
@@ -117,8 +117,8 @@ fn a_dependency_declared_twice_is_refused_on_the_manifest_line() {
     let proj = write_project(
         &root,
         &[
-            format!("dup_lib = {{ git = \"file://{}\", tag = \"v1.0.0\" }}", lib.display()),
-            format!("dup_lib = {{ git = \"file://{}/\", tag = \"v1.0.0\" }}", lib.display()),
+            format!("dup_lib = {{ git = \"{}\", tag = \"v1.0.0\" }}", git_host::shared().url_of(&lib)),
+            format!("dup_lib = {{ git = \"{}.git\", tag = \"v1.0.0\" }}", git_host::shared().url_of(&lib)),
         ],
     );
 
@@ -155,14 +155,14 @@ fn a_lock_holding_an_entry_twice_says_what_to_do() {
     let root = scratch("lock");
     let home = root.join("home");
     let (lib, commit) = commit_package(&root);
-    let url = format!("file://{}", lib.display());
+    let url = git_host::shared().url_of(&lib);
     let proj = write_project(&root, &[format!("dup_lib = {{ git = \"{url}\", tag = \"v1.0.0\" }}")]);
     std::fs::write(
         proj.join("almide.lock"),
         format!(
             "# almide.lock — auto-generated, do not edit\n\n\
              dup_lib = {{ git = \"{url}\", ref = \"v1.0.0\", commit = \"{commit}\" }}\n\
-             dup_lib = {{ git = \"{url}/\", ref = \"v1.0.0\", commit = \"{commit}\" }}\n"
+             dup_lib = {{ git = \"{url}.git\", ref = \"v1.0.0\", commit = \"{commit}\" }}\n"
         ),
     )
     .expect("write lock");
@@ -201,7 +201,7 @@ fn a_dependency_declared_once_still_checks_and_locks_once() {
     let (lib, commit) = commit_package(&root);
     let proj = write_project(
         &root,
-        &[format!("dup_lib = {{ git = \"file://{}\", tag = \"v1.0.0\" }}", lib.display())],
+        &[format!("dup_lib = {{ git = \"{}\", tag = \"v1.0.0\" }}", git_host::shared().url_of(&lib))],
     );
     for _ in 0..2 {
         let (ok, stderr) = run(&proj, &home, &["check", "src/main.almd"]);
@@ -209,7 +209,7 @@ fn a_dependency_declared_once_still_checks_and_locks_once() {
     }
     let entries = almide::project::parse_lock_file(&proj.join("almide.lock")).expect("parse lock");
     assert_eq!(entries.len(), 1, "{entries:?}");
-    assert_eq!(entries[0].commit, commit);
+    assert_eq!(entries[0].commit.as_str(), commit);
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -223,9 +223,10 @@ fn the_lock_writer_never_emits_a_name_twice() {
     let lock = dir.join("almide.lock");
     let dep = |git: &str| almide::project::LockedDep {
         name: "almai".into(),
-        git: git.into(),
+        git: almide::git_source::GitSource::parse(git).unwrap(),
         ref_name: "main".into(),
-        commit: "0123456789abcdef".into(),
+        commit: almide::git_source::CommitId::parse(&"0123456789abcdef".repeat(3)[..40]).unwrap(),
+        sum: None,
         subdir: None,
     };
     almide::project::write_lock_file(
@@ -235,7 +236,7 @@ fn the_lock_writer_never_emits_a_name_twice() {
     .expect("write lock");
     let entries = almide::project::parse_lock_file(&lock).expect("the lock must read back");
     assert_eq!(entries.len(), 1, "{entries:?}");
-    assert_eq!(entries[0].git, "https://github.com/almide/almai", "the first declaration wins");
+    assert_eq!(entries[0].git.to_string(), "https://github.com/almide/almai", "the first declaration wins");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -61,12 +61,13 @@ Systems compared: Go modules, Cargo, npm, pnpm, Deno/JSR, SwiftPM, Zig, pub, Hex
 ### D1. A source is written as a URL on any git host and read once into a typed `GitSource`
 
 ```
-GitSource = { transport: Https | Ssh, user: Segment?, host: Host, port: 1..65535?, path: [Segment] (1 or more) }
+GitSource = { transport: Https | Ssh, user: Segment?, host: Host, port: 1..65535?, path: [Segment] (1 or more), root: Absolute | HomeRelative }
 Host      = lowercase ASCII DNS name, 1..253 bytes, labels [a-z0-9-], not starting or ending with "-"
 Segment   = [A-Za-z0-9_] [A-Za-z0-9._-]{0,99}   -- never starts with "-" or ".", never "." or ".."
 ```
 
-- **Kept:** any git host, self-hosted included; paths of any depth (GitLab subgroups); a port; `https://`, `ssh://` and the scp-like `user@host:path`, which is normalized into the same value; an ssh user that fits `Segment`; a `.git` suffix, normalized away.
+- **Kept:** any git host, self-hosted included; paths of any depth (GitLab subgroups); a port; `https://`, `ssh://` and the scp-like `user@host:path`; an ssh user that fits `Segment`; a `.git` suffix, normalized away.
+- **Amended 2026-11-19 (owner ×, ruling 6):** the scp-like form keeps git's meaning. Its path is relative to the remote user's home, recorded as the typed `root: HomeRelative` (not a spelling). The ssh launcher sends it with no leading `/`, and the canonical print keeps the scp-like form (`git@host:a/b`). `user@host:/a/b` is the absolute path written scp-like, the same source as `ssh://user@host/a/b`. Because the two forms can name different repositories on a plain ssh server, `root` is part of the identity.
 - **Refused with a diagnostic that prints the canonical form**, when it has one:
   - any component that starts with `-`;
   - a query or a fragment;
@@ -87,7 +88,8 @@ Segment   = [A-Za-z0-9_] [A-Za-z0-9._-]{0,99}   -- never starts with "-" or ".",
 
 ### D3. Package content is a tree of regular files, and the format cannot express anything else
 
-- Fetched content becomes a typed tree `[(RelPath, Bytes)]` before anything touches the filesystem. A `RelPath` is a list of `Segment`s.
+- Fetched content becomes a typed tree `[(RelPath, Bytes)]` before anything touches the filesystem. A `RelPath` is a list of file-name segments.
+- **Amended 2026-11-19 (owner ○, ruling 1):** a file-name segment is `[A-Za-z0-9._-]{1,100}`: it may start with `.` (every package has `.gitignore` or `.github/`, which the URL `Segment` grammar would refuse), but never with `-`, is never `.` or `..`, never `.git` in any case, and never a Windows reserved name. URL path segments keep the `Segment` grammar above.
 - **Refused** as a package-format error naming the entry:
   - a symlink, a hard link, a submodule (gitlink) or a device;
   - an absolute path, `..`, or a segment that fails the grammar;
@@ -98,8 +100,18 @@ Segment   = [A-Za-z0-9_] [A-Za-z0-9._-]{0,99}   -- never starts with "-" or ".",
   |---|---|---|
   | bytes per file | 16 MiB | Go's go.mod cap |
   | bytes per package | 64 MiB | between JSR and Hex |
-  | files per package | 10 000 | no precedent; to be measured against every almide-org package before landing |
-  | path depth | 32 | no precedent; to be measured against every almide-org package before landing |
+  | files per package | 10 000 | no precedent; measured (below) |
+  | path depth | 32 | no precedent; measured (below) |
+
+  **Measured 2026-11-19 (owner ○, ruling 2), before landing:** all 34 almide-org repositories, HEAD and every tag (59 trees), as a fetch would materialize them:
+
+  | | files | depth | largest file | total |
+  |---|---|---|---|---|
+  | largest library package (porta) | 359 | 5 | 0.26 MB | 3.4 MB |
+  | almide-dojo HEAD (benchmark harness, not a dependency) | 13 450 | 5 | 1.09 MB | 61.9 MB |
+  | the compiler repository (not a dependency) | 11 365 | 11 | 2.75 MB | 66.8 MB |
+
+  No tree holds a link or a case collision; only the compiler repository holds gitlinks (2). Every library fits every budget with more than 25× headroom on files and 6× on depth; the two trees over 10 000 files are not dependencies. With a leading `.` allowed, every library passes the file-name grammar. No almide-org manifest or lock uses a refused source form (Track 1 scan).
 
 - The unpacker writes only regular files under the package root, and cannot create a link.
 - Every reader of a dependency uses **one enumeration**, `package_files(root)`: the native-grant scan, the module loader, `almide test` discovery and the LSP. Inside a dependency root it never follows a link. A link met in the cache is tampering, and is refused.
@@ -148,6 +160,7 @@ This holds today: there are no build scripts, and native code needs `[permission
 ## Owner decisions (○/×)
 
 - **2026-11-18 (draft):** 1 ×, because identities only would lose URLs on other hosts; 2–5 to be decided by comparison with other languages; 6 ×, implement now.
+- **2026-11-19, implementation rulings:** 1 ○ a file-name segment may start with `.` (D3, amended above); 2 ○ files 10 000 and depth 32, measured (D3 table); 3 ○ an in-process client of our own on the rustls stack already shipped, adding miniz_oxide, sha1 and adler2; 4 https stays anonymous, a private repository is fetched over ssh, and an https authentication refusal prints the ssh form to write (reading `~/.netrc`, keyed by the exact `(transport, host, port)`, is a later step with its own issue); 5 ○ the tests reach an in-test git host through `HTTPS_PROXY` and `SSL_CERT_FILE`, with no new almide setting; 6 × the scp-like form is not normalized to an absolute path (D1, amended above).
 - **2026-11-19, all ○, after the comparison:**
   1. URLs stay, on any git host, read once into `GitSource`. Only the listed dangerous forms are refused.
   2. No process starts except one typed ssh launcher; https goes through an in-process client.

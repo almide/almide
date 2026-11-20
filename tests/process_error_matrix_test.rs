@@ -261,8 +261,10 @@ effect fn main() -> Unit = {
 ///   `read_new_stderr`, `child_pid` — native-only, each declared unavailable
 ///   on the wasm legs in proofs/target-availability.toml (E081).
 ///
-/// Every fn that starts a child has a `[permissions] proc` row (src/cli/mod.rs)
-/// and a spawn-failure row in [`rows`].
+/// Every fn that starts a child is charged by `[permissions] proc` — it, or
+/// the runtime leaf it reaches, is declared `@spawns_process` (#4817; the
+/// charge is derived from that declaration in src/cli/proc_spawn.rs) — and
+/// has a spawn-failure row in [`rows`].
 #[test]
 fn the_subprocess_family_has_every_cell() {
     const NON_MEMBERS: &[&str] = &["exit", "args", "stdin_lines", "env", "sleep"];
@@ -275,7 +277,8 @@ fn the_subprocess_family_has_every_cell() {
         ("pid", "pid", "pid", "process.pid"),
     ];
     const HANDLE: &[&str] = &["start", "poll", "wait", "stop", "read_new_stdout", "read_new_stderr", "child_pid"];
-    const STARTS_A_CHILD: &[&str] = &["exec", "output", "run", "start"];
+    // (fn, the declaration that starts the child: itself or its runtime leaf)
+    const STARTS_A_CHILD: &[(&str, &str)] = &[("exec", "exec"), ("output", "__os_output"), ("run", "__os_run"), ("start", "__os_start")];
     let root = env!("CARGO_MANIFEST_DIR");
     let read = |p: &str| std::fs::read_to_string(format!("{root}/{p}")).unwrap_or_else(|e| panic!("{p}: {e}"));
     let stdlib = read("stdlib/process.almd");
@@ -283,7 +286,19 @@ fn the_subprocess_family_has_every_cell() {
     let leaves = read("crates/almide-wasm/src/fs_meta.rs");
     let registry = read("crates/almide-types/src/self_host_registry.rs");
     let availability = read("proofs/target-availability.toml");
-    let permissions = read("src/cli/mod.rs");
+    // The attribute lines directly above `fn <name>(` (any visibility).
+    let marked = |name: &str| {
+        let lines: Vec<&str> = stdlib.lines().collect();
+        let Some(at) = lines.iter().position(|l| {
+            let t = l.trim_start();
+            let t = t.strip_prefix("local ").unwrap_or(t);
+            let t = t.strip_prefix("effect ").unwrap_or(t);
+            t.starts_with(&format!("fn {name}("))
+        }) else {
+            return false;
+        };
+        lines[..at].iter().rev().take_while(|l| l.trim_start().starts_with('@')).any(|l| l.trim_start().starts_with("@spawns_process("))
+    };
     let failure_rows: Vec<String> = rows().into_iter().map(|(call, _)| call.to_string()).collect();
 
     let public: Vec<String> = stdlib
@@ -315,9 +330,9 @@ fn the_subprocess_family_has_every_cell() {
             missing.push(format!("  process.{f}: target-availability row (native-only, E081)"));
         }
     }
-    for f in STARTS_A_CHILD {
-        if !permissions.contains(&format!("(\"{f}\", ")) {
-            missing.push(format!("  process.{f}: [permissions] proc row in src/cli/mod.rs"));
+    for (f, decl) in STARTS_A_CHILD {
+        if !marked(decl) {
+            missing.push(format!("  process.{f}: `{decl}` is not declared @spawns_process, so [permissions] proc does not charge it"));
         }
         if !failure_rows.iter().any(|c| c.contains(&format!("process.{f}("))) {
             missing.push(format!("  process.{f}: spawn-failure row in rows()"));

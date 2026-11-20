@@ -104,7 +104,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/a
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
-安装脚本在解包前会用发布的 `almide-checksums.sha256` 校验压缩包；每个发布资产都有 Sigstore 证明（验证方法见 [SECURITY.md](./SECURITY.md#release-integrity)）。每个压缩包还带有 `almide-verify`，即 `almide verify` 交付见证的证书检查器。从源码构建需要 [Rust](https://rustup.rs/) 1.96+：`make install`。
+安装脚本在解包前会用发布的 `almide-checksums.sha256` 校验压缩包；每个发布资产都有 Sigstore 证明（验证方法见 [SECURITY.md](./SECURITY.md#release-integrity)）。每个压缩包还带有 `almide-verify`，即 `almide verify` 交付见证的证书检查器。从源码构建需要 [Rust](https://rustup.rs/) 1.97+：`make install`。
 
 ```almd
 fn main() -> Unit = {

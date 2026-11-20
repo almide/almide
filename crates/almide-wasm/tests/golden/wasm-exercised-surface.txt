@@ -33,6 +33,7 @@ call:base64.encode_url
 call:bigint.__almd_mono4_from__Int
 call:bigint.abs
 call:bigint.bit_length
+call:bigint.compare
 call:bigint.parse
 call:bigint.parse_radix
 call:bigint.pow
@@ -441,10 +442,17 @@ call:list.__almd_mono27___fallible_binary_search_by__Int_cString_cInt
 call:list.__almd_mono29___fallible_binary_search_with__Int_cString
 call:list.__almd_mono3_sum__Int
 call:list.__almd_mono4_join__String
+call:list.__almd_mono5_unzip___nBigInt_cTup_lString_c_nBigInt_r
+call:list.__almd_mono6_max_by__Tup_lString_c_nBigInt_r_c_nBigInt
+call:list.__almd_mono6_min_by__Tup_lString_c_nBigInt_r_c_nBigInt
 call:list.__almd_mono7_product__Int
 call:list.__almd_mono8_find_map__Int_cInt
 call:list.__almd_mono8_find_map__Int_cString
 call:list.__almd_mono8_find_map__String_cString
+call:list.__almd_mono8_max_with___nBigInt
+call:list.__almd_mono8_min_with___nBigInt
+call:list.__almd_mono9_sort_with__Tup_l_nBigInt_cTup_lString_c_nBigInt_r_r
+call:list.__almd_mono9_sort_with___nBigInt
 call:list.all
 call:list.any
 call:list.chunk
@@ -661,6 +669,10 @@ call:set.__almd_mono19___fallible_zip_with__Int_cInt_cInt_cString
 call:set.__almd_mono20___fallible_partition__Int_cString
 call:set.__almd_mono20___fallible_sort_with__Int_cString
 call:set.__almd_mono21___fallible_filter_map__Int_cInt_cString
+call:set.__almd_mono3_max___nBigInt
+call:set.__almd_mono3_min___nBigInt
+call:set.__almd_mono4_sort__Int
+call:set.__almd_mono4_sort___nBigInt
 call:set.contains
 call:set.difference
 call:set.filter

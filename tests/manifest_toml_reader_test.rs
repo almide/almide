@@ -63,7 +63,7 @@ fn dependencies_keep_file_order_and_read_every_spelling() {
     let names: Vec<&str> = p.dependencies.iter().map(|d| d.name.as_str()).collect();
     assert_eq!(names, ["zeta", "alpha", "quoted", "mid"], "file order; a bare string is not a dependency");
     let alpha = &p.dependencies[1];
-    assert_eq!(alpha.git, "https://example.com/alpha");
+    assert_eq!(alpha.git.as_ref().map(ToString::to_string).as_deref(), Some("https://example.com/alpha"));
     assert_eq!(alpha.tag.as_deref(), Some("v1.0.0"));
     assert_eq!(p.dependencies[3].branch.as_deref(), Some("main"));
 }

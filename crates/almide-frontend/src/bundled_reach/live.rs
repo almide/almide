@@ -55,6 +55,16 @@ pub const REWRITE_INSERTED: &[(&str, &str, &str)] = &[
     ("json", "__leaf_bool", "parse"),
     ("json", "__leaf_string", "parse"),
     ("json", "__array_text", "stringify"),
+    // Mono's protocol-order rewrite (#4788): a natural-order call over a type
+    // that orders through its protocol's `compare` takes the comparator form.
+    // Generic, so a program the rewrite never fires in prunes them after mono.
+    ("list", "sort_with", "sort"),
+    ("list", "min_with", "min"),
+    ("list", "max_with", "max"),
+    ("list", "sort_with", "sort_by"),
+    ("list", "zip", "sort_by"),
+    ("list", "map", "sort_by"),
+    ("list", "unzip", "sort_by"),
 ];
 
 /// Is `d` of `module` a [`REWRITE_INSERTED`] function whose trigger is in

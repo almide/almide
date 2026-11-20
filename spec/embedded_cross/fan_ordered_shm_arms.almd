@@ -1,0 +1,41 @@
+// @contract: C-004
+// ADR-0024 D3 (almide/almide#4618): `unix.shm_write` and `unix.shm_resize`
+// are `@ordered` — a shared-memory file is state a sibling arm can read, like
+// an `fs` write. A `fan { }` whose arm reaches either runs its arms in arm
+// order on every leg, so the sleeping reader sees the file from BEFORE the
+// writer: a zero byte and the size it was created with. On threads it saw
+// the writer's byte, or its new size.
+import env
+import unix
+
+effect fn reader(fd: unix.Fd) -> Result[String, String] = {
+  env.sleep_ms(100)
+  let b = unix.shm_read(fd, 0, 64)!
+  ok("read ${bytes.len(b)} bytes, first ${bytes.get(b, 0) ?? -1}")
+}
+
+effect fn writer(fd: unix.Fd) -> Result[String, String] = {
+  unix.shm_write(fd, 0, bytes.from_list([7]))!
+  ok("wrote")
+}
+
+effect fn grower(fd: unix.Fd) -> Result[String, String] = {
+  unix.shm_resize(fd, 32)!
+  ok("resized")
+}
+
+effect fn main() -> Unit = {
+  let a = unix.shm_create(8)!
+  let (r, w) = fan {
+    reader(a)!
+    writer(a)!
+  }
+  println("${r}; ${w}")
+  let b = unix.shm_create(8)!
+  let (r2, g) = fan {
+    reader(b)!
+    grower(b)!
+  }
+  println("${r2}; ${g}")
+  println("after: ${reader(a)!}; ${reader(b)!}")
+}

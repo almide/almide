@@ -129,6 +129,8 @@ impl Checker {
                 format!("`@pure` fn `{name}` is an `effect fn`")
             } else if !extern_attrs.is_empty() {
                 format!("`@pure` cannot be checked on `@extern` fn `{name}`: its body is foreign")
+            } else if self.env.inline_rust_fns.contains(&self.fn_decl_key(name)) {
+                format!("`@pure` cannot be checked on `@inline_rust` fn `{name}`: its body is foreign")
             } else {
                 let key = self.fn_decl_key(name);
                 self.purity.pending.push(PendingPure { key, name: *name, at });
@@ -209,6 +211,10 @@ impl Checker {
             }
             PurityCallee::User(k) if self.env.extern_fns.contains(k) => {
                 Some((k.to_string(), "is an `@extern` fn, whose body cannot be checked".to_string()))
+            }
+            // #4824: an `@inline_rust` body outside the stdlib is foreign too.
+            PurityCallee::User(k) if self.env.inline_rust_fns.contains(k) => {
+                Some((k.to_string(), "is an `@inline_rust` fn, whose body is Rust text the checker cannot see".to_string()))
             }
             PurityCallee::User(_) => None,
         }

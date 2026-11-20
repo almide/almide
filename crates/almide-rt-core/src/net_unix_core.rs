@@ -28,6 +28,23 @@
 
 include!("net_unix_sys.rs");
 
+/// `[permissions] fs` over a socket path (C-393, #4832): the decision a
+/// consumer that bounds the file system installs — the embedded host's
+/// scope; natively the guard wraps the call before it gets here. A path it
+/// refuses is answered with its refusal before any socket is created. The
+/// bind and connect are then made on the path as given, not beneath a held
+/// descriptor: a socket address is a path the kernel resolves again.
+static ALMIDE_UNIX_PATH_GATE: std::sync::OnceLock<fn(&str) -> Result<(), String>> = std::sync::OnceLock::new();
+
+/// Install the socket path decision (once per process).
+pub fn almide_unix_path_gate(gate: fn(&str) -> Result<(), String>) {
+    let _ = ALMIDE_UNIX_PATH_GATE.set(gate);
+}
+
+fn almide_unix_path_admitted(path: &str) -> Result<(), String> {
+    ALMIDE_UNIX_PATH_GATE.get().map_or(Ok(()), |gate| gate(path))
+}
+
 /// The descriptors one run (embedded) or one thread (native) holds, and the
 /// ones each socket received that the program has not taken yet.
 #[derive(Default)]
@@ -143,12 +160,14 @@ impl AlmideUnixTables {
 
     /// Connect a stream socket to the listener at `path`; its descriptor.
     pub fn unix_connect(&mut self, path: &str) -> Result<i64, String> {
+        almide_unix_path_admitted(path)?;
         let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix_connect({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(s)))
     }
 
     /// Listen for stream connections at `path` (which must not exist yet).
     pub fn unix_listen(&mut self, path: &str) -> Result<i64, String> {
+        almide_unix_path_admitted(path)?;
         let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(l)))
     }

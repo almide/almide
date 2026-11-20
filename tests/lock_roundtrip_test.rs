@@ -8,7 +8,17 @@
 //! from the network. The reader is now the `toml` crate, the writer escapes
 //! its strings, and a malformed entry is an error naming the dependency.
 
+use almide::git_source::{CommitId, GitSource};
 use almide::project::{parse_lock_file, write_lock_file, LockedDep};
+
+fn src(s: &str) -> GitSource {
+    GitSource::parse(s).unwrap()
+}
+
+/// A 40-digit commit id from a short marker.
+fn cid(marker: &str) -> CommitId {
+    CommitId::parse(&marker.repeat(40 / marker.len())).unwrap()
+}
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("almide-issue1465-{}", name));
@@ -24,26 +34,29 @@ fn hostile_ref_round_trips() {
     let deps = vec![
         LockedDep {
             name: "plain".into(),
-            git: "https://github.com/almide/plain".into(),
+            git: src("https://github.com/almide/plain"),
             ref_name: "v0.1.0".into(),
-            commit: "aaaa1111".into(),
+            commit: cid("aaaa1111"),
+            sum: None,
             subdir: None,
         },
         // A comma, a closing brace, a quote and a space — each one broke the
         // old splitter in a different way.
         LockedDep {
             name: "hostile".into(),
-            git: "https://github.com/almide/hostile".into(),
+            git: src("https://github.com/almide/hostile"),
             ref_name: "feat/x,y}z\"w v2".into(),
-            commit: "bbbb2222".into(),
+            commit: cid("bbbb2222"),
+            sum: None,
             subdir: None,
         },
         // #3381: a package in a subdirectory of the repository.
         LockedDep {
             name: "ceangal".into(),
-            git: "https://github.com/almide-graphics/ceangal2".into(),
+            git: src("https://github.com/almide-graphics/ceangal2"),
             ref_name: "v0.1.0".into(),
-            commit: "cccc3333".into(),
+            commit: cid("cccc3333"),
+            sum: Some(almide::package_tree::TreeSum::of(std::iter::once(("a", [7u8; 32])))),
             subdir: Some("pkgs/ceangal".into()),
         },
     ];
@@ -58,12 +71,13 @@ fn hostile_ref_round_trips() {
         assert_eq!(got.git, want.git);
         assert_eq!(got.ref_name, want.ref_name);
         assert_eq!(got.commit, want.commit);
+        assert_eq!(got.sum, want.sum);
         assert_eq!(got.subdir, want.subdir);
     }
     // An entry without `subdir` is written exactly as before #3381.
     let text = std::fs::read_to_string(&path).expect("read");
     assert!(
-        text.contains("plain = { git = \"https://github.com/almide/plain\", ref = \"v0.1.0\", commit = \"aaaa1111\" }\n"),
+        text.contains(&format!("plain = {{ git = \"https://github.com/almide/plain\", ref = \"v0.1.0\", commit = \"{}\" }}\n", cid("aaaa1111"))),
         "{text}"
     );
 }
@@ -88,9 +102,10 @@ fn a_corrupt_lock_is_an_error_not_an_empty_set() {
 fn one_dep(commit: &str) -> Vec<LockedDep> {
     vec![LockedDep {
         name: "almai".into(),
-        git: "https://github.com/almide/almai".into(),
+        git: src("https://github.com/almide/almai"),
         ref_name: "main".into(),
-        commit: commit.into(),
+        commit: cid(commit),
+        sum: None,
         subdir: None,
     }]
 }
@@ -157,7 +172,7 @@ fn an_unchanged_or_read_only_lock_is_not_rewritten() {
     write_lock_file(&path, &one_dep("aaaa1111")).expect("identical content is a no-op");
     assert!(write_lock_file(&path, &one_dep("bbbb2222")).is_err(), "a read-only lock was replaced");
     let back = parse_lock_file(&path).expect("parse");
-    assert_eq!(back[0].commit, "aaaa1111");
+    assert_eq!(back[0].commit, cid("aaaa1111"));
     #[allow(clippy::permissions_set_readonly_false)]
     perms.set_readonly(false);
     std::fs::set_permissions(&path, perms).expect("chmod back");

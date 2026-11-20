@@ -429,8 +429,8 @@ impl AlmideHttpCall {
     }
 }
 
-fn http_call_response(r: Result<HttpTextResponse, String>) -> Result<AlmideHttpResponse, String> {
-    r.map(|(status, headers, body)| AlmideHttpResponse { status, body, headers, body_raw: None })
+fn http_call_response(r: Result<HttpCallResponse, String>) -> Result<AlmideHttpResponse, String> {
+    r.map(|(status, headers, raw)| AlmideHttpResponse::fetched(status, headers, raw))
 }
 
 pub fn almide_http_call_start(

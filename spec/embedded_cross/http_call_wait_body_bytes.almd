@@ -1,0 +1,64 @@
+// @contract: C-328
+// almide/almide#4746: a response fetched through the call handle
+// (`http.start` + `http.wait`, and `http.poll` once the call ended) is a
+// fetched response like `http.send`'s: `http.body_bytes` is the body exactly
+// as the server sent it, every one of the 256 byte values, and `http.body`
+// its lossy UTF-8 decoding. Before, both legs decoded the body to text first,
+// so the 256 bytes came back as 512. The program is its own server: it
+// listens on 127.0.0.1 port 0, `http.start` dials, the program accepts, reads
+// the request head and answers with the bytes. Native and the embedded lane
+// print the same transcript.
+import http
+import net
+import io
+
+effect fn read_head(s: net.TcpStream, acc: String) -> Result[String, String] = {
+  if string.contains(acc, "\r\n\r\n") then ok(acc)
+  else {
+    let b = io.read(s, 4096)!
+    if bytes.len(b) == 0 then ok(acc)
+    else read_head(s, acc + bytes.to_string_lossy(b))
+  }
+}
+
+fn describe(r: HttpResponse, want: Bytes) -> String = {
+  let got = http.body_bytes(r)
+  "${http.status(r)} len=${bytes.len(got)} exact=${got == want} text=${string.len(http.body(r))}"
+}
+
+effect fn exchange(l: net.TcpListener, port: Int, tag: String, body: Bytes, framing: String) -> Unit = {
+  match http.start(
+    http.new_request("GET", "http://127.0.0.1:${port}/blob", "", []),
+    { total_ms: 0, idle_ms: 0 },
+  ) {
+    err(e) => println("${tag}: start err ${e}"),
+    ok(call) => {
+      let s = net.tcp_accept(l)!
+      let _ = read_head(s, "")!
+      io.write(s, bytes.from_string("HTTP/1.1 200 OK\r\n${framing}Connection: close\r\n\r\n"))!
+      io.write(s, body)!
+      let _ = io.close(s)
+      let answer = match http.wait(call) {
+        ok(r) => describe(r, body),
+        err(e) => "err ${e}",
+      }
+      let polled = match http.poll(call) {
+        some(ok(r)) => describe(r, body),
+        some(err(e)) => "err ${e}",
+        none => "running",
+      }
+      println("${tag}: wait ${answer}; poll ${polled}")
+    },
+  }
+}
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  let all = bytes.from_list(list.range(0, 256))
+  exchange(l, port, "length", all, "Content-Length: 256\r\n")!
+  exchange(l, port, "until-close", all, "")!
+  let utf8 = bytes.from_string("héllo")
+  exchange(l, port, "utf-8", utf8, "Content-Length: ${bytes.len(utf8)}\r\n")!
+  let _ = io.close(l)
+}

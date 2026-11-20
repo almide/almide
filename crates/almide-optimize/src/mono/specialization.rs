@@ -60,6 +60,9 @@ pub(super) fn specialize_function(
         lower_requirement_operators(&mut body, operator_requirements);
     }
     remap_expr_varids(&mut body, &remap);
+    if !operator_requirements.is_empty() {
+        lower_protocol_order_calls(&mut body, operator_requirements, vt);
+    }
 
     // Phase 5: rename self-recursive `Named { orig.name }` calls in the
     // specialized body so they refer to the specialized fn. Top-level mono's
@@ -176,6 +179,128 @@ fn lower_requirement_operators(
         }
     }
     Lower { table }.visit_expr_mut(expr);
+}
+
+/// The order a generic body asks of its type parameter (`list.sort`,
+/// `list.min`, `list.max`, and the key order of `list.sort_by`) once the
+/// parameter is bound to a declared type whose protocol defines its order
+/// through the `compare` requirement (`BigInt: Integer`, #4788): that type
+/// orders by its `compare`, as `<` on it already does, never by the layout of
+/// its fields. The four natural-order intrinsics are the only ones that take
+/// the order from the type; every other ordered operation (`set.sort`,
+/// `deque.sort`, `min_by`, …) reaches one of them, or `<`.
+///
+/// `sort` / `min` / `max` take the comparator form (`sort_with`, `min_with`,
+/// `max_with`); `sort_by` computes each key once, in order, as it does for
+/// every key type, sorts the (key, element) pairs by the key's compare, and
+/// unzips the elements back out.
+fn lower_protocol_order_calls(
+    expr: &mut IrExpr,
+    table: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+    vt: &mut VarTable,
+) {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    struct Lower<'a> {
+        table: &'a HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget>,
+        vt: &'a mut VarTable,
+    }
+    fn mk(kind: IrExprKind, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
+        IrExpr { kind, ty, span, def_id: None }
+    }
+    fn list_call(func: &str, args: Vec<IrExpr>, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
+        let target = CallTarget::Module { module: almide_base::intern::sym("list"), func: almide_base::intern::sym(func), def_id: None };
+        mk(IrExprKind::Call { target, args, type_args: vec![] }, ty, span)
+    }
+    impl Lower<'_> {
+        fn var(&mut self, prefix: &str, ty: &Ty, span: Option<almide_base::Span>) -> (VarId, IrExpr) {
+            let v = self.vt.alloc_fresh(prefix, ty.clone(), Mutability::Let, span);
+            (v, mk(IrExprKind::Var { id: v }, ty.clone(), span))
+        }
+        /// `list.<f>(xs)` → `list.<with>(xs, (a, b) => compare(a, b))` when the
+        /// element orders through its protocol's `compare`.
+        fn with_comparator(&mut self, expr: &mut IrExpr, elem: &Ty, with: &str) {
+            let Some(target) = operator_requirement_target(elem, "compare", self.table) else { return };
+            let span = expr.span;
+            let IrExprKind::Call { args, .. } = &mut expr.kind else { return };
+            let xs = std::mem::take(&mut args[0]);
+            let cmp = self.comparator(elem, |e| e, target, span);
+            *expr = list_call(with, vec![xs, cmp], expr.ty.clone(), span);
+        }
+        /// `(a, b) => compare(key(a), key(b))` over values of type `of`.
+        fn comparator(&mut self, of: &Ty, key: impl Fn(IrExpr) -> IrExpr, target: CallTarget, span: Option<almide_base::Span>) -> IrExpr {
+            let (a, ea) = self.var("__order_a", of, span);
+            let (b, eb) = self.var("__order_b", of, span);
+            let body = mk(IrExprKind::Call { target, args: vec![key(ea), key(eb)], type_args: vec![] }, Ty::Int, span);
+            let ty = Ty::Fn { params: vec![of.clone(), of.clone()], ret: Box::new(Ty::Int), is_effect: false };
+            mk(IrExprKind::Lambda { params: vec![(a, of.clone()), (b, of.clone())], body: Box::new(body), lambda_id: None }, ty, span)
+        }
+    }
+    impl IrMutVisitor for Lower<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let span = expr.span;
+            let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind else { return };
+            if module.as_str() != "list" {
+                return;
+            }
+            let func = func.as_str().to_owned();
+            let elem = match args.first().map(|a| &a.ty) {
+                Some(Ty::Applied(TC::List, e)) if e.len() == 1 => e[0].clone(),
+                _ => return,
+            };
+            match (func.as_str(), args.len()) {
+                // Each intrinsic's own comparator form (dispatch, one name per arm).
+                ("sort", 1) => self.with_comparator(expr, &elem, "sort_with"),
+                ("min", 1) => self.with_comparator(expr, &elem, "min_with"),
+                ("max", 1) => self.with_comparator(expr, &elem, "max_with"),
+                ("sort_by", 2) => {
+                    let key_ty = match &args[1].ty {
+                        Ty::Fn { ret, .. } => (**ret).clone(),
+                        _ => return,
+                    };
+                    let Some(target) = operator_requirement_target(&key_ty, "compare", self.table) else { return };
+                    let list_ty = args[0].ty.clone();
+                    let pair = Ty::Tuple(vec![key_ty.clone(), elem.clone()].into());
+                    // The list is read twice (keys, then the pairs): a value that
+                    // re-reads to itself is spelled twice, anything else is bound
+                    // once ahead. The key fn is read once, after the list, as the
+                    // call evaluated it.
+                    let xs = std::mem::take(&mut args[0]);
+                    let f = std::mem::take(&mut args[1]);
+                    let (bound, xs_e) = if rereads_to_itself(&xs) {
+                        (None, xs)
+                    } else {
+                        let (v, e) = self.var("__order_xs", &list_ty, span);
+                        (Some(IrStmt { kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: list_ty.clone(), value: xs }, span }), e)
+                    };
+                    let keys = list_call("map", vec![xs_e.clone(), f], Ty::list(key_ty.clone()), span);
+                    let pairs = list_call("zip", vec![keys, xs_e], Ty::list(pair.clone()), span);
+                    let first = |p: IrExpr| mk(IrExprKind::TupleIndex { object: Box::new(p), index: 0 }, key_ty.clone(), span);
+                    let cmp = self.comparator(&pair, first, target, span);
+                    let sorted = list_call("sort_with", vec![pairs, cmp], Ty::list(pair.clone()), span);
+                    let halves = Ty::Tuple(vec![Ty::list(key_ty.clone()), expr.ty.clone()].into());
+                    let unzipped = list_call("unzip", vec![sorted], halves, span);
+                    let out = mk(IrExprKind::TupleIndex { object: Box::new(unzipped), index: 1 }, expr.ty.clone(), span);
+                    *expr = match bound {
+                        Some(stmt) => mk(IrExprKind::Block { stmts: vec![stmt], expr: Some(Box::new(out)) }, expr.ty.clone(), span),
+                        None => out,
+                    };
+                }
+                _ => {}
+            }
+        }
+    }
+    /// A variable read or a literal built only of such: evaluating it twice
+    /// gives the same value and does nothing else.
+    fn rereads_to_itself(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } => true,
+            IrExprKind::List { elements } => elements.iter().all(rereads_to_itself),
+            _ => false,
+        }
+    }
+    Lower { table, vt }.visit_expr_mut(expr);
 }
 
 // ── Self-recursive Named rename ────────────────────────────────

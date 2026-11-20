@@ -58,7 +58,26 @@ pub fn envelope(ok: bool, diagnostics: Vec<Value>, result: Value) -> Value {
 
 /// Print the envelope as one line on stdout.
 pub fn print(ok: bool, diagnostics: Vec<Value>, result: Value) {
-    crate::out(&envelope(ok, diagnostics, result).to_string());
+    crate::out(&escape_hidden_json(&envelope(ok, diagnostics, result).to_string()));
+}
+
+/// #4819: the rows come back through `serde_json`, which writes a hidden
+/// character (C-418: bidi, zero-width, Tags) raw; every one sits inside a
+/// JSON string, so it is written as its `\uXXXX` escape, which every JSON
+/// reader decodes back.
+pub(crate) fn escape_hidden_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if almide_lang::lexer::is_hidden_source_char(c) {
+            let mut units = [0u16; 2];
+            for u in c.encode_utf16(&mut units).iter() {
+                out.push_str(&format!("\\u{u:04x}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// An error that carries no structured diagnostic, as a row of the shape

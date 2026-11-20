@@ -32,14 +32,35 @@ fn borrow_reads_of(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
     let readers = readers_of(func, &root);
     let mut out = BTreeSet::new();
+    // The block each read was loaded from: a reference through a borrowed
+    // read (`&v6.f1` with `v6 = &v1.f0`) borrows that read's own block too.
+    let mut loaded_from: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let Some(&base) = args.first().and_then(|a| root.get(a)) else { continue };
+        loaded_from.insert(*d, base);
         if func.ret == Some(*d) {
             continue;
         }
         let Some(last) = last_borrowing_use_at(func, i, *d, &root, &readers) else { continue };
-        if block_untouched(func, i, through_enclosing_loops(func, i, last), base, &root) {
+        let end = through_enclosing_loops(func, i, last);
+        if !block_untouched(func, i, end, base, &root) {
+            continue;
+        }
+        // Every borrowed read up the chain stays lent while this one is
+        // (#4805: a loop over `out.raw.nodes` whose body rebinds `out`).
+        let mut held = base;
+        let mut chain_ok = true;
+        let mut seen = BTreeSet::from([*d]);
+        while out.contains(&held) && seen.insert(held) {
+            let Some(&up) = loaded_from.get(&held) else { break };
+            if !block_untouched(func, i, end, up, &root) {
+                chain_ok = false;
+                break;
+            }
+            held = up;
+        }
+        if chain_ok {
             out.insert(*d);
         }
     }

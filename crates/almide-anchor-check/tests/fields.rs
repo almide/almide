@@ -63,6 +63,33 @@ fn an_unrecorded_store_into_the_site_is_refused() {
     assert!(fields(&body, REC_W, "-;1:2 1:5 1:11;1:13").unwrap_err().contains("unrecorded"));
 }
 
+/// A field value computed by a branch whose other arm traps (a match with a
+/// trapping arm as a tuple field, #4599): the trapping arm's `end` conjures
+/// its result, so the block's address below the branch is still the store's.
+const REC_TRAP_ARM: &str = "i32.const 16 call $alloc local.set 0
+  local.get 0 i64.const 3 i64.store offset=12
+  local.get 0
+  local.get 1 if (result i32) i32.const 4 else unreachable end
+  i32.store offset=20
+  local.get 0 i32.load offset=20 drop";
+
+#[test]
+fn a_field_computed_by_a_branch_with_a_trapping_arm_is_accepted() -> Result<(), String> {
+    let r = fields(REC_TRAP_ARM, REC_W, "-;1:2 1:5 1:13;1:15")?;
+    assert_eq!((r.field_sites, r.field_stores, r.field_accesses), (1, 2, 1));
+    Ok(())
+}
+
+#[test]
+fn a_store_through_a_value_the_trapping_arm_conjures_is_refused() {
+    // The address itself now comes from the branch: no block local below it.
+    let body = REC_TRAP_ARM.replace(
+        "local.get 0\n  local.get 1 if (result i32) i32.const 4 else unreachable end",
+        "local.get 1 if (result i32) local.get 0 else unreachable end\n  i32.const 4",
+    );
+    assert!(fields(&body, REC_W, "-;1:2 1:5 1:13;1:15").is_err());
+}
+
 #[test]
 fn a_layout_carrying_an_anchor_is_refused() {
     assert!(fields(REC, REC_W, "1:0;1:2 1:5 1:8;1:10").is_err());

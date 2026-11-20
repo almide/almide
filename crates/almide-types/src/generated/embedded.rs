@@ -7612,6 +7612,7 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
 /// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 @intrinsic("almide_rt_fs_read_text")
+@fs_path(path)
 effect fn read_text(path: String) -> Result[String, String] = _
 
 
@@ -7619,23 +7620,27 @@ effect fn read_text(path: String) -> Result[String, String] = _
 
 /// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
+@fs_path(path)
 effect fn read_bytes(path: String) -> Result[Bytes, String] = _
 
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
+@fs_path(path)
 @category("FS.write")
 effect fn write_text(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
 @intrinsic("almide_rt_fs_write_bytes")
+@fs_path(path)
 @category("FS.write")
 effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
+@fs_path(path)
 @category("FS.write")
 effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 
@@ -7647,21 +7652,25 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 /// Appends data verbatim; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append_bytes")
+@fs_path(path)
 @category("FS.write")
 effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
 @intrinsic("almide_rt_fs_mkdir_p")
+@fs_path(path)
 @category("FS.write")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
 /// False if missing or a dangling symlink.
 @intrinsic("almide_rt_fs_exists")
+@fs_path(path)
 effect fn exists(path: String) -> Bool = _
 
 /// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 @intrinsic("almide_rt_fs_read_lines")
+@fs_path(path)
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
 
@@ -7683,10 +7692,12 @@ effect fn read_lines(path: String) -> Result[List[String], String] = _
 
 /// Streamed fold over lines; err if missing.
 @intrinsic("almide_rt_fs_fold_lines")
+@fs_path(path)
 effect fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 /// Calls f per line, streamed; may err mid-file.
 @intrinsic("almide_rt_fs_for_each_line")
+@fs_path(path)
 effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String] = _
 
 
@@ -7698,9 +7709,11 @@ effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, Strin
 
 
 @intrinsic("almide_rt_fs_fold_lines_effect")
+@fs_path(path)
 effect fn __fallible_fold_lines[A](path: String, init: A, f: (A, String) -> Result[A, String]) -> Result[A, String] = _
 
 @intrinsic("almide_rt_fs_for_each_line_effect")
+@fs_path(path)
 effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = _
 
 
@@ -7709,6 +7722,7 @@ effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, Str
 
 /// Folds lines starting in bytes [start, end).
 @intrinsic("almide_rt_fs_fold_lines_range")
+@fs_path(path)
 effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 
@@ -7720,6 +7734,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 /// Parallel chunk partials, in order; [] if empty.
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
+@fs_path(path)
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
 
@@ -7732,53 +7747,64 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 
 /// Text, or none if missing; err if not UTF-8.
 @intrinsic("almide_rt_fs_read_text_if_exists")
+@fs_path(path)
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
 /// File Bytes, or none if missing.
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
+@fs_path(path)
 effect fn read_bytes_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// read_lines result, or none if missing.
 @intrinsic("almide_rt_fs_read_lines_if_exists")
+@fs_path(path)
 effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove")
+@fs_path(path)
 @category("FS.write")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
 /// Sorted names (not paths); err if not a dir.
 @intrinsic("almide_rt_fs_list_dir")
+@fs_path(path)
 effect fn list_dir(path: String) -> Result[List[String], String] = _
 
 /// True for a dir; follows symlinks.
 @intrinsic("almide_rt_fs_is_dir")
+@fs_path(path)
 effect fn is_dir(path: String) -> Bool = _
 
 /// True for a regular file; follows symlinks.
 @intrinsic("almide_rt_fs_is_file")
+@fs_path(path)
 effect fn is_file(path: String) -> Bool = _
 
 /// Copies src to dst; overwrites dst.
 @ordered
 @intrinsic("almide_rt_fs_copy")
+@fs_path(src, dst)
 @category("FS.read", "FS.write")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
 @ordered
 @intrinsic("almide_rt_fs_rename")
+@fs_path(src, dst)
 @category("FS.write")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Sorted paths below dir; links listed, not followed.
 @intrinsic("almide_rt_fs_walk")
+@fs_path(dir)
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
 /// Deletes a tree or file; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove_all")
+@fs_path(path)
 @category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
@@ -7790,26 +7816,31 @@ effect fn temp_dir() -> String = _
 
 /// Size, kind and mtime; err if missing.
 @intrinsic("almide_rt_fs_stat")
+@fs_path(path)
 effect fn stat(path: String) -> Result[FileStat, String] = _
 
 /// Sorted * and ** matches; links not followed.
 @intrinsic("almide_rt_fs_glob")
+@fs_glob(pattern)
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
 /// New private file, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
+@fs_temp(prefix)
 @category("FS.write")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New private dir, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
+@fs_temp(prefix)
 @category("FS.write")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
 /// True for a symlink, even a dangling one.
 @intrinsic("almide_rt_fs_is_symlink")
+@fs_path(path)
 effect fn is_symlink(path: String) -> Bool = _
 
 
@@ -7876,23 +7907,29 @@ local fn __root_answer[A](r: Result[A, String], path: String) -> Result[A, Strin
 
 
 @intrinsic("almide_rt_fs___root_read_text")
+@fs_root(at)
 effect fn __root_read_text(at: String) -> Result[String, String] = _
 
 @intrinsic("almide_rt_fs___root_read_bytes")
+@fs_root(at)
 effect fn __root_read_bytes(at: String) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_fs___root_list_dir")
+@fs_root(at)
 effect fn __root_list_dir(at: String) -> Result[List[String], String] = _
 
 
 @intrinsic("almide_rt_fs___root_exists")
+@fs_root(at)
 effect fn __root_exists(at: String) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_fs___root_write_text")
+@fs_root(at)
 @category("FS.write")
 effect fn __root_write_text(at: String, content: String) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_fs___root_remove")
+@fs_root(at)
 @category("FS.write")
 effect fn __root_remove(at: String) -> Result[Unit, String] = _
 
@@ -31583,6 +31620,7 @@ mod type ProcessChild = Int
 /// Stdout on exit 0; else err with stderr text.
 @ordered
 @intrinsic("almide_rt_process_exec")
+@spawns_process(cmd)
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
@@ -31661,15 +31699,18 @@ local fn __child(c: ProcessChild) -> Int = match c {
 
 @ordered
 @intrinsic("almide_rt_process___os_output")
-effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
+@spawns_process(cmd)
+local effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_run")
-effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+@spawns_process(cmd)
+local effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @ordered
 @intrinsic("almide_rt_process___os_start")
-effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+@spawns_process(cmd)
+local effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_process___os_poll")
 effect fn __os_poll(h: Int) -> Result[Bool, String] = _
@@ -41583,12 +41624,14 @@ effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
 effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
+@ordered
 effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(
   __raw(fd),
   size,
 )
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+@ordered
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
   __raw(fd),
   offset,
@@ -41622,10 +41665,12 @@ local fn __raw(f: Fd) -> Int = match f {
 
 
 @intrinsic("almide_rt_unix___os_connect")
+@fs_path(path)
 @category("Net.fetch")
 effect fn __os_connect(path: String) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_listen")
+@fs_path(path)
 @category("Net.listen")
 effect fn __os_listen(path: String) -> Result[Int, String] = _
 

@@ -100,7 +100,7 @@ fn response_with(url: &str, headers: &[(String, String)]) -> client::HttpTextRes
 }
 
 /// The same GET through the call handle (`http.start` + wait).
-fn start_get(url: &str) -> Result<client::HttpTextResponse, String> {
+fn start_get(url: &str) -> Result<client::HttpCallResponse, String> {
     client::http_call_spawn("GET", url, "", vec![], 5000, 0).and_then(|sh| client::http_call_wait(&sh))
 }
 
@@ -187,7 +187,7 @@ fn child_request() {
         "response" => client::request_response(method, url, "", &headers).map(|(c, _, b)| format!("{c} {b}")),
         "start" => client::http_call_spawn(method, url, "", headers, 10_000, 0)
             .and_then(|sh| client::http_call_wait(&sh))
-            .map(|(c, _, b)| format!("{c} {b}")),
+            .map(|(c, _, b)| format!("{c} {}", String::from_utf8_lossy(&b))),
         other => panic!("unknown child kind {other}"),
     };
     let secs = started.elapsed().as_secs_f64();
@@ -378,7 +378,7 @@ fn a_chunk_extension_does_not_empty_the_body() {
     assert_eq!((r.0, r.2.as_str()), (200, "hello world"));
     let (port, _rx) = origin(reply);
     let r = start_get(&format!("http://127.0.0.1:{port}/")).expect("the started call is answered");
-    assert_eq!((r.0, r.2.as_str()), (200, "hello world"));
+    assert_eq!((r.0, std::str::from_utf8(&r.2).expect("utf-8 body")), (200, "hello world"));
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn a_100_continue_is_skipped_for_the_final_response() {
     assert!(r.1.iter().any(|(k, _)| k == "x-final") && !r.1.iter().any(|(k, _)| k.eq_ignore_ascii_case("link")));
     let (port, _rx) = origin(reply);
     let r = start_get(&format!("http://127.0.0.1:{port}/")).expect("the started call is answered");
-    assert_eq!((r.0, r.2.as_str()), (200, "ok"));
+    assert_eq!((r.0, std::str::from_utf8(&r.2).expect("utf-8 body")), (200, "ok"));
 }
 
 // ── #2825: limits ──

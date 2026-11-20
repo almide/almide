@@ -858,7 +858,9 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall 
 
 `fan { name: expr, … }` runs its fields as parallel siblings and yields the
 anonymous record `{ name: value, … }`. Removing `fan` gives the same output and
-value (fields print in source order). A fallible field must say `!`: the
+value (fields print in source order) for what fields compute and print and for
+`@ordered` operations; wall-clock time, non-ordered shared state and fields
+that wait on each other are outside that promise. A fallible field must say `!`: the
 field's Err is the whole block's Err — every field still runs, and the first
 Err in source order wins. A Result field without `!` is E041. Sibling fields
 are not in scope inside the block.
@@ -1280,7 +1282,7 @@ takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
 `http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
 computed one, or for HTML / XML / SVG: SVG comes from a package such as
 almide/svg, which the application grants in `almide.toml` with `[trust]
-media = { "almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
+media = { "github.com/almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /
 `http.with_body(resp, body)` replace the body and its type together. A
 fetched response keeps the type it arrived with:

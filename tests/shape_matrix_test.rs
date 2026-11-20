@@ -351,6 +351,8 @@ fn shape_matrix() {
                 // builds do not serialize on the shared build-dir lock.
                 let scratch = root.join(format!(".scratch-{w}"));
                 std::fs::create_dir_all(&scratch).unwrap();
+                #[cfg(unix)]
+                std::fs::set_permissions(&scratch, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap(); // closed run dir override (#4842)
                 loop {
                     let Some((i, cell)) = queue.lock().unwrap().pop() else { break };
                     let dir = root.join(format!("{i:04}-{}", cell.name.replace('/', "-")));

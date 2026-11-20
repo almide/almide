@@ -43,7 +43,7 @@ fn report_check_errors_or_exit(
 /// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
 /// at exactly its original point in the control flow.
 fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str, critical: Option<&[String]>) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
-    let dep_paths = super::dep_paths_from_cwd_toml();
+    let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
@@ -391,6 +391,15 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
+        // #4815: the `[permissions]` gate `check` runs (rows 17/18, 26), on
+        // the same whole-program IR — `check --json` is the MCP `almide_check`.
+        if let Some(proj) = project::permissions_project_for(file) {
+            if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+                clean = false;
+            } else if proj.permissions.is_some() || proj.proc_allow.is_some() {
+                clean &= super::enforce_project_permissions(whole.as_ref().unwrap_or(&ir), &proj).is_ok();
+            }
+        }
     }
     // The same predicate that gates the unused-variable pass IS the verdict:
     // one expression, so the status cannot drift from what was emitted.
@@ -468,6 +477,19 @@ pub fn cmd_check_effects(file: &str) {
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
 
+    // #4847: the value gate (E109, E110's flow half) every route that judges
+    // one judges both (effect_value_gate.rs) — over every module when there
+    // are user modules, as `check` runs it.
+    let whole = (!checker.env.user_modules.is_empty()).then(|| crate::compile_driver::whole_program_ir(file)).flatten();
+    let refused = almide::effect_value_gate::effect_value_diagnostics(whole.as_ref().unwrap_or(&ir), file);
+    if !refused.is_empty() {
+        for d in &refused {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, &source_text)));
+        }
+        err(&format!("\n{} error(s) found", refused.len()));
+        std::process::exit(1);
+    }
+
     // Run effect inference
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};
     use almide::codegen::pass::NanoPass;
@@ -492,12 +514,20 @@ pub fn cmd_check_effects(file: &str) {
     let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
     err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
 
-    // Check permissions from the entry file's almide.toml
-    {
-        if let Some(proj) = project::permissions_project_for(file) {
-            if proj.permissions.is_some() {
-                enforce_effect_permissions(&proj, &entries);
+    // Check permissions from the entry file's almide.toml: the per-fn
+    // report above, then (#4815) the gate `check` runs over the WHOLE
+    // program — a capability reached through an imported module, and the
+    // `proc` list.
+    if let Some(proj) = project::permissions_project_for(file) {
+        if proj.permissions.is_some() || proj.proc_allow.is_some() {
+            let whole = crate::compile_driver::whole_program_ir(file)
+                .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+            if super::enforce_project_permissions(&whole, &proj).is_err() {
+                std::process::exit(1);
             }
+        }
+        if proj.permissions.is_some() {
+            enforce_effect_permissions(&proj, &entries);
         }
     }
 }

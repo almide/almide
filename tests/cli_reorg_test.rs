@@ -219,8 +219,17 @@ fn every_json_command_prints_the_same_envelope() {
 }
 
 // ── `remove` undoes `add` ─────────────────────────────────────────────────
-// No network: github.com is mapped onto local bare repositories through
-// git's `url.<base>.insteadOf`, as tests/dependency_trust_test.rs does.
+// No network: github.com's URLs are served from local bare repositories by
+// support/git_host.rs, as tests/dependency_trust_test.rs does.
+
+#[path = "support/git_host.rs"]
+mod git_host;
+
+/// The one git host of this test binary (only one test uses it).
+fn host() -> &'static git_host::GitHost {
+    static HOST: std::sync::OnceLock<git_host::GitHost> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| git_host::GitHost::start(&std::env::temp_dir().join(format!("almide-cli-reorg-host-{}", std::process::id()))))
+}
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -243,21 +252,13 @@ fn bare_repo(root: &Path, owner: &str, pkg: &str) {
     let bare = root.join("hosts").join(owner);
     std::fs::create_dir_all(&bare).unwrap();
     git(&bare, &["clone", "-q", "--bare", work.to_str().unwrap(), pkg]);
+    host().serve(&format!("https://github.com/{owner}/{pkg}"), &bare.join(pkg));
 }
 
 fn almide_hosted(root: &Path, dir: &Path, args: &[&str]) -> Output {
-    let base = format!("file://{}/", root.join("hosts").display());
-    Command::new(almide())
-        .current_dir(dir)
-        .env("HOME", root.join("home"))
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", format!("url.{base}.insteadOf"))
-        .env("GIT_CONFIG_VALUE_0", "https://github.com/")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .args(args)
-        .output()
-        .expect("spawn almide")
+    let mut cmd = Command::new(almide());
+    cmd.current_dir(dir).env("HOME", root.join("home")).stdin(Stdio::null()).args(args);
+    host().env(&mut cmd).output().expect("spawn almide")
 }
 
 fn files(dir: &Path) -> (Option<String>, Option<String>) {

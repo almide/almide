@@ -44,9 +44,14 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         let op = r.read().map_err(|e| e.to_string())?;
         let i = ops.len();
         let pre = fv.operand_stack_height() as usize;
+        // No instruction of a frame reaches below the frame's own height: past
+        // an `unreachable` or a branch its operands are conjured, not the
+        // enclosing frame's values (#4599: the `end` of a trapping match arm
+        // took the tuple block's address as its own operand).
+        let floor = fv.get_control_frame(0).map_or(0, |f| f.height);
         let arity = op.operator_arity(&fv);
-        args.push(popped(&shadow, arity, pre));
-        addr.push(if store_width(&op).is_some() && pre >= 2 {
+        args.push(popped(&shadow, arity, pre, floor));
+        addr.push(if store_width(&op).is_some() && pre >= 2 && pre - 2 >= floor {
             shadow.get(pre - 2).copied().flatten()
         } else {
             None
@@ -54,7 +59,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         depth.push(d);
         fv.op(off, &op).map_err(|e| e.to_string())?;
         let post = fv.operand_stack_height() as usize;
-        reshadow(&mut shadow, arity, pre, post, i);
+        reshadow(&mut shadow, arity, (pre, post, floor), i);
         match op {
             Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => {
                 d += 1
@@ -68,32 +73,35 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
 }
 
 /// The producers of the operands an instruction of `arity` pops from a
-/// stack of height `pre`, bottom first.
-fn popped(shadow: &[Option<usize>], arity: Option<(u32, u32)>, pre: usize) -> Vec<Option<usize>> {
+/// stack of height `pre`, bottom first. An operand below the frame's
+/// `floor` is conjured by a polymorphic stack: it has no producer.
+fn popped(shadow: &[Option<usize>], arity: Option<(u32, u32)>, pre: usize, floor: usize) -> Vec<Option<usize>> {
     match arity {
-        Some((k, _)) if pre >= k as usize && shadow.len() == pre => {
-            shadow[pre - k as usize..pre].to_vec()
-        }
+        Some((k, _)) if shadow.len() == pre => (0..k as usize)
+            .map(|n| (pre + n).checked_sub(k as usize).filter(|j| *j >= floor).and_then(|j| shadow[j]))
+            .collect(),
         Some((k, _)) => vec![None; k as usize],
         None => Vec::new(),
     }
 }
 
-/// The shadow stack after instruction `i` took it from height `pre` to `post`.
-fn reshadow(shadow: &mut Vec<Option<usize>>, arity: Option<(u32, u32)>, pre: usize, post: usize, i: usize) {
+/// The shadow stack after instruction `i` took it from height `pre` to
+/// `post`, inside a frame whose values start at `floor`: what lies below
+/// the floor belongs to the enclosing frames and is never this op's.
+fn reshadow(shadow: &mut Vec<Option<usize>>, arity: Option<(u32, u32)>, (pre, post, floor): (usize, usize, usize), i: usize) {
+    let floor = floor.min(shadow.len()).min(post);
     match arity {
-        Some((k, m)) if pre >= k as usize => {
-            let keep = (pre - k as usize).min(post);
+        Some((k, _)) => {
+            let keep = pre.saturating_sub(k as usize).max(floor).min(post);
             shadow.truncate(keep);
             // Pushed by this instruction (or, past a polymorphic
             // stack, re-derived by it): its own.
             while shadow.len() < post {
                 shadow.push(Some(i));
             }
-            let _ = m;
         }
-        _ => {
-            shadow.iter_mut().for_each(|s| *s = None);
+        None => {
+            shadow[floor..].iter_mut().for_each(|s| *s = None);
             shadow.truncate(post);
             while shadow.len() < post {
                 shadow.push(None);

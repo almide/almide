@@ -104,7 +104,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/a
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
-インストーラは展開前に、アーカイブをリリースの `almide-checksums.sha256` と照合します。すべてのリリース資産は Sigstore で証明されています（検証方法は [SECURITY.md](./SECURITY.md#release-integrity)）。各アーカイブには、`almide verify` が証跡を渡す証明書チェッカ `almide-verify` も入っています。ソースからは [Rust](https://rustup.rs/) 1.96 以上で `make install`。
+インストーラは展開前に、アーカイブをリリースの `almide-checksums.sha256` と照合します。すべてのリリース資産は Sigstore で証明されています（検証方法は [SECURITY.md](./SECURITY.md#release-integrity)）。各アーカイブには、`almide verify` が証跡を渡す証明書チェッカ `almide-verify` も入っています。ソースからは [Rust](https://rustup.rs/) 1.97 以上で `make install`。
 
 ```almd
 fn main() -> Unit = {

@@ -1,0 +1,7 @@
+// fan.timeout is the wall-clock surface: a bare Int is refused, and the
+// hint builds the budget with the constructor of fan.timeout's own clock
+// (duration.ms), never compute.ms, which it refuses too (#4742).
+effect fn main() -> Unit = {
+  let t = fan.timeout(1000) { 1 + 1 } ?? -1
+  println(int.to_string(t))
+}

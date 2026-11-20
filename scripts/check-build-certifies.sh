@@ -12,7 +12,9 @@
 #      error[certificate-rejected], and writes NO file;
 #   3. the same patched compiler with the verifier moved away writes the
 #      file (exit 0): the refusal is the verifier's verdict, not the patch
-#      breaking the build.
+#      breaking the build;
+#   4. (#4836) the patched `almide run --target wasm` refuses the module the
+#      same way (exit 1, error[certificate-rejected]) instead of running it.
 #
 #   scripts/check-build-certifies.sh [name ...]   (default: every bounds patch)
 set -uo pipefail
@@ -45,8 +47,12 @@ for name in "${names[@]}"; do
   git -C "$wt" apply "$DIR/$name.patch" || { echo "FAIL $name: the patch no longer applies"; fail=1; continue; }
   build || { echo "FAIL $name: the re-injected compiler does not build"; fail=1; git -C "$wt" checkout -q -- .; continue; }
   v=$(try "$name")
+  (cd "$wt" && "$BIN" run "$DIR/$name.almd" --target wasm) > "$wt/run.log" 2>&1
+  r=$?
   if [ "$v" != "1 absent" ] || ! grep -q "certificate-rejected" "$wt/build.log"; then
     echo "FAIL $name: with the bug re-injected the build reads '$v', not a refusal: $(head -3 "$wt/build.log")"; fail=1
+  elif [ "$r" != 1 ] || ! grep -q "certificate-rejected" "$wt/run.log"; then
+    echo "FAIL $name: with the bug re-injected \`run --target wasm\` exits $r, not a refusal: $(head -3 "$wt/run.log")"; fail=1
   else
     mv "$VER" "$VER.away"
     w=$(try "$name")
@@ -54,7 +60,7 @@ for name in "${names[@]}"; do
     if [ "$w" != "0 written" ]; then
       echo "FAIL $name: without the verifier the patched build reads '$w' — the refusal was not the verifier's"; fail=1
     else
-      echo "ok   $name: control built (exit 0, written); re-injected, refused (exit 1, no file, certificate-rejected); without the verifier, written"
+      echo "ok   $name: control built (exit 0, written); re-injected, refused (exit 1, no file, certificate-rejected) and run refused; without the verifier, written"
     fi
   fi
   git -C "$wt" checkout -q -- .

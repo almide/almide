@@ -423,6 +423,15 @@ impl<'a> BranchLifter<'a> {
             .into_iter()
             .filter(|v| !self.globals.contains(v))
             .collect();
+        // #4598: the helper is a plain, non-generic fn. A branch whose type or
+        // whose captures name a type parameter of the enclosing generic fn
+        // (`oo: O` in a fold callback) would leave that parameter unbound in
+        // the helper, where monomorphization never reaches it. Such a branch
+        // stays in place, as an unlifted heap branch does everywhere else.
+        let names_type_param = |t: &Ty| matches!(t, Ty::TypeVar(_)) || t.any_child_recursive(&|c| matches!(c, Ty::TypeVar(_)));
+        if names_type_param(&ty) || params.iter().any(|&v| names_type_param(&self.vt.get(v).ty)) {
+            return;
+        }
 
         // 2. Synthesize the helper name + take the branch expr out as the body.
         let id = *self.counter;

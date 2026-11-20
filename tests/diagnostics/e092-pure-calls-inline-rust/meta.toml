@@ -1,0 +1,3 @@
+expects_code = "E092"
+expects_error = "`@pure` fn `clean` calls `touch`, which is an `@inline_rust` fn, whose body is Rust text the checker cannot see"
+hint_substring = "remove `@pure`"

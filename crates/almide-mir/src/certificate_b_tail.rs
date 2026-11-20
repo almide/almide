@@ -485,7 +485,7 @@ impl CertScan {
             return;
         }
         let slot = self.s.object_of(local);
-        let mut ended: Vec<ValueId> = self.child_of.keys().copied().filter(|&c| self.child_root(c) == slot).collect();
+        let mut ended: Vec<ValueId> = self.child_of.keys().copied().filter(|&c| self.viewed_from_slot(c, slot)).collect();
         ended.extend(self.addr_of.iter().filter(|(_, &o)| o == slot).map(|(&a, _)| a));
         ended.extend(self.paths.carriers.iter().copied().filter(|&c| c != local && self.s.of.contains_key(&c) && self.s.object_of(c) == slot));
         ended.retain(|v| self.paths.view_src.get(v) != Some(&new));
@@ -508,13 +508,25 @@ impl CertScan {
         }
     }
 
-    /// The object at the top of a raw child's chain of parents.
-    fn child_root(&self, c: ValueId) -> ValueId {
+    /// `c` is a view of `slot`'s block: its chain of parents reaches `slot`
+    /// without passing a parent whose line is positive on this path. A parent
+    /// the frame took a `Dup` of keeps its block — and the child in its slot —
+    /// after the slot's old block is released, so a child below it is that
+    /// parent's view, not the slot's, and its reads probe the parent's line
+    /// ([`Self::child_probe`] walks up to it) instead of landing on its own
+    /// line at 0 (#4749 shape 5).
+    fn viewed_from_slot(&self, c: ValueId, slot: ValueId) -> bool {
         let mut o = c;
         while let Some(&p) = self.child_of.get(&o) {
+            if p == slot {
+                return true;
+            }
+            if self.path_balance(p) > 0 {
+                return false;
+            }
             o = p;
         }
-        o
+        o == slot
     }
 
     fn probe_raw_child(&mut self, v: ValueId) {

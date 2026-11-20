@@ -15,8 +15,16 @@
 //! lookup to `(name, git, ref)`, and all three match here: only the value is
 //! another package's. A lookup key cannot catch a wrong value.
 
+#[path = "support/git_host.rs"]
+mod git_host;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The URL `repo` is served at by the test binary's git host.
+fn src_url(repo: &Path) -> String {
+    git_host::shared().url_of(repo)
+}
 
 fn almide_bin() -> String {
     if let Ok(bin) = std::env::var("ALMIDE_BIN") {
@@ -47,7 +55,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn dep_line(name: &str, repo: &Path) -> String {
-    format!("{name} = {{ git = \"file://{}\", tag = \"v1.0.0\" }}", repo.display())
+    format!("{name} = {{ git = \"{}\", tag = \"v1.0.0\" }}", src_url(repo))
 }
 
 /// A package exporting one function, optionally depending on other packages,
@@ -91,16 +99,13 @@ fn commit_of(entries: &[almide::project::LockedDep], name: &str) -> String {
         .find(|l| l.name == name)
         .unwrap_or_else(|| panic!("no '{name}' entry in the lock"))
         .commit
-        .clone()
+        .to_string()
 }
 
 fn check(proj: &Path, home: &Path) -> (bool, String) {
-    let out = Command::new(almide_bin())
-        .args(["check", "src/main.almd"])
-        .current_dir(proj)
-        .env("HOME", home)
-        .output()
-        .expect("spawn almide");
+    let mut cmd = Command::new(almide_bin());
+    cmd.args(["check", "src/main.almd"]).current_dir(proj).env("HOME", home);
+    let out = git_host::shared().env(&mut cmd).output().expect("spawn almide");
     (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
 }
 
@@ -208,7 +213,7 @@ fn commit_versioned_foo(root: &Path, versions: &[&str]) -> (PathBuf, Vec<String>
 }
 
 fn tagged(name: &str, repo: &Path, tag: &str) -> String {
-    format!("{name} = {{ git = \"file://{}\", tag = \"{tag}\" }}", repo.display())
+    format!("{name} = {{ git = \"{}\", tag = \"{tag}\" }}", src_url(repo))
 }
 
 fn write_consumer(proj: &Path, foo_line: &str, mid_line: &str) {
@@ -265,7 +270,7 @@ fn a_dependency_raised_by_mvs_is_locked_at_the_version_that_was_built() {
         "the lock must record the version MVS built (v1.1.0 = {c11}), not the root's \
          request (v1.0.0 = {c10}) — #2532"
     );
-    assert_eq!(foo_entry.git, format!("file://{}", foo.display()));
+    assert_eq!(foo_entry.git.to_string(), src_url(&foo));
     // An unraised dependency is locked at its own request, as before.
     let mid_entry = entry(&entries, "raise_mid");
     assert_eq!((mid_entry.ref_name.as_str(), mid_entry.commit.as_str()), ("v1.0.0", mid_commit.as_str()));
@@ -284,17 +289,18 @@ fn a_dependency_raised_by_mvs_is_locked_at_the_version_that_was_built() {
     assert!(ok, "a cold-cache re-run must resolve the lock it was given:\n{stderr}");
     assert_eq!(std::fs::read(proj.join("almide.lock")).expect("read lock"), first, "cold re-run changed the lock");
 
-    // 3. A lock written before #2532 recorded the request. It still reads
-    //    (the entry simply does not pin the fetch that is built) and the next
-    //    run rewrites it to the resolved record.
+    // 3. A lock written before #2532 recorded the request (and, before
+    //    ADR-0035, no sum). It still reads (the entry simply does not pin the
+    //    fetch that is built) and the next run rewrites it to the resolved
+    //    record, sums included.
     std::fs::write(
         proj.join("almide.lock"),
         format!(
             "# almide.lock — auto-generated, do not edit\n\n\
-             raise_foo = {{ git = \"file://{}\", ref = \"v1.0.0\", commit = \"{c10}\" }}\n\
-             raise_mid = {{ git = \"file://{}\", ref = \"v1.0.0\", commit = \"{mid_commit}\" }}\n",
-            foo.display(),
-            mid.display()
+             raise_foo = {{ git = \"{}\", ref = \"v1.0.0\", commit = \"{c10}\" }}\n\
+             raise_mid = {{ git = \"{}\", ref = \"v1.0.0\", commit = \"{mid_commit}\" }}\n",
+            src_url(&foo),
+            src_url(&mid)
         ),
     )
     .expect("write old lock");

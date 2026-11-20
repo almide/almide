@@ -696,14 +696,19 @@ impl<'a> Interpreter<'a> {
                 // wasm. Records and variants order through the same comparator
                 // — by field declaration order, by case order then payload
                 // (#2167).
-                let order = crate::value::TotalOrder::new(&self.variant_tags);
-                items.sort_by(|a, b| {
-                    order.cmp(a, b).unwrap_or_else(|| {
-                        ok = false;
-                        std::cmp::Ordering::Equal
+                // A record whose protocol defines its order orders by that
+                // `compare` (C-456, `protocol_order.rs`).
+                let sorted = self.with_total_order(|order| {
+                    items.sort_by(|a, b| {
+                        order.cmp(a, b).unwrap_or_else(|| {
+                            ok = false;
+                            std::cmp::Ordering::Equal
+                        })
                     })
                 });
-                if ok {
+                if let Err(flow) = sorted {
+                    flow
+                } else if ok {
                     Flow::val(Value::list(items))
                 } else {
                     Flow::Abort("internal: list.sort on non-comparable elements".into())
@@ -721,21 +726,23 @@ impl<'a> Interpreter<'a> {
     fn list_min_max(&mut self, args: &[Value], want_max: bool) -> Flow {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(items) => {
-                let order = crate::value::TotalOrder::new(&self.variant_tags);
-                let mut best: Option<Value> = None;
-                for v in items {
-                    let take = match &best {
-                        None => true,
-                        Some(b) => match order.cmp(&v, b) {
-                            Some(ord) => if want_max { ord.is_gt() } else { ord.is_lt() },
-                            // Non-comparable element: abstain rather than vote
-                            // wrong (a wrong third vote is worse than a skip).
-                            None => return Flow::Unsupported("list.min/max on non-comparable elements".into()),
-                        },
-                    };
-                    if take { best = Some(v); }
-                }
-                Flow::val(Value::Option(best.map(Box::new)))
+                let picked = self.with_total_order(|order| {
+                    let mut best: Option<Value> = None;
+                    for v in items {
+                        let take = match &best {
+                            None => true,
+                            Some(b) => match order.cmp(&v, b) {
+                                Some(ord) => if want_max { ord.is_gt() } else { ord.is_lt() },
+                                // Non-comparable element: abstain rather than vote
+                                // wrong (a wrong third vote is worse than a skip).
+                                None => return Flow::Unsupported("list.min/max on non-comparable elements".into()),
+                            },
+                        };
+                        if take { best = Some(v); }
+                    }
+                    Flow::val(Value::Option(best.map(Box::new)))
+                });
+                picked.unwrap_or_else(|flow| flow)
             }
             None => Flow::Abort("internal: list.min/max on non-list".into()),
         }

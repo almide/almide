@@ -147,10 +147,13 @@ EOF
 
 # shape -> the symbols its crate must contain (the shape still reaches the
 # path the gate judges) and its control
+# The fold step only reads its line, so the native render calls the lending
+# entry (`_str_lent`, d7f2d011dd); both entries run fold_lines_chunked_impl,
+# whose worker loop the race control breaks.
 declare -A NEEDS=(
   [gate]='almide_rt_fan_map_par(|fn almide_fan_deal|fn almide_fan_steal'
   [par_filter]='almide_rt_list_par_filter(|almide_rt_list_par_any(|fn almide_fan_deal'
-  [fold]='almide_rt_fs_fold_lines_chunked(|fn almide_fan_spawn'
+  [fold]='almide_rt_fs_fold_lines_chunked_str_lent(|fn almide_fan_spawn'
 )
 declare -A CONTROL=([gate]=wait [par_filter]=wait [fold]=race)
 SHAPES="${MIRI_SHAPES:-gate par_filter fold}"

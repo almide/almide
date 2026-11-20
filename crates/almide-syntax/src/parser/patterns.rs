@@ -15,7 +15,16 @@ impl Parser {
         Ok(pattern)
     }
 
+    /// #4818: a pattern nests like an expression, so it draws on the same
+    /// `nesting` budget (C-440) — unbounded, a deep one overflowed the stack.
     fn parse_pattern_inner(&mut self) -> Result<Pattern, String> {
+        self.enter_depth()?;
+        let result = self.parse_pattern_at_depth();
+        self.exit_depth();
+        result
+    }
+
+    fn parse_pattern_at_depth(&mut self) -> Result<Pattern, String> {
         if let Some(p) = self.parse_structural_pattern() {
             return p;
         }

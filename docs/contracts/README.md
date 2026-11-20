@@ -428,7 +428,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-390 | The zlib decoders bound their output: past the bound they stop with one err text on every leg | 0.69.0 | active | fixture | 1 |
 | C-391 | json.parse bounds nesting at 1000 levels with one err text on every leg | 0.69.0 | active | fixture | 1 |
 | C-392 | fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target | 0.69.0 | active | fixture | 1 |
-| C-393 | [permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
+| C-393 | [permissions] fs bounds every fs call and every unix socket path to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
 | C-394 | random.bytes draws n bytes from the platform CSPRNG: n = 0 is empty, a negative n aborts with one text on every leg | 0.69.0 | active | fixture | 2 |
 | C-395 | regex.new aborts and regex.compile answers err, with one reason on every leg, for a pattern outside the engine's grammar or past 20,000 states | 0.69.0 | active | fuzz(300) | 3 |
 | C-396 | fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg | 0.69.0 | active | fixture | 0 |
@@ -491,4 +491,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-453 | A Region export declared returns: address crosses the wasm host boundary as its data address alone, one value in the memory's address width | 0.69.1 | active | fixture | 0 |
 | C-454 | An address-only Region export holds one host share, a lease its next call ends, so a host that never releases runs in bounded memory | 0.69.1 | active | fixture | 0 |
 | C-455 | A fetched response's header list names every field in ASCII lowercase and leaves out the fields the client manages, on every lane | 0.70.0 | active | fixture | 0 |
+| C-456 | A declared type whose protocol defines its order through `compare` (BigInt) orders by that compare in every natural-order operation a generic body reaches, on every leg | 0.70.0 | active | fixture | 1 |
 

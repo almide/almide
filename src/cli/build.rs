@@ -238,6 +238,17 @@ pub fn cmd_build(args: BuildArgs) {
         std::process::exit(2);
     }
 
+    // #4816: `[permissions] fs` is enforced by the host a program runs
+    // under — the embedded host of `almide run` / `almide test`, the scope
+    // the native build embeds in `main`. A `.wasm` module built for another
+    // host carries no scope (the host chooses its preopens), so the key is
+    // refused here rather than shipped unenforced.
+    if is_wasm && crate::project::permissions_project_for(file).is_some_and(|p| p.fs_allow.is_some()) {
+        err("error: [permissions] fs cannot be carried into a wasm module: the host that runs it chooses the directories it may touch");
+        err("  hint: run it with `almide run --target wasm` (the embedded host enforces the scope), build natively, or remove `fs` from [permissions]");
+        std::process::exit(1);
+    }
+
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
         // The knob rides a render-scoped guard, not a params thread-through:
@@ -356,7 +367,7 @@ pub fn cmd_build(args: BuildArgs) {
         None => rs_code,
     };
     let rs_code = arm_alloc_count(rs_code);
-    let rs_code = inject_fs_scope(rs_code);
+    let rs_code = inject_fs_scope(rs_code, super::fs_scope_for(file));
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
@@ -491,10 +502,10 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// held descriptor without following a symlink; the rooted calls open their
 /// root the same way. A symlink swapped in after the check is refused by the
 /// call, and the guard answers it with the check's own refusal text.
-pub(crate) fn inject_fs_scope(rs_code: String) -> String {
-    let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
+pub(crate) fn inject_fs_scope(rs_code: String, roots: Option<Vec<String>>) -> String {
+    let Some(roots) = roots else { return rs_code };
     // The certified renderer installs its scope before the artifact is bound.
-    if !almide_codegen::rust_idents::identifiers(&rs_code).any(|id| id.starts_with("almide_rt_fs_")) || rs_code.starts_with(almide_codegen::fs_scope::SCOPE_MARKER) {
+    if rs_code.starts_with(almide_codegen::fs_scope::SCOPE_MARKER) || !almide_codegen::fs_scope::FsScope::applies_to(&rs_code) {
         return rs_code;
     }
     let marker = almide::codegen::RT_BOUNDARY_MARKER;
@@ -508,7 +519,10 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
         let m = almide::codegen::RUNTIME_MODULE;
         (format!("crate::{m}::"), format!("use crate::{m}::*;\n"))
     };
-    let scope = almide_codegen::fs_scope::FsScope::new(&roots, &rt_path, &rt_use, user);
+    let scope = almide_codegen::fs_scope::FsScope::new(&roots, &rt_path, &rt_use, user).unwrap_or_else(|e| {
+        err(&format!("error: {e}"));
+        std::process::exit(1)
+    });
     let user = scope.wrap_calls(user);
     if head.is_empty() {
         splice_after_inner_attrs(&user, &scope.prelude)

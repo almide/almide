@@ -6,7 +6,7 @@
 #   orphan-fn    a function nothing names (value = lines)
 # Gated by tools/almide-gates structure: a count may not grow and a named row
 # may not be added. A shrink passes; take it up with --update.
-# pub-unused 756, split-file 95, orphan-file 3 (1318 lines), orphan-fn 12 (242 lines)
+# pub-unused 742, split-file 95, orphan-file 3 (1318 lines), orphan-fn 12 (242 lines)
 [[row]]
 kind  = "orphan-file"
 key   = "crates/almide-codegen/src/generated/matrix_desugar_gen.rs"
@@ -74,11 +74,11 @@ value = 14
 [[row]]
 kind  = "pub-unused"
 key   = "almide-base"
-value = 23
+value = 22
 [[row]]
 kind  = "pub-unused"
 key   = "almide-codegen"
-value = 131
+value = 129
 [[row]]
 kind  = "pub-unused"
 key   = "almide-corpus"
@@ -98,7 +98,7 @@ value = 1
 [[row]]
 kind  = "pub-unused"
 key   = "almide-frontend"
-value = 161
+value = 154
 [[row]]
 kind  = "pub-unused"
 key   = "almide-gpu-run"
@@ -106,7 +106,7 @@ value = 5
 [[row]]
 kind  = "pub-unused"
 key   = "almide-interp"
-value = 10
+value = 9
 [[row]]
 kind  = "pub-unused"
 key   = "almide-ir"
@@ -122,7 +122,7 @@ value = 4
 [[row]]
 kind  = "pub-unused"
 key   = "almide-mir"
-value = 148
+value = 147
 [[row]]
 kind  = "pub-unused"
 key   = "almide-optimize"
@@ -146,7 +146,7 @@ value = 13
 [[row]]
 kind  = "pub-unused"
 key   = "almide-types"
-value = 8
+value = 7
 [[row]]
 kind  = "pub-unused"
 key   = "almide-verify"
@@ -166,7 +166,7 @@ value = 11
 [[row]]
 kind  = "pub-unused"
 key   = "almide-wasm-vm"
-value = 14
+value = 13
 [[row]]
 kind  = "split-file"
 key   = "almide-codegen"

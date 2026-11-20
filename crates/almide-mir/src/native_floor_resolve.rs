@@ -242,15 +242,17 @@ fn host_module_of_text(text: &str) -> Option<&'static str> {
     host_module_of_text_in(runtime_index(), text)
 }
 
+#[cfg(test)]
 fn is_fs_host_text(text: &str) -> bool {
     host_module_of_text(text) == Some("fs")
 }
 
 /// Additional trusted runtime support for a scoped host implementation. This
-/// is not an admission route: the render must already carry a named fs host.
+/// is not an admission route: the render must already carry an admitted host
+/// call the scope bounds — an fs one, or a unix socket path (#4832).
 pub(crate) fn scoped_fs_runtime_items(text: &str, used: &[&str], with_fan: bool) -> Result<Vec<&'static str>, String> {
-    if !used.iter().any(|s| is_fs_host_text(s)) {
-        return Err("a scoped filesystem runtime requires an admitted fs host call".into());
+    if !used.iter().any(|s| host_module_of_text(s).is_some()) {
+        return Err("a scoped filesystem runtime requires an admitted host call".into());
     }
     let glue = if with_fan { crate::render_native::fan_glue() } else { String::new() };
     let mut supplied = defined_names(&glue);
@@ -263,8 +265,4 @@ pub(crate) fn scoped_fs_runtime_items(text: &str, used: &[&str], with_fan: bool)
         out.extend(closure_contents_using(&name, runtime_index(), refs)?);
     }
     Ok(out)
-}
-
-pub(crate) fn carries_fs_host(used: &[&str]) -> bool {
-    used.iter().any(|s| is_fs_host_text(s))
 }

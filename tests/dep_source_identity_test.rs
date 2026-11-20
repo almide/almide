@@ -14,10 +14,14 @@
 //!   the manifest's NEW tag beside it. The lock read as bumped; the build
 //!   compiled the old tag.
 //!
-//! Both are checked the way a user meets them: real git repositories reached
-//! over `file://`, a real `almide check`, and the lock read back off disk. The
+//! Both are checked the way a user meets them: real git repositories served
+//! over https by `support/git_host.rs`, a real `almide check`, and the lock
+//! read back off disk. The
 //! consumer calls a function that exists only in the source it asked for, so
 //! a wrong resolution is a type error and not merely a different hash.
+
+#[path = "support/git_host.rs"]
+mod git_host;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -113,12 +117,9 @@ fn write_consumer(proj: &Path, git_url: &str, tag: &str, marker: &str) {
 /// `almide check` with the dependency cache confined to `home`. Answers
 /// (success, stderr).
 fn check(proj: &Path, home: &Path) -> (bool, String) {
-    let out = Command::new(almide_bin())
-        .args(["check", "src/main.almd"])
-        .current_dir(proj)
-        .env("HOME", home)
-        .output()
-        .expect("spawn almide");
+    let mut cmd = Command::new(almide_bin());
+    cmd.args(["check", "src/main.almd"]).current_dir(proj).env("HOME", home);
+    let out = git_host::shared().env(&mut cmd).output().expect("spawn almide");
     (out.status.success(), String::from_utf8_lossy(&out.stderr).to_string())
 }
 
@@ -132,7 +133,7 @@ fn locked(proj: &Path) -> (String, String) {
         .into_iter()
         .find(|l| l.name == "fizz_protocol")
         .unwrap_or_else(|| panic!("no fizz_protocol entry in:\n{text}"));
-    (entry.ref_name, entry.commit)
+    (entry.ref_name, entry.commit.to_string())
 }
 
 /// #2523: a package name is not a namespace. Two repositories publishing
@@ -156,13 +157,13 @@ fn two_sources_sharing_a_name_and_tag_each_resolve_their_own_commit() {
 
     // A first — it is A's checkout that used to answer for B.
     let proj_a = root.join("projA");
-    write_consumer(&proj_a, &format!("file://{}", src_a.display()), "v0.2.2", "from_a");
+    write_consumer(&proj_a, &git_host::shared().url_of(&src_a), "v0.2.2", "from_a");
     let (ok_a, stderr_a) = check(&proj_a, &home);
     assert!(ok_a, "projA should check against its own source:\n{stderr_a}");
     assert_eq!(locked(&proj_a), ("v0.2.2".into(), commit_a.clone()));
 
     let proj_b = root.join("projB");
-    write_consumer(&proj_b, &format!("file://{}", src_b.display()), "v0.2.2", "from_b");
+    write_consumer(&proj_b, &git_host::shared().url_of(&src_b), "v0.2.2", "from_b");
     let (ok_b, stderr_b) = check(&proj_b, &home);
     assert!(
         ok_b,
@@ -195,13 +196,13 @@ fn bumping_a_tag_records_the_new_tags_commit() {
     assert_ne!(old_commit, new_commit);
 
     let proj = root.join("proj");
-    write_consumer(&proj, &format!("file://{}", src.display()), "v0.2.0", "in_v020");
+    write_consumer(&proj, &git_host::shared().url_of(&src), "v0.2.0", "in_v020");
     let (ok, stderr) = check(&proj, &home);
     assert!(ok, "the v0.2.0 pin should check:\n{stderr}");
     assert_eq!(locked(&proj), ("v0.2.0".into(), old_commit.clone()));
 
     // Bump the tag, and call a function only v0.2.2 declares.
-    write_consumer(&proj, &format!("file://{}", src.display()), "v0.2.2", "in_v022");
+    write_consumer(&proj, &git_host::shared().url_of(&src), "v0.2.2", "in_v022");
     let (ok, stderr) = check(&proj, &home);
     assert!(
         ok,

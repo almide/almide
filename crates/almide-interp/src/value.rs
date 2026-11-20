@@ -430,11 +430,24 @@ fn float_order_key(x: f64) -> i64 {
 
 pub struct TotalOrder<'a> {
     tags: &'a VariantTags,
+    /// How a record whose type defines its order through its protocol's
+    /// `compare` orders (#4788, C-456): `Some(answer)` for such a pair, `None`
+    /// for any other record pair, which then orders by its fields.
+    records: Option<std::cell::RefCell<&'a mut RecordOrder<'a>>>,
 }
+
+/// See [`TotalOrder::with_records`].
+pub(crate) type RecordOrder<'a> = dyn FnMut(&Value, &Value) -> Option<Option<std::cmp::Ordering>> + 'a;
 
 impl<'a> TotalOrder<'a> {
     pub fn new(tags: &'a VariantTags) -> Self {
-        TotalOrder { tags }
+        TotalOrder { tags, records: None }
+    }
+
+    /// The same order, asking `records` first for every record pair it meets,
+    /// at the top or nested in a tuple, list, option, result or payload.
+    pub(crate) fn with_records(tags: &'a VariantTags, records: &'a mut RecordOrder<'a>) -> Self {
+        TotalOrder { tags, records: Some(std::cell::RefCell::new(records)) }
     }
 
     pub fn cmp(&self, a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
@@ -449,12 +462,29 @@ impl<'a> TotalOrder<'a> {
             // must totalOrder like a bare Float would); the none/some shell
             // ordering itself is shared with `partial_cmp_val`.
             (Option(Some(x)), Option(Some(y))) => self.cmp(x, y),
+            // A Result orders as native's derived `Ord` and the wasm legs'
+            // tag-then-payload compare: every `ok` before every `err`, then the
+            // payloads on this same total order (#4760: with no arm here a
+            // `Heap[Result[..]]` / `sort_by` key of Results compared as
+            // incomparable, which the stable sort read as equal).
+            (Result(x), Result(y)) => match (x, y) {
+                (Ok(x), Ok(y)) | (Err(x), Err(y)) => self.cmp(x, y),
+                (Ok(_), Err(_)) => Some(std::cmp::Ordering::Less),
+                (Err(_), Ok(_)) => Some(std::cmp::Ordering::Greater),
+            },
             // A record orders lexicographically in FIELD DECLARATION order —
             // native's derive, and the order `almide_layout::pack_fields` gives
             // the wasm comparator. A named record's fields are ALWAYS rebuilt in
             // declaration order here (`fill_record_defaults`), so POSITION is
             // declaration order and a permuted literal compares identically.
-            (Record { fields: x, .. }, Record { fields: y, .. }) => self.cmp_fields(x, y),
+            (Record { fields: x, .. }, Record { fields: y, .. }) => {
+                if let Some(records) = &self.records
+                    && let Some(answer) = (records.borrow_mut())(a, b)
+                {
+                    return answer;
+                }
+                self.cmp_fields(x, y)
+            }
             // A variant compares its CASE first and breaks the tie on that
             // case's payload — native's discriminant-then-fields derive, and
             // the wasm legs' tag-then-payload emit.
