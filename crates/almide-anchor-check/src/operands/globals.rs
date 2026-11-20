@@ -2,6 +2,11 @@
 //! only when nothing between them can write it, and a `call` between them
 //! runs code that may: its callee's own `global.set`s, and those of every
 //! function that callee calls.
+//!
+//! TRUSTED: an imported function sets no global of this module. It holds no
+//! reference to one (a global is reached by index, from this module's own
+//! code), so it could only do so by calling back into the module while the
+//! call is in progress, which the hosts this compiler targets do not do.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -11,8 +16,8 @@ use wasmparser::Operator as Op;
 use crate::decode::Body;
 
 /// For each defined function, the globals a call of it may set; `None` for
-/// one that may set any (it reaches an imported function or an indirect
-/// call, whose code this module does not hold).
+/// one that may set any (it reaches an indirect call, whose callee is not
+/// known here).
 #[derive(Clone)]
 pub(crate) struct GlobalSets {
     imports: u32,
@@ -23,10 +28,11 @@ impl GlobalSets {
     /// Instruction `op` is a call that may set global `g`.
     pub(crate) fn call_may_set(&self, op: &Op<'_>, g: u32) -> bool {
         match op {
-            Op::Call { function_index } | Op::ReturnCall { function_index } => function_index
-                .checked_sub(self.imports)
-                .and_then(|d| self.sets.get(d as usize))
-                .is_none_or(|s| s.as_ref().is_none_or(|s| s.contains(&g))),
+            Op::Call { function_index } | Op::ReturnCall { function_index } => match function_index.checked_sub(self.imports) {
+                // An imported function (module header, TRUSTED).
+                None => false,
+                Some(d) => self.sets.get(d as usize).is_none_or(|s| s.as_ref().is_none_or(|s| s.contains(&g))),
+            },
             Op::CallIndirect { .. } | Op::ReturnCallIndirect { .. } => true,
             _ => false,
         }
@@ -34,8 +40,9 @@ impl GlobalSets {
 }
 
 /// The least fixpoint: a function sets what its own `global.set`s name and
-/// what each function it calls sets; an imported callee or an indirect call
-/// makes it one that may set any global.
+/// what each defined function it calls sets; an indirect call makes it one
+/// that may set any global, and an imported callee adds nothing (module
+/// header, TRUSTED).
 pub(crate) fn global_sets(bodies: &[Body<'_>], imports: u32) -> GlobalSets {
     let mut sets: Vec<Option<HashSet<u32>>> = bodies
         .iter()
@@ -62,9 +69,11 @@ pub(crate) fn global_sets(bodies: &[Body<'_>], imports: u32) -> GlobalSets {
             for op in &bodies[i].ops {
                 match op {
                     Op::Call { function_index } | Op::ReturnCall { function_index } => {
-                        match function_index.checked_sub(imports).and_then(|d| sets.get(d as usize)) {
-                            Some(Some(s)) => add.extend(s.iter().copied()),
-                            _ => any = true,
+                        if let Some(d) = function_index.checked_sub(imports) {
+                            match sets.get(d as usize) {
+                                Some(Some(s)) => add.extend(s.iter().copied()),
+                                _ => any = true,
+                            }
                         }
                     }
                     Op::CallIndirect { .. } | Op::ReturnCallIndirect { .. } => any = true,
