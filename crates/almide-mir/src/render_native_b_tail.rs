@@ -189,8 +189,12 @@ fn render_first_join_value(
         // assign it, so a default built and dropped per evaluation buys nothing.
         let (decl, join_t, rhs) = match t {
             NTy::Never => return Err(wall("native: an uninhabited value cannot choose a join type")),
-            NTy::F32 => (format!("let mut {}: f32;", var(*d)), t, var(v)),
-            NTy::Bool => (format!("let mut {}: bool;", var(*d)), t, var(v)),
+            // A real f32 / bool lives only at a typed collection's runtime
+            // boundary (a Map's Float32, a Set[Bool]'s element, #4795): every
+            // read converts it to the i64 lane the MIR carries, and a copy of
+            // one is refused (`render_dup`). A join of one is refused alike
+            // (#4799) rather than declared for a value no yield carries.
+            NTy::F32 | NTy::Bool => return Err(wall("native: a boundary-only scalar kind cannot choose a join type")),
             // #3532: a borrow join holds the arm's shared reference.
             NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
                 format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
@@ -583,5 +587,29 @@ fn take_dying_payloads(
         }
         rendered[k] = (format!("{{ {take} }}"), owned);
         dying[k] = true;
+    }
+}
+
+#[cfg(test)]
+mod boundary_join_tests {
+    use super::*;
+
+    /// A join whose first yield is a boundary-only scalar (a real f32 or
+    /// bool) is refused, never declared (#4799); an i64 join still is.
+    #[test]
+    fn a_boundary_only_scalar_cannot_choose_a_join_type() {
+        let (v, d) = (ValueId(1), ValueId(2));
+        let none = std::collections::BTreeSet::new();
+        for t in [NTy::F32, NTy::Bool] {
+            let mut tys = BTreeMap::from([(v, t)]);
+            let mut out = String::from("//__JOIN_v2__\n");
+            let err = render_first_join_value(v, "//__JOIN_v2__", &d, &none, &none, &mut tys, &mut out, 0)
+                .expect_err("a boundary-only scalar join is refused");
+            assert!(format!("{err:?}").contains("boundary-only scalar kind"), "{err:?}");
+        }
+        let mut tys = BTreeMap::from([(v, NTy::I64)]);
+        let mut out = String::from("//__JOIN_v2__\n");
+        render_first_join_value(v, "//__JOIN_v2__", &d, &none, &none, &mut tys, &mut out, 0).expect("an i64 join");
+        assert_eq!(tys.get(&d), Some(&NTy::I64));
     }
 }

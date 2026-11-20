@@ -1,0 +1,19 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4799): a
+// Set of (Int, String) tuples built and queried inside a loop, through a fn
+// that takes the set. It takes the native render's aggregate set element
+// path: a tuple element admitted by its generated record's exact equality.
+fn has(s: Set[(Int, String)], k: Int) -> Bool = set.contains(s, (k, "x"))
+
+fn main() -> Unit = {
+  let n = int.parse("4000") ?? 4
+  var acc = 0
+  var r = 0
+  while r < n {
+    let s = set.from_list([(r % 5, "x"), (r % 7, "y"), (r % 5, "x")])
+    acc = acc + set.len(s)
+    if has(s, r % 5) then acc = acc + 1 else ()
+    if has(s, 9) then acc = acc + 100 else ()
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

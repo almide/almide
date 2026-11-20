@@ -121,7 +121,7 @@ pub(crate) fn set_elem(i: u16) -> Option<NTy> {
 pub(crate) fn is_native_set(t: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     use almide_lang::types::Ty;
-    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (matches!(a[0], Ty::Float32 | Ty::Float | Ty::Bool) || native_set_element_type(&a[0])))
+    matches!(t, Ty::Applied(TypeConstructorId::Set, a) if a.len() == 1 && (matches!(a[0], Ty::Float32 | Ty::Float | Ty::Bool) || native_set_element_type(&a[0]).is_ok()))
 }
 
 /// The generated type `decl` declares: the first one `same` matches, or
