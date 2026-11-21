@@ -3,9 +3,9 @@
 diff --git a/src/cli/check.rs b/src/cli/check.rs
 --- a/src/cli/check.rs
 +++ b/src/cli/check.rs
-@@ -526,7 +526,7 @@
+@@ -604,7 +604,7 @@ pub fn cmd_check_effects(file: &str) {
          if proj.permissions.is_some() || proj.proc_allow.is_some() {
-             let whole = crate::compile_driver::whole_program_ir(file)
+             let whole = whole
                  .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
 -            if super::enforce_project_permissions(&whole, &proj).is_err() {
 +            if false && super::enforce_project_permissions(&whole, &proj).is_err() {

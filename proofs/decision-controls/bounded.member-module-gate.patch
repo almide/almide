@@ -3,12 +3,12 @@
 diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
 --- a/crates/almide-frontend/src/check/bounded.rs
 +++ b/crates/almide-frontend/src/check/bounded.rs
-@@ -939,7 +939,7 @@
+@@ -1052,7 +1052,7 @@ impl BoundedCx<'_, '_> {
          // #4840: a receiver the checker typed as a VALUE (a parameter or local,
          // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
          // through that value: indirect, never a stdlib member.
--        if self.checker.type_map.get(&object.id).is_some() {
-+        if false && self.checker.type_map.get(&object.id).is_some() {
+-        if self.checker.type_map.contains_key(&object.id) {
++        if false && self.checker.type_map.contains_key(&object.id) {
              // `p.norm()` on a value is UFCS for the user fn `norm(p)`: judged
              // as that direct call; anything else through a value is indirect.
              if self.fns.contains_key(f) {
