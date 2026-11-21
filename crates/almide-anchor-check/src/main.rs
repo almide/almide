@@ -22,6 +22,48 @@ fn main() {
     });
     // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
     // translation of every self-host body (lin.rs), holes as `_`.
+    // Probe only: single-byte mutants of the located instructions, each judged.
+    if args.first().map(String::as_str) == Some("--mutate") {
+        let (Some(w), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
+        let (w, b) = (std::fs::read(w).unwrap_or_default(), std::fs::read(b).unwrap_or_default());
+        let a = String::from_utf8_lossy(&std::fs::read(a).unwrap_or_default()).into_owned();
+        let located = almide_anchor_check::located_by(&a).unwrap_or_default();
+        let only = std::env::var("MUT_ONLY").ok();
+        let ms: Vec<_> = almide_anchor_check::mutate::mutants(&w, &located)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| only.as_deref().is_none_or(|o| m.role == o || m.kind == "branch-depth"))
+            .collect();
+        // The unmutated module must be accepted, or no verdict below means anything.
+        if almide_anchor_check::check(&w, &b, &a).is_err() {
+            println!("MUT base/rejected/- skipped {}", ms.len());
+            return;
+        }
+        let mut tally: std::collections::BTreeMap<(String, &str), usize> = std::collections::BTreeMap::new();
+        for m in &ms {
+            let mut x = w.clone();
+            for (p, v) in &m.bytes {
+                x[*p] = *v;
+            }
+            let verdict = if almide_anchor_check::decode(&x).is_err() {
+                "invalid"
+            } else {
+                match almide_anchor_check::check(&x, &b, &a) {
+                    Err(_) => "killed",
+                    Ok(_) => "survived",
+                }
+            };
+            let class = format!("{}/{}/{}", m.src, m.role, m.kind);
+            *tally.entry((class.clone(), verdict)).or_default() += 1;
+            if verdict == "survived" && (m.role == "self" || m.role == "addr" || m.role == "cond" || m.role == "control" || m.kind == "branch-depth") {
+                println!("MUTSURV {class} {}:{} -> {} {}", m.at.func, m.at.op, m.bytes.first().map_or(0, |b| b.1), m.what.replace(' ', ""));
+            }
+        }
+        for ((k, v), n) in tally {
+            println!("MUT {k} {v} {n}");
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--lin-skel") {
         let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
         let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
@@ -83,6 +125,43 @@ fn main() {
         };
         linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_with(&bodies, &a, &l)))
     });
+    // Probe only: the census again, one row per function.
+    let by_function = census.then(|| {
+        let linear = match &lin_cert {
+            None => Ok(std::collections::HashSet::new()),
+            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
+                .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect()),
+        };
+        linear.and_then(|l| almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_by_function(&bodies, &a, &l)))
+    });
+    if census {
+        let linear: std::collections::HashSet<almide_anchor_check::At> = match &lin_cert {
+            None => std::collections::HashSet::new(),
+            Some(p) => almide_anchor_check::lin::verify(&w, &a, String::from_utf8_lossy(&read(p)).trim_end())
+                .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect())
+                .unwrap_or_default(),
+        };
+        if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_detail(&bodies, &a, &linear)) {
+            for (func, key, n) in rows {
+                println!("CENSUSX {func} {key} {n}");
+            }
+        }
+    }
+    if census {
+        if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_writes(&bodies, &a)) {
+            for (func, n) in rows {
+                println!("STOREFN {func} {}", n.map(|x| x.to_string()).join(" "));
+            }
+        }
+    }
+    if let Some(Ok(rows)) = &by_function {
+        for r in rows {
+            println!(
+                "CENSUSFN {} {} {} {} {} {} {} {} {} {}",
+                r.func, u8::from(r.frame), r.tally.accesses, r.tally.located, r.tally.linear, r.tally.header, r.tally.bulk, r.other_load, r.other_store, r.other_byte
+            );
+        }
+    }
     match almide_anchor_check::check_within(w, b, a, limit) {
         Ok(r) => {
             println!(
