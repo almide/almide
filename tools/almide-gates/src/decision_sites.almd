@@ -250,18 +250,22 @@ fn judge(text: String, ev: Evidence) -> List[String] = {
 // proofs/decision-controls/<id>.<what>.patch, names its own test and has run.
 fn extra_prefix(r: Row) -> String = "proofs/decision-controls/" + r.id + "."
 
-fn extra_findings(r: Row, ev: Evidence, p: String) -> List[String] = if r.control_extra == "" then []
-else if not string.starts_with(r.control_extra, extra_prefix(r)) or not string.ends_with(r.control_extra, ".patch") then [
-  p + "c4: control_extra must be " + extra_prefix(r) + "<what>.patch"
-]
-else if not has(ev, r.control_extra) then [p + "c4: " + r.control_extra + " does not exist"]
-else if r.control_extra_test == "" then [
-  p + "c4: no control_extra_test (the test the second patch turns red)"
-]
-else if r.control_extra_seen == "" then [
-  p + "c4: the second control never ran (control_extra_seen is empty)"
-]
-else []
+fn extra_findings(r: Row, ev: Evidence, p: String) -> List[String] =
+  if r.control_extra == "" then []
+  else if not string.starts_with(r.control_extra, extra_prefix(r)) or not string.ends_with(
+    r.control_extra,
+    ".patch",
+  ) then [p + "c4: control_extra must be " + extra_prefix(r) + "<what>.patch"]
+  else if not has(ev, r.control_extra) then [
+    p + "c4: " + r.control_extra + " does not exist"
+  ]
+  else if r.control_extra_test == "" then [
+    p + "c4: no control_extra_test (the test the second patch turns red)"
+  ]
+  else if r.control_extra_seen == "" then [
+    p + "c4: the second control never ran (control_extra_seen is empty)"
+  ]
+  else []
 
 // The paths a STAMPED row points at, so the effectful half can look them up.
 fn wanted(rows: List[Row]) -> List[String] = rows |> list.filter((r) => r.status == "STAMPED") |> list.flat_map((r) => [
@@ -301,7 +305,16 @@ effect fn extra_patch_findings(root: String, r: Row) -> List[String] = {
   else if not string.contains(text, "# control_test: " + r.control_extra_test + "\n") then [
     r.id + ": " + r.control_extra + " does not name the row's control_extra_test `" + r.control_extra_test + "`"
   ]
-  else match process.exec("git", ["-C", root, "apply", "--check", r.control_extra]) {
+  else match process.exec(
+    "git",
+    [
+      "-C",
+      root,
+      "apply",
+      "--check",
+      r.control_extra
+    ],
+  ) {
     ok(_) => [],
     err(_) => [
       r.id + ": " + r.control_extra + " no longer applies — re-derive it against the moved check"
@@ -365,14 +378,20 @@ test "a second control must sit beside the row's patch, exist and have run" {
   let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"tests/x_test.rs::novel_x\"\ncontrol_seen = \"abc 2026-11-19\"\n"
   let extra = ctl + "control_extra = \"proofs/decision-controls/x.forged.c1.patch\"\ncontrol_extra_test = \"tests/x_test.rs::novel_y\"\n"
   let ev = Evidence {
-    present: full_evidence().present + ["proofs/decision-controls/x.forged.c1.patch"],
+    present: full_evidence().present + [
+      "proofs/decision-controls/x.forged.c1.patch"
+    ],
     texts: full_evidence().texts,
   }
   assert(judge(forged(extra), ev) |> list.any((b) => string.contains(b, "second control never ran")))
   let seen = extra + "control_extra_seen = \"abc 2026-11-21\"\n"
   assert_eq(judge(forged(seen), ev), [])
   assert(judge(forged(seen), full_evidence()) |> list.any((b) => string.contains(b, "x.forged.c1.patch does not exist")))
-  let elsewhere = string.replace(seen, "decision-controls/x.forged.c1.patch", "decision-controls/y.c1.patch")
+  let elsewhere = string.replace(
+    seen,
+    "decision-controls/x.forged.c1.patch",
+    "decision-controls/y.c1.patch",
+  )
   assert(judge(forged(elsewhere), ev) |> list.any((b) => string.contains(b, "control_extra must be")))
 }
 
