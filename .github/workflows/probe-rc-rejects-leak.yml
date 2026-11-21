@@ -28,7 +28,7 @@ jobs:
       - name: Run each under the allocation counter
         run: |
           set -u
-          for f in examples/minesweeper.almd \
+          for f in \
             research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/seed/almide/main.almd \
             research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/solution/almide/main.almd \
             research/benchmark/perf/fannkuchredux/fannkuchredux.almd \
@@ -38,10 +38,11 @@ jobs:
             research/benchmark/perf/v1-shapes/chunked_line_fold.almd \
             research/benchmark/perf/v1-shapes/map_keyed_counting.almd \
             research/benchmark/perf/v1-shapes/never_fallible.almd \
-            examples/lisp.almd examples/raytracer.almd; do
+            examples/lisp.almd examples/raytracer.almd examples/minesweeper.almd; do
             echo "== $f"
-            ALMIDE_WASM_ALLOC_COUNT=1 timeout 300 ./target/release/almide run "$f" --target wasm > out.txt 2> err.txt < /dev/null
-            echo "exit $? ; stdout $(wc -l < out.txt) line(s), $(wc -c < out.txt) byte(s)"
-            grep -iE "alloc|free|live|leak" out.txt err.txt | tail -6 | cut -c1-240
-            head -2 err.txt | cut -c1-200
+            rc=0
+            ALMIDE_WASM_ALLOC_COUNT=1 timeout 120 ./target/release/almide run "$f" --target wasm > out.txt 2> err.txt < /dev/null || rc=$?
+            echo "exit $rc ; stdout $(wc -l < out.txt) line(s), $(wc -c < out.txt) byte(s)"
+            grep -iE "alloc|free|live|leak" out.txt err.txt | tail -6 | cut -c1-240 || true
+            head -2 err.txt | cut -c1-200 || true
           done
