@@ -31,6 +31,9 @@ impl Emitter<'_> {
                 };
                 let mut i = self.f.instructions();
                 i.i32_load(slot_memarg(almide_layout::SUM_TAG));
+                self.fw_res_tag_back(0);
+                #[allow(unused_variables, unused_mut)]
+                let mut i = self.f.instructions();
                 if func == "is_ok" {
                     i.i32_eqz();
                 } else {
@@ -71,13 +74,16 @@ impl Emitter<'_> {
                         .i32_load(slot_memarg(almide_layout::SUM_TAG))
                         .i32_const(0)
                         .i32_ne();
+                    self.fw_res_tag_back(3);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     i.if_(BlockType::Result(ValType::I32));
                     i.local_get(hs);
                     i.else_();
                 }
                 self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(a, almide_layout::SUM_FIELD);
+                self.load_res_slot(a);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(rb))?;
                 // A callback result RETURNED as the arm's value: a view (a captured var,
@@ -109,11 +115,14 @@ impl Emitter<'_> {
                         .i32_load(slot_memarg(almide_layout::SUM_TAG))
                         .i32_const(0)
                         .i32_ne();
+                    self.fw_res_tag_back(3);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     i.if_(BlockType::Result(a.val_type()));
                 }
                 self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(e, almide_layout::SUM_FIELD);
+                self.load_res_slot(e);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(a))?;
                 // A callback result RETURNED as the arm's value: a view (a captured var,
@@ -122,7 +131,7 @@ impl Emitter<'_> {
                 self.witness_store(body, a);
                 self.witness_once_arm();
                 self.f.instructions().else_().local_get(hs);
-                self.load_ty_slot(a, almide_layout::SUM_FIELD);
+                self.load_res_slot(a);
                 // The payload handed out is a SHARE of the Option's (the
                 // borrowed source may be a temporary released next): +1,
                 // so both branches hand back an owned value.
@@ -146,6 +155,9 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_set(hs);
                     i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     if want_ok {
                         i.i32_const(0).i32_ne();
                     } else {
@@ -158,11 +170,11 @@ impl Emitter<'_> {
                     let _ = i;
                 }
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(side, almide_layout::SUM_FIELD);
+                self.load_res_slot(side);
                 // The payload copied out is a SHARE (+1): the new block's
                 // typed drop releases it, the source keeps its own.
                 self.arm_share_handle_top(side);
-                self.store_ty_slot(side, almide_layout::OPTION_FIELD);
+                self.store_opt_slot(side);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
@@ -221,12 +233,15 @@ impl Emitter<'_> {
                 .i32_load(slot_memarg(almide_layout::SUM_TAG))
                 .i32_eqz()
                 .if_(BlockType::Empty);
+            self.fw_res_tag_back(3);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hok).local_get(hwo).i32_add();
             i.local_get(hr);
         }
         // Each payload copied out is a SHARE (+1), as in `option.zip`: the
         // output lists' drops release them, the input results keep their own.
-        self.load_ty_slot(t, almide_layout::SUM_FIELD);
+        self.load_res_slot(t);
         self.arm_share_handle_top(t);
         self.store_ty_slot(t, 0);
         {
@@ -236,7 +251,7 @@ impl Emitter<'_> {
             i.local_get(herr).local_get(hwe).i32_add();
             i.local_get(hr);
         }
-        self.load_ty_slot(e, almide_layout::SUM_FIELD);
+        self.load_res_slot(e);
         self.arm_share_handle_top(e);
         self.store_ty_slot(e, 0);
         {
@@ -288,6 +303,9 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_set(hs);
                     i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     if on_ok {
                         i.i32_const(0).i32_ne();
                     } else {
@@ -300,7 +318,7 @@ impl Emitter<'_> {
                 }
                 self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(side, almide_layout::SUM_FIELD);
+                self.load_res_slot(side);
                 self.f.instructions().local_set(params[0]);
                 self.f
                     .instructions()
@@ -309,6 +327,7 @@ impl Emitter<'_> {
                     .local_tee(hb)
                     .i32_const(if on_ok { 0 } else { 1 })
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                self.fw_res_tag_back(0);
                 self.f.instructions().local_get(hb);
                 self.lower(body, Some(b))?;
                 // A pass-through body hands back a VIEW (a captured var, the
@@ -317,7 +336,7 @@ impl Emitter<'_> {
                 self.witness_store(body, b);
                 self.witness_once_arm();
                 self.witness_once_close();
-                self.store_ty_slot(b, almide_layout::SUM_FIELD);
+                self.store_res_slot(b);
                 // #2969: the mapped side is done with the retained input —
                 // the new block took its own credit on whatever the body
                 // handed back (the share guard above), so the input is
@@ -372,7 +391,7 @@ impl Emitter<'_> {
                 }
                 self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(a);
                 self.f.instructions().local_set(params[0]);
                 let out_ty = if flat {
                     self.lower(body, Some(b))?;
@@ -390,7 +409,7 @@ impl Emitter<'_> {
                     // A pass-through body hands back a VIEW (a captured var, the
                     // input itself): the block storing it is a holder and takes the share.
                     self.rc_share_guard(body, b);
-                    self.store_ty_slot(b, almide_layout::OPTION_FIELD);
+                    self.store_opt_slot(b);
                     self.f.instructions().local_get(hb);
                     SliceTy::Option(self.types.intern(b))
                 };
@@ -420,7 +439,7 @@ impl Emitter<'_> {
                     i.else_();
                 }
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(inner, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(inner);
                 self.f.instructions().end();
                 self.release_i32();
                 // The inner option is o's PAYLOAD, not a fresh block: a view
@@ -448,7 +467,7 @@ impl Emitter<'_> {
                 self.witness_store(body, a);
                 self.witness_once_arm();
                 self.f.instructions().else_().local_get(hs);
-                self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(a);
                 // The payload handed out is a SHARE of the Option's (the
                 // borrowed source may be a temporary released next): +1,
                 // so both branches hand back an owned value.
@@ -501,7 +520,7 @@ impl Emitter<'_> {
                 }
                 self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(a);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(BOOL))?;
                 self.witness_once_arm();
@@ -558,11 +577,11 @@ impl Emitter<'_> {
                 // their own. Without it a temporary input freed its string
                 // under the tuple, and a let-bound one was released twice.
                 self.f.instructions().local_get(hla);
-                self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(a);
                 self.arm_share_handle_top(a);
                 self.store_ty_slot(a, aoff);
                 self.f.instructions().local_get(hp).local_get(hlb);
-                self.load_ty_slot(b, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(b);
                 self.arm_share_handle_top(b);
                 self.store_ty_slot(b, boff);
                 // the tuple base doubles as the some-payload: a tuple-typed
@@ -600,7 +619,7 @@ impl Emitter<'_> {
                     let _ = i;
                 }
                 self.f.instructions().local_get(hs);
-                self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(a);
                 // The payload copied out is a SHARE (+1): the new block's
                 // typed drop releases it, the source keeps its own.
                 self.arm_share_handle_top(a);

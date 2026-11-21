@@ -296,7 +296,7 @@ impl Emitter<'_> {
             .local_tee(rh)
             .local_get(params[0]);
         self.share_handle_top(elem);
-        self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(elem);
         self.f.instructions().br(2);
         self.f.instructions().end();
         self.hof_step(ih);
@@ -329,7 +329,7 @@ impl Emitter<'_> {
             .local_tee(rh)
             .local_get(ih)
             .i64_extend_i32_u();
-        self.store_ty_slot(INT, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(INT);
         self.f.instructions().br(2);
         self.f.instructions().end();
         self.hof_step(ih);

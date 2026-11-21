@@ -278,7 +278,7 @@ impl Emitter<'_> {
             i.local_get(hb).local_get(hlen).i32_add().i32_const(stride).i32_sub();
         }
         self.load_ty_slot(elem, 0);
-        self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(elem);
     }
 
     /// `list.pop(h.f)` on a record var's field (#2908): the field is read

@@ -218,7 +218,7 @@ impl Emitter<'_> {
                     // ok: collect the payload — its credit moves from the
                     // carrier into the list, and the spine is released.
                     self.f.instructions().local_get(hacc).local_get(hr);
-                    self.load_ty_slot(b, almide_layout::SUM_FIELD);
+                    self.load_res_slot(b);
                     if b.val_type() == ValType::F64 {
                         self.f.instructions().i64_reinterpret_f64();
                     }
@@ -679,7 +679,7 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
                     self.f.instructions().local_get(hr).local_get(hv);
-                    self.store_ty_slot(pure, almide_layout::SUM_FIELD);
+                    self.store_res_slot(pure);
                     self.release_val(pure);
                     self.f.instructions().br(0);
                     result_ty

@@ -174,7 +174,7 @@ impl Emitter<'_> {
                 self.f.instructions().else_();
                 self.append_lit("some(");
                 self.f.instructions().local_get(ho);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.disp_last(")", |em| em.emit_display_at(et, true, ir_arg(ir, 0), path))?;
                 self.append_lit(")");
                 self.f.instructions().end();
@@ -192,13 +192,13 @@ impl Emitter<'_> {
                     .if_(BlockType::Empty);
                 self.append_lit("ok(");
                 self.f.instructions().local_get(hr);
-                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
+                self.load_res_slot(ot);
                 self.disp_last(")", |em| em.emit_display_at(ot, true, ir_arg(ir, 0), path))?;
                 self.append_lit(")");
                 self.f.instructions().else_();
                 self.append_lit("err(");
                 self.f.instructions().local_get(hr);
-                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.load_res_slot(et);
                 self.disp_last(")", |em| em.emit_display_at(et, true, ir_arg(ir, 1), path))?;
                 self.append_lit(")");
                 self.f.instructions().end();

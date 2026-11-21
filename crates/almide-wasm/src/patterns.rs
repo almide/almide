@@ -255,7 +255,7 @@ impl Emitter<'_> {
                 let et = self.types.el(h);
                 self.f.instructions().local_get(scr).if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.test_nested(inner, et)?;
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
@@ -338,6 +338,7 @@ impl Emitter<'_> {
                     .i32_load(slot_memarg(almide_layout::SUM_TAG))
                     .i32_const(want_tag)
                     .i32_eq();
+                self.fw_res_tag_back(3);
                 if pattern_irrefutable(inner) {
                     return Ok(());
                 }
@@ -345,7 +346,7 @@ impl Emitter<'_> {
                 // tag matches AND the payload matches (recursive).
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(scr);
-                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.load_res_slot(et);
                 self.test_nested(inner, et)?;
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
@@ -460,19 +461,19 @@ impl Emitter<'_> {
                 let SliceTy::Option(s) = subj_ty else {
                     return unsup("pattern:some-on-non-option");
                 };
-                self.bind_inner(inner, s, almide_layout::OPTION_FIELD, scr)
+                self.bind_inner(inner, s, almide_layout::OPTION_FIELD, scr, Some(crate::field_witness::Sum::Opt))
             }
             IrPattern::Ok { inner } => {
                 let SliceTy::Result(o, _) = subj_ty else {
                     return unsup("pattern:ok-on-non-result");
                 };
-                self.bind_inner(inner, o, almide_layout::SUM_FIELD, scr)
+                self.bind_inner(inner, o, almide_layout::SUM_FIELD, scr, Some(crate::field_witness::Sum::Res))
             }
             IrPattern::Err { inner } => {
                 let SliceTy::Result(_, e) = subj_ty else {
                     return unsup("pattern:err-on-non-result");
                 };
-                self.bind_inner(inner, e, almide_layout::SUM_FIELD, scr)
+                self.bind_inner(inner, e, almide_layout::SUM_FIELD, scr, Some(crate::field_witness::Sum::Res))
             }
             IrPattern::List { elements, rest } => {
                 let SliceTy::List(h) = subj_ty else {
@@ -480,7 +481,7 @@ impl Emitter<'_> {
                 };
                 let stride = self.types.el(h).slot_size();
                 for (i, ep) in elements.iter().enumerate() {
-                    self.bind_inner(ep, h, i as u32 * stride, scr)?;
+                    self.bind_inner(ep, h, i as u32 * stride, scr, None)?;
                 }
                 // #1461 list-rest: a NAMED tail materializes as a fresh
                 // list block — alloc(len - prefix) + payload copy, the
@@ -568,6 +569,7 @@ impl Emitter<'_> {
         h: ETy,
         field: u32,
         scr: u32,
+        sum: Option<crate::field_witness::Sum>,
     ) -> Result<(), EmitError> {
         match inner {
             IrPattern::Wildcard | IrPattern::Literal { .. } => Ok(()),
@@ -577,14 +579,14 @@ impl Emitter<'_> {
                 };
                 let et = self.types.el(h);
                 self.f.instructions().local_get(scr);
-                self.load_ty_slot(et, field);
+                self.load_slot_of(sum, et, field);
                 self.f.instructions().local_set(idx);
                 Ok(())
             }
             nested => {
                 let et = self.types.el(h);
                 self.f.instructions().local_get(scr);
-                self.load_ty_slot(et, field);
+                self.load_slot_of(sum, et, field);
                 self.bind_nested(nested, et)
             }
         }
