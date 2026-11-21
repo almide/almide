@@ -682,7 +682,16 @@ fn validate_package_name(name: &str) -> Result<(), String> {
             name.replace('-', "_"),
         ));
     }
-    Ok(())
+    // The name is an import name and, for build / compile / install, a file
+    // name: one grammar for every route that reads the manifest, so a name
+    // `check` accepts is a name `build` accepts. A manifest without a name
+    // declares none.
+    if name.is_empty() {
+        return Ok(());
+    }
+    check_plain_name(name).map_err(|e| {
+        format!("package name {e}\n  hint: the package name is the import name; rename it in [package] name")
+    })
 }
 
 /// The project root is the directory containing `almide.toml` — `.` when
