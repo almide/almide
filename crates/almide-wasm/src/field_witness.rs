@@ -31,17 +31,18 @@ impl Emitter<'_> {
         match ty {
             SliceTy::Tuple(ti) => {
                 let def = self.types.tuple_def(ti);
-                let k = (3 * ti + 2, 0);
+                let k = (3 * table_index(ti)? + 2, 0);
                 fw::declare(k, &Layout { n: 1, z: def.size, fields: def.fields.iter().map(|&(t, o)| (o, width(t))).collect() });
                 Some((k, false))
             }
             SliceTy::Named(ti) => match self.types.def(ti) {
                 NamedDef::Record(r) => {
-                    let k = (3 * ti, 0);
+                    let k = (3 * table_index(ti)?, 0);
                     fw::declare(k, &Layout { n: 1, z: r.size, fields: r.fields.iter().map(|f| (f.offset, width(f.ty))).collect() });
                     Some((k, false))
                 }
                 NamedDef::Variant(v) => {
+                    let ti = table_index(ti)?;
                     let n = v.cases.len() as u32;
                     for c in &v.cases {
                         let mut fields = vec![(almide_layout::SUM_TAG, 4)];
@@ -94,6 +95,7 @@ impl Emitter<'_> {
         if !fw::armed() || !matches!(self.types.def(ti), NamedDef::Variant(_)) {
             return;
         }
+        let Some(ti) = table_index(ti) else { return };
         // Lays out every case: the checker holds the tag read to each.
         let _ = self.fw_kind(ty, None);
         fw::tag(3 * ti + 1, self.f);
@@ -103,7 +105,21 @@ impl Emitter<'_> {
 /// The representation numbers of the two built-in sums, clear of every
 /// type-table kind (`3 * index + 0..2`): an Option block of a 4- or 8-byte
 /// slot, and a Result block.
-const SUM_BASE: u32 = 1 << 20;
+///
+/// Kept small on purpose. The proven checker reads a kind as a unary
+/// natural (proofs/FieldCert.v `FKey`, extracted without a machine-integer
+/// mapping), so parsing or comparing one costs as many steps as its value.
+/// With the base at `1 << 20` the extracted checker's pass over a fixture's
+/// witnesses took about 7 s where it takes 0.1 s without these kinds, and
+/// the kernel oracle did not finish within the job. A type-table index at
+/// or past the base would share a kind with a sum, so [`table_index`] leaves
+/// such a type unrecorded.
+const SUM_BASE: u32 = 1 << 12;
+
+/// `ti` when its kinds stay clear of the built-in sums' ([`SUM_BASE`]).
+fn table_index(ti: u32) -> Option<u32> {
+    (ti < SUM_BASE).then_some(ti)
+}
 
 /// Which built-in sum a block is.
 #[derive(Clone, Copy, PartialEq, Eq)]
