@@ -1,0 +1,14 @@
+# The probe of net.unix-path-unscoped: `[permissions] fs` grants ./data only,
+# and the program listens on a socket path outside it (C-393). The program
+# prints the refusal (exit 0); build runs the built binary.
+expect = 'fs: "/almide-probe-outside.sock" is outside [permissions] fs'
+exit = "any"
+exec_out = ["build"]
+
+[expect_by]
+# the test route: the refusal-asserting test passes
+test = "All 1 test file(s) passed"
+# bench: the run's output is checked before it is timed
+bench = "output verified identical across all runs"
+# emit: the emitted Rust wraps the call in its scope guard
+emit = "__almide_fs_path!("

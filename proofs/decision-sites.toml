@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "121"
+# unstamped_ceiling     = "120"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "187"
-# failopen_ceiling      = "43"
+# skipped_route_ceiling = "180"
+# failopen_ceiling      = "42"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -120,6 +120,10 @@
 #               fail-open with honest cells. Rows unstamped only for missing
 #               evidence move to after the final; the unstamped ceiling stays
 #               shrink-only.
+#   2026-11-21  net.unix-path-unscoped re-read after #4832 (marks + shared gate):
+#               from the declaration, novel fresh-directory test, probe driven on
+#               run/build/test/bench/native/wasm/emit (bench compiles since #4899),
+#               control red. STAMPED: 37 stamped, 120 not, 180 skipped, 42 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1377,27 +1381,25 @@ id = "net.unix-path-unscoped"
 at = "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_listen"
 items = [
   "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_listen",
+  "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_connect",
 ]
 keys = []
-decides = "unix.listen / unix.connect bind/connect a filesystem path with no [permissions] fs judgement on either leg"
-from = "prefix"
-unknown = "allow"
-unknown_note = "the path never reaches fs_scoped_admits: native guards only almide_rt_fs_* (unix is almide_rt_unix___os_*), wasm ops 104..=116 go to net_host::dispatch before host_fs_scope (host.rs:1009-1016)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4832", build = "skipped: #4832", test = "skipped: #4832", bench = "skipped: #4832", native = "skipped: #4832", wasm = "skipped: #4832", wasi = "n.a.: unix ops not served", component = "n.a.: walled (component_availability.rs:240)", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4832" }
-tests = [
-  "tests/net_unix_test.rs",
-  "tests/net_unix_embedded_cross_test.rs",
-]
-control_note = "NONE"
-issues = [4832]
-status = "UNSTAMPED"
-reasons = [
-  "c1:prefix",
-  "c2:fail-open",
-  "c3:route-skipped",
-  "c4:no-control",
-]
-note = "net_unix_core.rs:145-154 UnixListener::bind(path) / UnixStream::connect(path)."
+decides = "unix.listen / unix.connect bind or connect a filesystem path; under [permissions] fs the path is judged first (C-393, #4832): natively by the @fs_path(path) guard read off the leaf's declaration, on the embedded host by the unix path gate host_fs_scope installs"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "a socket path outside every grant, whatever its name (the novel test makes a fresh directory), is refused with the fs refusal before any socket is made; the bind / connect then runs on the path as given (not beneath a held descriptor: the kernel resolves a socket address again)"
+routes = { check = "n.a.: makes no socket", check_json = "n.a.: makes no socket", check_effects = "n.a.: makes no socket", run = "runs", build = "runs", test = "runs", bench = "runs: compiles since #4899", native = "runs", wasm = "runs", wasi = "n.a.: the stock build refuses the unix family (E081)", component = "n.a.: walled (E081)", lsp = "n.a.: makes no socket", mcp = "n.a.: makes no socket", emit = "runs: the emitted Rust wraps the leaf in __almide_fs_path!" }
+probe = "tests/decision-probes/net.unix-path-unscoped"
+tests = ["tests/fs_scope_test.rs::unix_socket_paths_are_bounded_by_permissions_fs_on_both_targets", "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused", "crates/almide-codegen/src/fs_scope.rs::tests::the_unix_socket_paths_are_guarded"]
+control_note = "one patch removes both halves (the two @fs_path marks and the two gate calls)"
+issues = [4832, 4899]
+status = "STAMPED"
+stamp = "30b1fac0fb 2026-11-21"
+note = "Fixed by #4832 (marks + shared gate); the bench route failed to compile a scoped socket-only program (#4899, fixed: emit_source includes the fs runtime when a guard applies)."
+control_patch = "proofs/decision-controls/net.unix-path-unscoped.patch"
+control_test = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
+novel = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
+control_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "net.shm-create-tempfile"
