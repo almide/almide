@@ -24,6 +24,8 @@ jobs:
           workspaces: "."
           prefix-key: "trust-spine"
       - name: Replay
+        env:
+          ONLY: "2398-list-update-borrowed-result"
         run: bash scripts/probe-replay-history.sh "$RUNNER_TEMP/replay"
       - name: Upload
         if: always()

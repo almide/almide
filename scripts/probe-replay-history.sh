@@ -37,6 +37,7 @@ verdicts() {
 build || { echo "the unpatched tree does not build"; exit 1; }
 for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-replay/*.patch; do
   name="$(basename "$p" .patch)"
+  case " ${ONLY:-$name} " in *" $name "*) ;; *) continue ;; esac
   repro="proofs/fixtures/heap-check/reinject/$name.almd"
   [ -f "$repro" ] || { echo "== $name: no reproduction"; continue; }
   if ! git apply --check "$p" 2>/dev/null; then
