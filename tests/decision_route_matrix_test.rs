@@ -237,7 +237,8 @@ fn drive(p: &Probe, col: &str, side: Side) -> Result<(), String> {
                 return Err(format!("`almide {}` exited 0:\n{}", args.join(" "), tail(&t)));
             }
             if o.status.success() && p.exec_out.iter().any(|c| c == col) {
-                let b = Command::new(&at.out).current_dir(&at.cwd).stdin(Stdio::null()).output().map_err(|e| format!("spawn {}: {e}", at.out))?;
+                // The artifact runs in the probe's environment, as the route did.
+                let b = Command::new(&at.out).current_dir(&at.cwd).envs(p.env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).output().map_err(|e| format!("spawn {}: {e}", at.out))?;
                 t.push_str(&String::from_utf8_lossy(&b.stdout));
                 t.push_str(&String::from_utf8_lossy(&b.stderr));
             }
