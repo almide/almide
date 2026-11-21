@@ -44,13 +44,13 @@ pub(crate) fn hoisted_slices(out: String) -> String {
     let mut at = 0;
     while let Some(s) = (at..lines.len()).find(|&i| is_opener(&lines[i])) {
         at = s + 1;
-        let Some(e) = close_of(&lines, s) else { continue };
+        // A loop the render left unclosed has no body to scan (`unwrap_or(s)`: none).
+        let e = close_of(&lines, s).unwrap_or(s);
+        let body: &[String] = lines.get(s + 1..e).unwrap_or(&[]);
         // A closure that may outlive a pass or run on another thread keeps the handles (a `move` would take the slice).
-        if lines[s..=e].iter().any(|l| l.contains("move ") || l.contains("spawn")) {
-            continue;
-        }
+        let moving = body.iter().any(|l| l.contains("move ") || l.contains("spawn"));
         let mut binds: Vec<String> = Vec::new();
-        for v in candidates(&lines[s + 1..e]) {
+        for v in candidates(body).into_iter().filter(|_| !moving) {
             let Some(writes) = only_element_access(&lines[s..=e], &v) else { continue };
             let pad = " ".repeat(indent_of(&lines[s]));
             let (name, bind) = if writes {
