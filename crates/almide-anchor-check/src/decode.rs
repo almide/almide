@@ -79,6 +79,13 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         if control(&op) == Control::Refused {
             return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
         }
+        // A loop typed by a function type may take parameters, and a branch to
+        // it then carries values across its back edge on the operand stack.
+        // The checks follow a value across a back edge only through a local,
+        // a global or memory, so such a loop is not judged.
+        if matches!(op, Op::Loop { blockty: wasmparser::BlockType::FuncType(_) }) {
+            return Err(format!("instruction {i} ({op:?}) is a loop typed by a function type: it may take parameters across its back edge"));
+        }
         let pre = fv.operand_stack_height() as usize;
         // No instruction of a frame reaches below the frame's own height: past
         // an `unreachable` or a branch its operands are conjured, not the

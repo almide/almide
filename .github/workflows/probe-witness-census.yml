@@ -3,7 +3,7 @@ name: Probe — witness census
 # census of every artifact the structural wall judges. Not a gate.
 on:
   push:
-    branches: [probe/fields-globals-off]
+    branches: [probe/fields-globals]
 
 permissions:
   contents: read
