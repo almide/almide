@@ -31,7 +31,7 @@ jobs:
           prefix-key: "trust-spine"
       - name: Measure
         env:
-          ONLY: "replay-4304-push-release-at-rc1 replay-4305-map-reserve-release-at-rc1"
+          ONLY: "replay-2133-variant-case-payload-without-share replay-2397-fused-fold-borrowed-result replay-3538-payload-copy-without-credit"
         run: bash scripts/probe-inject-vs-tests.sh "$RUNNER_TEMP/inject" ${{ matrix.shard }} 1
       - name: Upload results
         if: always()
