@@ -1,0 +1,10 @@
+import env
+import process
+
+effect fn main() -> Unit = {
+  env.set("PATH", "bin:proj/bin")!
+  match process.exec("almide-probe-planted", []) {
+    ok(out) => println(out),
+    err(_) => println("path-probe: not found"),
+  }
+}

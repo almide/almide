@@ -1,0 +1,17 @@
+# The probe of proc.command-path-resolution: the project ships an executable
+# `almide-probe-planted` in ./bin, which is on no launch PATH. The program
+# puts ./bin (from inside or outside the project) on PATH with env.set and
+# runs the bare name: the spawn resolves through the launch PATH (C-459), so
+# the name is not found and the program prints that (exit 0); before #4844
+# the native spawn ran the planted program. build runs the built binary.
+expect = "path-probe: not found"
+exit = "any"
+exec_out = ["build"]
+
+[expect_by]
+# the test route: the not-found-asserting test passes
+test = "All 1 test file(s) passed"
+# bench: the run's output is checked before it is timed
+bench = "output verified identical across all runs"
+# emit: the emitted Rust spawns through the launch-PATH resolver
+emit = "almide_rt_launch_command("

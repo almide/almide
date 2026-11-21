@@ -338,3 +338,58 @@ fn novel_a_fresh_link_under_a_dependency_src_is_never_followed() {
     let t = text(&o);
     assert!(!o.status.success() && t.contains(&format!("sub-module '{dep}.{link}.{module}' not found")), "an import through the link was followed:\n{t}");
 }
+
+/// trust.add-trust-flag (#4867): the dependency name is written into
+/// almide.toml, so it must be an identifier. A fresh name carrying TOML — a
+/// path dependency and a `[trust] owners` line for a fresh owner — is refused
+/// before anything is probed, fetched or written, even with a `--trust` that
+/// covers the source.
+#[test]
+fn novel_add_a_fresh_name_carrying_toml_is_refused_before_anything_is_written() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let host = fresh_host();
+    let (owner, repo, dep, seg) = (novel::ident("owner"), novel::ident("repo"), novel::ident("dep"), novel::path_segment());
+    let proj = app(&td.path().join("app"), "", "", "");
+    let before = std::fs::read(proj.join("almide.toml")).unwrap();
+    let git = format!("https://{host}/{owner}/{repo}");
+    let trust = format!("{host}/{owner}");
+    for name in [
+        format!("{dep} = {{ path = \"/{seg}\" }}\n[trust]\nowners = [\"{host}/{}\"]\n#", novel::ident("attacker")),
+        format!("{dep}\n{seg}"),
+        format!("{dep}={seg}"),
+        format!("{dep}.{seg}"),
+    ] {
+        let o = almide(&proj, &home, &["add", &name, "--git", &git, "--tag", "v0.1.0", "--trust", &trust]);
+        let t = text(&o);
+        assert!(!o.status.success(), "{name:?} was added:\n{t}");
+        assert!(t.contains("package name"), "{name:?}: refused for another reason than its name:\n{t}");
+        assert_eq!(std::fs::read(proj.join("almide.toml")).unwrap(), before, "{name:?} changed almide.toml");
+    }
+    assert!(fetched_nothing(&home), "a refused name was fetched");
+}
+
+/// trust.install-owner (#4864): a spec spelled as a source is a source,
+/// whatever exists on disk under that name. A fresh `host/owner/repo`
+/// directory planted in the working directory is refused by the trust check
+/// and never built; the same directory spelled as a path (`./…`) installs.
+#[test]
+fn novel_install_a_planted_directory_named_like_a_fresh_source_is_not_installed() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let (host, owner, repo) = (fresh_host(), novel::ident("owner"), novel::ident("repo"));
+    let spec = format!("{host}/{owner}/{repo}");
+    let marker = novel::ident("planted");
+    write(td.path().join(&spec).join("almide.toml"), &format!("[package]\nname = \"{repo}\"\nversion = \"0.1.0\"\n"));
+    write(td.path().join(&spec).join("src/main.almd"), &format!("effect fn main() -> Unit = println(\"{marker}\")\n"));
+    let bin = td.path().join("bin");
+    let bin = bin.to_str().unwrap();
+    let o = almide(td.path(), &home, &["tool", "install", &spec, "--bin-dir", bin]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "the planted `{spec}` was installed:\n{t}");
+    assert!(t.contains("its owner is not trusted") && t.contains(&format!("owner: {host}/{owner}")), "the planted directory was read as the source:\n{t}");
+    assert!(std::fs::read_dir(bin).map_or(true, |mut d| d.next().is_none()), "something was installed");
+    // Control: the same directory spelled as a path installs.
+    let o = almide(td.path(), &home, &["tool", "install", &format!("./{spec}"), "--bin-dir", bin, "--target", "wasm"]);
+    assert!(o.status.success(), "control: the planted directory spelled as a path did not install:\n{}", text(&o));
+}
