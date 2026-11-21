@@ -13,22 +13,26 @@ jobs:
   compile:
     name: Compile the probe files
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install opam
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends opam
+      # A branch sees only its own caches and the default branch's, so the
+      # first run here builds the toolchain once (about an hour) and saves it.
       - name: Restore opam root (OCaml + Rocq)
         id: opam-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
-      - name: Require the cached toolchain
+      - name: Build opam switch + Rocq (cache miss only)
         if: steps.opam-cache.outputs.cache-hit != 'true'
         run: |
-          echo "::error::no cached opam root for this key; the probe does not build Rocq from source"
-          exit 1
-      - name: Install opam
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends opam
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
       - name: Compile
         working-directory: proofs
         run: |
