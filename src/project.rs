@@ -1015,7 +1015,7 @@ pub fn read_governing_manifest(path: &Path) -> Result<Project, String> {
 pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
-    refuse_unknown_security_keys(path, content, &manifest)?;
+    refuse_unknown_keys(path, content, &manifest)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.permission_list(path, content, "fs")?;
     manifest.trust_owners(path, content)?;
@@ -1036,22 +1036,22 @@ fn naming(path: &Path, e: String) -> String {
     if e.contains(&shown) { e } else { format!("{shown}: {e}") }
 }
 
-// ── Unknown keys (#3382) ────────────────────────────────────────────
+// ── Unknown keys (#3382, refused since dialect epoch 17) ──────────────
 //
-// Each list below is the set of keys its table's reader reads, and the one
-// place the unknown-key warning takes its vocabulary from. The readers
-// `debug_assert!` that every key they read is listed, and
-// `tests/manifest_unknown_key_test.rs` asserts the other direction: each
-// listed key changes what `parse_toml` returns, so a listed key the reader
-// stopped reading (or a new reader key nobody listed) fails a test instead of
-// drifting.
+// Each list below is the set of keys its table's reader reads, and
+// [`MANIFEST_SCHEMA`] binds each list to its section: the one place the
+// unknown-key refusal takes its vocabulary from. The readers `debug_assert!`
+// that every key they read is listed, and `tests/manifest_unknown_key_test.rs`
+// asserts the other direction: each listed key changes what `parse_toml`
+// returns, so a listed key the reader stopped reading (or a new reader key
+// nobody listed) fails a test instead of drifting.
 
 /// The top-level tables `parse_toml` reads.
 pub const TOP_LEVEL_KEYS: &[&str] = &["package", "dependencies", "native-deps", "permissions", "target", "trust"];
 /// The keys `[package]` has.
 pub const PACKAGE_KEYS: &[&str] = &["name", "version", "almide"];
 /// `[package]` keys that describe the package and that no reader reads, so
-/// they draw no warning: `edition` is what `almide init` writes, and the
+/// they are accepted and change nothing: `edition` is what `almide init` writes, and the
 /// others are the metadata manifests in use already carry (`description` is
 /// in most of them). A key here must change nothing — the test asserts it —
 /// so a reader that starts reading one moves it to [`PACKAGE_KEYS`].
@@ -1062,9 +1062,47 @@ pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path"
 pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs", "native"];
 /// The keys `[trust]` has (#4093).
 pub const TRUST_KEYS: &[&str] = &["owners", "media"];
-/// The tables a `[target.<platform>]` table may hold (anything else is an
-/// error, not a warning — it was refused before #3382).
+/// The tables a `[target.<platform>]` table may hold.
 pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
+
+/// Where a section of `almide.toml` sits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionAt {
+    /// The file's top level, whose keys are its tables.
+    Root,
+    /// A top-level table, `[name]`.
+    Table(&'static str),
+    /// Each `[dependencies]` entry written as a table (inline, dotted keys or
+    /// `[dependencies.<name>]`).
+    DependencyEntry,
+    /// Each `[target.<platform>]` table.
+    TargetPlatform,
+}
+
+/// One section of the manifest and the keys it declares.
+#[derive(Debug)]
+pub struct Section {
+    pub at: SectionAt,
+    /// The keys a reader reads.
+    pub keys: &'static [&'static str],
+    /// Keys the section declares that no reader reads (they change nothing).
+    pub inert: &'static [&'static str],
+}
+
+/// The manifest schema: every section `almide.toml` may write and the keys it
+/// declares. A key outside its section's declaration is refused on every
+/// command that reads the manifest (#3382 made it a warning; dialect epoch 17
+/// makes it an error), with the declared keys and the one a single edit away.
+/// `[native-deps]` (keys are crate names) and `[trust].media` (keys are
+/// package sources) are maps, so they declare no key list and are not here.
+pub const MANIFEST_SCHEMA: &[Section] = &[
+    Section { at: SectionAt::Root, keys: TOP_LEVEL_KEYS, inert: &[] },
+    Section { at: SectionAt::Table("package"), keys: PACKAGE_KEYS, inert: PACKAGE_METADATA_KEYS },
+    Section { at: SectionAt::Table("permissions"), keys: PERMISSION_KEYS, inert: &[] },
+    Section { at: SectionAt::Table("trust"), keys: TRUST_KEYS, inert: &[] },
+    Section { at: SectionAt::DependencyEntry, keys: DEPENDENCY_KEYS, inert: &[] },
+    Section { at: SectionAt::TargetPlatform, keys: TARGET_PLATFORM_KEYS, inert: &[] },
+];
 
 /// `a` and `b` differ by at most one insertion, deletion, substitution or
 /// swap of two adjacent characters (Damerau-Levenshtein ≤ 1) — `brnach` is
@@ -1092,115 +1130,75 @@ fn manifest_warning(path: &Path, lines: &LineStarts, offset: usize, message: Str
     d
 }
 
-/// One warning per key of `table` that is not in `accepted`, in file order.
-/// `site` names the table as a reader would; `what` is `key` or `table`.
-fn unknown_key_warnings(
-    path: &Path,
-    lines: &LineStarts,
-    table: &toml::de::DeTable<'_>,
-    site: &str,
-    what: &str,
-    accepted: &[&str],
-) -> Vec<Diagnostic> {
-    let mut unknown: Vec<(usize, String)> = table
-        .iter()
-        .filter(|(k, _)| !accepted.contains(&k.get_ref().as_ref()))
-        .map(|(k, _)| (k.span().start, k.get_ref().to_string()))
-        .collect();
-    unknown.sort();
-    if unknown.is_empty() {
-        return Vec::new();
-    }
-    let list = accepted.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
-    unknown
-        .into_iter()
-        .map(|(at, key)| {
-            let hint = match accepted.iter().find(|k| within_one_edit(&key, k)) {
-                Some(k) => format!("did you mean `{k}`? The {what}s {site} accepts are {list}"),
-                None => format!("delete it, or write one of the {what}s {site} accepts: {list}"),
-            };
-            let message = format!("unknown {what} `{}` in {site} is ignored — it changes nothing", shown(&key));
-            manifest_warning(path, lines, at, message, hint)
-        })
-        .collect()
+/// The tables under the top-level table `name` of `spans`, each with the name
+/// `site` gives it, in file order; entries that are not tables are skipped.
+fn entry_tables<'a, 'i>(spans: &'a toml::de::DeTable<'i>, name: &str, site: fn(&str) -> String) -> Vec<(String, &'a toml::de::DeTable<'i>)> {
+    let Some(t) = spanned_entry(spans, name).and_then(|t| t.get_ref().as_table()) else { return Vec::new() };
+    let mut keyed: Vec<_> = t.iter().filter_map(|(k, v)| v.get_ref().as_table().map(|v| (k, v))).collect();
+    keyed.sort_by_key(|(k, _)| k.span().start);
+    keyed.into_iter().map(|(k, v)| (site(&shown(k.get_ref().as_ref())), v)).collect()
 }
 
-/// The tables that restrict the program, with the keys each reads.
-const SECURITY_TABLES: &[(&str, &[&str])] = &[("permissions", PERMISSION_KEYS), ("trust", TRUST_KEYS)];
-
-/// #4851: in a table that restricts the program, a key no reader reads is
-/// refused, never a warning: `alow = []` in `[permissions]`, or a
-/// `[permission]` table, left the bound unset and granted every capability.
-/// An unknown top-level table one edit from a security table is its
-/// misspelling and refused the same way. Other unknown keys stay warnings
-/// ([`manifest_warnings`], #3382).
-fn refuse_unknown_security_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
-    for (k, _) in manifest.spans.iter() {
-        let name = k.get_ref().as_ref();
-        if TOP_LEVEL_KEYS.contains(&name) {
-            continue;
-        }
-        if let Some((table, _)) = SECURITY_TABLES.iter().find(|(t, _)| within_one_edit(&name.to_ascii_lowercase(), t)) {
-            return Err(located(
-                path,
-                content,
-                k.span().start,
-                &format!(
-                    "unknown table `{}` is refused — it is one edit from [{table}], which restricts the program, and a misspelled bound would grant everything\n  hint: write it as [{table}]",
-                    shown(name)
-                ),
-            ));
-        }
+/// Each table of `spans` that `at` names, with the name a reader calls it by,
+/// in file order.
+fn section_tables<'a, 'i>(spans: &'a toml::de::DeTable<'i>, at: SectionAt) -> Vec<(String, &'a toml::de::DeTable<'i>)> {
+    match at {
+        SectionAt::Root => vec![("almide.toml".to_string(), spans)],
+        SectionAt::Table(name) => spanned_entry(spans, name)
+            .and_then(|t| t.get_ref().as_table())
+            .map(|t| vec![(format!("[{name}]"), t)])
+            .unwrap_or_default(),
+        SectionAt::DependencyEntry => entry_tables(spans, "dependencies", |n| format!("dependency `{n}`")),
+        SectionAt::TargetPlatform => entry_tables(spans, "target", |n| format!("[target.'{n}']")),
     }
-    for (table, keys) in SECURITY_TABLES {
-        let Some(t) = spanned_entry(&manifest.spans, table).and_then(|t| t.get_ref().as_table()) else { continue };
-        let mut unknown: Vec<(usize, String)> =
-            t.iter().filter(|(k, _)| !keys.contains(&k.get_ref().as_ref())).map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect();
-        unknown.sort();
-        if let Some((at, key)) = unknown.into_iter().next() {
-            let list = keys.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
-            let hint = match keys.iter().find(|k| within_one_edit(&key, k)) {
-                Some(k) => format!("did you mean `{k}`? [{table}] reads only {list}"),
-                None => format!("[{table}] reads only {list}; delete it or write one of them"),
-            };
-            return Err(located(
-                path,
-                content,
-                at,
-                &format!("unknown key `{}` in [{table}] is refused — a key the table does not read would leave its bound unset\n  hint: {hint}", shown(&key)),
-            ));
-        }
-    }
-    Ok(())
 }
 
-/// The warnings for keys `almide.toml` writes that no reader reads (#3382):
-/// an unknown top-level table, an unknown key in `[package]`,
-/// `[permissions]` or a `[dependencies]` entry (inline table, dotted keys or
-/// `[dependencies.<name>]`), and a dependency entry that names neither `git`
-/// nor `path`, which declares nothing. Each names its line, the key, the
-/// keys that table reads, and the key one edit away when there is one.
-/// `[native-deps]` entries are crate names, so any key is one; their specs
-/// are Cargo's to judge. `[target.<platform>]` refuses an unknown table
-/// already (an error). An unreadable manifest has no warnings — its error
-/// comes from [`check_manifest`]. A warning never fails a command.
+/// Refuse every key `almide.toml` writes outside its section's declaration in
+/// [`MANIFEST_SCHEMA`] (#3382, #4851; an error since dialect epoch 17): a
+/// misspelled key or table used to be dropped with a warning, so `brnach`
+/// built from the default ref and `[permission]` left every capability
+/// granted. Each unknown key is named on its line, in file order, with the
+/// keys its section declares and the one a single edit away.
+fn refuse_unknown_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
+    let mut found: Vec<(usize, String)> = Vec::new();
+    for section in MANIFEST_SCHEMA {
+        let what = if section.at == SectionAt::Root { "table" } else { "key" };
+        let declared: Vec<&str> = section.keys.iter().chain(section.inert).copied().collect();
+        let list = declared.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+        for (site, table) in section_tables(&manifest.spans, section.at) {
+            for (k, _) in table.iter() {
+                let key = k.get_ref().as_ref();
+                if declared.contains(&key) {
+                    continue;
+                }
+                let near = declared.iter().find(|d| within_one_edit(&key.to_ascii_lowercase(), d));
+                let hint = match near {
+                    Some(d) => format!("did you mean `{d}`? The {what}s {site} declares are {list}"),
+                    None => format!("delete it, or write one of the {what}s {site} declares: {list}"),
+                };
+                let message = format!("unknown {what} `{}` in {site} is refused — almide.toml accepts only the {what}s its sections declare\n  hint: {hint}", shown(key));
+                found.push((k.span().start, located(path, content, k.span().start, &message)));
+            }
+        }
+    }
+    found.sort();
+    if found.is_empty() {
+        return Ok(());
+    }
+    Err(found.into_iter().map(|(_, m)| m).collect::<Vec<_>>().join("\nerror: "))
+}
+
+/// The warnings for `[dependencies]` entries that declare nothing (#3382): an
+/// entry that is not a table, or one that names neither `git` nor `path`. An
+/// unknown key is not a warning — [`check_manifest`] refuses it. An
+/// unreadable manifest has no warnings — its error comes from
+/// [`check_manifest`]. A warning never fails a command.
 pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
     let Ok(manifest) = read_manifest(path, content) else { return Vec::new() };
     let lines = LineStarts::new(content);
     let lines = &lines;
-    let mut out = unknown_key_warnings(path, lines, &manifest.spans, "almide.toml", "table", TOP_LEVEL_KEYS);
-    let sub = |name: &str| spanned_entry(&manifest.spans, name).and_then(|t| t.get_ref().as_table());
-    if let Some(t) = sub("package") {
-        let known: Vec<&str> = PACKAGE_KEYS.iter().chain(PACKAGE_METADATA_KEYS).copied().collect();
-        out.extend(unknown_key_warnings(path, lines, t, "[package]", "key", &known));
-    }
-    if let Some(t) = sub("permissions") {
-        out.extend(unknown_key_warnings(path, lines, t, "[permissions]", "key", PERMISSION_KEYS));
-    }
-    if let Some(t) = sub("trust") {
-        out.extend(unknown_key_warnings(path, lines, t, "[trust]", "key", TRUST_KEYS));
-    }
-    let Some(deps) = sub("dependencies") else { return out };
+    let mut out = Vec::new();
+    let Some(deps) = spanned_entry(&manifest.spans, "dependencies").and_then(|t| t.get_ref().as_table()) else { return out };
     let mut entries: Vec<_> = deps.iter().collect();
     entries.sort_by_key(|(k, _)| k.span().start);
     for (name, entry) in entries {
@@ -1220,7 +1218,6 @@ pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
             out.push(ignored("an entry is a table naming `git` or `path`"));
             continue;
         };
-        out.extend(unknown_key_warnings(path, lines, t, &format!("dependency `{name}`"), "key", DEPENDENCY_KEYS));
         if spanned_entry(t, "git").is_none() && spanned_entry(t, "path").is_none() {
             out.push(ignored("it names neither `git` nor `path`"));
         }

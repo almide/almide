@@ -528,12 +528,14 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
 
-`./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
-`check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
-行(`almide.toml:LINE`)・キー・その表が受け付けるキー・1 編集距離の候補を出す。
-ビルドはキーが無い場合と同じに走り、終了コードは変わらない(`--deny-warnings`
-も数えない)。`--json` では envelope の `diagnostics` に `"level":"warning"` の行として、それ以外は
-stderr に出る。表ごとの受理キーは [package-system.md §6](package-system.md#6-dependency-declaration)。
+`./almide.toml` にその節が宣言していないキー(`brnach = "main"` など)があると、
+`check` / `check --json` / `build` / `run` / `test` / `bench` / `emit` を含む全コマンドが
+何もする前にエラーで止まる(#3382 では警告、dialect epoch 17 からエラー):
+行(`almide.toml:LINE`)・キー・その節が宣言するキー・1 編集距離の候補を出す。
+エディタ(LSP)では文書のエラー診断になる。節ごとの宣言キーは
+[package-system.md §6](package-system.md#6-dependency-declaration)、その一覧は
+`src/project.rs` の `MANIFEST_SCHEMA` 1 つ。`git` も `path` も書かない依存の行だけは
+警告のままで、終了コードは変わらない。
 
 `almide check --explain CODE` was removed in #4590: it exits 2 with an error naming
 [`almide explain CODE`](#almide-explain).

@@ -177,42 +177,42 @@ with `--allow-switch ALMIDE_SKIP_VERSION_CHECK` (#4129).
 
 Test: `tests/version_pin_commands_test.rs`.
 
-**A key no reader reads is a warning** (#3382). It used to be dropped without a
-word, so `brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the
-default ref, not the one written. Every command that reads `almide.toml` now
-warns once, naming the line, the key, the keys that table accepts, and the key
-one edit away (insertion, deletion, substitution or an adjacent swap) when
-there is one:
+**A key outside its section's declaration is an error** (#3382; a warning
+until dialect epoch 17). It used to be dropped without a word, so
+`brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the default
+ref, not the one written, and `[permission] allow = []` left every capability
+granted. Every command that reads `almide.toml` (`check`, `check --json`,
+`run`, `build`, `test`, `bench`, `emit`, and the editor server as a
+diagnostic) refuses the manifest before it does anything else, naming each
+unknown key on its line, the keys that section declares, and the key one edit
+away (insertion, deletion, substitution or an adjacent swap) when there is one:
 
 ```text
-warning: unknown key `brnach` in dependency `foo` is ignored — it changes nothing
-  --> almide.toml:5
-  hint: did you mean `branch`? The keys dependency `foo` accepts are `git`, `tag`, `branch`, `version`, `path`, `subdir`
+error: almide.toml:5: unknown key `brnach` in dependency `foo` is refused — almide.toml accepts only the keys its sections declare
+  hint: did you mean `branch`? The keys dependency `foo` declares are `git`, `tag`, `branch`, `version`, `path`, `subdir`
 ```
 
-| Table | Accepted keys |
+| Section | Declared keys |
 |---|---|
 | top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]`, `[trust]` |
-| `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
+| `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and change nothing |
 | a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
 | `[permissions]` | `allow`, `proc`, `native`, `fs` |
-| `[trust]` | `owners` |
+| `[trust]` | `owners`, `media` |
+| `[target.<platform>]` | `native-deps` |
 
-A dependency entry that is not a table, or names neither `git` nor `path`,
-declares nothing and is warned about the same way. `[native-deps]` entries are
-crate names, so any key is one (their specs are Cargo's to judge); an unknown
-table under `[target.<platform>]` is already an error (§6.2).
+`[native-deps]` entries are crate names and `[trust].media` keys are package
+sources, so any key is one there (a crate spec is Cargo's to judge). A
+dependency entry that is not a table, or names neither `git` nor `path`,
+declares nothing and is a warning (stderr; a `"level":"warning"` row in
+`almide check --json`), which never changes the exit code.
 
-The build still runs exactly as if the key were absent, and the exit code does
-not change (`check --deny-warnings` does not count it either). `almide check
---json` carries the warning as a `"level":"warning"` row in its envelope's
-`diagnostics`; every other
-command prints it on stderr. Escalating it to an error is planned for a later
-dialect epoch, after a release that carries the warning; there is no epoch
-entry yet. The key lists live beside their readers in `src/project.rs`, and
-`tests/manifest_unknown_key_test.rs` asserts that every listed key changes the
-parse (and that every metadata key does not), so a list cannot drift from its
-reader.
+The table above is `MANIFEST_SCHEMA` in `src/project.rs`, which binds each
+section to the key list its reader reads; the refusal takes its vocabulary
+from that one table. `tests/manifest_unknown_key_test.rs` asserts that every
+listed key changes the parse (and that every metadata key does not), so a
+list cannot drift from its reader, and that a fresh key in every declared
+section is refused.
 
 Short form (defaults to github.com/almide/):
 ```bash
