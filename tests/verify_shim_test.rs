@@ -160,19 +160,41 @@ fn emit_writes_the_bundle_even_without_the_verifier() {
 }
 
 #[test]
-fn mir_emits_the_mir_lowering_witnesses() {
-    // `--mir` (#4011): the MIR producer proofs/coverage.sh drives — per
-    // function ownership, names and caps, no artifact, no bounds witness.
-    let stage = Stage::new("mir", false);
+fn mir_emits_the_certificates_of_the_mir_the_native_route_ships() {
+    // `--mir` (#4909): the native route's own certificates of the MIR it
+    // renders from — a version-5 bundle with one `native-calls` witness and
+    // the bounds witnesses — judged by the real verifier (the control).
+    let stage = Stage::new("mir", true);
     let out = stage.dir.join("heap_arg_call.bundle");
     let o = stage.verify(&["--mir", &fixture("heap_arg_call.almd"), "--emit", &out.display().to_string()]);
-    assert_eq!(o.status.code(), Some(127), "{:?}: {}", o.status, text(&o.stderr));
+    assert_eq!(o.status.code(), Some(0), "{:?}: {}{}", o.status, text(&o.stdout), text(&o.stderr));
     let bundle = almide_verify::bundle::parse(&std::fs::read(&out).expect("bundle written")).expect("a bundle");
     let (verdicts, _) = almide_verify::bundle::verify(&bundle);
-    let main_names: Vec<_> = verdicts.iter().filter(|v| v.function == "main").map(|v| v.property.name()).collect();
-    assert_eq!(main_names, ["ownership", "names", "caps"], "per-function MIR witnesses for main");
-    assert!(!verdicts.iter().any(|v| v.property.name() == "bounds"), "MIR carries no bounds witness");
+    assert_eq!(verdicts.iter().filter(|v| v.property.name() == "native-calls").count(), 1, "{verdicts:?}");
+    assert!(verdicts.iter().any(|v| v.property.name() == "bounds" && v.function == "main"), "{verdicts:?}");
+    assert!(!verdicts.iter().any(|v| v.property.name() == "call-modes"), "no v1 witness over MIR no route ships");
     assert!(verdicts.iter().all(|v| v.accepted), "{verdicts:?}");
+}
+
+#[test]
+fn a_program_the_native_route_walls_is_reported_uncertified() {
+    // #4909: a host import the native render does not serve walls the whole
+    // program. The bundle names the wall and holds no witness, and the
+    // command fails — nothing falls back to another producer.
+    let stage = Stage::new("mir-wall", true);
+    let src = stage.dir.join("walled.almd");
+    std::fs::write(
+        &src,
+        "@extern(wasm, \"js\", \"js_half\")\nfn js_half(x: Float) -> Float\n\nfn main() -> Unit = println(float.to_string(js_half(5.0)))\n",
+    )
+    .expect("source");
+    let out = stage.dir.join("walled.bundle");
+    let o = stage.verify(&["--mir", &src.display().to_string(), "--emit", &out.display().to_string()]);
+    assert_eq!(o.status.code(), Some(1), "{:?}: {}", o.status, text(&o.stderr));
+    assert!(text(&o.stderr).contains("is uncertified — the native route walls it: native:"), "{}", text(&o.stderr));
+    let written = String::from_utf8(std::fs::read(&out).expect("bundle written")).expect("utf-8");
+    assert!(written.lines().any(|l| l.starts_with("uncertified (program) native:")), "{written}");
+    assert!(!written.lines().any(|l| l.starts_with("witness ")), "{written}");
 }
 
 #[test]
