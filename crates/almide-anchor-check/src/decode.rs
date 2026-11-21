@@ -52,16 +52,14 @@ pub struct Body<'a> {
 
 /// The proposals whose control flow this checker does not classify (#4854):
 /// GC's `br_on_cast*`, the legacy exception handling's `try` / `delegate`,
-/// stack switching's `resume` / `switch`, and exception handling's
-/// `try_table`, whose catch clauses take control from ANY call in its body
-/// to a label — a transfer no single instruction's [`branch_target`] can
-/// name. A module using any of them is REFUSED by validation rather than read
-/// as if those operators did not branch — the checker's domain is declared
-/// here, not defaulted. No emitter writes any of them.
-pub const UNCLASSIFIED_PROPOSALS: WasmFeatures = WasmFeatures::GC
-    .union(WasmFeatures::LEGACY_EXCEPTIONS)
-    .union(WasmFeatures::STACK_SWITCHING)
-    .union(WasmFeatures::EXCEPTIONS);
+/// stack switching's `resume` / `switch`. A module using any of them is
+/// REFUSED by validation rather than read as if those operators did not
+/// branch — the checker's domain is declared here, not defaulted. The
+/// operators of the proposals it does validate but does not follow
+/// (`try_table`, `throw`, `br_on_null`, `call_ref`, ...) are refused per
+/// operator by the control table, naming the instruction.
+pub(crate) const UNCLASSIFIED_PROPOSALS: WasmFeatures =
+    WasmFeatures::GC.union(WasmFeatures::LEGACY_EXCEPTIONS).union(WasmFeatures::STACK_SWITCHING);
 
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
