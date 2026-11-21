@@ -253,23 +253,28 @@ mod tests {
         assert!(!fn_reaches_host(prog, "io", "take_plain"));
     }
 
-    /// The rule is the declaration's shape, not the `Read` protocol: a
-    /// generic over a user protocol dispatching its method reaches the host;
-    /// the same call over a concrete type, and a bounded generic that only
-    /// passes its param on as data, do not.
+    /// The rule is the declaration's shape, not the `Read` protocol: an
+    /// `effect fn` generic over a user protocol dispatching its method
+    /// reaches the host. The controls do not: the same call over a concrete
+    /// type, a plain `fn` dispatching on the same bound (it cannot call an
+    /// effect requirement), and a bounded `effect fn` that only passes its
+    /// param on as data.
     #[test]
     fn a_method_on_any_protocol_bounded_param_reaches_the_host() {
         let prog = leak_parse(
-            "protocol Shape {\n  fn area(self) -> Int\n}\n\
-             type Sq: Shape = { side: Int }\n\
-             fn Sq.area(self) -> Int = self.side * self.side\n\
-             fn total[S: Shape](s: S) -> Int = s.area()\n\
-             fn total_sq(s: Sq) -> Int = s.area()\n\
-             fn keep[S: Shape](s: S) -> List[S] = [s]\n"
+            "protocol Sink {\n  effect fn put(self, n: Int) -> Unit\n  fn size(self) -> Int\n}\n\
+             type Box: Sink = { n: Int }\n\
+             effect fn Box.put(self, n: Int) -> Unit = ()\n\
+             fn Box.size(self) -> Int = self.n\n\
+             effect fn fill[S: Sink](s: S) -> Unit = s.put(1)\n\
+             effect fn fill_box(s: Box) -> Unit = s.put(1)\n\
+             fn measure[S: Sink](s: S) -> Int = s.size()\n\
+             effect fn keep[S: Sink](s: S) -> List[S] = [s]\n"
                 .to_string(),
         );
-        assert!(fn_reaches_host(prog, "geom", "total"));
-        assert!(!fn_reaches_host(prog, "geom", "total_sq"));
+        assert!(fn_reaches_host(prog, "geom", "fill"));
+        assert!(!fn_reaches_host(prog, "geom", "fill_box"));
+        assert!(!fn_reaches_host(prog, "geom", "measure"));
         assert!(!fn_reaches_host(prog, "geom", "keep"));
     }
 
