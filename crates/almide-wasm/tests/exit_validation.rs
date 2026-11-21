@@ -15,9 +15,22 @@ const SRC: &str = r#"fn helper(n: Int) -> Int = {
 fn main() -> Unit = println("${helper(3)}")
 "#;
 
-fn emit() -> Result<Vec<u8>, almide_wasm::EmitError> {
-    let ir = almide_spine::s5::lower_to_ir("exit_validation.almd", SRC).expect("front");
+/// Two functions that end in a call of each other: each exit is a
+/// `return_call`, an explicit transfer in the bytes.
+const TAIL_SRC: &str = r#"fn pong(n: Int) -> Int = if n == 0 then 0 else ping(n - 1)
+
+fn ping(n: Int) -> Int = if n == 0 then 1 else pong(n - 1)
+
+fn main() -> Unit = println("${ping(4)}")
+"#;
+
+fn emit_src(src: &str) -> Result<Vec<u8>, almide_wasm::EmitError> {
+    let ir = almide_spine::s5::lower_to_ir("exit_validation.almd", src).expect("front");
     almide_wasm::emit_program(&ir)
+}
+
+fn emit() -> Result<Vec<u8>, almide_wasm::EmitError> {
+    emit_src(SRC)
 }
 
 #[test]
@@ -40,4 +53,17 @@ fn an_exit_that_skips_a_planned_release_is_a_compiler_defect_named_by_local() {
     assert!(text.contains("compiler contract failure; no artifact emitted"), "{text}");
     // Never a wall: the reason text must not read like an Unsupported shape.
     assert!(!text.contains("wall"), "{text}");
+
+    // The other direction (#4854): a transfer the bytes hold that no plan
+    // recorded. The honest emitter records every exit it writes.
+    emit_src(TAIL_SRC).expect("the unmutated emitter records every exit");
+    almide_wasm::test_omit_exit_record(true);
+    let res = emit_src(TAIL_SRC);
+    almide_wasm::test_omit_exit_record(false);
+    let Err(almide_wasm::EmitError::OwnershipLowering(d)) = res else {
+        panic!("an unrecorded exit must be an E083 defect, got {res:?}");
+    };
+    let text = d.to_string();
+    assert!(text.starts_with("error[E083]: an exit in the function's bytes has no exit plan"), "{text}");
+    assert!(text.contains("= emitted: a return_call no plan claims") || text.contains("= emitted: a return no plan claims"), "{text}");
 }

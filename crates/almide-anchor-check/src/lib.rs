@@ -259,7 +259,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds }, alloc, &mut rep)?;
+    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds, imports: function_imports(wasm) }, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
