@@ -24,6 +24,15 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     // bounds are bound once so the reservation and the range read the same
     // values.
     let reserved = counted.is_some() && matches!(collector, IterCollector::Collect) && steps_keep_length(steps);
+    // One `map` over a list the chain consumes, collected: the block is
+    // rewritten in place when it is unique and the element layouts agree, the
+    // way std's `Vec` collects `into_iter().map(f)` into its source buffer.
+    if let [IterStep::Map { lambda }] = steps {
+        let list_source = matches!(source.ty, Ty::Applied(almide_lang::types::TypeConstructorId::List, _));
+        if consume && counted.is_none() && list_source && matches!(collector, IterCollector::Collect) {
+            return format!("AlmideList::map_owned({}, {})", src, render_expr(ctx, lambda));
+        }
+    }
     let mut chain = if let Some((s, e)) = &counted {
         if reserved { "(__almide_rs..__almide_re)".to_string() } else { format!("({s}..{e})") }
     } else if consume {

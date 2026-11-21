@@ -500,9 +500,140 @@ impl<T: Clone> std::ops::DerefMut for AlmideList<T> {
 /// The elements by value: moved out when this handle is the only owner, cloned otherwise.
 impl<T: Clone> IntoIterator for AlmideList<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = AlmideListIntoIter<T>;
+    /// No allocation: a unique block hands its elements out by move, a shared one by clone.
     fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+        let end = self.len();
+        let unique = end > 0 && self.is_unique();
+        if unique {
+            // SAFETY: the block is unique; with its `len` at 0 it no longer drops the elements, which the
+            // iterator now owns: it moves each one out once and drops those it never yields.
+            unsafe { (*self.ptr.as_ptr()).len = 0 };
+        }
+        AlmideListIntoIter { list: self, next: 0, end, unique }
+    }
+}
+
+impl<T: Clone> AlmideList<T> {
+    /// `self.into_iter().map(f).collect()`. A unique block whose element layout `U` shares is rewritten in place,
+    /// as std's `Vec` collects `into_iter().map(f)` into its source buffer: no second block.
+    pub fn map_owned<U: Clone, F: FnMut(T) -> U>(self, mut f: F) -> AlmideList<U> {
+        let len = self.len();
+        let fits = std::mem::size_of::<T>() == std::mem::size_of::<U>()
+            && std::mem::align_of::<T>() == std::mem::align_of::<U>()
+            && std::mem::size_of::<T>() > 0;
+        if len == 0 || !fits || !self.is_unique() {
+            return self.into_iter().map(f).collect();
+        }
+        /// Unwinding out of `f` at element `done`: the `done` elements already written are `U`s, the one `f` was
+        /// handed is gone, the rest are `T`s. Drop each as what it is, then free the block.
+        struct Unwind<T, U> {
+            ptr: NonNull<AlmideListHeader>,
+            done: usize,
+            len: usize,
+            _elems: PhantomData<(T, U)>,
+        }
+        impl<T, U> Drop for Unwind<T, U> {
+            fn drop(&mut self) {
+                // SAFETY: the block is unique with its `len` at 0, so freeing it drops no element; the ranges below are
+                // exactly the initialised `U`s and `T`s described above, each dropped once.
+                unsafe {
+                    let data = self.ptr.as_ptr().cast::<u8>().add(almide_list_offset::<U>());
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(data.cast::<U>(), self.done));
+                    let rest = self.len - self.done - 1;
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(data.cast::<T>().add(self.done + 1), rest));
+                    drop(AlmideList::<U> { ptr: self.ptr, _elems: PhantomData });
+                }
+            }
+        }
+        let me = std::mem::ManuallyDrop::new(self);
+        let data = me.data();
+        // SAFETY: the block is unique; with `len` at 0 nothing else reads or drops its elements while they change type.
+        unsafe { (*me.ptr.as_ptr()).len = 0 };
+        let mut guard = Unwind::<T, U> { ptr: me.ptr, done: 0, len, _elems: PhantomData };
+        while guard.done < len {
+            // SAFETY: slot `done` holds a `T` not yet read; `U` has `T`'s size and alignment, so the `U` written
+            // back fits the slot exactly, and the offset of the elements is the same for both.
+            unsafe {
+                let x = std::ptr::read(data.add(guard.done));
+                let y = f(x);
+                std::ptr::write(data.cast::<U>().add(guard.done), y);
+            }
+            guard.done += 1;
+        }
+        let ptr = guard.ptr;
+        std::mem::forget(guard);
+        // SAFETY: every slot now holds a `U`; the block's capacity in elements is unchanged because the sizes agree.
+        unsafe { (*ptr.as_ptr()).len = len };
+        AlmideList { ptr, _elems: PhantomData }
+    }
+}
+
+/// The by-value iterator of an `AlmideList`: owns the block for its lifetime.
+pub struct AlmideListIntoIter<T: Clone> {
+    list: AlmideList<T>,
+    next: usize,
+    end: usize,
+    unique: bool,
+}
+
+impl<T: Clone> AlmideListIntoIter<T> {
+    fn element(&self, i: usize) -> T {
+        if self.unique {
+            // SAFETY: `i` is in `next..end`, each index is taken once, and the block no longer drops them.
+            unsafe { std::ptr::read(self.list.data().add(i)) }
+        } else {
+            self.list.as_slice()[i].clone()
+        }
+    }
+}
+
+impl<T: Clone> Iterator for AlmideListIntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        let i = self.next;
+        self.next += 1;
+        Some(self.element(i))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.next;
+        (n, Some(n))
+    }
+}
+
+impl<T: Clone> DoubleEndedIterator for AlmideListIntoIter<T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        self.end -= 1;
+        Some(self.element(self.end))
+    }
+}
+
+impl<T: Clone> Clone for AlmideListIntoIter<T> {
+    /// The elements not yet yielded, cloned into a block of their own (as `vec::IntoIter` clones its rest).
+    fn clone(&self) -> Self {
+        // SAFETY: `next..end` holds initialised elements in either mode: none of them has been moved out.
+        let rest: &[T] = unsafe { std::slice::from_raw_parts(self.list.data().add(self.next), self.end - self.next) };
+        AlmideList::from(rest).into_iter()
+    }
+}
+
+impl<T: Clone> ExactSizeIterator for AlmideListIntoIter<T> {}
+impl<T: Clone> std::iter::FusedIterator for AlmideListIntoIter<T> {}
+
+impl<T: Clone> Drop for AlmideListIntoIter<T> {
+    fn drop(&mut self) {
+        if self.unique && self.next < self.end {
+            // SAFETY: the elements in `next..end` were never moved out; the block does not drop them.
+            unsafe {
+                std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(self.list.data().add(self.next), self.end - self.next));
+            }
+        }
     }
 }
 

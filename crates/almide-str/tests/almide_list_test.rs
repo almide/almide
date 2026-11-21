@@ -471,6 +471,7 @@ fn a_clone_that_panics_mid_fill_drops_what_was_written() {
 
 #[test]
 fn a_literal_moves_its_elements_into_one_exact_block() {
+    use almide_str::almide_list;
     let l: AlmideList<String> = almide_list!["a".to_string(), "bc".to_string(), "d".to_string()];
     assert_eq!(l.len(), 3);
     assert_eq!(l.capacity(), 3);
@@ -479,4 +480,56 @@ fn a_literal_moves_its_elements_into_one_exact_block() {
     assert_eq!(one.as_slice(), &[7]);
     let empty: AlmideList<String> = AlmideList::from([] as [String; 0]);
     assert!(empty.is_empty());
+}
+
+#[test]
+fn a_by_value_iteration_allocates_nothing_and_drops_what_it_never_yields() {
+    // unique: elements move out; a partial walk drops the rest exactly once
+    let l: AlmideList<String> = AlmideList::from(vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()]);
+    let mut it = l.into_iter();
+    assert_eq!(it.len(), 4);
+    assert_eq!(it.next().as_deref(), Some("a"));
+    assert_eq!(it.next_back().as_deref(), Some("d"));
+    assert_eq!(it.size_hint(), (2, Some(2)));
+    drop(it);
+    // shared: elements are cloned and the other owner keeps its block intact
+    let l: AlmideList<String> = AlmideList::from(vec!["x".to_string(), "y".to_string()]);
+    let keep = l.clone();
+    let got: Vec<String> = l.into_iter().rev().collect();
+    assert_eq!(got, ["y", "x"]);
+    assert_eq!(keep.as_slice(), &["x".to_string(), "y".to_string()]);
+    // empty: the static block is never written
+    let e: AlmideList<String> = AlmideList::new();
+    assert_eq!(e.into_iter().count(), 0);
+}
+
+#[test]
+fn a_by_value_iterator_clones_only_what_it_has_not_yielded() {
+    let l: AlmideList<String> = AlmideList::from(vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    let mut it = l.into_iter();
+    assert_eq!(it.next().as_deref(), Some("a"));
+    let twin = it.clone();
+    assert_eq!(it.collect::<Vec<_>>(), ["b", "c"]);
+    assert_eq!(twin.collect::<Vec<_>>(), ["b", "c"]);
+}
+
+#[test]
+fn a_map_over_a_unique_block_rewrites_it_in_place_and_unwinds_cleanly() {
+    let l: AlmideList<i64> = AlmideList::from(vec![1, 2, 3]);
+    let at = l.as_slice().as_ptr() as usize;
+    let m: AlmideList<u64> = l.map_owned(|x| (x * 10) as u64);
+    assert_eq!(m.as_slice(), &[10, 20, 30]);
+    assert_eq!(m.as_slice().as_ptr() as usize, at, "same size and alignment: the block is reused");
+    // shared: the other owner keeps its elements
+    let l: AlmideList<String> = AlmideList::from(vec!["a".to_string(), "b".to_string()]);
+    let keep = l.clone();
+    let m: AlmideList<String> = l.map_owned(|s| s + "!");
+    assert_eq!(m.as_slice(), &["a!".to_string(), "b!".to_string()]);
+    assert_eq!(keep.as_slice(), &["a".to_string(), "b".to_string()]);
+    // a panic part way: converted and unconverted elements are each dropped once (Miri checks the leak/double free)
+    let l: AlmideList<String> = AlmideList::from(vec!["x".to_string(), "boom".to_string(), "z".to_string()]);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        l.map_owned(|s| if s == "boom" { panic!("stop") } else { s + "?" })
+    }));
+    assert!(r.is_err());
 }

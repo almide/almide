@@ -134,7 +134,7 @@ impl FromIterator<(AlmideKey, AlmideValue)> for AlmideObject {
 
 impl IntoIterator for AlmideObject {
     type Item = (AlmideKey, AlmideValue);
-    type IntoIter = std::vec::IntoIter<(AlmideKey, AlmideValue)>;
+    type IntoIter = <AlmideList<(AlmideKey, AlmideValue)> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter { self.pairs.into_iter() }
 }
 

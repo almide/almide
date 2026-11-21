@@ -114,7 +114,9 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
         ("long", "pub fn long(ws: AlmideList<AlmideString>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
-        assert!(s.starts_with(sig) && s.contains("(ws).into_iter()"), "{name}:\n{s}");
+        // One `map` collected consumes through `map_owned`, which rewrites a
+        // unique block in place as std's in-place collect did.
+        assert!(s.starts_with(sig) && (s.contains("(ws).into_iter()") || s.contains("AlmideList::map_owned(ws, ")), "{name}:\n{s}");
     }
 
     // A `for` loop is the same iteration: a body that only reads its binder
