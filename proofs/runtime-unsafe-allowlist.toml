@@ -69,9 +69,9 @@ reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed p
 
 [[file]]
 path = "crates/almide-codegen/src/walker/mod.rs"
-count = 1
+count = 2
 class = "emitted-prelude"
-reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri))"
+reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri)); MAIN_ALLOC_PRELUDE: glibc mallopt(M_TRIM_THRESHOLD, M_MMAP_THRESHOLD) after it — glibc mallopt has no safe API; cfg(target_os = linux, target_env = gnu, not(miri)) (#4620, owner ruling 2026-11-21)"
 
 [[file]]
 path = "crates/almide-codegen/src/walker/extern_c.rs"
