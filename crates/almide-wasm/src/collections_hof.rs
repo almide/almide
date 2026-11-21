@@ -68,6 +68,7 @@ impl Emitter<'_> {
         self.store_ty_slot(v, pv);
         self.f.instructions().i32_const(4).call(F_ALLOC).local_tee(hend).local_get(hr);
         self.f.instructions().i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+        self.fw_opt_w(4, 0);
         self.f.instructions().local_get(hend).local_set(hr);
         self.f.instructions().br(2);
         self.f.instructions().end();

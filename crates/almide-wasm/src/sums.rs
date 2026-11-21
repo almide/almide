@@ -594,6 +594,7 @@ impl Emitter<'_> {
                     .local_tee(hs)
                     .local_get(hp)
                     .i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+                self.fw_opt_w(4, 0);
                 self.f.instructions().local_get(hs).end();
                 self.release_i32();
                 self.release_i32();
