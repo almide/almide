@@ -161,7 +161,13 @@ pub(crate) fn store(site: Option<Site>, i: usize, at: &wasm_encoder::Function) {
 
 /// Field `i` of a block of kind `k` was just loaded or stored.
 pub(crate) fn access(k: Kind, i: usize, at: &wasm_encoder::Function) {
-    let a = crate::witness::anchor::at(at);
+    access_back(k, i, at, 0);
+}
+
+/// As [`access`], for the instruction that ended `back` bytes before the
+/// body's current end.
+pub(crate) fn access_back(k: Kind, i: usize, at: &wasm_encoder::Function, back: usize) {
+    let a = crate::witness::anchor::at_back(at, back);
     with(|s| {
         s.items.push(format!("a{} c{} f{i}", k.0, k.1));
         s.anchors.push(a);
