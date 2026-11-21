@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "114"
+# unstamped_ceiling     = "110"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
-# failopen_ceiling      = "37"
+# failopen_ceiling      = "33"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -142,6 +142,13 @@
 #               epoch 17). manifest.unknown-keys and net.permissions-unknown-key
 #               refuse on every route, novel fresh-key tests, controls red.
 #               STAMPED: 43 stamped, 114 not, 175 skipped, 37 fail-open.
+#   2026-11-21  thirteenth engineer: proc.command-path-resolution (C-459 launch
+#               PATH, #4844) and env.test-wasm-runner (the wasmtime lane preopens
+#               the grant, #4842) re-read as stale; trust.add-trust-flag (#4867)
+#               and trust.install-owner (#4864) residuals closed, second controls
+#               red. Fresh novel tests and probes; anchor.branch-target-depth's
+#               control re-pointed at the control table. STAMPED: 47 stamped,
+#               110 not, 175 skipped, 33 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1550,22 +1557,22 @@ items = [
   "crates/almide-rt-core/src/process_core.rs::almide_proc_exec",
 ]
 keys = []
-decides = "a listed bare command name is resolved through PATH at spawn time; native env.set(\"PATH\", ..) is std::env::set_var, so the program chooses which binary the listed name runs"
-from = "name"
-unknown = "allow"
-unknown_note = "proc = [\"git\"] + env.set(\"PATH\", dir) + fs.copy of any executable to dir/git -> process.exec(\"git\") runs it natively (code-read); arguments are never judged"
-routes = { check = "passes (probe p2: No errors found)", check_json = "passes", check_effects = "passes", run = "native: suspected bypass (not probed); wasm: host PATH used, no bypass (probe p2)", build = "native suspected", test = "native suspected", bench = "native suspected", native = "suspected bypass", wasm = "no bypass (probe p2)", wasi = "n.a.", component = "unknown", lsp = "n.a.", mcp = "n.a.", emit = "suspected" }
-tests = []
+decides = "which program a bare command name runs: the first executable of that name on the PATH the program was LAUNCHED with, captured once before the program can change it (C-459, #4844); env.set(\"PATH\", ..) changes what env.get answers, never which program a name runs; a name with a `/` runs as written"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "Stale draft (Command::new(cmd) resolving through the process PATH that native env.set rewrites) superseded by #4844 / C-459: process_core.rs spawns through almide_rt_launch_command (launch_core.rs), which searches only the launch PATH; a name found on no launch-PATH directory is spawned with the launch PATH set on the child, so it fails to start (refused). The decision is the invoker's declaration (the launch environment), not the program's. The embedded wasm host spawns from its own process, whose PATH the guest's env overlay never writes. Out of this row: which names may be spawned at all is perm.proc-allowlist-static; arguments are never judged"
+routes = { check = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", check_json = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", check_effects = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", run = "runs", build = "runs (the built binary, run in the probe environment)", test = "runs (the file runs on the embedded wasm host, which spawns from its own launch PATH)", bench = "runs", native = "runs", wasm = "runs", wasi = "n.a.: a stock WASI module has no process spawn, so no name is resolved (the build of a process program currently fails with a rustc error, #4907)", component = "n.a.: process.* is refused at build (E081: no component world declares almide:process/spawn)", lsp = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", mcp = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", emit = "runs (the emitted Rust spawns through almide_rt_launch_command)" }
+tests = ["tests/proc_launch_path_test.rs::a_command_name_runs_what_the_launch_path_finds_on_both_legs", "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"]
 control_note = "NONE"
-issues = [4844]
-status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (command string, not identity)",
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "process_core.rs:32 Command::new(cmd) with no env/path pin; runtime/rs/src/env.rs:21-29 set_var. Needs Env.write + FS.write + Proc granted (or allow absent). Also a native/wasm divergence: the wasm host resolves with the host's PATH."
+issues = [4844, 4907]
+status = "STAMPED"
+note = "launch_core.rs:14-17 (OnceLock launch PATH), :25-42 resolution, :71-85 spawn; process_core.rs:32; runtime/rs/src/env.rs:26-28 captures the launch PATH before a native env.set writes. The probe plants an executable in the project and puts its directory on PATH with env.set."
+probe = "tests/decision-probes/proc.command-path-resolution"
+novel = "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"
+control_patch = "proofs/decision-controls/proc.command-path-resolution.patch"
+control_test = "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"
+stamp = "9894977bda 2026-11-21"
+control_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.switch-lock"
@@ -1600,21 +1607,22 @@ items = [
   "src/cli/test_wasm.rs::WasmTestRunner::from_env",
 ]
 keys = []
-decides = "ALMIDE_TEST_WASM_RUNNER=wasmtime runs the wasm test lane on the wasmtime CLI with --dir=/ (run.rs:665), so [permissions] fs and the embedded host's op/proc bounds do not apply to the test"
-from = "text"
-unknown = "allow"
-unknown_note = "scope Tool -> not held by the switch lock: an inherited value (.envrc, CI env) is honoured by the release binary"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "wasm lane: [permissions] fs OFF", bench = "n.a.", native = "n.a.", wasm = "test lane only", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "almide_test child inherits env: OFF", emit = "n.a." }
-tests = []
+decides = "ALMIDE_TEST_WASM_RUNNER=wasmtime runs the wasm test lane on the wasmtime CLI; that lane preopens exactly the test file's [permissions] fs roots (wasmtime_fs_args with file_fs_scope, #4842), never `/`, so the fs scope bounds it as it bounds the embedded lane; any other value runs the embedded host"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "Stale draft (`--dir=/` on the CLI lane) superseded by #4842: test_wasm.rs passes file_fs_scope(test_file) to wasmtime_fs_args, which preopens only the granted roots, so a read outside them finds no preopen and is refused. An unrecognised switch value keeps the embedded host. The switch stays scope Tool (not held by the lock): the lane it selects is bounded instead. Out of this row: the stock artifact has no process spawn, and the CLI is not given network"
+routes = { check = "n.a.: the switch selects only the wasm test lane of `almide test`", check_json = "n.a.: the switch selects only the wasm test lane of `almide test`", check_effects = "n.a.: the switch selects only the wasm test lane of `almide test`", run = "n.a.: the switch selects only the wasm test lane of `almide test`", build = "n.a.: the switch selects only the wasm test lane of `almide test`", test = "runs", bench = "n.a.: the switch selects only the wasm test lane of `almide test`", native = "n.a.: the switch selects only the wasm test lane of `almide test`", wasm = "n.a.: `almide run --target wasm` runs on the embedded host; the switch selects only the test lane", wasi = "n.a.: the switch selects only the wasm test lane of `almide test`", component = "n.a.: the switch selects only the wasm test lane of `almide test`", lsp = "n.a.: the switch selects only the wasm test lane of `almide test`", mcp = "n.a.: almide_check runs no test; the almide_test tool runs `almide test`, the test column", emit = "n.a.: the switch selects only the wasm test lane of `almide test`" }
+tests = ["tests/fs_scope_routes_test.rs::the_wasmtime_test_runner_is_bounded_by_the_fs_scope", "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"]
 control_note = "NONE"
 issues = [4842]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-  "lock:not-held (Tool)",
-]
-note = "env.rs:240 (Tool); test_wasm.rs:256-260, 589-614; run.rs:649-666 wasmtime_fs_args `--dir=/` on non-Windows. Release-reachable, not announced as a gate bypass. secaudit P7 mentioned it; not filed."
+status = "STAMPED"
+note = "env.rs:241 (Tool); test_wasm.rs:276-281 from_env, :631-633 the CLI lane (wasmtime_fs_args with file_fs_scope); run.rs:652-658 preopens exactly the granted roots under a scope (#4842). Before #4842 the lane preopened `/` (secaudit P7)."
+probe = "tests/decision-probes/env.test-wasm-runner"
+novel = "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"
+control_patch = "proofs/decision-controls/env.test-wasm-runner.patch"
+control_test = "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"
+stamp = "9894977bda 2026-11-21"
+control_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.run-project-dir"
@@ -2485,19 +2493,22 @@ items = ["src/dispatch.rs::dispatch_add", "src/trust.rs::owner_arg", "src/trust.
 keys = []
 decides = "`almide add` reads the source once into a GitSource and refuses it unless github.com/almide or the root [trust] owners cover it, or --trust (read with the same grammar) covers it; a --trust that does not cover the source is refused; the tag is a GitRef; only then is the repository probed and almide.toml / almide.lock written"
 from = "type"
-unknown = "allow"
-unknown_note = "the source is typed and the trust check refuses an uncovered owner (dispatch.rs:359-384); but the dependency NAME is written into almide.toml unescaped (project_fetch.rs ~1216): a name holding TOML adds a path dependency or a [trust] owners line (probed 2026-11-19, #4867)"
+unknown = "refuse"
+unknown_note = "Stale residual (#4867, the name written into almide.toml unescaped) closed: dispatch_add refuses a name that is not an identifier before anything is probed, fetched or written (dispatch.rs:373-376), and add_dep_to_toml refuses it again and writes every value through the TOML encoder (project_fetch.rs:1198-1234). The source is typed and an uncovered owner is refused (dispatch.rs:377-406); a --trust that does not cover the source is refused"
 routes = { check = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", check_json = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", check_effects = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", run = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", build = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", test = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", bench = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", native = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", wasm = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", wasi = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", component = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", lsp = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", mcp = "n.a.: the MCP server has no add tool (almide_check / almide_test / almide_fmt_check / almide_survive / almide_explain / almide_api / almide_deploy)", emit = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)" }
 tests = ["tests/dependency_trust_test.rs::an_untrusted_add_is_refused_with_the_source_and_writes_nothing", "tests/dependency_trust_test.rs::a_trust_flag_naming_another_owner_is_refused", "tests/dependency_trust_test.rs::dry_run_reports_the_verdict_and_writes_nothing", "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"]
 control_note = "row 14 (is_trusted -> true)"
 issues = [4867]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4867, probed: the add name injects manifest lines)"]
+status = "STAMPED"
 note = "dispatch.rs:342-467: source parsed :359, --trust :361-371, verdict :372-386, tag :388-390, probe :401-423, write :445-466. #4810/#4811 closed by this code."
 novel = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
 control_patch = "proofs/decision-controls/trust.add-trust-flag.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/trust.add-trust-flag.name.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_name_carrying_toml_is_refused_before_anything_is_written"
+stamp = "9894977bda 2026-11-21"
+control_extra_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.install-owner"
@@ -2506,19 +2517,22 @@ items = ["src/cli/install.rs::check_install_trust", "src/cli/install.rs::spec_so
 keys = []
 decides = "`almide tool install <spec>`: an existing local directory needs no trust; any other spec (a URL, or a package spec expanded to https://…) is read into a GitSource and installed only when github.com/almide covers it or --trust (same grammar) covers it"
 from = "type"
-unknown = "allow"
-unknown_note = "a remote spec is read into one GitSource and its owner checked (install.rs:323-354); but a spec that names an existing directory is installed as local with no trust check, even when it is spelled as a remote source (probed 2026-11-19, #4864)"
+unknown = "refuse"
+unknown_note = "Stale residual (#4864, an existing directory named like a source installed as local) closed: only a spec SPELLED as a path (`.`, `..`, `./`, `../`, absolute) is local (install.rs:332-334); anything else is read into one GitSource and its owner checked before anything is fetched, whatever exists on disk under that name (install.rs:336-366)"
 routes = { check = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", check_json = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", check_effects = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", run = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", build = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", test = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", bench = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", native = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", wasm = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", wasi = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", component = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", lsp = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", mcp = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", emit = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)" }
 tests = ["tests/install_native_gate_test.rs::an_untrusted_remote_spec_is_refused_before_any_fetch", "src/cli/install.rs::tests::install_trust_follows_the_add_rule", "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"]
 control_note = "NONE"
 issues = [4864]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4864, probed: a planted github.com/<o>/<r> directory skips trust)"]
+status = "STAMPED"
 note = "install.rs:22-37 (trust before anything), 202-257 resolve_source, 323-354. #4810/#4811 closed by this code."
 novel = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
 control_patch = "proofs/decision-controls/trust.install-owner.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/trust.install-owner.planted.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_install_a_planted_directory_named_like_a_fresh_source_is_not_installed"
+stamp = "9894977bda 2026-11-21"
+control_extra_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.media-grant-key"
@@ -3311,7 +3325,7 @@ note = "NEW sibling of #4826 (same crate, same validator-admits-all cause, diffe
 control_patch = "proofs/decision-controls/anchor.branch-target-depth.patch"
 control_test = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
 novel = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
-control_seen = "a4d13b850e + the 2026-11-21 batch (q53), ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "9894977bda 2026-11-21 ds-2: re-run after the decoder took develop's control table (the patch now neuters the per-operator refusal): base green, patched red"
 stamp = "a4d13b850e 2026-11-21"
 
 [[site]]
