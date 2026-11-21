@@ -252,6 +252,7 @@ impl<'p> Reach<'p> {
     fn is_reached(&self, i: usize, d: &Decl) -> bool {
         let m = self.cands[i].name;
         fn_is_named(&self.spelled, m, d)
+            || super::requirement_called(&self.spelled, m, d)
             || rewrite_triggered(m, d, self.live.get(m))
             || decl_name(d).and_then(|n| n.strip_prefix("__fallible_")).is_some_and(|h| {
                 almide_lang::fallible_hofs::is_fallible_hof(m, h)
@@ -405,15 +406,23 @@ pub(super) fn surface_of(prog: &Program) -> Surface {
 /// type (`mod fn Secret.repr`), which every renderer and requirement
 /// dispatch reaches through the TYPE, never by a spelled call.
 fn requirement_fns(module: &str, prog: &Program) -> HashSet<String> {
-    use crate::canonicalize::protocols::{builtin_protocol, BUILTIN_PROTOCOLS};
+    use crate::canonicalize::protocols::{builtin_protocol, is_operator_requirement, BUILTIN_PROTOCOLS};
     use almide_lang::stdlib_info::{requirement_fn_name, stdlib_owned_type_owner};
     let mut out = HashSet::new();
     for p in BUILTIN_PROTOCOLS {
         let owned = p.conformers.iter().filter(|t| t.stdlib_module() == Some(module)).map(|t| t.display()).chain(
             p.named_conformers.iter().filter(|n| stdlib_owned_type_owner(n) == Some(module)).map(|n| n.to_string()),
         );
+        // #4311: a requirement only requirement dispatch calls (a cell of
+        // `builtin_conformance_requirements`: neither derivable nor an
+        // operator's) is not called by the compiler on its own. It wakes when
+        // its requirement is called ([`super::requirement_called`]), as the
+        // module rules defer it: String's `Body` body names `bytes`, and
+        // spelled at entry it loaded `bytes` into every program that used a
+        // string function.
+        let dispatch_only = |m: &str| !p.derivable && !is_operator_requirement(m);
         for t in owned {
-            out.extend(p.method_names().iter().map(|m| requirement_fn_name(&t, m)));
+            out.extend(p.method_names().iter().filter(|m| !dispatch_only(m)).map(|m| requirement_fn_name(&t, m)));
         }
     }
     for d in &prog.decls {

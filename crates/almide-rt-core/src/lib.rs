@@ -40,6 +40,7 @@ pub mod http_server_core {
 /// includes it, the embedded host serves `almide:process/spawn` with it.
 pub mod process_core {
     include!("generated/err_text.rs");
+    include!("launch_core.rs");
     include!("process_core.rs");
 }
 /// The tcp family (#3620): `runtime/rs/src/net.rs` includes it, the embedded

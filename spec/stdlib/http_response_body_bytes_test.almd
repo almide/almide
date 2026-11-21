@@ -1,0 +1,44 @@
+// @contract: C-275
+// A built response keeps a bytes body exactly (#4311, ADR-0032 amendment): a
+// `Body` hands the response its bytes, so `body_bytes` answers what was given
+// and `body` is its lossy text. Before, every Bytes body was decoded as lossy
+// UTF-8 when the response was built: the 256 byte values came back as 512.
+import http
+
+fn all_bytes() -> Bytes = bytes.from_list(list.range(0, 256))
+
+test "a Bytes body round-trips every byte value" {
+  let resp = http.response(200, all_bytes())
+  assert_eq(http.body_bytes(resp), all_bytes())
+  assert_eq(bytes.len(http.body_bytes(resp)), 256)
+  assert_eq(http.body(resp), bytes.to_string_lossy(all_bytes()))
+  assert_eq(http.header(resp, "Content-Type"), some("application/octet-stream"))
+}
+
+test "a typed body keeps its bytes and its media type" {
+  let resp = http.response(200, http.typed("application/x-sweep", all_bytes()))
+  assert_eq(http.body_bytes(resp), all_bytes())
+  assert_eq(http.header(resp, "Content-Type"), some("application/x-sweep"))
+}
+
+test "with_body, set_body_bytes and with_headers keep the bytes" {
+  let b = bytes.from_list(list.range(128, 256) + list.range(0, 128))
+  assert_eq(http.body_bytes(http.with_body(http.response(200, ""), b)), b)
+  assert_eq(http.body_bytes(http.set_body_bytes(http.response(200, ""), b)), b)
+  let resp = http.with_headers(200, b, [("X-A", "1")])
+  assert_eq(http.body_bytes(resp), b)
+  assert_eq(http.header(resp, "X-A"), some("1"))
+  assert_eq(http.body_bytes(http.with_headers(200, http.typed("image/png", b), [])), b)
+}
+
+test "a text body after a bytes body drops the bytes" {
+  let resp = http.set_body(http.response(200, all_bytes()), "plain")
+  assert_eq(http.body(resp), "plain")
+  assert_eq(http.body_bytes(resp), bytes.from_string("plain"))
+  assert_eq(http.header(resp, "Content-Type"), some("text/plain; charset=utf-8"))
+}
+
+test "String, Value and SafeHtml bodies are unchanged" {
+  assert_eq(http.body_bytes(http.response(200, "λ€")), bytes.from_string("λ€"))
+  assert_eq(http.body(http.response(200, "λ€")), "λ€")
+}

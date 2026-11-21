@@ -7,6 +7,6 @@ type Csv: Body = { rows: String }
 
 fn Csv.media_type(self) -> String = "text/csv"
 
-fn Csv.to_text(self) -> String = self.rows
+fn Csv.to_bytes(self) -> Bytes = bytes.from_string(self.rows)
 
 fn main() -> Unit = println(http.body(http.response(200, Csv { rows: "a,b" })))

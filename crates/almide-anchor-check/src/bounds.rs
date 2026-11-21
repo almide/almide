@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use wasmparser::{BlockType, Operator as Op};
 
-use crate::decode::{is_load, store_width};
+use crate::decode::{arm_branches_out, is_load, store_width};
 use crate::{operands, parse_at, At, Body, Ctx, Report};
 
 impl<'a> Ctx<'_, 'a> {
@@ -77,6 +77,14 @@ impl<'a> Ctx<'_, 'a> {
                 b.ops[end - 1]
             ));
         }
+        // Nothing in the arm leaves it before that abort: a branch out
+        // would carry the failed compare on to the access.
+        if let Some(j) = arm_branches_out(&b.ops, &b.depth, at.op - 1, end) {
+            return Err(format!(
+                "c: instruction {j} ({:?}) branches out of the guard's `if` before its abort",
+                b.ops[j]
+            ));
+        }
         Ok(at.op - 2)
     }
 
@@ -107,6 +115,9 @@ impl<'a> Ctx<'_, 'a> {
 pub struct Sites<'s> {
     pub judges: &'s [At],
     pub holds: &'s [At],
+    /// How many functions the module imports: a `call`'s index minus this
+    /// is its callee's position among the defined functions.
+    pub imports: u32,
 }
 
 /// Check the bounds witness `bounds` against its anchors `anch`.
@@ -130,7 +141,7 @@ pub fn check_bounds_held(
     holds: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
-    check_bounds_alloc(bodies, bounds, anch, Sites { judges, holds }, u32::MAX, rep)
+    check_bounds_alloc(bodies, bounds, anch, Sites { judges, holds, imports: 0 }, u32::MAX, rep)
 }
 
 /// [`check_bounds_held`] knowing `$alloc` (a function index, as a `call`
@@ -143,7 +154,7 @@ pub fn check_bounds_alloc(
     alloc: u32,
     rep: &mut Report,
 ) -> Result<(), String> {
-    let mut bc = Bounds { ctx: Ctx { bodies, alloc }, sites, flows: HashMap::new() };
+    let mut bc = Bounds { ctx: Ctx { bodies, alloc }, sites, sets: operands::global_sets(bodies, sites.imports), flows: HashMap::new() };
     if bounds.trim().is_empty() && anch.trim().is_empty() {
         return Ok(());
     }
@@ -166,17 +177,21 @@ pub fn check_bounds_alloc(
 struct Bounds<'b, 's, 'a> {
     ctx: Ctx<'b, 'a>,
     sites: Sites<'s>,
+    /// The globals each function's call may set.
+    sets: operands::GlobalSets,
     flows: HashMap<usize, operands::Flow<'b, 'a>>,
 }
 
 impl<'b, 'a> Bounds<'b, '_, 'a> {
     /// Function `func`'s flow, built once, with its judges and holds.
     fn flow(&mut self, func: usize) -> &mut operands::Flow<'b, 'a> {
-        let (bodies, Sites { judges, holds }) = (self.ctx.bodies, self.sites);
+        let (bodies, Sites { judges, holds, .. }) = (self.ctx.bodies, self.sites);
+        let sets = self.sets.clone();
         self.flows.entry(func).or_insert_with(|| {
             let js = judges.iter().filter(|j| j.func == func).map(|j| j.op).collect();
             operands::Flow::new(&bodies[func], js)
                 .with_holds(holds.iter().filter(|h| h.func == func).map(|h| h.op).collect())
+                .with_global_sets(sets)
         })
     }
 

@@ -88,6 +88,9 @@ fn cells() -> Vec<Cell> {
         rebind("http.set_status", "http", RESP, "http.set_status(x, 200 + n % 2)"),
         rebind("http.__http_response_put_header", "http", RESP, "http.set_header(x, \"k\", \"v${n}\")"),
         rebind("http.__http_response_put_body", "http", RESP, "http.set_body(x, \"b${n}\")"),
+        rebind("http.__http_response_put_body_bytes", "http", RESP, "http.with_body(x, bytes.from_string(\"b${n}\"))"),
+        // #4767: a request is built around its body by move, not by a copy.
+        last("http.__new_request", "http", "string.repeat(\"b\", 100 + n)", "http.new_request(\"GET\", \"/a\", x, [])", "string.len(http.body(r))"),
         rebind("http.__http_request_set_header", "http", REQ, "http.set_header(x, \"k\", \"v${n}\")"),
         rebind("http.__http_request_set_body", "http", REQ, "http.set_body(x, \"b${n}\")"),
         rebind("http.__http_request_set_body_bytes", "http", REQ, "http.set_body_bytes(x, bytes.from_string(\"b${n}\"))"),

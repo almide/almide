@@ -932,7 +932,7 @@ pub const HTTP_SERVER_OWNED_FIELDS: &[&str] = &["connection", "content-length", 
 
 /// The response bytes for a request of any method but HEAD: see
 /// [`http_server_response_bytes_for`].
-pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
+pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Vec<u8> {
     http_server_response_bytes_for(false, status, headers, body)
 }
 
@@ -943,7 +943,9 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 /// Content-Length, the body. A HEAD request, a 1xx, a 204 and a 304 get no
 /// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
 /// (§8.6). The headers must already have passed [`http_server_bad_header`].
-pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
+/// The body is bytes: a `Body`'s bytes are sent exactly (#4311).
+pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Vec<u8> {
+    let body = body.as_ref();
     let mut out = format!("HTTP/1.1 {} {}\r\n", status, http_server_reason(status));
     for (k, v) in headers {
         if HTTP_SERVER_OWNED_FIELDS.iter().any(|f| k.eq_ignore_ascii_case(f)) {
@@ -962,17 +964,18 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
         out.push_str(&format!("Content-Length: {}\r\n", body.len()));
     }
     out.push_str("\r\n");
+    let mut out = out.into_bytes();
     if !(head || informational || status == 204 || status == 304) {
-        out.push_str(body);
+        out.extend_from_slice(body);
     }
-    out.into_bytes()
+    out
 }
 
 /// Write the handler's response and close the connection. Two answers
 /// replace it: a header that would split the response (#2822) is a `500`
 /// plus one stderr line, and a response that arrives after the request
 /// timeout (ADR-0020 §5.7) is a `503`.
-pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
+pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Result<(), String> {
     let plain = [("Content-Type".to_string(), "text/plain".to_string())];
     if let Some(why) = headers.iter().find_map(|(k, v)| http_server_bad_header(k, v)).or_else(|| http_server_bad_status(status)) {
         eprintln!("http.serve: refused the response: {why}");
@@ -986,7 +989,7 @@ pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, 
 
 /// Send the response: on the socket directly, or through the pool worker
 /// that holds the connection (it writes while the serving thread goes on).
-fn http_server_send(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
+fn http_server_send(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Result<(), String> {
     let bytes = http_server_response_bytes_for(conn.head, status, headers, body);
     match conn.out {
         HttpServerOut::Stream(stream) => http_server_put(stream, &bytes),

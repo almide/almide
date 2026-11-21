@@ -259,8 +259,8 @@ A body of any other media type. The type is written as a literal and read at
 check time (E117): a computed one, a malformed one, or one a browser runs
 script in — HTML and XHTML (owned by `html`), SVG (a granted package's), XML
 and `+xml` types — is refused, so a String never reaches a browser as markup
-except through a safe type. A built body is held as text today, so bytes that
-are not UTF-8 are decoded lossily (#4311).
+except through a safe type. The bytes are kept exactly: `http.body_bytes`
+answers them and `http.serve` sends them byte for byte (#4311).
 
 ```almd run
 import http
@@ -547,9 +547,8 @@ final
 Replace the body with `Bytes`. A request keeps the bytes exactly:
 `http.body_bytes` answers them and `http.send` / `http.start` send them byte
 for byte, so it is a lossless binary upload; `http.body` is their lossy UTF-8
-decoding. A built response still holds its body as text (#4311), so on a
-response the bytes are decoded as lossy UTF-8 and its `Content-Type` becomes
-`application/octet-stream`.
+decoding. A response keeps them exactly too (#4311): `http.serve` sends them
+unchanged, and its `Content-Type` becomes `application/octet-stream`.
 
 ```almd run
 import http
@@ -1203,7 +1202,7 @@ http.headers(m: M) -> List[(String, String)]
 // @since 0.6.0 or earlier
 http.body(m: M) -> String
 
-// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
+// Body as bytes: a fetched body exactly as sent, a bytes body exactly as given, otherwise the UTF-8 bytes of body(m).
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 
@@ -1215,7 +1214,7 @@ http.set_header(m: M, name: String, value: String) -> M
 // @since unreleased
 http.set_body(m: M, body: String) -> M
 
-// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
+// m with its body replaced by body, kept exactly; a response's Content-Type becomes application/octet-stream.
 // @since unreleased
 http.set_body_bytes(m: M, body: Bytes) -> M
 

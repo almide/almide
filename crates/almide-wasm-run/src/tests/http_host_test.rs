@@ -222,8 +222,13 @@ fn parse_cells(a: &str) -> Result<Cells, String> {
 }
 
 fn serve(st: &Mutex<ServeState>, op: i32, a: &str) -> (i64, Vec<u8>) {
+    serve_with_body(st, op, a, &[])
+}
+
+/// A reply's body crosses as bytes beside its cells (#4311).
+fn serve_with_body(st: &Mutex<ServeState>, op: i32, a: &str, body: &[u8]) -> (i64, Vec<u8>) {
     // No live stdout: the harness never arms shutdown signals.
-    host_serve::dispatch(st, None, op, a, frames, parse_cells)
+    host_serve::dispatch(st, None, op, a, body, frames, parse_cells)
 }
 
 #[test]
@@ -238,11 +243,11 @@ fn serve_ops_refuse_out_of_order_calls_and_a_bad_port() {
 
 /// A PUT whose answer is read to the close, then a GET left unanswered
 /// (its reply carries unparsable cells).
-fn put_then_get(port: u16) -> std::io::Result<String> {
+fn put_then_get(port: u16) -> std::io::Result<Vec<u8>> {
     let mut s = TcpStream::connect(("127.0.0.1", port))?;
     s.write_all(b"PUT /x HTTP/1.1\r\nHost: a\r\nX-K: v\r\nContent-Length: 2\r\n\r\nhi")?;
-    let mut resp = String::new();
-    s.read_to_string(&mut resp)?;
+    let mut resp = Vec::new();
+    s.read_to_end(&mut resp)?;
     let mut s2 = TcpStream::connect(("127.0.0.1", port))?;
     s2.write_all(b"GET / HTTP/1.1\r\nHost: a\r\n\r\n")?;
     Ok(resp)
@@ -258,9 +263,10 @@ fn serve_ops_bind_take_a_request_and_reply() {
     let (ret, payload) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(unframe(&payload), ["PUT", "/x", "hi", "Host", "a", "X-K", "v", "Content-Length", "2"]);
-    let reply = [cell("201"), cell("made"), cell("X-R"), cell("1")].concat();
-    assert_eq!(serve(&st, OP_SERVE_REPLY, &reply), (0, Vec::new()));
-    assert_eq!(join(client), "HTTP/1.1 201 Created\r\nX-R: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
+    // The body is bytes that are not UTF-8: they reach the client exactly (#4311).
+    let reply = [cell("201"), cell(""), cell("X-R"), cell("1")].concat();
+    assert_eq!(serve_with_body(&st, OP_SERVE_REPLY, &reply, b"m\xffde"), (0, Vec::new()));
+    assert_eq!(join(client), b"HTTP/1.1 201 Created\r\nX-R: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 4\r\n\r\nm\xffde");
     let (ret, _) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(text(serve(&st, OP_SERVE_REPLY, "nonsense")), (1, "bad cells".to_string()));

@@ -27,13 +27,14 @@ pub fn transpose_8x8_f64(input: &[f64; 64]) -> [f64; 64] {
     transpose_8x8_f64_naive(input)
 }
 
-/// # Safety
-/// The CPU has AVX; it is inlined into, and only called from,
-/// `transpose_8x8_f64_avx`, whose own contract is that. Register-only: no
-/// memory is touched.
+/// Register-only: no memory is touched, so it is a safe `#[target_feature]`
+/// fn (the shuffle intrinsics are safe under AVX since Rust 1.87). Only
+/// `transpose_8x8_f64_avx`, which enables the same feature, calls it, so the
+/// call needs no `unsafe` and LLVM inlines it there.
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
-unsafe fn transpose_4x4_f64(
+#[target_feature(enable = "avx")]
+#[inline]
+fn transpose_4x4_f64(
     r0: std::arch::x86_64::__m256d,
     r1: std::arch::x86_64::__m256d,
     r2: std::arch::x86_64::__m256d,
@@ -149,6 +150,23 @@ mod tests {
             let source = out[p] as usize;
             let (i, j) = (p % 8, p / 8);
             assert_eq!(source, i * 8 + j, "f64 permutation wrong at {p}");
+        }
+    }
+
+    /// The 4x4 register shuffle (a safe `#[target_feature]` fn) through the
+    /// dispatch, bit for bit on values a lossy shuffle would change: -0.0, NaN
+    /// payloads, infinities and subnormals. The x86_64 test hosts have AVX, so
+    /// this runs the AVX kernel; the assert keeps that from passing vacuously.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn f64_avx_kernel_bitwise_special_values() {
+        assert!(is_x86_feature_detected!("avx"), "the AVX kernel did not run on this host");
+        let specials = [-0.0, f64::from_bits(0x7ff8_0000_0000_beef), f64::INFINITY, f64::NEG_INFINITY, f64::from_bits(1), f64::MIN_POSITIVE / 3.0];
+        let input: [f64; 64] = std::array::from_fn(|k| if k % 3 == 0 { specials[k % specials.len()] } else { k as f64 - 31.5 });
+        let simd = transpose_8x8_f64(&input);
+        let naive = transpose_8x8_f64_naive(&input);
+        for k in 0..64 {
+            assert_eq!(simd[k].to_bits(), naive[k].to_bits(), "at {k}");
         }
     }
 

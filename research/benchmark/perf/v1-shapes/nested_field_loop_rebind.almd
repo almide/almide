@@ -1,0 +1,30 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4799): a
+// loop over a two-level field (`out.raw.nodes`) of a var the loop body
+// rebuilds (#4805). The read of `out.raw` is a borrow only while `out` is
+// untouched, so the render walks the chain of borrowed reads and keeps the
+// owned copy where the body rebinds `out`.
+type Node = { name: String, kind: String }
+type Raw = { id: String, nodes: List[Node] }
+type Out = { raw: Raw, n: Int }
+
+fn add(o: Out, name: String) -> Out = Out { raw: Raw { id: o.raw.id, nodes: o.raw.nodes + [Node { name: name, kind: "x" }] }, n: o.n + 1 }
+
+fn grow(o0: Out) -> Out = {
+  var out = o0
+  for node in out.raw.nodes {
+    if node.kind == "task" then out = add(out, node.name) else ()
+  }
+  out
+}
+
+fn main() -> Unit = {
+  let n = int.parse("20000") ?? 4
+  let o = Out { raw: Raw { id: "r", nodes: [Node { name: "a", kind: "task" }, Node { name: "b", kind: "x" }, Node { name: "c", kind: "task" }] }, n: 0 }
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = acc + grow(o).n
+    i = i + 1
+  }
+  println(int.to_string(acc))
+}

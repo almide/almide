@@ -2821,12 +2821,6 @@ probe = 'int.count_trailing_zeros(8)'
 expect = "3"
 
 [[int.fn]]
-name = "pop_count"
-index_unit = "count"
-probe = 'int.pop_count(255)'
-expect = "8"
-
-[[int.fn]]
 name = "bit_reverse"
 index_unit = "bit-pattern"
 probe = 'int.bit_reverse(1)'
@@ -2837,12 +2831,6 @@ name = "byte_swap"
 index_unit = "bit-pattern"
 probe = 'int.byte_swap(1)'
 expect = "72057594037927936"
-
-[[int.fn]]
-name = "bit_width"
-index_unit = "count"
-probe = 'int.bit_width(255)'
-expect = "8"
 
 [[int.fn]]
 name = "log2_floor"
@@ -3190,16 +3178,6 @@ expect = '200'
 
 [process]
 default_index_unit = "value"
-
-[[process.fn]]
-name = "run"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
-when a signal killed it — the same reading as ProcessStatus.code (#2540, #3379).
-"""
 
 [[process.fn]]
 name = "stop"

@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-09-30. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd`, `tests/module_shadow_member_test.rs`, `tests/extern_rust_abi_test.rs` and `tests/diagnostics/e090-*`.
+> Last updated: 2026-11-20. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd`, `tests/module_shadow_member_test.rs`, `tests/extern_rust_abi_test.rs` and `tests/diagnostics/e090-*`.
 
 ---
 
@@ -722,7 +722,9 @@ export に `returns: address` を書くと（`@export(wasm, "in_alloc", returns:
 
 ## 12. ファイル解決順序
 
-`import pkg` の解決:
+`import pkg` と `import pkg.sub` の先頭 `pkg` は同じ一つの判断で解決する。`pkg` がプロジェクト内のモジュール（`{base_dir}/pkg.almd` か `{base_dir}/pkg/` ディレクトリ）と `almide.toml` の `[dependencies]` の両方を指すとき、どちらかを選ばず E121 で拒否する（#4865, C-458。ヒントはどちらかの改名）。`[dependencies]` の path 依存がそのディレクトリそのものなら一つのパッケージとして扱う。テスト: `tests/import_dependency_ambiguity_test.rs`。
+
+どちらか一方だけを指す `import pkg` の解決:
 
 1. `{base_dir}/pkg.almd`
 2. `{base_dir}/pkg/mod.almd`

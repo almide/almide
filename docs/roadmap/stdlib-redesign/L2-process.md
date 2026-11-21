@@ -129,7 +129,8 @@
 ### R-process-07 `run` も `ProcessCommand` を受け取り、`run_in` を撤去する — ○ 採用
 
 - いま: `process.run(cmd, args) -> Int` と `process.run_in(dir, cmd, args) -> Int`。R-process-02 の完全性の規則は「設定は 1 つのレコードに集め、関数名の組み合わせを作らない」と書くのに、`run_in` は作業ディレクトリの軸を名前に持ったままです。標準の関数は既定値つきの引数を持たない（R-string-08）ので、設定はレコードで渡すのが規則どおりです。
-- 案: `effect fn process.run(c: ProcessCommand) -> Int`（stdin の欄が空なら端末をそのまま渡す）にし、`run_in` を撤去します。引数だけで走らせる近道は `exec(cmd, args)` の 1 つにします。
+- 案: `effect fn process.run(c: ProcessCommand) -> Result[Unit, String]`（stdin の欄が空なら端末をそのまま渡す）にし、`run_in` を撤去します。引数だけで走らせる近道は `exec(cmd, args)` の 1 つにします。
+- 改訂（2026-11-20）: 戻り値は `Int` ではなく `Result[Unit, String]`。0 でない終了とシグナルでの終了は Err になります（#4148 の裁定、dialect epoch 17）。
 - 根拠の L0 規則: R-process-02 の完全性の規則、CLAUDE.md「族は行列で」。
 - (a) Rust `Command::status`、Go `Cmd.Run`、Python `run()` は、ほかの実行の形と同じ設定の値を受け取ります。
 - (c) `run` に時間切れを付けたい LLM が `run_timeout` を推測で書くのを防げます。

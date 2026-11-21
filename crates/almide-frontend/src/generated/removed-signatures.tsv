@@ -53,6 +53,7 @@ ffi.address	ffi.address(b: Bytes) -> RawPtr	ffi.region(b: Bytes) -> Region	0fdff
 float.from_float32	float.from_float32(n: Float32) -> Float	float.from(x: S) -> Float	6845dfcf68e9
 float.from_float64	float.from_float64(n: Float64) -> Float	float.from(x: S) -> Float	6845dfcf68e9
 float.from_int	float.from_int(n: Int) -> Float	float.from(x: S) -> Float	6845dfcf68e9
+float.sign	float.sign(n: Float) -> Float	float.signum(x: Float) -> Float	0778f4535652
 float.sqrt	float.sqrt(n: Float) -> Float	math.sqrt(x: Float) -> Float	6845dfcf68e9
 float.to_float32	float.to_float32(n: Float) -> Float32	float32.from(x: S) -> Float32	6845dfcf68e9
 float.to_float32_checked	float.to_float32_checked(n: Float) -> Option[Float32]	float32.from_checked(x: S) -> Option[Float32]	6845dfcf68e9
@@ -116,6 +117,7 @@ http.html	http.html(status: Int, body: SafeHtml) -> HttpResponse	http.response(s
 http.req_body	http.req_body(req: HttpRequest) -> String	http.body(m: M) -> String	867d094c510c
 http.status	http.status(resp: HttpResponse, code: Int) -> HttpResponse	http.set_status(resp: HttpResponse, code: Int) -> HttpResponse	867d094c510c
 http.status_code	http.status_code(resp: HttpResponse) -> Int	http.status(resp: HttpResponse) -> Int	867d094c510c
+int.bit_width	int.bit_width(n: Int) -> Int	int.bit_length(x: Int) -> Int	0778f4535652
 int.bits_to_float	int.bits_to_float(bits: Int) -> Float	float.from_bits(bits: Int) -> Float	6845dfcf68e9
 int.from_int16	int.from_int16(n: Int16) -> Int	int.from(x: S) -> Int	6845dfcf68e9
 int.from_int32	int.from_int32(n: Int32) -> Int	int.from(x: S) -> Int	6845dfcf68e9
@@ -127,6 +129,7 @@ int.from_uint64	int.from_uint64(n: UInt64) -> Int	int.from_wrapping(x: S) -> Int
 int.from_uint64_checked	int.from_uint64_checked(n: UInt64) -> Option[Int]	int.from_checked(x: S) -> Option[Int]	6845dfcf68e9
 int.from_uint64_saturating	int.from_uint64_saturating(n: UInt64) -> Int	int.from_saturating(x: S) -> Int	6845dfcf68e9
 int.from_uint8	int.from_uint8(n: UInt8) -> Int	int.from(x: S) -> Int	6845dfcf68e9
+int.pop_count	int.pop_count(n: Int) -> Int	int.count_ones(x: Int) -> Int	0778f4535652
 int.to_float	int.to_float(n: Int) -> Float	float.from(x: S) -> Float	6845dfcf68e9
 int.to_float32	int.to_float32(n: Int) -> Float32	float32.from(x: S) -> Float32	6845dfcf68e9
 int.to_float32_checked	int.to_float32_checked(n: Int) -> Option[Float32]	float32.from_checked(x: S) -> Option[Float32]	6845dfcf68e9
@@ -258,6 +261,7 @@ net.unix_listen	effect net.unix_listen(path: String) -> Int	effect unix.listen(p
 net.unix_send	effect net.unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit	effect unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit	a1bc6ad4898d
 process.args	effect process.args() -> List[String]	effect env.args() -> List[String]	6845dfcf68e9
 process.sleep	effect process.sleep(ms: Int) -> Unit	effect env.sleep_ms(ms: Int) -> Unit	6845dfcf68e9
+regex.full_match	regex.full_match(pat: String, s: String) -> Bool	regex.is_full_match(re: Regex, s: String) -> Bool	0778f4535652
 string.chars	string.chars(s: String) -> List[String]	string.to_list(s: String) -> List[String]	07f539ab640e
 string.codepoint	string.codepoint(s: String) -> Option[Int]	string.to_codepoint(s: String) -> Option[Int]	07f539ab640e
 string.run_length_encode	string.run_length_encode(s: String) -> List[(String, Int)]	-	6845dfcf68e9

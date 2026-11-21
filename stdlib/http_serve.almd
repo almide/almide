@@ -16,15 +16,19 @@
 //
 // The three `__http_serve_*` leaves are host ops 70 / 71 / 72 served by the
 // embedded host (crates/almide-wasm-run/src/host_serve.rs). The response
-// crosses as http_framed cells `<char count>\n<payload>`: status, body, then
-// each header name and value.
+// crosses as http_framed cells `<char count>\n<payload>` — status, an empty
+// body cell, then each header name and value — and its body as bytes beside
+// them (#4311).
 import hash
+import hex
 
 effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
 
 effect fn __http_serve_next() -> Result[List[String], String] = _
 
-effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
+// The body crosses on its own, as bytes (#4311): the body cell holds a
+// `Body`'s exact bytes, which a char-counted text frame could not carry.
+effect fn __http_serve_reply(frame: String, body: Bytes) -> Result[Unit, String] = _
 
 // Op 75 (#4203): run `step` (the serve loop) under the host's containment.
 // The embedded host calls `step` itself; a runtime abort inside a handler
@@ -82,8 +86,28 @@ fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
   (list.len(resp) - 2) / 2,
 ) |> list.map((i) => (list.get(resp, 2 + 2 * i) ?? "", list.get(resp, 3 + 2 * i) ?? ""))
 
+// The rep's status cell is `<status>` or, for a body whose bytes are not
+// UTF-8, `<status>/<hex of the bytes>` (http_response.almd, #4311).
+fn __hs_status(resp: List[String]) -> String = {
+  let cell = list.get(resp, 0) ?? ""
+  match string.index_of(cell, "/") {
+    some(i) => string.slice(cell, 0, i),
+    none => cell,
+  }
+}
+
+// The body's bytes, exactly: the raw hex when the status cell holds it.
+fn __hs_body(resp: List[String]) -> Bytes = {
+  let cell = list.get(resp, 0) ?? ""
+  let text = bytes.from_string(list.get(resp, 1) ?? "")
+  match string.index_of(cell, "/") {
+    some(i) => hex.decode(string.drop(cell, i + 1)) ?? text,
+    none => text,
+  }
+}
+
 fn __hs_refusal(resp: List[String]) -> String? = {
-  let status = list.get(resp, 0) ?? ""
+  let status = __hs_status(resp)
   let code = int.parse(status) ?? 0
   match __hs_pairs(resp) |> list.filter_map(((k, v)) => __hs_bad_header(k, v)) |> list.first {
     some(why) => some(why),
@@ -162,7 +186,11 @@ effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
         },
         none => resp,
       }
-      __http_serve_reply(__hs_frame(__hs_shaped(answer)))!
+      let shaped = __hs_shaped(answer)
+      __http_serve_reply(
+        __hs_frame([__hs_status(shaped), ""] + list.drop(shaped, 2)),
+        __hs_body(shaped),
+      )!
     }
   }
 }

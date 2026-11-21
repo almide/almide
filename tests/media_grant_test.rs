@@ -41,7 +41,7 @@ fn write(path: PathBuf, body: &str) {
 fn body_pkg(media: &str, owns: &str) -> String {
     format!(
         "type Mark: Body = {{ text: String }}\n\n@media_owns(\"{owns}\")\nfn Mark.media_type(self) -> String = \"{media}\"\n\n\
-         fn Mark.to_text(self) -> String = self.text\n\nfn mark(s: String) -> Mark = Mark {{ text: s }}\n"
+         fn Mark.to_bytes(self) -> Bytes = bytes.from_string(self.text)\n\nfn mark(s: String) -> Mark = Mark {{ text: s }}\n"
     )
 }
 

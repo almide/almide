@@ -22,6 +22,11 @@ pub fn almide_rt_env___set(name: &str, value: &str) {
     if name.is_empty() || name.contains('=') || name.contains('\0') {
         return;
     }
+    // The launch PATH is taken before the program can change it (#4844,
+    // C-459): a spawn runs what that PATH finds, not what this write says.
+    if name == "PATH" || (cfg!(windows) && name.eq_ignore_ascii_case("PATH")) {
+        let _ = almide_rt_launch_path();
+    }
     if value == "\0" {
         std::env::remove_var(name);
     } else if !value.contains('\0') {

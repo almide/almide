@@ -1,0 +1,38 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4787): sets
+// and maps keyed by generated types, built and queried inside a loop. The
+// native render decides per key type whether it gets canonical key bytes: a
+// record of exact fields, a variant with unit, tuple and nested-record cases,
+// a record whose fields reach a generated type through an option, a result
+// and a list, a Bytes field, a recursive variant, and a Map field, which
+// keeps the linear scan. (A Set of a Float-field record walls the native
+// render before any key is chosen, so it cannot sit in a native bench.)
+type Point = { x: Int, name: String }
+type Shape = | Dot | Box(Int, Int) | At(Point, List[Int])
+type Holder = { p: Option[Point], r: Result[Point, String], ps: List[Point] }
+type Blob = { tag: Int, data: Bytes }
+type Tree = | Leaf | Node(Tree, Int, Tree)
+type Indexed = { id: Int, attrs: Map[String, Int] }
+
+fn tree(d: Int) -> Tree = if d <= 0 then Leaf else Node(tree(d - 1), d, Leaf)
+
+fn main() -> Unit = {
+  let n = int.parse("2000") ?? 2
+  var acc = 0
+  var r = 0
+  while r < n {
+    let k = r % 7
+    let pts = set.from_list([{ x: k, name: "a" }, { x: k + 1, name: "b" }, { x: k, name: "a" }])
+    var shapes: Map[Shape, Int] = map.new()
+    shapes = map.set(shapes, Dot, 1)
+    shapes = map.set(shapes, Box(k, 2), 2)
+    shapes = map.set(shapes, At({ x: k, name: "c" }, [k]), 3)
+    let hs: Set[Holder] = set.from_list([{ p: some({ x: k, name: "h" }), r: ok({ x: 1, name: "o" }), ps: [{ x: 2, name: "l" }] }, { p: none, r: err("e"), ps: [] }])
+    let bs = set.from_list([{ tag: k, data: bytes.from_list([1, 2]) }, { tag: k, data: bytes.from_list([1, 2]) }])
+    let ts = set.from_list([tree(k % 3), tree(2), Leaf])
+    let ix = set.from_list([{ id: k, attrs: map.set(map.new(), "a", 1) }])
+    acc = acc + set.len(pts) + (map.get(shapes, Box(k, 2)) ?? 0) + set.len(hs) + set.len(bs) + set.len(ts) + set.len(ix)
+    if set.contains(pts, { x: k, name: "a" }) then acc = acc + 1 else ()
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

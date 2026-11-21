@@ -27,7 +27,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
     }
     let addr = match op {
         Op::Prim { args, .. } => args.first(),
-        Op::CallFn { name, args, .. } if name == "__mg_take" => match args.as_slice() {
+        Op::CallFn { name, args, .. } if name == crate::mir_ops::MG_TAKE => match args.as_slice() {
             [crate::CallArg::Scalar(a)] => Some(a), _ => None,
         },
         _ => None,
@@ -55,7 +55,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                 crate::render_native_bounds::access(slot);
                 heap_read(st, tys, out, *d, (ad.base, payload));
             }
-            Op::CallFn { dst: Some(d), name, .. } if name == "__mg_take" => {
+            Op::CallFn { dst: Some(d), name, .. } if name == crate::mir_ops::MG_TAKE => {
                 crate::render_native_bounds::access(slot); tys.insert(*d, payload);
                 take(out, *d, &base, payload);
             }

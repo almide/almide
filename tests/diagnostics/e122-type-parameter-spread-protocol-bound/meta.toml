@@ -1,0 +1,2 @@
+expects_code = "E122"
+expects_error = "cannot spread a value of type parameter 'A'"

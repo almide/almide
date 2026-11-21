@@ -1,0 +1,6 @@
+// Without a spread, the generic fn hands its argument back as it is.
+fn touch[A: Eq](x: A) -> A = x
+
+fn main() -> Unit = {
+  println("${touch(1)}")
+}

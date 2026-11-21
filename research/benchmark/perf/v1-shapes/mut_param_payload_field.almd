@@ -1,0 +1,24 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4799): a
+// field read out of the payload of a `mut` variant parameter, which the
+// caller reads again after the call. It takes the native render's
+// payload-field move check for a carrier the callee does not own.
+type H = { buf: List[Int], n: Int }
+type W = | Has(H) | Empty
+
+fn grab(mut w: W) -> List[Int] = {
+  let b = match w { Has(h) => h.buf, Empty => [] }
+  b
+}
+
+effect fn main() -> Unit = {
+  let n = int.parse("4000") ?? 4
+  var w = Has({ buf: [1, 2, 3], n: 1 })
+  var acc = 0
+  var i = 0
+  while i < n {
+    acc = acc + list.len(grab(w))
+    i = i + 1
+  }
+  let after = match w { Has(h) => list.len(h.buf), Empty => -1 }
+  println("${acc} ${after}")
+}

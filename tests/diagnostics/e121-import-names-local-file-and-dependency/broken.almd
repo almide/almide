@@ -1,0 +1,5 @@
+// `zq_dep` is both the local module zq_dep.almd and the dependency
+// `zq_dep` in almide.toml: the import cannot pick one.
+import zq_dep
+
+effect fn main() -> Unit = println(zq_dep.root())

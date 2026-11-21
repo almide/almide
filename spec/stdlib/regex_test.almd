@@ -15,7 +15,7 @@ test "regex.is_match anchored" {
 }
 
 // ── full_match ──
-test "regex.full_match" {
+test "regex.is_full_match" {
   assert_eq(regex.is_full_match(regex.new("[0-9]+"), "123"), true)
   assert_eq(regex.is_full_match(regex.new("[0-9]+"), "abc123"), false)
   assert_eq(regex.is_full_match(regex.new(""), ""), true)

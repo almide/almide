@@ -1,0 +1,17 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, #4799): a
+// record's Result field (a field type with no `Default`) copied out and the
+// record rebound right after, inside a loop. It takes the native render's
+// plain partial move of a field out of a record rebound next.
+type R = { res: Result[List[Int], String], n: Int }
+
+fn main() -> Unit = {
+  let n = int.parse("4000") ?? 4
+  var r: R = { res: ok([1, 2]), n: 0 }
+  var i = 0
+  while i < n {
+    let x = r.res
+    r = { res: x, n: i }
+    i = i + 1
+  }
+  println(int.to_string(r.n))
+}

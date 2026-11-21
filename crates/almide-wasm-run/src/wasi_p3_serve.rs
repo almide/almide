@@ -24,7 +24,8 @@
 //   op 70 bind                 ok: the host owns the address.
 //   op 71 next                 the framed request once, then no request — the
 //                              guest's loop ends and `main` returns.
-//   op 72 reply                the response cells, copied for `handle`.
+//   op 72 reply                the response cells and the body bytes beside
+//                              them (#4311), copied for `handle`.
 //   op 75 run                  err ("not served"): the guest runs its loop
 //                              itself (#4203; the host's own 500 answers a
 //                              trap and the instance is discarded).
@@ -203,13 +204,26 @@ struct ServeGlobals {
     req_len: u32,
     rep_ptr: u32,
     rep_len: u32,
+    /// The reply's body bytes, which op 72 hands beside the frame (#4311):
+    /// the frame's body cell is empty, so a body that is not UTF-8 crosses
+    /// exactly.
+    body_ptr: u32,
+    body_len: u32,
 }
 
 impl ServeGlobals {
-    const COUNT: u32 = 5;
+    const COUNT: u32 = 7;
 
     fn at(first: u32) -> Self {
-        ServeGlobals { state: first, req_ptr: first + 1, req_len: first + 2, rep_ptr: first + 3, rep_len: first + 4 }
+        ServeGlobals {
+            state: first,
+            req_ptr: first + 1,
+            req_len: first + 2,
+            rep_ptr: first + 3,
+            rep_len: first + 4,
+            body_ptr: first + 5,
+            body_len: first + 6,
+        }
     }
 
     fn emit(globals: &mut GlobalSection) {
@@ -261,7 +275,7 @@ struct ServeFns {
 
 /// `(op, a_ptr, a_len, b_ptr, b_len) -> i64`: ops 70..=72 and 75, guest-side.
 fn shim_serve_op(g: P3Globals, s: ServeGlobals) -> Function {
-    let (op, a_ptr, a_len) = (0u32, 1u32, 2u32);
+    let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let p = 5u32;
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
@@ -285,6 +299,11 @@ fn shim_serve_op(g: P3Globals, s: ServeGlobals) -> Function {
     i.local_get(p).local_get(a_ptr).local_get(a_len).memory_copy(0, 0);
     i.local_get(p).global_set(s.rep_ptr);
     i.local_get(a_len).global_set(s.rep_len);
+    // The body's bytes, copied as they are (#4311).
+    i.i32_const(0).i32_const(0).i32_const(1).local_get(b_len).call(g.f_alloc).local_set(p);
+    i.local_get(p).local_get(b_ptr).local_get(b_len).memory_copy(0, 0);
+    i.local_get(p).global_set(s.body_ptr);
+    i.local_get(b_len).global_set(s.body_len);
     i.i32_const(3).global_set(s.state);
     i.end();
     // op 75 (#4203): err, "not served" — the export runs one request per
@@ -598,11 +617,14 @@ fn serve_run_guest(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, s: S
     i.i32_const(0).global_set(s.state);
     i.global_get(s.rep_ptr).local_set(L::CUR);
     i.global_get(s.rep_ptr).global_get(s.rep_len).i32_add().local_set(L::END);
+    i.global_get(s.body_ptr).local_set(L::B_PTR);
+    i.global_get(s.body_len).local_set(L::B_LEN);
 }
 
 /// Parse the reply cells at `CUR..END` (status, body, then header pairs;
-/// http_framed CHAR-count lengths) into a response, return it, then write
-/// its body and trailers.
+/// http_framed CHAR-count lengths) into a response, return it, then write its
+/// body and trailers. A guest reply's body cell is empty and its body is op
+/// 72's bytes, already in `B_PTR..B_LEN` (#4311).
 fn serve_respond(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, abi: &ServeAbi, t: &ServeTexts) {
     use HandleLocals as L;
     let ret = (g.park + RET) as i32;
@@ -616,9 +638,14 @@ fn serve_respond(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, abi: &
     i.local_get(L::TMP).i32_load8_u(mem8(0)).i32_const(48).i32_sub().i32_add().local_set(L::STATUS);
     i.local_get(L::TMP).i32_const(1).i32_add().local_set(L::TMP);
     i.br(0).end().end();
+    // The body cell. A guest reply leaves it empty: its bytes came beside the
+    // frame (#4311) and are already in B_PTR / B_LEN. The shim's own answers
+    // (413 / 414 / 431) carry their text in it.
     cell(i);
+    i.local_get(L::CUR).local_get(L::TMP).i32_ne().if_(BlockType::Empty);
     i.local_get(L::TMP).local_set(L::B_PTR);
     i.local_get(L::CUR).local_get(L::TMP).i32_sub().local_set(L::B_LEN);
+    i.end();
     // No body for HEAD, 1xx, 204 and 304 (native's core).
     i.local_get(L::HEAD);
     i.local_get(L::STATUS).i32_const(100).i32_ge_u().local_get(L::STATUS).i32_const(200).i32_lt_u().i32_and().i32_or();

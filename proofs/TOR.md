@@ -113,7 +113,7 @@ enforced-by: crates/almide-verify/src/bundle.rs
 |---|---|
 | Domain-level MC/DC qualification not established by these gates | line/condition coverage and safety-set decision vectors are scoped evidence, not blanket domain coverage credit; plan the required assessment in the domain process |
 | C-WCET pending (counted-loop keystone) | no allocation/time bound claims — do not derive timing budgets from the receipt |
-| C-FAITHFUL partial on the wasm leg (the four runtime RC routines are proven bytes-to-semantics; every other emitted body, and the link from a program's instructions to its ownership witness, is not) | treat the structural build's behaviour beyond the RC runtime as differentially tested (native / wasm / interp byte identity), not proven |
+| C-FAITHFUL partial on the wasm leg (the four runtime RC routines are proven bytes-to-semantics; every other emitted body, and the link from a program's instructions to its ownership witness, is not proven — that link is checked per build by `almide-anchor-check`, #4277) | treat the structural build's behaviour beyond the RC runtime as differentially tested (native / wasm / interp byte identity), not proven |
 | C-FAITHFUL pending on the native leg (production Rust renderer + Ferrocene) | the native leg's object-code trust runs through rustc, not a qualified toolchain |
 | fuzz endurance streak is young | the durability metric (90-day milestone) is accruing; consult the current streak before citing it |
 

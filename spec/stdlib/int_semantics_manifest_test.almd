@@ -131,20 +131,12 @@ test "int.count_trailing_zeros unit=count" {
   assert_eq("${int.count_trailing_zeros(8)}", "3")
 }
 
-test "int.pop_count unit=count" {
-  assert_eq("${int.pop_count(255)}", "8")
-}
-
 test "int.bit_reverse unit=bit-pattern" {
   assert_eq("${int.bit_reverse(1)}", "-9223372036854775808")
 }
 
 test "int.byte_swap unit=bit-pattern" {
   assert_eq("${int.byte_swap(1)}", "72057594037927936")
-}
-
-test "int.bit_width unit=count" {
-  assert_eq("${int.bit_width(255)}", "8")
 }
 
 test "int.log2_floor unit=count" {

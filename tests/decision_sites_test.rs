@@ -111,10 +111,10 @@ impl Finder<'_> {
     fn literal(&mut self, s: &str) {
         let here = self.here();
         if is_code(s) {
-            if let Some(d) = self.decls.codes.get(s) {
-                if d != "no" {
-                    self.keys.entry(here).or_default().insert(("S1".into(), s.to_string()));
-                }
+            if let Some(d) = self.decls.codes.get(s)
+                && d != "no"
+            {
+                self.keys.entry(here).or_default().insert(("S1".into(), s.to_string()));
             }
             return;
         }
@@ -454,21 +454,21 @@ fn every_decision_site_is_ledgered() {
         problems.push(format!("[routes] {r}: no such CLI route any more"));
     }
 
-    if let Ok(out) = std::env::var("ALMIDE_DECISION_SITES_TSV") {
-        if !out.trim().is_empty() {
-            let mut tsv = String::from("key\titem\towner\n");
-            for k in &all_keys {
-                let owner: Vec<&String> = want_keys.iter().filter(|(_, ks)| ks.contains(k)).map(|(id, _)| id).collect();
-                tsv.push_str(&format!(
-                    "{k}\t{}\t{}\n",
-                    key_item(k),
-                    owner.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(",")
-                ));
-            }
-            std::fs::write(&out, tsv).expect("write tsv");
-            let all_items: Vec<&str> = items.iter().map(String::as_str).collect();
-            std::fs::write(format!("{out}.items"), all_items.join("\n")).expect("write items");
+    if let Ok(out) = std::env::var("ALMIDE_DECISION_SITES_TSV")
+        && !out.trim().is_empty()
+    {
+        let mut tsv = String::from("key\titem\towner\n");
+        for k in &all_keys {
+            let owner: Vec<&String> = want_keys.iter().filter(|(_, ks)| ks.contains(k)).map(|(id, _)| id).collect();
+            tsv.push_str(&format!(
+                "{k}\t{}\t{}\n",
+                key_item(k),
+                owner.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(",")
+            ));
         }
+        std::fs::write(&out, tsv).expect("write tsv");
+        let all_items: Vec<&str> = items.iter().map(String::as_str).collect();
+        std::fs::write(format!("{out}.items"), all_items.join("\n")).expect("write items");
     }
 
     if update() {

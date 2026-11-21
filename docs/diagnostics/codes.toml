@@ -543,6 +543,16 @@ severity = "error"
 since = "0.69.1"
 decision = "no"
 
+[E121]
+severity = "error"
+since = "0.70.0"
+decision = "deps"
+
+[E122]
+severity = "error"
+since = "0.70.0"
+decision = "access"
+
 [E420]
 severity = "error"
 since = "0.13.3"

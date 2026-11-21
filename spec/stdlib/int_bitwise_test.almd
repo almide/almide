@@ -110,11 +110,11 @@ test "int.count_trailing_zeros" {
   assert_eq(int.count_trailing_zeros(256), 8)
 }
 
-test "int.pop_count" {
-  assert_eq(int.pop_count(0), 0)
-  assert_eq(int.pop_count(1), 1)
-  assert_eq(int.pop_count(7), 3)
-  assert_eq(int.pop_count(255), 8)
+test "int.count_ones" {
+  assert_eq(int.count_ones(0), 0)
+  assert_eq(int.count_ones(1), 1)
+  assert_eq(int.count_ones(7), 3)
+  assert_eq(int.count_ones(255), 8)
 }
 
 test "int.bit_reverse" {
@@ -129,13 +129,13 @@ test "int.byte_swap" {
   assert_eq(int.byte_swap(int.byte_swap(42)), 42)
 }
 
-test "int.bit_width" {
-  assert_eq(int.bit_width(0), 0)
-  assert_eq(int.bit_width(1), 1)
-  assert_eq(int.bit_width(2), 2)
-  assert_eq(int.bit_width(3), 2)
-  assert_eq(int.bit_width(255), 8)
-  assert_eq(int.bit_width(256), 9)
+test "int.bit_length" {
+  assert_eq(int.bit_length(0), 0)
+  assert_eq(int.bit_length(1), 1)
+  assert_eq(int.bit_length(2), 2)
+  assert_eq(int.bit_length(3), 2)
+  assert_eq(int.bit_length(255), 8)
+  assert_eq(int.bit_length(256), 9)
 }
 
 test "int.log2_floor" {

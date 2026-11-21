@@ -99,7 +99,7 @@ fn put_values_back<V>(
 
 /// How a mutable binding was declared — what E011 decides from (#4859).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MutableDecl {
+pub(crate) enum MutableDecl {
     /// A `var` inside a fn body, declared at this lambda nesting depth.
     Local { lambda_depth: usize },
     /// A module-level `var`.
@@ -233,7 +233,7 @@ pub struct TypeEnv {
     /// Escape analysis (E011): how each mutable binding was declared — a
     /// local `var` (with the lambda depth it was declared at), a module-level
     /// `var`, or a `mut` parameter.
-    pub mutable_decl: std::collections::HashMap<Sym, MutableDecl>,
+    pub(crate) mutable_decl: std::collections::HashMap<Sym, MutableDecl>,
     /// Variables that are function parameters (for better error messages).
     pub param_vars: std::collections::HashSet<Sym>,
     /// Declaration locations: variable name -> (line, col)

@@ -3,12 +3,12 @@
 diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
 --- a/crates/almide-wasm/src/exit_plan.rs
 +++ b/crates/almide-wasm/src/exit_plan.rs
-@@ -754,7 +754,7 @@
-     // no window claims was emitted without an ExitPlan, so its releases were
-     // never judged: refuse it rather than read only the recorded windows.
-     for &(off, kind) in &ops {
--        if matches!(kind, Op::Return | Op::ReturnCall) && !claimed.iter().any(|&(s, e)| off >= s && off <= e) {
-+        if matches!(kind, Op::Return | Op::ReturnCall) && !claimed.iter().any(|&(s, e)| off >= s && off <= e) && function.is_empty() {
-             return Err(d.at(
-                 "an emitted exit has no ExitPlan",
-                 format!("byte {off}"),
+@@ -765,7 +765,7 @@ pub(crate) fn validate_exits(
+ /// hold is the transfer of a recorded plan. One no plan claims is an exit the
+ /// emitter wrote without recording it — with an empty ledger too.
+ fn every_transfer_planned(ops: &[(usize, Op)], transfers: &[usize], d: &Defects<'_>) -> Result<(), EmitError> {
+-    let unplanned = |j: &usize| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j);
++    let unplanned = |j: &usize| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j) && d.function.is_empty();
+     match (0..ops.len()).find(unplanned) {
+         None => Ok(()),
+         Some(j) => Err(d.at(

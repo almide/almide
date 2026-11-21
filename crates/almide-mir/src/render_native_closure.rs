@@ -115,10 +115,16 @@ pub(crate) fn demand_borrowed_dispatch(params: &[NTy], ret: Option<NTy>) -> Stri
 
 /// A typed host adapter that hands the callback the owned values it was
 /// given (`handed[i]`) dispatches through that handing-over table.
-pub(crate) fn demand_handed_dispatch(ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> String {
-    let key = sig_key(ps, handed, ret).unwrap_or_else(|| ps.len().to_string());
+///
+/// A handed param is a heap value (`native_hof_callbacks::handed_positions`),
+/// so the signature is never the all-scalar one `sig_key` leaves to the
+/// per-arity tables, and those tables have no handing-over mode. A signature
+/// without a key is refused rather than sent to a table that would lend what
+/// the adapter meant to hand over (#4799).
+pub(crate) fn demand_handed_dispatch(ps: &[NativeSigKind], handed: &[bool], ret: Option<NativeSigKind>) -> Option<String> {
+    let key = sig_key(ps, handed, ret)?;
     DEMANDED.with(|d| d.borrow_mut().insert(key.clone(), (ps.to_vec(), handed.to_vec(), ret)));
-    key
+    Some(key)
 }
 
 /// Which of a lifted lambda's user params (the env param dropped) are move
@@ -351,4 +357,21 @@ pub(crate) fn handed_after(func: &MirFunction, i: usize) -> Vec<ValueId> {
         crate::mir_ops::op_values(&func.ops[j], &mut out);
     }
     out
+}
+
+#[cfg(test)]
+mod handed_dispatch_tests {
+    use super::*;
+
+    /// A handed (heap) param always has a dispatch key; a signature without
+    /// one is refused, never sent to the per-arity table that has no
+    /// handing-over mode (#4799). Before, the keyless case answered the
+    /// arity table's key ("1").
+    #[test]
+    fn a_keyless_handed_signature_is_refused() {
+        let i = NativeSigKind::I64;
+        assert_eq!(demand_handed_dispatch(&[i], &[true], Some(i)), None);
+        let key = demand_handed_dispatch(&[NativeSigKind::Str], &[true], Some(i)).expect("a handed string has a key");
+        assert_eq!(Some(key), sig_key(&[NativeSigKind::Str], &[true], Some(i)));
+    }
 }

@@ -112,9 +112,63 @@ const CASES: &[(&[&str], &str)] = &[
 
 #[test]
 fn args_parse_rules_hold_on_native_and_both_wasm_legs() {
+    run_cases(PROGRAM, CASES);
+}
+
+/// #4866: every reader treats a one-letter name the same way. `has_flag("o")`
+/// answered to `-o` while `option("o")` did not read `-o v`, and
+/// `positional(["o"])` kept the value. And a name written with its dashes is
+/// an err naming the dash-free form, whatever argv holds; it was silently
+/// never matched. Each case failed on the old stdlib.
+const SHORT_PROGRAM: &str = r#"import args
+
+fn shown(r: Result[String, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  println("o=${args.option("o")! ?? "none"} flag_o=${args.has_flag("o")!} out=${args.option("out")! ?? "none"}")
+  println("positional=${list.join(args.positional(["o", "out"])!, ",")}")
+  let dashed: Result[String?, String] = args.option("--out")
+  println(shown(dashed |> result.map((v) => v ?? "none")))
+  let short_dashed: Result[Bool, String] = args.has_flag("-o")
+  println(shown(short_dashed |> result.map((b) => "${b}")))
+  let names: Result[List[String], String] = args.positional(["out", "--o"])
+  println(shown(names |> result.map((v) => list.join(v, ","))))
+  let empty: Result[String?, String] = args.option("")
+  println(shown(empty |> result.map((v) => v ?? "none")))
+}
+"#;
+
+const SHORT_ERRS: &str = "err args.option: write the name without its dashes: \"out\"
+err args.has_flag: write the name without its dashes: \"o\"
+err args.positional: write the name without its dashes: \"o\"
+err args.option: the name is empty: write it without dashes, as in \"out\"
+";
+
+const SHORT_CASES: &[(&[&str], &str)] = &[
+    (&["-o", "v", "in.txt"], "o=v flag_o=true out=none\npositional=in.txt\n"),
+    (&["-o=w", "in.txt"], "o=w flag_o=false out=none\npositional=in.txt\n"),
+    (&["--o", "v", "--out", "r", "x"], "o=v flag_o=true out=r\npositional=x\n"),
+    // `--out` given on the command line still does not match the dashed name.
+    (&["--out=r"], "o=none flag_o=false out=r\npositional=\n"),
+    (&["--", "-o", "v"], "o=none flag_o=false out=none\npositional=-o,v\n"),
+];
+
+#[test]
+fn one_letter_names_read_alike_and_dashed_names_are_refused_on_native_and_both_wasm_legs() {
+    let cases: Vec<(&[&str], String)> = SHORT_CASES.iter().map(|(argv, want)| (*argv, format!("{want}{SHORT_ERRS}"))).collect();
+    let cases: Vec<(&[&str], &str)> = cases.iter().map(|(argv, want)| (*argv, want.as_str())).collect();
+    run_cases(SHORT_PROGRAM, &cases);
+}
+
+/// Build `program` natively and for wasm, then run every case on the native
+/// binary, the embedded wasm host and (when on PATH) a stock wasmtime.
+fn run_cases(program: &str, cases: &[(&[&str], &str)]) {
     let dir = tempfile::tempdir().expect("tempdir");
     let file = dir.path().join("args_parse.almd");
-    std::fs::write(&file, PROGRAM).expect("write program");
+    std::fs::write(&file, program).expect("write program");
     let native_bin = dir.path().join("args_parse");
     build(&file, &native_bin, false);
     let stock = wasmtime_available();
@@ -125,7 +179,7 @@ fn args_parse_rules_hold_on_native_and_both_wasm_legs() {
         eprintln!("SKIP stock-p1 leg: wasmtime not on PATH — enforced on Linux CI");
     }
 
-    for (argv, want) in CASES {
+    for (argv, want) in cases {
         let mut n = Command::new(&native_bin);
         n.args(*argv);
         assert_eq!(stdout_of(n), *want, "native, argv {argv:?}");

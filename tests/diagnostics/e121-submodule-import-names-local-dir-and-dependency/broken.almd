@@ -1,0 +1,5 @@
+// `zq_dep.sub` would take the local directory zq_dep/ while `import zq_dep`
+// takes the dependency: the first segment names both, so it is refused.
+import zq_dep.sub
+
+effect fn main() -> Unit = println(sub.which())
