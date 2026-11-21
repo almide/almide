@@ -144,6 +144,8 @@ impl Emitter<'_> {
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
         i.i64_load8_u(byte_k(0));
         i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
+        self.fw_opt_w(8, 0);
+        let mut i = self.f.instructions();
         i.local_get(hr);
         i.else_();
         i.i32_const(0);

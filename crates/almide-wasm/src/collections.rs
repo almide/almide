@@ -190,7 +190,7 @@ impl Emitter<'_> {
                 // the some-block co-owns the value it copied out (its
                 // typed drop releases it; the map keeps its own credit)
                 self.arm_share_handle_top(v);
-                self.store_ty_slot(v, almide_layout::OPTION_FIELD);
+                self.store_opt_slot(v);
                 self.f.instructions().local_get(vh);
                 self.release_i32(); // vh
                 self.f.instructions().end();

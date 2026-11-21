@@ -91,7 +91,7 @@ impl Emitter<'_> {
         if self.elem_is_handle(el) {
             self.rc_inc_top();
         }
-        self.store_ty_slot(el, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(el);
         self.f.instructions().local_get(hc).end();
         self.release_i32();
         self.release_i32();

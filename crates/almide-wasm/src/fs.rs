@@ -197,7 +197,11 @@ impl Emitter<'_> {
         i.local_get(hs);
         i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64();
         i.i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs);
         let _ = i;
         self.release_i32();
@@ -262,11 +266,19 @@ impl Emitter<'_> {
         let hs = self.tmp_i32_local;
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs);
         i.else_();
         i.i32_const(16).call(F_ALLOC).local_tee(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hb);
         i.end();
         let _ = i;
@@ -302,7 +314,11 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.else_();
             i.i32_const(16).call(F_ALLOC).local_tee(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            let mut i = self.f.instructions();
             i.local_get(hs).local_get(hlist).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            let mut i = self.f.instructions();
             i.local_get(hs);
             i.end();
         }
@@ -336,7 +352,11 @@ impl Emitter<'_> {
         let hs = self.tmp_i32_local;
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hraw).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_set(herr);
         i.i32_const(0).local_set(hlen);
         i.end();
@@ -403,7 +423,11 @@ impl Emitter<'_> {
         }
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hmsg).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_set(slot);
         if keep_first {
             i.end();
@@ -541,6 +565,8 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
                     i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    self.fw_res_w(4, 0);
+                    let mut i = self.f.instructions();
                     i.local_get(hb);
                     i.else_();
                     i.local_get(hret);
@@ -552,13 +578,21 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_set(hb);
                     i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+                    self.fw_res_tag_back(1);
+                    let mut i = self.f.instructions();
                     i.if_(BlockType::Empty);
                     let hs = self.tmp_i32_local;
                     i.i32_const(4).call(F_ALLOC).local_set(hs);
                     i.local_get(hs);
                     i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+                    self.fw_res_w(4, 0);
+                    let mut i = self.f.instructions();
                     i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+                    self.fw_opt_w(4, 0);
+                    let mut i = self.f.instructions();
                     i.local_get(hb).local_get(hs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    self.fw_res_w(4, 0);
+                    let mut i = self.f.instructions();
                     i.end();
                     i.local_get(hb);
                     i.end();
@@ -613,9 +647,11 @@ impl Emitter<'_> {
                         .local_tee(hs)
                         .i32_const(0)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
+                    let mut i = self.f.instructions();
                     i.local_get(hs).local_get(params[0]);
                 }
-                self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+                self.store_res_slot(acc_ty);
                 self.f.instructions().local_get(hs).end();
                 for _ in 0..5 {
                     self.release_i32();
@@ -644,7 +680,11 @@ impl Emitter<'_> {
                         .local_tee(hs)
                         .i32_const(0)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
+                    let mut i = self.f.instructions();
                     i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    self.fw_res_w(4, 0);
+                    let mut i = self.f.instructions();
                     i.local_get(hs);
                     i.end();
                 }

@@ -70,7 +70,7 @@ impl Emitter<'_> {
             }
             i.local_get(hres);
             let _ = i;
-            em.load_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+            em.load_res_slot(acc_ty);
             if !owned {
                 em.share_handle_top(acc_ty);
             }
@@ -113,9 +113,11 @@ impl Emitter<'_> {
                 .local_tee(hs)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            let mut i = self.f.instructions();
             i.local_get(hs).local_get(params[0]);
         }
-        self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+        self.store_res_slot(acc_ty);
         self.f.instructions().local_get(hs).end().end();
         for _ in 0..6 {
             self.release_i32();
@@ -205,7 +207,7 @@ impl Emitter<'_> {
             }
             i.local_get(hres);
             let _ = i;
-            em.load_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+            em.load_res_slot(acc_ty);
             let mut i = em.f.instructions();
             i.local_set(hacc);
             i.local_get(hres).call(F_DEC_FLAT);
@@ -241,9 +243,11 @@ impl Emitter<'_> {
                 .local_tee(hs)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            let mut i = self.f.instructions();
             i.local_get(hs).local_get(hacc);
         }
-        self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+        self.store_res_slot(acc_ty);
         self.f.instructions().local_get(hs).end().end();
         // hs, hr, hmsg, herr, hlen, hraw are i32 holds; hacc is typed; hcl is i32.
         for _ in 0..6 {

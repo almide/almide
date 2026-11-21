@@ -221,7 +221,11 @@ impl Emitter<'_> {
         let hs = self.tmp_i32_local;
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs);
         i.else_();
         // ok(HttpCall { id })
@@ -230,7 +234,11 @@ impl Emitter<'_> {
         i.i64_store(MemArg { offset: u64::from(almide_layout::PAYLOAD + off), align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hs);
         i.end();
         let _ = i;

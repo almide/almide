@@ -130,6 +130,7 @@ impl Emitter<'_> {
             .local_get(c.hold)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
+        self.fw_res_tag_back(2);
         let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
@@ -185,7 +186,7 @@ impl Emitter<'_> {
         let joined = self.is_str_list(ert);
         self.emit_abort_message(ert, err_ir, |s| {
             s.f.instructions().local_get(hold);
-            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+            s.load_res_slot(ert);
         })?;
         let blk = self.hold_i32()?;
         self.f
@@ -199,6 +200,7 @@ impl Emitter<'_> {
             .local_get(blk)
             .local_get(self.tmp_i32_local)
             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
         if c.owned {
             let dec = self.dec_fn_of(c.ty);
             self.f.instructions().local_get(hold).call(dec);
@@ -230,7 +232,7 @@ impl Emitter<'_> {
     /// owned carrier's spine released (the payload keeps its credit).
     pub(crate) fn fan_carrier_payload(&mut self, c: &FanCarrier) {
         self.f.instructions().local_get(c.hold);
-        self.load_ty_slot(c.p, almide_layout::SUM_FIELD);
+        self.load_res_slot(c.p);
         self.f.instructions().local_set(c.hv);
         if c.owned {
             self.f.instructions().local_get(c.hold).call(F_DEC_FLAT);
@@ -397,6 +399,8 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(ha);
             i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
+            self.fw_res_tag_back(3);
+            let mut i = self.f.instructions();
             i.local_get(a.msg).i32_eqz();
             i.i32_and();
             if let Some(first) = a.first {
@@ -405,7 +409,7 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.local_get(ha);
         }
-        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        self.load_res_slot(ert);
         match typed {
             None => {
                 self.f.instructions().local_set(a.msg).end();
@@ -415,7 +419,7 @@ impl Emitter<'_> {
             }
         }
         self.f.instructions().local_get(ha);
-        self.load_ty_slot(p, almide_layout::SUM_FIELD);
+        self.load_res_slot(p);
         self.f.instructions().local_set(hv);
         if owned {
             self.f.instructions().local_get(ha).call(F_DEC_FLAT);

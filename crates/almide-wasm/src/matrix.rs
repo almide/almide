@@ -224,6 +224,8 @@ impl Emitter<'_> {
                 i.i32_const(3).i32_shl().i32_add();
                 i.f64_load(slot_memarg(8));
                 i.f64_store(slot_memarg(almide_layout::OPTION_FIELD));
+                self.fw_opt_w(8, 0);
+                let mut i = self.f.instructions();
                 i.local_get(hres);
                 i.end();
             }

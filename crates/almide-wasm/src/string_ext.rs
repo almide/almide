@@ -232,6 +232,8 @@ impl Emitter<'_> {
         // some(str): a 4-byte option cell holding the handle
         i.i32_const(4).call(F_ALLOC).local_tee(hoff).local_get(hb);
         i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+        self.fw_opt_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hoff);
         i.end();
         i.end();
@@ -388,6 +390,8 @@ impl Emitter<'_> {
         i.memory_copy(0, 0);
         i.i32_const(4).call(F_ALLOC).local_tee(hr).local_get(hk);
         i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+        self.fw_opt_w(4, 0);
+        let mut i = self.f.instructions();
         i.local_get(hr);
         i.else_();
         i.i32_const(0);

@@ -99,3 +99,144 @@ impl Emitter<'_> {
         fw::tag(3 * ti + 1, self.f);
     }
 }
+
+/// The representation numbers of the two built-in sums, clear of every
+/// type-table kind (`3 * index + 0..2`): an Option block of a 4- or 8-byte
+/// slot, and a Result block.
+const SUM_BASE: u32 = 1 << 20;
+
+/// Which built-in sum a block is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Sum {
+    Opt,
+    Res,
+}
+
+impl Emitter<'_> {
+    /// Field `i` of the built-in sum kind `r` (laid out as `l`) was just
+    /// loaded or stored.
+    fn fw_sum(&mut self, r: u32, l: Layout, i: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + r), 0);
+        fw::declare(k, &l);
+        fw::access(k, i, self.f);
+    }
+
+    /// The value slot of a `some` block holding a `t` was just loaded or
+    /// stored: a block of exactly that slot.
+    pub(crate) fn fw_opt(&mut self, t: SliceTy) {
+        let w = width(t);
+        self.fw_sum(u32::from(w == 8), Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] }, 0);
+    }
+
+    /// A `some` block holding a `t` was just set into its local, right after
+    /// its allocation of exactly that slot: a construction site, whose one
+    /// store [`Self::fw_store`] records as field 0.
+    pub(crate) fn fw_opt_site(&mut self, t: SliceTy) -> Option<fw::Site> {
+        if !fw::armed() {
+            return None;
+        }
+        let w = width(t);
+        let k = (3 * (SUM_BASE + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] });
+        fw::site(k, self.f)
+    }
+
+    /// As [`Self::fw_opt`], by the slot's width, for the access that ended
+    /// `back` bytes of instructions ago.
+    pub(crate) fn fw_opt_w(&mut self, w: u32, back: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] });
+        fw::access_back(k, 0, self.f, back);
+    }
+
+    /// As [`Self::fw_res`], by the slot's width, for the access that ended
+    /// `back` bytes of instructions ago.
+    pub(crate) fn fw_res_w(&mut self, w: u32, back: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + 2), 0);
+        fw::declare(k, &Self::res_layout());
+        fw::access_back(k, if w == 8 { 2 } else { 1 }, self.f, back);
+    }
+
+    /// A Result block holding a `t` was just set (or teed) into its local,
+    /// right after its allocation of 16 bytes: a construction site of the
+    /// Result kind of that slot width, whose tag store is field 0 and whose
+    /// value store is field 1. (Reads name the one Result kind whose layout
+    /// carries the slot at both widths; a site needs a kind it fills.)
+    pub(crate) fn fw_res_site(&mut self, t: SliceTy) -> Option<fw::Site> {
+        if !fw::armed() {
+            return None;
+        }
+        let w = width(t);
+        let k = (3 * (SUM_BASE + 3 + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: 16, fields: vec![(almide_layout::SUM_TAG, 4), (almide_layout::SUM_FIELD, w)] });
+        fw::site(k, self.f)
+    }
+
+    /// A Result block: its tag word, then one 8-byte value slot read at the
+    /// width of the side it holds (fields 1 and 2 name the same slot).
+    fn res_layout() -> Layout {
+        Layout { n: 1, z: 16, fields: vec![(almide_layout::SUM_TAG, 4), (almide_layout::SUM_FIELD, 4), (almide_layout::SUM_FIELD, 8)] }
+    }
+
+    /// The tag word of a Result block was just loaded or stored.
+    pub(crate) fn fw_res_tag(&mut self) {
+        self.fw_res_tag_back(0);
+    }
+
+    /// The tag word of a Result block was loaded or stored `back` bytes of
+    /// instructions ago (the fixed-size tail of the chain it was emitted in).
+    pub(crate) fn fw_res_tag_back(&mut self, back: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + 2), 0);
+        fw::declare(k, &Self::res_layout());
+        fw::access_back(k, 0, self.f, back);
+    }
+
+    /// The value slot of a Result block holding a `t` was just loaded or
+    /// stored.
+    pub(crate) fn fw_res(&mut self, t: SliceTy) {
+        let i = if width(t) == 8 { 2 } else { 1 };
+        self.fw_sum(2, Self::res_layout(), i);
+    }
+
+    pub(crate) fn load_opt_slot(&mut self, t: SliceTy) {
+        self.load_ty_slot(t, almide_layout::OPTION_FIELD);
+        self.fw_opt(t);
+    }
+
+    pub(crate) fn store_opt_slot(&mut self, t: SliceTy) {
+        self.store_ty_slot(t, almide_layout::OPTION_FIELD);
+        self.fw_opt(t);
+    }
+
+    pub(crate) fn load_res_slot(&mut self, t: SliceTy) {
+        self.load_ty_slot(t, almide_layout::SUM_FIELD);
+        self.fw_res(t);
+    }
+
+    pub(crate) fn store_res_slot(&mut self, t: SliceTy) {
+        self.store_ty_slot(t, almide_layout::SUM_FIELD);
+        self.fw_res(t);
+    }
+
+    /// Load the value slot at `field` of a block that is `sum` (or of no
+    /// built-in sum: a plain slot load).
+    pub(crate) fn load_slot_of(&mut self, sum: Option<Sum>, t: SliceTy, field: u32) {
+        match sum {
+            Some(Sum::Opt) => self.load_opt_slot(t),
+            Some(Sum::Res) => self.load_res_slot(t),
+            None => self.load_ty_slot(t, field),
+        }
+    }
+}

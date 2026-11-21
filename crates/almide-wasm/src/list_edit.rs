@@ -468,6 +468,8 @@ impl Emitter<'_> {
         i.i32_const(8).call(F_ALLOC).local_tee(hr);
         i.local_get(hi).i64_extend_i32_u();
         i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
+        self.fw_opt_w(8, 0);
+        let mut i = self.f.instructions();
         i.br(2);
         i.end();
         i.local_get(hi).i32_const(1).i32_add().local_set(hi);

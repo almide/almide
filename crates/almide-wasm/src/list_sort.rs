@@ -88,9 +88,9 @@ impl Emitter<'_> {
                 self.f.instructions().else_();
             }
             self.f.instructions().local_get(ha);
-            self.load_ty_slot(ty, almide_layout::SUM_FIELD);
+            self.load_res_slot(ty);
             self.f.instructions().local_get(hb);
-            self.load_ty_slot(ty, almide_layout::SUM_FIELD);
+            self.load_res_slot(ty);
             self.emit_val_cmp(ty)?;
         }
         self.f.instructions().end().end();
@@ -289,9 +289,9 @@ impl Emitter<'_> {
                     i.else_();
                     i.local_get(ha);
                 }
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.f.instructions().local_get(hb);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.emit_val_cmp(et)?;
                 self.f.instructions().end().end();
                 self.release_i32();
