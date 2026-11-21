@@ -131,6 +131,19 @@ impl Emitter<'_> {
         self.fw_sum(u32::from(w == 8), Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] }, 0);
     }
 
+    /// A `some` block holding a `t` was just set into its local, right after
+    /// its allocation of exactly that slot: a construction site, whose one
+    /// store [`Self::fw_store`] records as field 0.
+    pub(crate) fn fw_opt_site(&mut self, t: SliceTy) -> Option<fw::Site> {
+        if !fw::armed() {
+            return None;
+        }
+        let w = width(t);
+        let k = (3 * (SUM_BASE + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] });
+        fw::site(k, self.f)
+    }
+
     /// A Result block: its tag word, then one 8-byte value slot read at the
     /// width of the side it holds (fields 1 and 2 name the same slot).
     fn res_layout() -> Layout {
