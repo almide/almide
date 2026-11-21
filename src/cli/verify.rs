@@ -305,7 +305,8 @@ fn one_line(s: &str) -> String {
 /// the same v1 render `almide build` takes (`try_compile_pending`,
 /// `render_v1_native_certified`), and the bundle holds what that render
 /// returns for the functions it renders from (native-calls with its runtime
-/// blocks, the bounds witnesses). No wasm byte comes from MIR since #2761;
+/// blocks, the bounds witnesses) in a version-5 bundle, the first that
+/// carries `native-calls`. No wasm byte comes from MIR since #2761;
 /// the wasm route's structural leg is certified by plain `almide verify`. A
 /// program the native render walls is uncertified: the bundle names the wall
 /// and holds no witness, and nothing falls back to another producer.
@@ -314,7 +315,7 @@ fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
     let (mut pending, _metered, _outside) = crate::try_compile_pending(file, false, &opts).map_err(|_| 1)?;
     let (_callbacks, _source, rendered) = super::render_v1_native_certified(&mut pending);
     let mut text = format!(
-        "almide-certificate-bundle 1\nproducer almide {} (native MIR certificates)\nsource {}\n",
+        "almide-certificate-bundle 5\nproducer almide {} (native MIR certificates)\nsource {}\n",
         one_line(env!("ALMIDE_VERSION_LINE")),
         one_line(file)
     );
