@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let ace1 = 1
+  let асе1 = 2
+  println(int.to_string(ace1 + асе1))
+}

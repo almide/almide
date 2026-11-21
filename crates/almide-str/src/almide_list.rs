@@ -25,7 +25,7 @@ use std::sync::atomic::AtomicUsize as AlmideListCount;
 
 /// The block header. The elements follow it at [`almide_list_offset`].
 #[repr(C, align(16))]
-pub struct AlmideListHeader {
+pub(crate) struct AlmideListHeader {
     rc: AlmideListCount,
     len: usize,
     cap: usize,
@@ -45,7 +45,7 @@ static ALMIDE_LIST_EMPTY: AlmideListHeader = AlmideListHeader { rc: AlmideListCo
 #[inline]
 const fn almide_list_offset<T>() -> usize {
     let a = std::mem::align_of::<T>();
-    (ALMIDE_LIST_HDR + a - 1) / a * a
+    ALMIDE_LIST_HDR.div_ceil(a) * a
 }
 
 /// The block's alignment for `T`: the header's, or `T`'s when that is larger.

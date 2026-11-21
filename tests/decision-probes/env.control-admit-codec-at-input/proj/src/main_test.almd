@@ -1,0 +1,18 @@
+// The probe of env.control-admit-codec-at-input: the over-post shape E110 refuses.
+import http
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[User](req) {
+  ok(u) => http.response(201, "${u.name} is_admin=${u.is_admin}"),
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = {
+  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", []))!
+  println("${http.status(res)} ${http.body(res)}")
+}
+
+test "probe" {
+  assert_eq(1, 1)
+}

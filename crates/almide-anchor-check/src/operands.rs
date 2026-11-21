@@ -70,13 +70,15 @@ use std::collections::HashSet;
 
 use wasmparser::Operator as Op;
 
-use crate::decode::{branch_target, is_load, store_width, Body};
+use crate::decode::{arm_branches_out, branch_target, is_load, store_width, Body};
 
 mod arms;
 mod covers;
+mod globals;
 mod tags;
 
 pub(crate) use covers::{covers, loop_exit};
+pub(crate) use globals::{global_sets, GlobalSets};
 pub(crate) use tags::{case_guarded, readonly_calls};
 
 /// almide-layout `LEN.offset` and `PAYLOAD` — the block ABI the shipped
@@ -256,7 +258,8 @@ pub(crate) struct Flow<'b, 'a> {
     close: Vec<usize>,
     /// The innermost construct holding each instruction (its opener).
     parent: Vec<Option<usize>>,
-    /// Inside an aborting `if` (no `else`, ends in `unreachable`).
+    /// Inside an aborting `if` (no `else`, ends in `unreachable`, and no
+    /// branch inside it leaves it before that).
     abort_arm: Vec<bool>,
     /// Inside a returning `if` (no `else`, ends in `return`, no branch
     /// inside it): a path through it leaves the function (#4280).
@@ -268,6 +271,10 @@ pub(crate) struct Flow<'b, 'a> {
     holds: HashSet<usize>,
     /// Functions (by index) whose call writes no memory (`readonly_calls`).
     ro_calls: HashSet<u32>,
+    /// The globals each function's call may set (`global_sets`); `None`
+    /// when the caller did not give them, and then no call is taken to set
+    /// a global.
+    global_sets: Option<GlobalSets>,
 }
 
 impl<'b, 'a> Flow<'b, 'a> {
@@ -300,6 +307,7 @@ impl<'b, 'a> Flow<'b, 'a> {
                 && close[s] != usize::MAX
                 && close[s] > s + 1
                 && matches!(b.ops[close[s] - 1], Op::Unreachable)
+                && arm_branches_out(&b.ops, &b.depth, s, close[s]).is_none()
             {
                 abort_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
@@ -313,7 +321,14 @@ impl<'b, 'a> Flow<'b, 'a> {
                 ret_arm[s + 1..=close[s]].iter_mut().for_each(|x| *x = true);
             }
         }
-        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new(), ro_calls: HashSet::new() }
+        Flow { b, close, parent, abort_arm, ret_arm, judges, holds: HashSet::new(), ro_calls: HashSet::new(), global_sets: None }
+    }
+
+    /// The globals each function's call may set: a call between two reads
+    /// of a global then counts as a write of it.
+    pub(crate) fn with_global_sets(mut self, sets: GlobalSets) -> Self {
+        self.global_sets = Some(sets);
+        self
     }
 
     /// This function's recorded loop holds.
@@ -437,6 +452,7 @@ impl<'b, 'a> Flow<'b, 'a> {
         match (src, &self.b.ops[k]) {
             (Src::Local(l), Op::LocalSet { local_index } | Op::LocalTee { local_index }) => *local_index == l,
             (Src::Global(g), Op::GlobalSet { global_index }) => *global_index == g,
+            (Src::Global(g), op) => self.global_sets.as_ref().is_some_and(|s| s.call_may_set(op, g)),
             _ => false,
         }
     }

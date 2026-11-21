@@ -1,0 +1,8 @@
+import helper.{print_novel}
+
+@bounded
+fn go(k: Int) -> Int = print_novel(k)
+
+test "go" {
+  assert_eq(go(1), 2)
+}

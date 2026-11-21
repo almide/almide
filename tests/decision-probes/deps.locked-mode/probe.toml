@@ -1,0 +1,4 @@
+# --locked refuses a dependency the lock does not name, before any fetch (the
+# URL is unreachable on purpose: a fetch would fail with a different message).
+expect = "--locked: not in almide.lock"
+args = ["--locked"]

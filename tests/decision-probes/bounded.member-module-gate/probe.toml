@@ -1,0 +1,2 @@
+# The probe of bounded.member-module-gate: A @bounded fn calling a field of a parameter named like a pure module (#4840).
+expect = "E074"

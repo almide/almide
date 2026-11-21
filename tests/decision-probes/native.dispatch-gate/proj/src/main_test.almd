@@ -1,0 +1,5 @@
+import nat
+
+test "an ungranted native dependency" {
+  assert_eq(nat.number(), 7)
+}

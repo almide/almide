@@ -493,7 +493,7 @@
 12490	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2587	spec/wasm_cross/list_product_overflow.almd
 5322	spec/wasm_cross/list_push_field_in_place.almd
-6273	spec/wasm_cross/list_push_field_reads_root.almd
+6295	spec/wasm_cross/list_push_field_reads_root.almd
 7490	spec/wasm_cross/list_push_on_record_field.almd
 3511	spec/wasm_cross/list_range_step_extremes.almd
 13129	spec/wasm_cross/list_reduce_fused_fold_release.almd
@@ -700,6 +700,9 @@
 6124	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 14934	spec/wasm_cross/ord_record_variant.almd
 20464	spec/wasm_cross/ord_recursive.almd
+3615	spec/wasm_cross/output_line_fan_whole.almd
+5690	spec/wasm_cross/output_line_float.almd
+6183	spec/wasm_cross/output_line_int_bool.almd
 4183	spec/wasm_cross/panic_abort_positions.almd
 2685	spec/wasm_cross/panic_value_arm.almd
 4260	spec/wasm_cross/path_extension_hidden.almd

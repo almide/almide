@@ -1,0 +1,15 @@
+# Negative control of effect.e006-isolation (proofs/decision-sites.toml): E006 is never reported: a pure fn calling an effect fn is admitted.
+# control_test: tests/decision_novel_test.rs::novel_e006_fresh_effect_fn_in_a_fresh_module
+diff --git a/crates/almide-frontend/src/check/calls.rs b/crates/almide-frontend/src/check/calls.rs
+--- a/crates/almide-frontend/src/check/calls.rs
++++ b/crates/almide-frontend/src/check/calls.rs
+@@ -685,6 +685,9 @@
+     /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
+     /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
+     pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {
++        if !name.is_empty() {
++            return;
++        }
+         let (msg, hint) = match self.env.metered_region {
+             // Inside a metered region the caller usually IS an effect fn —
+             // "mark it effect" would send the user in a circle. The region

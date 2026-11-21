@@ -37,7 +37,10 @@ where
         .map(|item| {
             let (tx, work) = (tx.clone(), Arc::clone(&work));
             let (slot_tx, slot_rx) = (Arc::clone(&slot_tx), Arc::clone(&slot_rx));
-            std::thread::spawn(move || {
+            // #4880: a worker compiles user source, so it gets the compiler's
+            // stack — on the 2 MiB default a nesting the parser's budget
+            // refuses on the main thread overflowed here instead.
+            std::thread::Builder::new().stack_size(crate::compiler_stack_size()).spawn(move || {
                 // The lock is held only across `recv`, which cannot panic, so a
                 // poisoned lock is unreachable; taking the guard either way
                 // keeps a waiting worker from dying with its item unreported.
@@ -46,6 +49,7 @@ where
                 let _ = slot_tx.send(());
                 let _ = tx.send(result);
             })
+            .expect("failed to spawn a test worker thread")
         })
         .collect();
     drop(tx);

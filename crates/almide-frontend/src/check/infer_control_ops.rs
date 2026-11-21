@@ -210,7 +210,7 @@ impl Checker {
                 // copies the base's fields; a base still open here is judged
                 // once it resolves.
                 // #4285: so is a base of a type parameter without a record
-                // shape (E121) — its instance could be such a record.
+                // shape (E122) — its instance could be such a record.
                 let shaped: Vec<Sym> = self.env.structural_bounds.keys().copied().collect();
                 self.deferred_opaque_spreads.push((base_ty.clone(), self.current_span, shaped));
                 // #3358: an updated field takes the base record's DECLARED field

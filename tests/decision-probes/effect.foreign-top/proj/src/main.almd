@@ -1,0 +1,4 @@
+@inline_rust("{ {n} }")
+fn tpl(n: Int) -> Int = n
+
+effect fn main() -> Unit = println(int.to_string(tpl(1)))

@@ -1,0 +1,14 @@
+# Negative control of effect.foreign-top (proofs/decision-sites.toml): an @inline_rust fn outside the stdlib carries no category, so its template runs past [permissions].allow
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_inline_rust_fn_outside_the_stdlib_is_every_category
+diff --git a/crates/almide-codegen/src/pass_effect_inference.rs b/crates/almide-codegen/src/pass_effect_inference.rs
+--- a/crates/almide-codegen/src/pass_effect_inference.rs
++++ b/crates/almide-codegen/src/pass_effect_inference.rs
+@@ -51,7 +51,7 @@
+ /// too. The stdlib's own templates (`in_stdlib`) are categorised by the
+ /// stdlib call table instead, as before.
+ pub(crate) fn declared_direct_effects(func: &IrFunction, in_stdlib: bool) -> HashSet<Effect> {
+-    if !func.extern_attrs.is_empty() || (!in_stdlib && has_inline_rust(func)) {
++    if !func.extern_attrs.is_empty() || (false && !in_stdlib && has_inline_rust(func)) {
+         return Effect::ALL.into_iter().collect();
+     }
+     HashSet::new()

@@ -1,0 +1,2 @@
+# The probe of perm.check-effects-gate: check --effects: a capability reached only through an imported module.
+expect = "capability violation"

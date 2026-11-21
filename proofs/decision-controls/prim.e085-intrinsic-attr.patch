@@ -1,0 +1,14 @@
+# Negative control of prim.e085-intrinsic-attr (proofs/decision-sites.toml): a user @intrinsic is admitted.
+# control_test: tests/decision_novel_test.rs::novel_user_intrinsic_with_a_fresh_runtime_symbol
+diff --git a/crates/almide-frontend/src/check/intrinsic_authority.rs b/crates/almide-frontend/src/check/intrinsic_authority.rs
+--- a/crates/almide-frontend/src/check/intrinsic_authority.rs
++++ b/crates/almide-frontend/src/check/intrinsic_authority.rs
+@@ -161,7 +161,7 @@
+         else {
+             return;
+         };
+-        if self.stdlib_authority() != Some(false) {
++        if self.stdlib_authority() != Some(false) || !fn_name.is_empty() {
+             return;
+         }
+         let mut diagnostic = err(

@@ -1,0 +1,14 @@
+# Negative control of trust.install-owner (proofs/decision-sites.toml): `almide tool install` admits a remote spec of any owner without --trust
+# control_test: tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch
+diff --git a/src/cli/install.rs b/src/cli/install.rs
+--- a/src/cli/install.rs
++++ b/src/cli/install.rs
+@@ -346,7 +346,7 @@
+             "error: --trust {t} does not match the owner of {src} ({owner})\n  hint: --trust must name the owner the source belongs to"
+         )),
+         Some(Err(e)) => Err(format!("error: --trust: {e}")),
+-        None if crate::trust::is_trusted(&[], &src) => Ok(()),
++        None if true || crate::trust::is_trusted(&[], &src) => Ok(()),
+         None => Err(format!(
+             "error: refusing to install {spec}: its owner is not trusted\n  source: {src}\n  owner: {owner}\n  hint: if you asked for this exact repository, rerun with --trust {owner}"
+         )),

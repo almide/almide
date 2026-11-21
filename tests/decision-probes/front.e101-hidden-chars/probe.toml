@@ -1,0 +1,2 @@
+# The probe of front.e101-hidden-chars: A raw U+202E in a comment.
+expect = "E101"

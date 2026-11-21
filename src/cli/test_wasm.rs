@@ -156,10 +156,13 @@ fn wasm_test_dep_paths(test_file: &str) -> Vec<(project::PkgId, std::path::PathB
 /// is `WasmTestRunner`'s choice.
 struct TestModule {
     almide: Vec<u8>,
-    /// None when the module runs `testing.assert_aborts` sites: the abort-site
-    /// ops (ADR-0029) start a fresh instance, which only the embedded host
-    /// can, so there is no stock artifact to run.
+    /// None when there is no stock artifact to run, and `no_stock` says why:
+    /// the module runs `testing.assert_aborts` sites (the abort-site ops,
+    /// ADR-0029, start a fresh instance, which only the embedded host can), or
+    /// it emits an op the p1 shim does not serve (#4857: the embedded host
+    /// serves it, as it does for `almide run --target wasm`).
     wasi: Option<Vec<u8>>,
+    no_stock: Option<String>,
 }
 
 impl TestModule {
@@ -209,15 +212,20 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     // The abort-site ops are test-only and embedded-only (ADR-0029): they are
     // not a wall of the leg, and there is no stock artifact to rewrite.
     let abort_sites = host_ops.iter().any(|op| almide_wasm::ABORT_SITE_OPS.contains(op));
+    // #4857: the p1-shim audit decides whether a STOCK artifact exists, not
+    // whether the module runs: the embedded host (this lane's default runner,
+    // and `almide run --target wasm`'s) serves every op the module emits, so
+    // an op the shim lacks leaves the embedded module runnable — the same
+    // decision the run route makes — and only the opt-in stock runner refuses.
     if let Some(op) = host_ops
         .iter()
         .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op) && !almide_wasm::ABORT_SITE_OPS.contains(op))
     {
-        wall("host audit", format!("op {op} is not served by the p1 shim"));
-        return None;
+        wall("host audit (stock artifact)", format!("op {op} is not served by the p1 shim"));
+        return Some(TestModule { almide: bytes, wasi: None, no_stock: Some(format!("op {op} is not served by the p1 shim, so there is no stock artifact; the embedded host serves it")) });
     }
     if abort_sites {
-        return Some(TestModule { almide: bytes, wasi: None });
+        return Some(TestModule { almide: bytes, wasi: None, no_stock: Some("testing.assert_aborts needs the embedded host to start a fresh instance (almide:test/abort-site); a stock runtime cannot".to_string()) });
     }
     // The structural module imports `almide.*` (the embedded host's surface,
     // which runs it by default); the same `to_wasi` rewrite the build ships
@@ -230,7 +238,7 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     if explain {
         err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, wasi.len()));
     }
-    Some(TestModule { almide: bytes, wasi: Some(wasi) })
+    Some(TestModule { almide: bytes, wasi: Some(wasi), no_stock: None })
 }
 
 /// ALMIDE_WASM_ALLOC_COUNT (#2407): the armed test module's counters, in
@@ -556,6 +564,19 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
         return skip(format!("matrix.{op} is native-only — no WASM lowering"));
     }
+    // #4857: the availability verdict `almide run --target wasm` gives this
+    // program on the same (embedded) host. A refusal is a compile error of
+    // this lane: `--target wasm` reports it FAILED, and the default lane
+    // routes it to its reported native fallback.
+    let package: std::collections::HashSet<String> = resolved
+        .modules
+        .iter()
+        .map(|(name, ..)| name.clone())
+        .filter(|name| resolved.sources.contains_key(name))
+        .collect();
+    if let Err(text) = super::wasm_compile::embedded_leg_availability(&ir_program, &package) {
+        return compile_error(format!("{text}\n"));
+    }
     // `ALMIDE_WALL_REASON=1` prints WHICH stage declined (lower, emit,
     // validate, host audit, to_wasi).
     let explain = almide_base::env::flag("ALMIDE_WALL_REASON");
@@ -595,9 +616,10 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
         // in (ADR-0029 D3): a declared limit of the host, named, and the file
         // runs on native.
         let Some(wasi) = &module.wasi else {
-            return skip_env(
-                "ALMIDE_TEST_WASM_RUNNER=wasmtime, and testing.assert_aborts needs the embedded host to start a fresh instance (almide:test/abort-site); a stock runtime cannot".to_string(),
-            );
+            return skip_env(format!(
+                "ALMIDE_TEST_WASM_RUNNER=wasmtime, and {}",
+                module.no_stock.as_deref().unwrap_or("there is no stock artifact")
+            ));
         };
         // `ALMIDE_TEST_WASM_RUNNER=wasmtime`: write the stock artifact and run
         // it under the wasmtime CLI. `-S inherit-env=y` mirrors the embedded
@@ -886,6 +908,10 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir) {
         return Err(format!("matrix.{op} is native-only"));
     }
+    // #4857: a batch holding a file the embedded leg refuses splits, so that
+    // file reaches the per-file route and its E081 (the empty package set is
+    // the stricter reading: a false hit only costs the split).
+    super::wasm_compile::embedded_leg_availability(&ir, &std::collections::HashSet::new()).map_err(|_| "an embedded-leg availability refusal".to_string())?;
     // #4836: judged by the installed verifier like the module `build` writes.
     let mut emit_err = String::new();
     let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {

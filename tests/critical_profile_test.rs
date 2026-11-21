@@ -258,3 +258,26 @@ fn a_value_named_like_a_module_is_an_indirect_callee() {
     let (normal, err) = check(src, "shadow_math.almd", &[]);
     assert!(normal, "the normal check rejected the program:\n{err}");
 }
+
+/// #4885: `--profile` / `--allow` belong to `almide check`. `run` used to hand
+/// them to the program and run it unprofiled (exit 0); it now refuses them
+/// on both targets before compiling anything, and a program argument spelled
+/// the same still reaches the program after `--`.
+#[test]
+fn run_refuses_the_check_profile_flags_instead_of_running_unprofiled() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src = dir.path().join("argv.almd");
+    std::fs::write(&src, "import env\n\neffect fn main() -> Unit = {\n  var i = 0\n  while i < 2 { i = i + 1 }\n  println(\"args=${env.args()}\")\n}\n").unwrap();
+    let run = |args: &[&str]| {
+        let o = Command::new(almide()).arg("run").arg(&src).args(args).current_dir(dir.path()).output().expect("spawn almide run");
+        (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+    };
+    for flags in [&["--profile", "critical"][..], &["--target", "wasm", "--profile", "critical"], &["--allow", "IO"], &["--profile", "critical", "--allow", "IO"]] {
+        let (ok, out) = run(flags);
+        assert!(!ok, "`almide run argv.almd {}` ran the program:\n{out}", flags.join(" "));
+        assert!(out.contains("almide check") && !out.contains("args="), "`{}`: not refused as a check flag:\n{out}", flags.join(" "));
+    }
+    // control: after `--` the same words are the program's own arguments
+    let (ok, out) = run(&["--target", "wasm", "--", "--profile", "critical"]);
+    assert!(ok && out.contains("args=") && out.contains("--profile"), "`-- --profile critical` did not reach the program:\n{out}");
+}

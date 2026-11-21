@@ -611,7 +611,10 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
                     self.refuse(&format!("`{n}`"), "an assertion reports through the host, outside the allocation region", "return the value and assert outside the scope", call.span);
                     return false;
                 }
-                // A bare unknown callee: E002 owns it.
+                // Any other bare callee (a builtin such as `assert_ne`, a fn
+                // this walk was not given) is refused: the region admits only
+                // what it can see, never what it does not know (#4860).
+                self.refuse(&format!("`{n}`"), "a call the allocation region cannot follow (it is not a `scoped fn`)", "return the value and make the call outside the scope", call.span);
                 false
             }
             ast::ExprKind::Member { object, field } => {

@@ -1,0 +1,12 @@
+// ALS-B4 (ADR-0038): print the record's scalar fields as an output line; it
+// builds no string.
+type Pose = { pos: Int, vel: Int }
+
+@bounded
+effect fn trace(p: Pose) -> Unit = {
+  for t in 0..<4 {
+    println("t=${t} pos=${p.pos} vel=${p.vel}")
+  }
+}
+
+effect fn main() -> Unit = trace(Pose { pos: 3, vel: 1 })!

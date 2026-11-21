@@ -1,0 +1,2 @@
+# The probe of deps.dep-manifest-swallow: A path dependency whose own manifest does not parse (#4820).
+expect = "dependency `bad`"

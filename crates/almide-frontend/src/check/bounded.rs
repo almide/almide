@@ -50,6 +50,9 @@ impl Checker {
                 }
             }
         }
+        // #4871: each user fn's allocation summary, computed by reach and
+        // shared by every fn's walk (`None` while it is being computed).
+        let alloc_memo: std::cell::RefCell<HashMap<String, Option<bool>>> = Default::default();
         for decl in &program.decls {
             let ast::Decl::Fn { name, attrs, body: Some(body), span, .. } = decl else {
                 continue;
@@ -59,7 +62,7 @@ impl Checker {
             }
             // ALS-B6 / E073: the reachable call graph must be a DAG — a DFS
             // from this fn over user-fn edges that revisits it is recursion
-            if user_call_cycle(name.as_str(), &fns) {
+            if user_call_cycle(name.as_str(), &fns, self) {
                 diags.push(bounded_err(
                     "recursion is not admissible in a @bounded function",
                     "the reachable call graph must be a DAG — replace the recursion with a counted loop",
@@ -76,6 +79,7 @@ impl Checker {
                 fn_span: *span,
                 consts: Vec::new(),
                 loop_depth: 0,
+                alloc_memo: &alloc_memo,
             };
             cx.walk_expr(body);
         }
@@ -234,6 +238,42 @@ mod bounded_tables_tests {
     }
 }
 
+/// #4855: does a value of this type hold a block of its own? An `Option` /
+/// `Result` of scalars is a tag and a scalar (`list.get(xs, i) ?? 0`); every
+/// other non-scalar shape, and any type not yet known, is read as allocating.
+fn ty_allocates(t: &Ty) -> bool {
+    match t {
+        Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, args) => args.iter().any(ty_allocates),
+        other => almide_lang::types::is_heap_ty(other),
+    }
+}
+
+/// ADR-0038: does a value of this type have a DIRECT SINK WRITER — can an
+/// output line write it to the stream as it is, without first building a
+/// String, on every target? A closed predicate over the type constructors,
+/// admitting only what both lowerings write with no allocation per line
+/// (measured: the native ALMIDE_ALLOC_COUNT and wasm ALMIDE_WASM_ALLOC_COUNT
+/// counters): the signed ints, the unsigned ints up to 32 bits, and `Bool`.
+/// Every other type answers false (fail closed): a record, a variant, a
+/// container, an `Option`, a type variable, an unknown type, and — until
+/// their sink writers exist — `String` (the gathered write), `UInt64` (its
+/// native text is still built as a String) and the Floats (the wasm float
+/// printer still returns a String block).
+pub(crate) fn ty_has_sink_writer(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::Bool
+    )
+}
+
 /// Run-time-length heap constructors (ALS-B8): fn -> the size-argument slots
 /// that must be compile-time constants.
 const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
@@ -294,19 +334,44 @@ fn bounded_err(
 fn user_call_cycle<'a>(
     start: &str,
     fns: &std::collections::HashMap<&'a str, (bool, Option<&'a ast::Expr>)>,
+    ck: &Checker,
 ) -> bool {
+    // The edges are the calls BoundedCx::check_call judges as direct calls of
+    // a user fn, in every form it judges them: a call, a pipe stage (`x |> f`
+    // is `f(x)`; `x |> f(a)` is itself a Call node) and UFCS through a value
+    // receiver (`p.f()` is `f(p)`, check_call_member).
     fn edges<'a>(
         body: &'a ast::Expr,
         fns: &std::collections::HashMap<&'a str, (bool, Option<&'a ast::Expr>)>,
+        ck: &Checker,
         out: &mut Vec<&'a str>,
     ) {
         ast::visit_expr(body, &mut |e| {
-            if let ast::ExprKind::Call { callee, .. } = &e.kind {
-                if let ast::ExprKind::Ident { name } = &callee.kind {
-                    if let Some((k, _)) = fns.get_key_value(name.as_str()) {
-                        out.push(k);
-                    }
+            let mut callee = match &e.kind {
+                ast::ExprKind::Call { callee, .. } => &**callee,
+                ast::ExprKind::Pipe { right, .. } => &**right,
+                _ => return,
+            };
+            while let ast::ExprKind::Unwrap { expr } | ast::ExprKind::Try { expr } = &callee.kind {
+                callee = &**expr;
+            }
+            // #4878: an edge is a callee the checker bound to a top-level
+            // fn; one bound to a local value is an indirect call (E074).
+            if ck.value_callees.contains(&callee.id) {
+                return;
+            }
+            let name = match &callee.kind {
+                ast::ExprKind::Ident { name } => name.as_str(),
+                ast::ExprKind::Member { object, field }
+                    if matches!(object.kind, ast::ExprKind::Ident { .. })
+                        && ck.type_map.contains_key(&object.id) =>
+                {
+                    field.as_str()
                 }
+                _ => return,
+            };
+            if let Some((k, _)) = fns.get_key_value(name) {
+                out.push(k);
             }
         });
     }
@@ -324,7 +389,7 @@ fn user_call_cycle<'a>(
         seen.push(f);
         if let Some((_, Some(body))) = fns.get(f) {
             let mut es = Vec::new();
-            edges(body, fns, &mut es);
+            edges(body, fns, ck, &mut es);
             for e in es {
                 if e == start {
                     return true;
@@ -346,6 +411,8 @@ struct BoundedCx<'a, 'c> {
     /// "constant-foldable from a literal"); shadowing/mutation removes them
     consts: Vec<String>,
     loop_depth: u32,
+    /// #4871: user fn -> does a call to it allocate (by reach)?
+    alloc_memo: &'a std::cell::RefCell<std::collections::HashMap<String, Option<bool>>>,
 }
 
 impl BoundedCx<'_, '_> {
@@ -634,8 +701,21 @@ impl BoundedCx<'_, '_> {
             }
             ast::ExprKind::Call { callee, args, .. } => {
                 self.check_call(e, callee, args);
-                for a in args {
-                    self.walk_expr(a);
+                match self.output_line_holes(callee, args) {
+                    // ADR-0038: an output line writes its parts to the sink
+                    // and builds no String, so the interpolation's own E071
+                    // is not raised; every hole is still walked under every
+                    // rule (a hole that computes or allocates is refused).
+                    Some(holes) => {
+                        for h in holes {
+                            self.walk_expr(h);
+                        }
+                    }
+                    None => {
+                        for a in args {
+                            self.walk_expr(a);
+                        }
+                    }
                 }
                 // walk the callee only when it is not a plain name (a lambda
                 // callee must be flagged by its own arm)
@@ -836,6 +916,21 @@ impl BoundedCx<'_, '_> {
 
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) {
         match &callee.kind {
+            // #4878: decided by what the checker bound the callee to, never
+            // by its spelling — a parameter, `let` or lambda parameter that
+            // shares a profile fn's name is a function value, so the call is
+            // an indirect call even though a top-level fn is spelled the same.
+            // The text is the one a value callee with no same-named fn always
+            // got (the unknown-bare-callee arm below), so only the shadowing
+            // case changes verdict.
+            ast::ExprKind::Ident { .. } if self.checker.value_callees.contains(&callee.id) => {
+                self.err(
+                    "calling a function outside the profile is not admissible in a @bounded function",
+                    "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+                    "E074",
+                    call.span,
+                );
+            }
             ast::ExprKind::Ident { name } => self.check_call_ident(call, name.as_str(), args),
             ast::ExprKind::Member { object, field } => self.check_call_member(call, object, field.as_str(), args),
             // ALS-B7 (#2297): a variant constructor application builds a
@@ -854,10 +949,55 @@ impl BoundedCx<'_, '_> {
         }
     }
 
+    /// ADR-0038 §2: is this call an OUTPUT LINE? Decided from position and
+    /// types only: the bare callee resolves to an output builtin (one the
+    /// builtin table describes as writing to stdout or stderr, and no user fn
+    /// of that name), its single argument is written directly as an
+    /// interpolated string, and every hole's checked type has a direct sink
+    /// writer ([`ty_has_sink_writer`]). Returns the hole expressions, which
+    /// the caller still walks under every rule; `None` = not an output line.
+    fn output_line_holes<'e>(&self, callee: &ast::Expr, args: &'e [ast::Expr]) -> Option<Vec<&'e ast::Expr>> {
+        let ast::ExprKind::Ident { name } = &callee.kind else { return None };
+        let n = name.as_str();
+        if self.fns.contains_key(n) {
+            return None;
+        }
+        let writes = crate::check::OUTPUT_ABORT_BUILTINS
+            .iter()
+            .any(|(b, does)| *b == n && matches!(*does, "writes to stdout" | "writes to stderr"));
+        if !writes {
+            return None;
+        }
+        let [arg] = args else { return None };
+        let ast::ExprKind::InterpolatedString { parts, .. } = &arg.kind else { return None };
+        let holes: Vec<&ast::Expr> = parts
+            .iter()
+            .filter_map(|p| match p {
+                ast::StringPart::Expr { expr } => Some(expr.as_ref()),
+                _ => None,
+            })
+            .collect();
+        holes
+            .iter()
+            .all(|h| self.checker.type_map.get(&h.id).is_some_and(ty_has_sink_writer))
+            .then_some(holes)
+    }
+
     /// A bare callee: a @bounded fn, the print family, the assert macros, or
     /// nothing the profile admits.
     fn check_call_ident(&mut self, call: &ast::Expr, n: &str, args: &[ast::Expr]) {
         if let Some((is_bounded, _)) = self.fns.get(n) {
+            // ALS-B4 / E071 (#4871): a call allocates when the callee's body
+            // does, by reach — decided from what the callee's body contains,
+            // under the same rules as a loop body, never from its name.
+            if *is_bounded && self.loop_depth > 0 && self.callee_allocates(n) {
+                self.err(
+                    "calling a function that allocates inside a counted loop is not admissible in a @bounded function",
+                    "allocate outside the loop and keep the loop body allocation-free",
+                    "E071",
+                    call.span,
+                );
+            }
             if !is_bounded {
                 // ALS-B7 / E074
                 self.err(
@@ -912,7 +1052,7 @@ impl BoundedCx<'_, '_> {
         // #4840: a receiver the checker typed as a VALUE (a parameter or local,
         // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
         // through that value: indirect, never a stdlib member.
-        if self.checker.type_map.get(&object.id).is_some() {
+        if self.checker.type_map.contains_key(&object.id) {
             // `p.norm()` on a value is UFCS for the user fn `norm(p)`: judged
             // as that direct call; anything else through a value is indirect.
             if self.fns.contains_key(f) {
@@ -1029,7 +1169,7 @@ impl BoundedCx<'_, '_> {
             return;
         }
         // ALS-B8 / E075: run-time-length heap construction
-        if self.has_runtime_sized_slot(&full, args) {
+        if self.has_runtime_sized_slot(&full, args) || self.call_sizes_from_an_int(call, args) {
             self.err(
                 "run-time-length heap construction is not admissible in a @bounded function",
                 "give every constructed length a compile-time size",
@@ -1039,7 +1179,7 @@ impl BoundedCx<'_, '_> {
             return;
         }
         // ALS-B4 / E071: allocating calls inside a counted loop
-        if self.loop_depth > 0 && BOUNDED_ALLOC_CALLS.contains(&full.as_str()) {
+        if self.loop_depth > 0 && (BOUNDED_ALLOC_CALLS.contains(&full.as_str()) || self.call_allocates(call, m, f)) {
             self.err(
                 "an allocating call inside a counted loop is not admissible in a @bounded function",
                 "allocate outside the loop and keep the loop body allocation-free",
@@ -1051,7 +1191,7 @@ impl BoundedCx<'_, '_> {
         // ALS-B10 / E077: a stdlib call computing on Float arguments.
         // float.to_string / float.sign etc. OBSERVE a Float — computing
         // calls (math.*, BOUNDED_FLOAT_COMPUTE_CALLS) reject it
-        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str());
+        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str()) || self.call_yields_float(call);
         if computes && args.iter().any(|a| self.expr_is_float(a)) {
             self.err(
                 "a Float operation is not admissible in a @bounded function",
@@ -1060,6 +1200,97 @@ impl BoundedCx<'_, '_> {
                 call.span,
             );
         }
+    }
+
+    /// #4871: does calling user fn `n` allocate? The callee's body is walked
+    /// as a loop body under every profile rule into a scratch list: any
+    /// allocation it makes (E071 / E075), and any callee the profile cannot
+    /// follow (E074 indirect or outside the profile, E100 foreign code), makes
+    /// the call allocating. A callee without a body (`@extern`) is foreign, so
+    /// allocating. A callee already being summarised (recursion, itself E073)
+    /// is read as allocating: fail closed.
+    fn callee_allocates(&mut self, n: &str) -> bool {
+        if let Some(known) = self.alloc_memo.borrow().get(n) {
+            return known.unwrap_or(true);
+        }
+        let Some((_, body)) = self.fns.get(n) else { return true };
+        let Some(body) = *body else {
+            self.alloc_memo.borrow_mut().insert(n.to_string(), Some(true));
+            return true;
+        };
+        self.alloc_memo.borrow_mut().insert(n.to_string(), None);
+        let mut scratch: Vec<Diagnostic> = Vec::new();
+        let mut probe = BoundedCx {
+            checker: self.checker,
+            diags: &mut scratch,
+            fns: self.fns,
+            fn_name: n,
+            fn_span: self.fn_span,
+            consts: Vec::new(),
+            loop_depth: 1,
+            alloc_memo: self.alloc_memo,
+        };
+        probe.walk_expr(body);
+        let allocates = scratch
+            .iter()
+            .any(|d| matches!(d.code, Some("E071" | "E074" | "E075" | "E100")));
+        self.alloc_memo.borrow_mut().insert(n.to_string(), Some(allocates));
+        allocates
+    }
+
+    /// #4855: the call's own result type, as the checker instantiated it
+    /// (`list.get` on a `List[Int]` is an `Option[Int]`); `None` when unknown.
+    fn call_ty(&self, call: &ast::Expr) -> Option<&Ty> {
+        self.checker.type_map.get(&call.id).filter(|t| !matches!(t, Ty::Unknown))
+    }
+
+    /// #4855 (E071, from the declaration): a member call allocates when the
+    /// value it returns is a heap block, or when its declared signature takes a
+    /// heap value `mut` (grows it in place). An unknown result type or an
+    /// unknown signature is read as allocating.
+    fn call_allocates(&self, call: &ast::Expr, m: &str, f: &str) -> bool {
+        let returns_heap = self.call_ty(call).is_none_or(ty_allocates);
+        let grows_heap = crate::stdlib::lookup_sig(m, f).is_none_or(|sig| {
+            sig.mut_params.iter().any(|&i| sig.params.get(i).is_none_or(|(_, t)| almide_lang::types::is_heap_ty(t)))
+        });
+        returns_heap || grows_heap
+    }
+
+    /// #4855 (E075, from the types): a call that returns a collection (a
+    /// List, Map, Set, Bytes or Matrix), takes no heap value its length could
+    /// be bounded by, and is handed an Int that is not a compile-time constant
+    /// builds a run-time-length block (`list.range(0, n)`, a fresh
+    /// `fn f(n: Int) -> List[Int]`). Text is left to the table: an Int's
+    /// digits are a bounded String.
+    fn call_sizes_from_an_int(&self, call: &ast::Expr, args: &[ast::Expr]) -> bool {
+        let returns_heap = self.call_ty(call).is_none_or(|t| {
+            matches!(
+                t,
+                Ty::Bytes
+                    | Ty::Matrix
+                    | Ty::Applied(TypeConstructorId::List | TypeConstructorId::Map | TypeConstructorId::Set, _)
+                    | Ty::TypeVar(_)
+            )
+        });
+        let arg_ty = |a: &ast::Expr| self.checker.type_map.get(&a.id);
+        let bounded_by_input = args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty));
+        let runtime_int = args.iter().any(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a));
+        returns_heap && !bounded_by_input && runtime_int
+    }
+
+    /// #4855 (E077, from the types): a call whose result carries a Float
+    /// computes one (`float.abs`, a fresh `fn f(x: Float) -> Float`); one that
+    /// turns a Float into text or an Int observes it. Unknown is computing.
+    fn call_yields_float(&self, call: &ast::Expr) -> bool {
+        fn has_float(t: &Ty) -> bool {
+            match t {
+                Ty::Float | Ty::Float32 | Ty::Float64 => true,
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.iter().any(has_float),
+                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| has_float(t)),
+                _ => false,
+            }
+        }
+        self.call_ty(call).is_none_or(has_float)
     }
 
     /// A sized constructor (`list.repeat`-like) given a size slot that is not

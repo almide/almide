@@ -712,7 +712,7 @@ fn a_chunked_body_is_decoded_and_bounded() {
         b"POST /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n2;ext=1\r\nhe\r\n3\r\nllo\r\n0\r\nX-Trailer: t\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
-        |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).expect("written"),
+        |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], format!("{method} {body}")).expect("written"),
     );
     assert!(resp.ends_with("\r\n\r\nPOST hello"), "{resp:?}");
     let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000, ..server::HTTP_SERVER_DEFAULT_LIMITS };
@@ -760,7 +760,7 @@ fn malformed_header_field_lines_are_400() {
         b"GET /x HTTP/1.1\r\nHost: a\r\nX-A:\t 1 \t\r\nX-B:2\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
-        |conn, (_, _, _, headers)| server::http_server_write(conn, 200, &[], &format!("{headers:?}")).expect("written"),
+        |conn, (_, _, _, headers)| server::http_server_write(conn, 200, &[], format!("{headers:?}")).expect("written"),
     );
     assert!(ok.ends_with(r#"[("Host", "a"), ("X-A", "1"), ("X-B", "2")]"#), "{ok:?}");
 }

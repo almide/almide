@@ -139,6 +139,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DEBUG_EFFECTS", Flag, Dbg, "print the effect inference pass's per-function results (native codegen)"),
     sw("ALMIDE_DEBUG_MIR_OPS", Flag, Harness, "print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument)"),
     sw("ALMIDE_DEBUG_STD_SPLIT", Flag, Dbg, "say why a `--release` native build links with the plain fat-LTO profile instead of the backtrace split (#4459): the missing tool, the moved std symbol, the probe whose panic output differed"),
+    sw("ALMIDE_DECISION_SITES_TSV", Value, Harness, "a file the decision-site detector (tests/decision_sites_test.rs) writes its found keys to, `key<TAB>item<TAB>owner`, for the Almide judge `tools/almide-gates decision-sites`; unset = nothing written"),
     sw("ALMIDE_DEFAULTS_DEBUG", Flag, Dbg, "print the record-default resolution when no default keys were found (native codegen)"),
     sw("ALMIDE_DEPS_CACHE_ONLY", Flag, Tool, "resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179)"),
     sw("ALMIDE_DISABLE_OPT", Flag, Ablation, "run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run)"),
@@ -243,6 +244,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_TOPLET_DEBUG", Flag, Dbg, "print the cross-module top-let type writes and reads of the checker"),
     sw("ALMIDE_TRACE_PASSES", Flag, Dbg, "name each optimiser pass BEFORE it runs, so a pass that never returns is identifiable"),
     sw("ALMIDE_UPDATE_ALLOC", Flag, Harness, "regenerate the structural leg's allocation baseline"),
+    sw("ALMIDE_UPDATE_DECISION_SITES", Flag, Harness, "rewrite each decision-site row's `keys` to what the detector finds, append every unowned site as an UNCLASSIFIED row and every unmapped CLI route as `unknown` (tests/decision_sites_test.rs); the test still fails until those are classified"),
     sw("ALMIDE_UPDATE_DUMPS", Flag, Harness, "regenerate the structural leg's section-dump goldens"),
     sw("ALMIDE_UPDATE_GAUNTLET", Flag, Harness, "regenerate the gauntlet manifest"),
     sw("ALMIDE_UPDATE_INSPECTION", Flag, Harness, "add the missing rows to the stdlib inspection ledger and reset the stale ones"),
@@ -347,6 +349,13 @@ pub fn lock(allowed: Vec<String>) {
 /// Is the switch lock on?
 pub fn locked() -> bool {
     LOCK.get().is_some()
+}
+
+/// The names `--allow-switch` let through the lock, when the lock is on: what
+/// a child `almide` the tool spawns for itself must be started with, so the
+/// child decides as its parent does (`almide mcp`'s tool children).
+pub fn lock_allowances() -> Option<Vec<String>> {
+    LOCK.get().cloned()
 }
 
 /// Does a binary whose `--version` line is `version_line` lock the switches

@@ -1,0 +1,14 @@
+# The wasm availability verdict: every wasm-producing route refuses a call
+# the wasm host does not serve. Each column names --target wasm itself.
+expect = "E081"
+
+[argv]
+check = ["check", "{main}", "--target", "wasm"]
+check_json = ["check", "--json", "--target", "wasm", "{main}"]
+run = ["run", "{main}", "--target", "wasm"]
+build = ["build", "{main}", "--target", "wasm", "-o", "{out}.wasm"]
+test = ["test", "{test}", "--target", "wasm"]
+bench = ["bench", "{main}", "--target", "wasm"]
+
+[mcp]
+target = "wasm"

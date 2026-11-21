@@ -1,3 +1,0 @@
-expects_code = "E121"
-expects_error = "cannot spread a value of type parameter 'A'"
-hint_substring = "bound it with a record shape"

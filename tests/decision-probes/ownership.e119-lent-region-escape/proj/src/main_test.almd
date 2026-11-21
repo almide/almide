@@ -1,0 +1,14 @@
+import ffi
+
+var stash: Region? = none
+
+@export(c, "keep")
+fn keep(r: Region) -> Int = {
+  let (a, _) = (r, 1)
+  stash = some(a)
+  0
+}
+
+test "a lent region escapes through a destructuring let" {
+  assert_eq(1, 1)
+}

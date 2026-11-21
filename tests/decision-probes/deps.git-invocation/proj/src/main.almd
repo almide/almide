@@ -1,0 +1,4 @@
+// The probe of deps.git-invocation: a source git would read as an option.
+import optsrc
+
+effect fn main() -> Unit = println(optsrc.hello())

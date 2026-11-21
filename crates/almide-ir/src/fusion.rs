@@ -13,12 +13,6 @@
 //! (#2953). The vocabulary and the sequencing rule live HERE; each backend only
 //! walks its own IR to fill in a [`Stage`] per callback.
 
-/// Stdlib modules whose calls are effects, or read the outside world.
-pub const EFFECT_MODULES: &[&str] = &[
-    "args", "datetime", "env", "fan", "ffi", "fs", "http", "io", "net",
-    "process", "random", "testing", "time", "zlib",
-];
-
 /// Stdlib modules whose every fn is TOTAL: pure arithmetic / conversion that
 /// never aborts. (`list`/`string`/`map` have aborting members —
 /// `list.chunk(xs, 0)` — so a call into them counts as a possible abort.)
@@ -28,7 +22,27 @@ pub const TOTAL_MODULES: &[&str] = &["int", "float", "math", "bool"];
 /// its result. A user module is never answered here: its fns are judged from
 /// their bodies, or refused.
 pub fn stdlib_module_is_pure(module: &str) -> bool {
-    almide_lang::stdlib_info::is_stdlib_module(module) && !EFFECT_MODULES.contains(&module)
+    module_is_pure_by_declaration(
+        module,
+        almide_lang::stdlib_info::is_stdlib_module,
+        almide_lang::stdlib_info::bundled_module_declares_effect,
+    )
+}
+
+/// The judgment behind [`stdlib_module_is_pure`] (#4855), from the module's
+/// own declarations only — the effect-bearing declarations the checker reads
+/// (`effect fn`, `@ordered`, `@memory_unsafe`, `@signals_process`;
+/// `stdlib_info::source_declares_effect`): pure only when its source is known
+/// (`declares_effect` answers `Some`) and declares none. A module whose
+/// source cannot be read is unknown, so not pure. No module is named here.
+/// (A pure module may still abort; aborting stages are sequenced by
+/// [`stages_mergeable`], not by purity.)
+pub fn module_is_pure_by_declaration(
+    module: &str,
+    is_stdlib: impl Fn(&str) -> bool,
+    declares_effect: impl Fn(&str) -> Option<bool>,
+) -> bool {
+    is_stdlib(module) && declares_effect(module) == Some(false)
 }
 
 /// Every fn of stdlib `module` returns without aborting.

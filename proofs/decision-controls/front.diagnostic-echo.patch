@@ -1,0 +1,14 @@
+# Negative control of front.diagnostic-echo (proofs/decision-sites.toml): the human renderer writes the message, hint, notes, context and echoed line raw again (#4819)
+# control_test: tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw
+diff --git a/src/diagnostic_render.rs b/src/diagnostic_render.rs
+--- a/src/diagnostic_render.rs
++++ b/src/diagnostic_render.rs
+@@ -25,7 +25,7 @@
+ /// #4819: the same escape for the message, hint, notes and context — a parse
+ /// error quoting the character it stopped at carried it raw.
+ fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
+-    almide_base::err_text::escape_hidden(text)
++    std::borrow::Cow::Borrowed(text)
+ }
+ 
+ /// The rendered width of `line`'s first `n` characters once `escape_bidi` has

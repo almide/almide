@@ -1,0 +1,6 @@
+# The walk refuses at run time; the program prints the refusal and exits 0.
+expect = "link: err fs: path escapes root: link/s.txt"
+exit = "any"
+
+[expect_by]
+test = "All 1 test file(s) passed"

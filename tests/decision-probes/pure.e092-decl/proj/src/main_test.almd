@@ -1,0 +1,7 @@
+@pure
+@inline_rust("{ let _ = {p}; 1i64 }")
+fn touch(p: String) -> Int = 1
+
+test "touch" {
+  assert_eq(touch("x"), 1)
+}

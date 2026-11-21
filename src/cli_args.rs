@@ -186,6 +186,14 @@ pub(crate) enum Commands {
         /// machine) next to the measured wall clock on this host.
         #[arg(long)]
         time_report: bool,
+        /// `almide check`'s profile flags, parsed here only to be refused
+        /// (#4885): without them `run app.almd --profile critical` handed the
+        /// flag to the program and ran it unprofiled. A program argument
+        /// spelled the same goes after `--`.
+        #[arg(long, hide = true)]
+        profile: Option<String>,
+        #[arg(long, hide = true)]
+        allow: Vec<String>,
         /// Arguments passed to the program. Almide's own flags (`--target`,
         /// `--no-check`, `--release`) are consumed before these; anything
         /// after a `--` separator is forwarded verbatim to the program.
@@ -211,6 +219,10 @@ pub(crate) enum Commands {
         /// Report as the --json envelope
         #[arg(long)]
         json: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
     },
     /// Build a binary
     Build {
@@ -374,6 +386,10 @@ pub(crate) enum Commands {
         /// Source file. Omitted inside a package: every `.almd` under `src/`
         /// is checked and named (#2165)
         file: Option<String>,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
         /// Treat warnings as errors
         #[arg(long)]
         deny_warnings: bool,
@@ -693,6 +709,10 @@ pub(crate) enum Commands {
     Emit {
         /// Source file
         file: String,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093, #4852)
+        #[arg(long)]
+        locked: bool,
         /// Target language (rust, wgsl)
         #[arg(long, default_value = "rust")]
         target: String,

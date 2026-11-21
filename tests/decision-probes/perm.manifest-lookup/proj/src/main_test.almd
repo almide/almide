@@ -1,0 +1,6 @@
+import reach
+
+test "reach" {
+  let _ = reach.peek("s.txt")
+  assert(true)
+}

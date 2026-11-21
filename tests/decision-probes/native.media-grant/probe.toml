@@ -1,0 +1,2 @@
+# The probe of native.media-grant: a path dependency owns a script-capable media type the root manifest does not grant (ADR-0032 D7, #4830).
+expect = "E118"

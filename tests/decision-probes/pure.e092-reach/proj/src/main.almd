@@ -1,0 +1,7 @@
+@inline_rust("{ let _ = {p}; 1i64 }")
+fn touch(p: String) -> Int = 1
+
+@pure
+fn clean(p: String) -> Int = touch(p) + 1
+
+fn main() -> Unit = println(int.to_string(clean("x")))

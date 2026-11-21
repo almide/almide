@@ -57,11 +57,11 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
     // #4187: the modules a package's native code calls back into, as the
     // build loads them, so the whole program judged here is the one it builds.
     let self_versioned = resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
         program,
@@ -379,8 +379,8 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
     (program, input, errors)
 }
 
-pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
-    if !check_json_one(file, critical) {
+pub fn cmd_check_json(file: &str, critical: Option<&[String]>, wasm_target: bool) {
+    if !check_json_one(file, critical, wasm_target) {
         // 1 = this file did not check clean, which is what `almide check`
         // without `--json` exits on for the same program. A harness that gates
         // on the status must not get a different answer for asking that the
@@ -394,12 +394,12 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
 /// diagnostic — each row names its `file`. The exit code is the single-file
 /// form's, aggregated: `1` iff some entry did not check clean, and every
 /// remaining entry is still judged so one bad file does not hide the rest.
-pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>) {
+pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>, wasm_target: bool) {
     let mut all_clean = true;
     for file in files {
         // NOT `&&`: short-circuiting would stop judging at the first bad entry
         // and the package report would lose every diagnostic after it.
-        all_clean &= check_json_one(file, critical);
+        all_clean &= check_json_one(file, critical, wasm_target);
     }
     if !all_clean {
         std::process::exit(1);
@@ -416,7 +416,7 @@ pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>) {
 /// consumer this mode exists for — an editor, a CI step, a model's harness —
 /// does the normal thing and gates on the status, so every rejected program
 /// read as accepted while the reason sat unread on stdout.
-fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
+fn check_json_one(file: &str, critical: Option<&[String]>, wasm_target: bool) -> bool {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
         for d in &parse_errors {
@@ -435,7 +435,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
         out(&format!("{}", crate::diagnostic_render::to_json(d)));
     }
     if let Some(d) = almide::lint_shebang::split_string_warning(file, &source_text) {
-        out(&format!("{}", crate::diagnostic_render::to_json(&d)));
+        out(&crate::diagnostic_render::to_json(&d));
     }
 
     // Lower to IR for unused variable warnings (skip if type errors)
@@ -463,6 +463,23 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
                 clean &= super::enforce_project_permissions(whole.as_ref().unwrap_or(&ir), &proj).is_ok();
             }
         }
+    }
+    // #4857: `--target wasm` — the wasm route's verdict (E081 / E082 / E083),
+    // the same pipeline `check --target wasm` runs, reported as JSON rows.
+    if clean && wasm_target {
+        let (built, refusals) = super::wasm_compile::capturing_route_refusals(|| {
+            super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false)
+        });
+        for (code, text) in &refusals {
+            let mut lines = text.lines();
+            let head = lines.next().unwrap_or("").to_string();
+            let message = head.split_once("]: ").map_or(head.as_str(), |(_, m)| m).to_string();
+            let hint = lines.map(str::trim).collect::<Vec<_>>().join("\n");
+            let mut d = diagnostic::Diagnostic::error(message, hint, "--target wasm".to_string()).with_code(code);
+            d.file = Some(file.to_string());
+            out(&format!("{}", crate::diagnostic_render::to_json(&d)));
+        }
+        clean = built.is_ok();
     }
     // The same predicate that gates the unused-variable pass IS the verdict:
     // one expression, so the status cannot drift from what was emitted.

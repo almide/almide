@@ -1,0 +1,1 @@
+fn evil() -> String = "outside the package"

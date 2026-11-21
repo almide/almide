@@ -1,0 +1,20 @@
+// v1-vs-v0 shape bench: a number printed to STDERR straight from its text
+// call (`eprintln(int.to_string(n))`), which the render writes through the
+// locked stderr stream with no line allocation (ADR-0038), beside the stdout
+// twin of the same shape.
+fn mix(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+fn main() -> Unit = {
+  let n = list.len(list.range(0, 1000)) * 1000
+  let a = mix(n)
+  eprintln(int.to_string(a))
+  println(int.to_string(a + 1))
+}

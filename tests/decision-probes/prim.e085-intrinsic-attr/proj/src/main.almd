@@ -1,0 +1,5 @@
+// The probe of prim.e085-intrinsic-attr: a user file binds a runtime symbol (E085).
+@intrinsic("almide_rt_fs_write")
+effect fn write(path: String, text: String) -> Result[Unit, String]
+
+effect fn main() -> Unit = write("out.txt", "hi")!

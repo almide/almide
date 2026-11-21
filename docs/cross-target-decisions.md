@@ -22,7 +22,7 @@ This page is the inventory from the 2026-09-29 audit. The rule it records is tha
 | Is this `var` ever written? (`var`→`let` demotion) | shared lowering: `Assign`-family statements only, so a var written only through `list.push(xs, ..)` became `let` and native snapshotted it into a closure (#2952) | the same, but wasm's cell scan counted the call | a var handed to a declared `mut` param counts as written | `use_count::mut_arg_write_tests`, enumerated |
 | May this expression run earlier, later, twice, or not at all? | LICM: its own `binop_may_trap` | the small-scalar-fn inliner: "call-free" only, which drops a trapping argument (#2947) | `almide_ir::speculation` | unit tests; C-001 fixture |
 | When does a top-level `let`'s initializer run? (C-007) | lazy, forced at startup only for a **direct** `/`/`%` (#2954) | always at startup | forced iff not speculation-safe (`almide_ir::speculation`) | C-007 fixture |
-| May a pipeline's stages run element by element? (stream fusion) | IR body purity plus `EFFECT_MODULES`/`TOTAL_MODULES` plus "at most one aborting stage" | its own 7-module denylist and no abort rule, so a user-module callback's output interleaved (#2953) | `almide_ir::fusion`: module vocabulary, trap rule, stage-sequencing rule | unit tests; C-001 fixture |
+| May a pipeline's stages run element by element? (stream fusion) | IR body purity plus each stdlib module's declared effects (`source_declares_effect`) and `TOTAL_MODULES` plus "at most one aborting stage" | its own 7-module denylist and no abort rule, so a user-module callback's output interleaved (#2953) | `almide_ir::fusion`: module vocabulary, trap rule, stage-sequencing rule | unit tests; C-001 fixture |
 
 ## Checked and consistent
 

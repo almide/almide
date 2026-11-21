@@ -1,0 +1,2 @@
+// The probe of env.no-verified-ok: an inherited ALMIDE_NO_VERIFIED_OK under the switch lock.
+effect fn main() -> Unit = println("probe ran")

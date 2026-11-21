@@ -1,0 +1,14 @@
+# Negative control of fsscope.component-preopens (proofs/decision-sites.toml): the component host ignores [permissions] fs and preopens the cwd and the temp dir
+# control_test: tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root
+diff --git a/crates/almide-wasm-run/src/host_fs_scope.rs b/crates/almide-wasm-run/src/host_fs_scope.rs
+--- a/crates/almide-wasm-run/src/host_fs_scope.rs
++++ b/crates/almide-wasm-run/src/host_fs_scope.rs
+@@ -81,7 +81,7 @@
+ /// roots, or — with no `fs` key — the working directory and the temp dir
+ /// (no longer the whole host filesystem at `/`).
+ pub fn preopens() -> Vec<String> {
+-    if let Some(roots) = scope() {
++    if let Some(roots) = scope().filter(|_| false) {
+         return roots;
+     }
+     let mut out = Vec::new();

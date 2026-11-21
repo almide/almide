@@ -1,0 +1,2 @@
+# The probe of manifest.control-text: A bidi control (written as a TOML escape) in a manifest string.
+expect = "control or bidi"

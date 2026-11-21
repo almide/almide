@@ -146,9 +146,28 @@ pub(crate) fn fan_glue() -> String {
 /// Every abort path of the rendered program exits through `almide_v1_exit`,
 /// which first waits for the arms below the trapping one (ADR-0024 D5).
 pub(crate) fn route_exits(program: &str) -> String {
-    // A printed line joins the arm timelines through the routed `print!`.
-    crate::native_floor::route_process_exits(program, "almide_v1_exit").replace(
-        "if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }",
-        "print!(\"{}\", String::from_utf8_lossy(line))",
-    )
+    // A printed line joins the arm timelines through the routed `print!` /
+    // `println!` / `eprintln!` (the fan glue's macros), never the stream's
+    // lock directly: a threaded arm's line must land in its own timeline so
+    // the block's output is the sequential observation (C-004 / C-386).
+    // ADR-0038's line writer (`rt_println_fmt`, `rt_eprintln_fmt`) locks the
+    // stream itself, so it is routed here too.
+    let routed = crate::native_floor::route_process_exits(program, "almide_v1_exit")
+        .replace(
+            "if std::io::Write::write_all(&mut std::io::stdout().lock(), line).is_err() { print!(\"{}\", String::from_utf8_lossy(line)) }",
+            "print!(\"{}\", String::from_utf8_lossy(line))",
+        )
+        .replace(STDOUT_LINE_DIRECT, "println!(\"{}\", args)")
+        .replace(STDERR_LINE_DIRECT, "eprintln!(\"{}\", args)");
+    // Every print shim is routed or the render stops: a shim that still
+    // writes under the lock would print in completion order.
+    for direct in [STDOUT_LINE_DIRECT, STDERR_LINE_DIRECT] {
+        assert!(!routed.contains(direct), "fan render: a print shim still writes to the stream directly: {direct}");
+    }
+    routed
 }
+
+/// The ADR-0038 line writer's direct writes (render_native_shims.rs
+/// `PRINT_SHIMS`), as rendered.
+const STDOUT_LINE_DIRECT: &str = "almide_v1_fmt_line(&mut std::io::stdout().lock(), args, |a| print!(\"{}\\n\", a))";
+const STDERR_LINE_DIRECT: &str = "almide_v1_fmt_line(&mut std::io::stderr().lock(), args, |a| eprint!(\"{}\\n\", a))";

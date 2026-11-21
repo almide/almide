@@ -1,0 +1,9 @@
+type Holder = { run: (Int) -> Int }
+
+@bounded
+fn go(math: Holder, k: Int) -> Int = math.run(k)
+
+test "go" {
+  let b = Holder { run: (x) => x + 1 }
+  assert_eq(go(b, 1), 2)
+}

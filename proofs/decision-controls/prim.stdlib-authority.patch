@@ -1,0 +1,14 @@
+# Negative control of prim.stdlib-authority (proofs/decision-sites.toml): authority by layout again (#4100's defect): any file in a directory named stdlib is the stdlib.
+# control_test: tests/decision_novel_test.rs::novel_stdlib_layout_with_a_fresh_stem
+diff --git a/crates/almide-frontend/src/check/intrinsic_authority.rs b/crates/almide-frontend/src/check/intrinsic_authority.rs
+--- a/crates/almide-frontend/src/check/intrinsic_authority.rs
++++ b/crates/almide-frontend/src/check/intrinsic_authority.rs
+@@ -88,7 +88,7 @@
+                 Some(text) => text == embedded,
+                 None => std::fs::read_to_string(&path).is_ok_and(|t| t == embedded),
+             });
+-        Some(in_stdlib_dir && embedded_identity)
++        Some(in_stdlib_dir || embedded_identity)
+     }
+ 
+     /// E118 (ADR-0032 D7): media-type ownership outside the stdlib. A

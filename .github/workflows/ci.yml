@@ -1160,6 +1160,15 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- impl-count .
 
+      # The decision-site ledger's judge (proofs/decision-sites.toml): what STAMPED
+      # means (c1-c4 from each row's evidence), every skipped route cell naming an
+      # issue, every c4 patch still applying, and the four shrink-only ceilings.
+      # Its enumerator half, tests/decision_sites_test.rs, runs in the cargo shards.
+      - name: Decision sites — stamped rows hold their evidence, ceilings only fall
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- decision-sites .
+
       # What codopsy's per-file grades cannot see: a crate's exports nobody imports,
       # files cut by size (`desugar_b.rs`), files no `mod` reaches, functions nothing
       # names. Pinned in proofs/structure-ledger.toml; only growth fails, a shrink is

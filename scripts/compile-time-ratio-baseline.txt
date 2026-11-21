@@ -121,6 +121,16 @@
 # The reader's own code is still compiled for a program that parses (it is
 # what makes the parse fast), which is what is left over the pre-reader tree
 # (3dff2f16a, 2.017 on the same machine).
-check 14.4
+#
+# check lowered to 8.0 (#4187, 2026-11-21). almide check now runs its front
+# end once and lowers the whole program inside that one pass instead of
+# parsing, resolving and checking every source again, so the check row fell
+# under half its anchor: the CI gate on PR #4890 (land-2 a99ddbe03e) read
+# check 6.963 (wasm 21.247, jsonround 2.177) and failed the 7.2 floor. One
+# c4-standard-16 (asia-northeast1-b), the script, two rounds on 37a87d35e1:
+# check 7.318 and 7.302. The gate runs on the CI runner, so the anchor is CI's
+# reading times the 1.15 offset used since #4458: 6.963 x 1.15 = 8.0. Its
+# ceiling (9.6) sits far below the old anchor 14.4; the floor is 4.0.
+check 8.0
 wasm 25.7
 jsonround 2.20

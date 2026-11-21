@@ -28,7 +28,11 @@ fn compute_hover(doc: &AnalyzedDoc, pos: Position) -> Option<Hover> {
             format!("```almide\n{}: {} (parameter)\n```", name, ty),
     };
     Some(Hover {
-        contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: md }),
+        // #4879: hover text is rendered, so a hidden character is escaped.
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: almide_base::err_text::escape_hidden(&md).into_owned(),
+        }),
         range: None,
     })
 }

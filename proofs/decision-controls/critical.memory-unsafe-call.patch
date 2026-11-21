@@ -1,0 +1,14 @@
+# Negative control of critical.memory-unsafe-call (proofs/decision-sites.toml): the @memory_unsafe declaration is no longer read: an ffi call falls through to the capability table (E076), never E100.
+# control_test: tests/decision_novel_test.rs::novel_every_memory_unsafe_stdlib_fn_under_critical
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -919,7 +919,7 @@
+     /// profile callee. `true` when that settles the call.
+     fn member_module_decided(&mut self, call: &ast::Expr, m: &str, f: &str) -> bool {
+         // #4008: outside the memory-safety guarantee — no grant reaches it.
+-        if self.checker.profile_critical && is_memory_unsafe_call(m, f) {
++        if self.checker.profile_critical && is_memory_unsafe_call(m, f) && m.is_empty() {
+             self.diags.push(memory_unsafe_err(
+                 &format!(
+                     "`{m}.{f}` is outside the memory-safety guarantee and is not admissible under `--profile critical`"

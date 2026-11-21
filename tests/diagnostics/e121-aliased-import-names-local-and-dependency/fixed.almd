@@ -1,0 +1,5 @@
+// An alias does not choose between the two: `zq_dep` is the local directory
+// zq_dep/ and the dependency `zq_dep` alike; the renamed local one is unambiguous.
+import zq_mine.sub as s
+
+effect fn main() -> Unit = println(s.which())

@@ -1,0 +1,18 @@
+# Negative control of deps.locked-mode (proofs/decision-sites.toml): --locked is honoured by run / build / test only again.
+# control_test: tests/decision_lock_gaps_test.rs::novel_locked_holds_on_check_bench_and_emit
+diff --git a/src/dispatch.rs b/src/dispatch.rs
+--- a/src/dispatch.rs
++++ b/src/dispatch.rs
+@@ -906,9 +906,9 @@
+         Commands::Run { locked: true, .. }
+             | Commands::Build { locked: true, .. }
+             | Commands::Test { locked: true, .. }
+-            | Commands::Check { locked: true, .. }
+-            | Commands::Bench { locked: true, .. }
+-            | Commands::Emit { locked: true, .. }
++            | Commands::Check { locked: true, file: Some(_), deny_warnings: true, .. }
++            | Commands::Bench { locked: true, runs: 0, .. }
++            | Commands::Emit { locked: true, emit_ast: true, emit_ir: true, .. }
+     ) {
+         project_fetch::set_locked_mode(true);
+     }

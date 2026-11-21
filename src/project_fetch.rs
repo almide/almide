@@ -893,7 +893,10 @@ fn refuse_changed_sources(project: &Project, locked: &[LockedDep], resolved: &[R
     for dep in project.dependencies.iter() {
         let Some(src) = &dep.git else { continue };
         let Some(entry) = locked.iter().find(|l| l.name == dep.name) else { continue };
-        if entry.git == *src || resolved.iter().any(|r| r.lock.git == entry.git) {
+        // #4852: the locked source still stands only when THIS dependency's
+        // own resolution came from it — not when some other package in the
+        // walk happened to fetch that URL.
+        if entry.git == *src || resolved.iter().any(|r| r.lock.name == dep.name && r.lock.git == entry.git) {
             continue;
         }
         return Err(format!(
@@ -1040,6 +1043,7 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
     });
     let shown: Vec<String> = std::iter::once(walk.root.to_string()).chain(chain.iter().cloned()).collect();
     let Fetched { dir: path, lockable } = fetch_dep_in_chain(dep, pin, &shown)?;
+    let declaring_dir = path.clone();
     let (fetched, resolved) = (&mut walk.fetched, &mut walk.resolved);
 
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name, &shown)?;
@@ -1103,7 +1107,35 @@ fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) 
     }
 
     if !transitive_deps.is_empty() {
+        if dep.git.is_some() {
+            refuse_escaping_path_deps(&dep.name, &declaring_dir, &transitive_deps, chain)?;
+        }
         walk.deps(&transitive_deps, chain)?;
+    }
+    Ok(())
+}
+
+/// #4852: a FETCHED dependency's own `path =` dependency is local code no grant and
+/// no trust check covers, so it may name only what lies INSIDE the declaring
+/// package (a sub-package it ships). One that resolves anywhere else — an
+/// absolute path, a `..` out, a link out — is refused: the root names the
+/// local directories it trusts, a fetched package does not.
+fn refuse_escaping_path_deps(owner: &str, declaring_dir: &Path, deps: &[Dependency], chain: &[String]) -> Result<(), String> {
+    let Ok(home) = declaring_dir.canonicalize() else {
+        return Err(format!("dependency `{owner}`: its directory {} cannot be resolved", declaring_dir.display()));
+    };
+    for d in deps {
+        let Some(path) = &d.path else { continue };
+        let inside = PathBuf::from(path).canonicalize().is_ok_and(|p| p.starts_with(&home));
+        if !inside {
+            return Err(format!(
+                "error: `{}` (required through {}) declares the path dependency `{}` = {path}, which is outside its own package
+                   hint: a package may use `path =` only for a directory it ships; the root project names the local directories it trusts",
+                owner,
+                chain.join(" -> "),
+                d.name
+            ));
+        }
     }
     Ok(())
 }

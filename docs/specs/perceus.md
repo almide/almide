@@ -51,7 +51,9 @@ The implementation has several kinds of evidence, with different scopes:
 - [`perceus_verified.rs`](../../crates/almide-codegen/src/perceus_verified.rs)
   mirrors Lean definitions and names model-local insertion/counting properties.
   Those properties do not establish correctness of every lowering and runtime
-  operation in a complete emitted program.
+  operation in a complete emitted program, and no compile route calls its
+  `verify_rc_balance`: it is checked by its own tests and the MC/DC vectors
+  (`proofs/mcdc-ledger.toml`), never per build (#4849).
 - The Rocq/Coq certificate and memory-safety models are described in
   [Memory Safety](../design/MEMORY-SAFETY.md) and
   [`proofs/Certified.v`](../../proofs/Certified.v). Their stated hypotheses and

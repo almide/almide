@@ -1029,6 +1029,48 @@ fn lsp_survive_refuses_a_uri_outside_the_workspace_and_never_fetches() {
     assert!(!cloned, "almide/survive cloned into the dependency cache ({})", cache.display());
 }
 
+/// #4879 (C-418 on the LSP route): every character of the hidden-character
+/// table, written raw in code position, is quoted ESCAPED in the published
+/// diagnostics — never raw — as `check`, `--json`, `test` and `mcp` already
+/// write it (#4819). The table is enumerated from the lexer's own predicate,
+/// so a character added to it later is covered without editing this test.
+#[test]
+fn lsp_diagnostics_never_quote_a_hidden_character_raw() {
+    let hidden: Vec<char> = (0u32..=0x10FFFF)
+        .filter_map(char::from_u32)
+        .filter(|&c| almide_lang::lexer::is_hidden_source_char(c))
+        .collect();
+    assert!(!hidden.is_empty(), "the hidden-character table is empty");
+    fn raw_hidden(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) if s.chars().any(almide_lang::lexer::is_hidden_source_char) => out.push(s.escape_unicode().to_string()),
+            Value::Array(a) => a.iter().for_each(|x| raw_hidden(x, out)),
+            Value::Object(o) => o.values().for_each(|x| raw_hidden(x, out)),
+            _ => {}
+        }
+    }
+    let mut c = LspClient::start();
+    for (i, ch) in hidden.iter().enumerate() {
+        let uri = format!("file:///tmp/lsp_hidden_{i}.almd");
+        c.open_file(&uri, &format!("fn main() -> Unit = {{\n  let x = 1 {ch} 2\n  println(\"${{x}}\")\n}}\n"));
+        let diags = loop {
+            let m = c.recv();
+            if m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri.as_str() {
+                break m;
+            }
+        };
+        assert!(
+            diags["params"]["diagnostics"].as_array().is_some_and(|d| !d.is_empty()),
+            "U+{:04X}: no diagnostic published",
+            *ch as u32
+        );
+        let mut found = Vec::new();
+        raw_hidden(&diags, &mut found);
+        assert!(found.is_empty(), "U+{:04X} quoted raw in the LSP payload: {found:?}", *ch as u32);
+    }
+    c.shutdown();
+}
+
 /// The probe project of #4869: a path dependency whose `src/ext` is a link
 /// out of the package (`linked`), or the same files with `src/ext` a real
 /// directory inside it (the control).

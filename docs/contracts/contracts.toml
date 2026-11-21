@@ -4269,7 +4269,7 @@ evidence  = [
 id        = "C-311"
 spec      = "ALS-B4"
 title     = "No allocation inside a counted loop in a @bounded function (E071)"
-statement = "Inside a counted loop body of a `@bounded` function, constructing, concatenating or pushing to a list/string/map/set or creating a closure is rejected with E071 (hint `allocate outside the loop`); reading, borrowing and passing existing heap values is admissible; allocation outside loops is admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+statement = "Inside a counted loop body of a `@bounded` function, constructing, concatenating or pushing to a list/string/map/set or creating a closure is rejected with E071 (hint `allocate outside the loop`); reading, borrowing and passing existing heap values is admissible; allocation outside loops is admissible. AMENDED (ADR-0038, 0.70.0): the one exception is an output line — an interpolated string (or a plain string literal) written directly as the single argument of an output builtin (`println`, `eprintln`) whose holes all have a direct sink writer (Int, the sized ints Int8..Int64 / UInt8..UInt64, Float, Float32, Bool, String); it builds no string and is admissible. A hole of any other type (record, variant, list, map, set, Option, Result, tuple, type variable), an interpolation bound to a name (`let s = \"${n}\"`) and a printed String result (`println(int.to_string(n))`) stay E071; each hole expression is still judged by every other rule. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design; likewise the output-line exception is specified before the checker admits it — the 0.70.0-rc3 release refuses an output line in a counted loop with E071, so the admitted `fixed.almd` halves below are red against it by design."
 since     = "0.60.0"
 status    = "active"
 evidence  = [
@@ -4903,7 +4903,7 @@ evidence  = [
 id        = "C-364"
 spec      = "ALS-E31"
 title     = "A shape outside the scoped fragment is refused at check time, identically on both targets"
-statement = "ALS-E31: the admitted `scoped` fragment is decided by the CHECKER, before the target split, so a shape outside it is rejected with the same code and the same wording under `almide check` and `almide check --target wasm`, and no backend accepts what the other refuses. The three codes are E086 (a value that would outlive the scoped allocation, carrying `allocated at` and `scope ends at` rows), E087 (an operation not permitted in a scoped function or block — a non-scoped callee, a global, a host resource, an unknown indirect call, an outer heap capture, a type outside the fragment), and E088 (a recursive call that retains the current scoped activation). A program the checker admits is never refused by a leg for its region: the structural wasm leg reports a disagreement as the E083 compiler-defect channel rather than a wall, and a `scoped` program routed away from that leg is refused loudly instead of built without the boundary."
+statement = "ALS-E31: the admitted `scoped` fragment is decided by the CHECKER, before the target split, so a shape outside it is rejected with the same code and the same wording under `almide check` and `almide check --target wasm`, and no backend accepts what the other refuses. The three codes are E086 (a value that would outlive the scoped allocation, carrying `allocated at` and `scope ends at` rows), E087 (an operation not permitted in a scoped function or block — a non-scoped callee, a global, a host resource, an unknown indirect call, an outer heap capture, a type outside the fragment), and E088 (a recursive call that retains the current scoped activation). A program the checker admits is never refused by a leg for its region: the structural wasm leg reports a disagreement as the E083 compiler-defect channel rather than a wall, and a `scoped` program routed away from that leg is refused loudly instead of built without the boundary. AMENDED (2026-11-20, 0.70.0): a stdlib call is admitted by its declared SIGNATURE, never by its module name — inside a `scoped` fn or block a stdlib member is callable only when its declaration is not an `effect fn`, carries none of `@ordered` / `@memory_unsafe` / `@signals_process`, and every parameter type and the result type is a scalar (Int, the sized ints Int8..Int64 / UInt8..UInt64, Float, Float32, Bool, Unit); a call whose signature is unknown is refused. So `int.abs`, `int.clamp`, `float.abs` and `float.clamp` stay admitted, while `int.to_string` (a String result), `int.parse` (a String parameter) and `random.int` (an `effect fn` with a scalar signature) are E087 whose `may retain` row carries `signature is not scalar and effect-free`; scoped program fns and constructors are admitted as before. Requirements-first (ADR-0017): specified here before the checker enforces it — the 0.70.0-rc3 release still admits every member of `int`, `float`, `math` and `bool` by module name (it refuses `int.to_string` and `int.parse` here only for the `String` / `Result` value they produce, and `random.int` for its module), so the `expects_error` row of the three signature fixtures below is red against it by design."
 since     = "0.64.0"
 status    = "active"
 declaration = "docs/specs/scoped.md#What is refused, and why"
@@ -6074,4 +6074,41 @@ since     = "0.70.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bigint_protocol_order.almd", class = "fixture" },
+]
+
+# ── OUTPUT LINE: AN INTERPOLATED println WRITES THE STRING PATH'S BYTES ─
+[[contract]]
+id        = "C-457"
+spec      = "ALS-R2"
+title     = "An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream"
+statement = "ALS-R2 (ADR-0038): an output line — `println` / `eprintln` whose single argument is an interpolated string (or a plain string literal) written directly in the argument position, every hole an Int, a sized int (Int8..Int64, UInt8..UInt64), Float, Float32, Bool or String — writes the same bytes on both targets as the String path would: the bytes the interpolated String would hold (the same interpolation built as a String outside the line and then printed), which for an integer hole are its type's `to_string` digits, for a Bool `true` / `false`, for a String its bytes, and for a Float / Float32 hole the interpolation Display form of C-011 (shortest round-trip digits, no exponent, `NaN`, `inf`, `-inf`, the `.0` of an integral value dropped). It allocates nothing per line, and it never interleaves with another line on the same stream: under `fan.map` arms that print concurrently, every line appears whole, in the list-order observation of C-004. Requirements-first: specified here before the implementation lowers an output line to the sink; the 0.70.0-rc3 release already prints these bytes through the String path, so the byte evidence is green against it and certifies the reference the new lowering must keep (the per-line zero-allocation clause is the implementation's alloc_count ledger, cited there)."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/output_line_int_bool.almd", class = "fixture" },
+  { path = "spec/wasm_cross/output_line_float.almd", class = "fixture" },
+  { path = "spec/wasm_cross/output_line_fan_whole.almd", class = "fixture" },
+]
+
+# ── IMPORT: A NAME THAT IS BOTH A LOCAL MODULE AND A DEPENDENCY IS REFUSED ─
+[[contract]]
+id        = "C-458"
+spec      = "ALS-DL1"
+title     = "An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike"
+statement = "ALS-DL1 (almide/almide#4865): when the first segment of an `import` — `import pkg`, `import pkg.sub`, with or without an alias — names both a module of the importing project's own source (a `pkg.almd` file or a `pkg/` directory where the importing file's modules are looked up) and an entry of the governing `almide.toml` `[dependencies]`, the import is refused with error E121 naming both places, and the hint asks to rename one of them; no form of the import picks one of the two. `almide check`, `run`, `build` and `test` refuse it alike, on both targets, before anything is built. A name that is only local, or only a dependency, resolves as before, and the submodule form resolves its first segment by the same decision as the plain form."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/import_dependency_ambiguity_test.rs", name = "a_name_that_is_both_local_and_a_dependency_is_refused_in_every_import_form", class = "fixture" },
+]
+# ── PROCESS: A COMMAND NAME RUNS WHAT THE LAUNCH PATH FINDS ─────────────
+[[contract]]
+id        = "C-459"
+spec      = "ALS-R5"
+title     = "A process command name runs the program the launch PATH finds; env.set(\"PATH\") never changes which program a name runs, on native and the embedded wasm host alike"
+statement = "ALS-R5 (almide/almide#4844): a `process` call that takes a command name without a `/` (`process.exec`, `process.output`, `process.run` and `process.start`) runs the program that the `PATH` the program was LAUNCHED with finds, on native and on the embedded wasm host alike. `env.set(\"PATH\", ...)` and `env.remove(\"PATH\")` change what `env.get(\"PATH\")` answers, but never which program a name runs: a program granted `[permissions] proc = [\"ls\"]` that copies another executable into a directory as `ls` and puts that directory first on `PATH` still runs the `ls` the launch `PATH` finds, so a `[permissions] proc` entry names the program the launch environment resolves, not one the program can substitute. A name with a `/` is a path and is spawned as written. On Linux and macOS a name resolves to the first directory of the launch `PATH` holding an executable file of that name; on Windows the platform's search over the launch `PATH` and `PATHEXT` applies. Before, the native spawn resolved the name through the process `PATH` at spawn time, which `env.set` rewrites, while the embedded host resolved it through its own `PATH`, which `env.set` never reaches, so the two legs ran different programs for one name and the proc list could be sidestepped natively."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/proc_launch_path_test.rs", name = "a_command_name_runs_what_the_launch_path_finds_on_both_legs", class = "fixture" },
 ]

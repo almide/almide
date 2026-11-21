@@ -1,0 +1,2 @@
+# The probe of perm.allow-gate: A capability (FS.read) reached only through an imported module, under allow = ["IO"].
+expect = "capability violation"

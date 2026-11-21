@@ -1,0 +1,2 @@
+# The probe of bounded.bare-callee: A @bounded fn calling a selectively imported user-module fn named print_* (#4823).
+expect = "E074"

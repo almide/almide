@@ -69,9 +69,9 @@ reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed p
 
 [[file]]
 path = "crates/almide-codegen/src/walker/mod.rs"
-count = 1
+count = 2
 class = "emitted-prelude"
-reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri))"
+reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri)); MAIN_ALLOC_PRELUDE: glibc mallopt(M_TRIM_THRESHOLD, M_MMAP_THRESHOLD) after it — glibc mallopt has no safe API; cfg(target_os = linux, target_env = gnu, not(miri)) (#4620, owner ruling 2026-11-21)"
 
 [[file]]
 path = "crates/almide-codegen/src/walker/extern_c.rs"
@@ -93,9 +93,9 @@ reason = "the AVX register-tiled matmul kernel (multiply then add, no fused step
 
 [[file]]
 path = "crates/almide-kernel/src/transpose_f64.rs"
-count = 3
+count = 2
 class = "emitted-prelude"
-reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection. kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30) Invariant: AVX detected by the caller, fixed [f64; 64] in and out. Boundary test: the ASan program transposes 8x8, 16x16, 1x8, 9x13 and 24x7 against the list transpose."
+reason = "the AVX 8x8 f64 transpose (its unaligned loads and stores) and its call behind feature detection; the register-only 4x4 shuffle it calls is a safe #[target_feature] fn (3 -> 2). kept (#4342): the plain 8x8 tile in their place measured 1.26x / 1.30x on matrix.transpose of a 1024x1024 matrix and 1.18x / 1.17x on 512x768 (GCE Intel Xeon 2.8 GHz n2 / AMD EPYC 7B13 n2d, --release x86-64-v3, min of 7 pinned runs, Rust 1.96.0, 2026-10-30) Invariant: AVX detected by the caller, fixed [f64; 64] in and out. Boundary test: the ASan program transposes 8x8, 16x16, 1x8, 9x13 and 24x7 against the list transpose."
 
 [[file]]
 path = "crates/almide-rt-core/src/fs_beneath_sys.rs"

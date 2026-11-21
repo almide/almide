@@ -1,0 +1,14 @@
+# Negative control of manifest.permission-list-shape (proofs/decision-sites.toml): a list key of another TOML shape reads as absent instead of being refused
+# control_test: tests/decision_batch1a_test.rs::novel_a_permission_list_of_another_shape_is_refused
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -519,7 +519,7 @@
+         let not_a_list = || {
+             located(path, content, list.span().start, &format!("[{table_name}].{key} must be an array of strings, like `{key} = [\"…\"]`"))
+         };
+-        let items = list.get_ref().as_array().ok_or_else(not_a_list)?;
++        let Some(items) = list.get_ref().as_array() else { return Ok(None) };
+         items
+             .into_iter()
+             .map(|v| v.get_ref().as_str().map(|s| (s.to_string(), v.span().start)).ok_or_else(not_a_list))

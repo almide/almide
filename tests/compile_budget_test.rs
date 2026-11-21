@@ -306,6 +306,35 @@ fn deep_interpolation_nesting_ends_at_the_nesting_budget() {
     }
 }
 
+/// #4880: `almide test` compiles on worker threads; they run on the
+/// compiler's stack, so a test file nested past the budget ends in the same
+/// budget diagnostic `check` gives, never a stack-overflow abort, on the
+/// native and the wasm lanes. Several files, so the parallel lanes run.
+#[test]
+fn almide_test_ends_deep_nesting_at_the_budget_on_every_lane() {
+    let body = |depth: usize| format!("test \"deep\" {{\n  assert_eq({}1{}, \"1\")\n}}\n", "\"${".repeat(depth), "}\"".repeat(depth));
+    let dir = std::env::temp_dir().join(format!("almide-compile-budget-test-lane-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for i in 0..3 {
+        std::fs::write(dir.join(format!("deep{i}_test.almd")), body(600)).unwrap();
+    }
+    for lane in [&[][..], &["--target", "wasm"][..]] {
+        let out = Command::new(env!("CARGO_BIN_EXE_almide"))
+            .arg("test")
+            .arg(&dir)
+            .args(lane)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let all = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!all.contains("overflowed its stack"), "almide test {lane:?} aborted on the stack:\n{all}");
+        assert!(out.status.code().is_some_and(|c| c != 0 && c != 134), "almide test {lane:?} exit {:?}:\n{all}", out.status.code());
+        assert!(all.contains("nesting too deep (max 500)"), "almide test {lane:?}: expected the nesting budget:\n{all}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// D3: the operator raises a budget on the command line, and the verdict
 /// moves with it — the same source that ends at the default passes.
 #[test]

@@ -1,0 +1,1 @@
+locked = { git = "https://probe-lock.invalid/probe-owner/pkg", ref = "v0.1.0", commit = "/etc" }

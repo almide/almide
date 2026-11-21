@@ -1,0 +1,15 @@
+# Negative control of deps.cache-only (proofs/decision-sites.toml): the editor and MCP routes fetch dependencies and write almide.lock like a build.
+# control_test: tests/decision_novel_test.rs::novel_mcp_check_does_not_fetch_a_fresh_dependency
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -218,7 +218,8 @@
+     // `ALMIDE_DEPS_CACHE_ONLY` is the same mode for a whole process tree:
+     // `almide mcp` sets it on every tool child, whose own children (the
+     // `survive` legs, a test worker) inherit it (#4179).
+-    OFFLINE.with(|o| o.get()) || almide_base::env::flag("ALMIDE_DEPS_CACHE_ONLY")
++    let _ = OFFLINE.with(|o| o.get()) || almide_base::env::flag("ALMIDE_DEPS_CACHE_ONLY");
++    false
+ }
+ 
+ /// Restores the previous offline state when dropped.

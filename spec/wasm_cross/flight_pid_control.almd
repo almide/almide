@@ -3,7 +3,8 @@
 // a single-axis PID control law in Q16.16 fixed point — saturation and
 // integral anti-windup — driven through a 16-step COUNTED simulation loop
 // against a first-order plant. Everything scalar Int, no allocation in the
-// hot path, one declared {Stdout} exit (the actuator command trace). The
+// hot path, one declared {Stdout} exit (the actuator command trace, printed
+// as an output line that builds no String, ADR-0038 / ALS-B4). The
 // design sketch's state updates live in the driver as scalar `var`s (the
 // per-iteration heap-tuple co-return is outside the flight subset — the
 // roadmap's own constraint note); `pid_step` stays pure arithmetic.
@@ -41,6 +42,6 @@ effect fn main() -> Unit = {
     let cmd = pid_step(13107, 6553, 3276, e, integral, prev_e)
     prev_e = e
     measured = measured + cmd / 256
-    println(int.to_string(cmd))
+    println("${cmd}")
   }
 }

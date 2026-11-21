@@ -1,0 +1,3 @@
+import fs
+
+effect fn peek(p: String) -> String = fs.read_text(p)!

@@ -552,8 +552,14 @@ impl Emitter<'_> {
     /// the #1558/#1087 bare-name landmine family demands the ambiguity case
     /// refuse, never guess).
     pub(crate) fn resolve_named_fn(&self, name: &str) -> Option<usize> {
+        // #4886: a derived method of a module type is named `acct.User.decode`
+        // (key `acct.acct.User.decode`); it beats the entry's bare same name.
         self.cur_module
-            .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
+            .and_then(|m| {
+                self.table.by_name.get(&format!("{m}.{name}")).or_else(|| {
+                    name.contains('.').then(|| self.table.by_name.get(&format!("{m}.{m}.{name}"))).flatten()
+                })
+            })
             .or_else(|| self.table.by_name.get(name))
             .copied()
             .or_else(|| self.resolve_qualified(name))

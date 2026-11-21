@@ -1,0 +1,14 @@
+# Negative control of perm.proc-grant-without-list (proofs/decision-sites.toml): granting Proc with no proc list is a warning under --profile critical too
+# control_test: tests/decision_batch1a_test.rs::novel_proc_granted_without_a_list_is_refused_under_critical
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -168,7 +168,7 @@
+          any command, and a started command can reach every other capability"
+     ));
+     err("  hint: list the commands it may start — `proc = [\"git\"]` under [permissions] (ADR-0025)");
+-    if refuse {
++    if false && refuse {
+         return Err("`Proc` granted without a `proc` list under --profile critical".to_string());
+     }
+     Ok(())

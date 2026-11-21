@@ -1,0 +1,5 @@
+import helper
+
+test "inc" {
+  assert_eq(helper.inc(1), 2)
+}
