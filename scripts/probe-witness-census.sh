@@ -17,6 +17,7 @@ ROOT="$PWD"
 OUT="${1:?usage: scripts/probe-witness-census.sh <out-dir>}"
 mkdir -p "$OUT/work" "$OUT/keep"
 OUT="$(cd "$OUT" && pwd)"
+: >> "$OUT/mutrows.tsv"
 W="$OUT/work"
 
 cargo build -q --bin almide || exit 1
@@ -81,7 +82,9 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
     grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
-    "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    if [ -z "${NO_MUTATE:-}" ]; then
+  "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    fi
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true
     if [ -n "$ANCHOROLD" ]; then
       MUT_ONLY=control "$ANCHOROLD" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows-old.tsv" || true

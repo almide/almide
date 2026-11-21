@@ -103,7 +103,11 @@ pub(crate) fn emit_list_push(s: Scalar) -> (Function, HelperSig) {
         i.end();
         sig.loop_close();
     }
-    i.local_get(list).call(F_DEC_FLAT);
+    // REPLAY (probe only): the release as it was before the every-path
+    // fix — the outgrown block freed only when uniquely held.
+    i.local_get(list).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(list).call(F_FREE);
+    i.end();
     sig.rc(lo, 'd');
     i.local_get(base);
     sig.op(fresh, 'm');
@@ -163,7 +167,10 @@ pub(crate) fn emit_bytes_push() -> (Function, HelperSig) {
     // RC-3: release the outgrown block on every path, as $list_push and
     // $str_append do — freed when uniquely owned, the caller's share
     // dropped when shared, a static left alone (#4304).
-    i.local_get(b).call(F_DEC_FLAT);
+    // REPLAY (probe only): as above.
+    i.local_get(b).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(b).call(F_FREE);
+    i.end();
     sig.rc(b as usize, 'd');
     i.local_get(base);
     sig.op(fresh, 'm');
