@@ -24,6 +24,8 @@ struct Decl {
     arity: usize,
     intrinsic: String,
     consumes: bool,
+    /// `@appends`: the result is the reused list with the fn's other param appended as one element.
+    appends: bool,
 }
 
 /// `@name(a, b)` -> ("name", ["a", "b"]); `@name("s")` -> ("name", ["s"]).
@@ -115,6 +117,7 @@ fn scan(path: &Path) -> Vec<Decl> {
         let consumes = attrs_here
             .iter()
             .any(|(n, a)| n == "consume" && a.iter().any(|x| x == p));
+        let appends = attrs_here.iter().any(|(n, _)| n == "appends");
         out.push(Decl {
             module: module.clone(),
             func,
@@ -123,6 +126,7 @@ fn scan(path: &Path) -> Vec<Decl> {
             arity: names.len(),
             intrinsic,
             consumes,
+            appends,
         });
     }
     out
@@ -165,8 +169,8 @@ pub fn generate(root: &Path, files: &[PathBuf], out_path: &Path) {
         };
         writeln!(
             out,
-            "    Reuse {{ module: {:?}, func: {:?}, param: {}, arity: {}, intrinsic: {:?}, owned_twin: {twin} }},",
-            d.module, d.func, d.param, d.arity, d.intrinsic
+            "    Reuse {{ module: {:?}, func: {:?}, param: {}, arity: {}, intrinsic: {:?}, owned_twin: {twin}, appends: {} }},",
+            d.module, d.func, d.param, d.arity, d.intrinsic, d.appends
         )
         .expect("write");
     }
