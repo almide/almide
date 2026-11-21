@@ -38,7 +38,7 @@ fn novel_depth_is_the_validators_control_stack() {
 /// by `branch_target` — a branch names the frame it leaves to, an exit of the
 /// function answers `Some(0)`, everything else does not branch — and every
 /// operator outside the domain (GC, legacy and current exception handling,
-/// stack switching) or no operator at all (an unassigned opcode byte) is
+/// stack switching, the function-references branches and calls) or no operator at all (an unassigned opcode byte) is
 /// refused at decode. Each module is a fresh function, so no table of names
 /// stands in for the operators.
 #[test]
@@ -57,15 +57,11 @@ fn novel_every_control_operator_is_classified_or_refused() {
         ("Br", "(block (block (br 1)))".into(), Some(1)),
         ("BrIf", "(block (block (br_if 0 (i32.const 1))))".into(), Some(2)),
         ("BrTable", "(block (block (block (br_table 0 2 1 (i32.const 0)))))".into(), Some(1)),
-        ("BrOnNull", "(block (br_on_null 0 (ref.null func)) (drop))".into(), Some(1)),
-        ("BrOnNonNull", "(block (result funcref) (br_on_non_null 0 (ref.null func)) (ref.null func)) drop".into(), Some(1)),
         ("Return", "(block (return))".into(), Some(0)),
         ("Call", format!("(call ${f}_g)"), None),
         ("CallIndirect", "(call_indirect (type $t) (i32.const 0))".into(), None),
-        ("CallRef", format!("(call_ref $t (ref.func ${f}_g))"), None),
         ("ReturnCall", format!("(block (return_call ${f}_g))"), Some(0)),
         ("ReturnCallIndirect", "(block (return_call_indirect (type $t) (i32.const 0)))".into(), Some(0)),
-        ("ReturnCallRef", format!("(block (return_call_ref $t (ref.func ${f}_g)))"), Some(0)),
     ];
     let module = |body: &str| {
         format!(
@@ -88,6 +84,10 @@ fn novel_every_control_operator_is_classified_or_refused() {
         ("try_table (exceptions)", format!("(tag ${tag}) (func ${f} (block (try_table (catch ${tag} 0) (call ${f}))))")),
         ("throw (exceptions)", format!("(tag ${tag}) (func ${f} (throw ${tag}))")),
         ("try (legacy exceptions)", format!("(tag ${tag}) (func ${f} try throw ${tag} catch_all end)")),
+        ("br_on_null (function references)", format!("(func ${f} (block (br_on_null 0 (ref.null func)) (drop)))")),
+        ("br_on_non_null (function references)", format!("(func ${f} (block (result funcref) (br_on_non_null 0 (ref.null func)) (ref.null func)) drop)")),
+        ("call_ref (function references)", format!("(type $t (func)) (elem declare func ${f}_g) (func ${f}_g) (func ${f} (call_ref $t (ref.func ${f}_g)))")),
+        ("return_call_ref (function references)", format!("(type $t (func)) (elem declare func ${f}_g) (func ${f}_g) (func ${f} (return_call_ref $t (ref.func ${f}_g)))")),
         ("br_on_cast (gc)", format!("(func ${f} (block (result anyref) (br_on_cast 0 anyref i31ref (ref.null any)) drop (ref.null any)) drop)")),
     ];
     for (name, items) in refused {
