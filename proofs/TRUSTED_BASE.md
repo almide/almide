@@ -172,7 +172,7 @@ the row lists where it does not hold yet.
 
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
-The spine has 163 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
+The spine has 164 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra

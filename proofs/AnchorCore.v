@@ -72,5 +72,72 @@ Proof.
   rewrite Ha. repeat split; nia.
 Qed.
 
+(* The address the emitter's instructions compute, as wasm computes it: every
+   i32 operation wraps, so `base + wrap(I) * S` with `base = B + c` is the
+   integer `B + c + I * S` taken mod 2^32. *)
+Lemma wrapped_address : forall B c I S,
+  wrap32 (wrap32 (B + c) + wrap32 (wrap32 I * S)) = wrap32 (B + c + I * S).
+Proof.
+  intros B c I S. unfold wrap32.
+  assert (Hn : M32 <> 0) by (unfold M32; lia).
+  rewrite (Z.mul_mod_idemp_l I S M32 Hn).
+  rewrite <- (Z.add_mod (B + c) (I * S) M32 Hn).
+  reflexivity.
+Qed.
+
+(* The general shape the byte-level check accepts (covers.rs `list_index`):
+   the access's address is `(B + c) + wrap(I) * S` at static offset `off`,
+   with `off + c = PAYLOAD + S * q` (a displacement of `q` whole slots), and
+   the compare tested the slot number `j = I + q` — NOT `I` itself, which may
+   be negative or large. The 32-bit sum wraps; the static offset is added
+   without wrapping (the effective address), and the access traps unless it
+   ends inside memory. So: whenever the access does not trap, it touches
+   exactly slot `j` of the block, inside its payload.
+
+   The hypotheses, and where each comes from:
+     0 < S, W <= S, off + c = PAYLOAD + S * q, 0 <= q   the check's rule R5
+     j = I + q                                            the check's rule R6
+     0 <= j < len / S                                     the guard (the theorem
+                                                          above) and rule R4
+     B + PAYLOAD + len <= mem <= 2^32                     assumption A2 (the block
+                                                          lies in memory)
+     ea + W <= mem                                        wasm: the access did
+                                                          not trap *)
+Theorem displaced_access_in_payload : forall B c I S q off W len j mem a ea,
+  0 < S -> 0 < W -> W <= S ->
+  0 <= B -> 0 <= len -> B + PAYLOAD + len <= mem -> mem <= M32 ->
+  0 <= off -> 0 <= q ->
+  off + c = PAYLOAD + S * q ->
+  j = I + q ->
+  0 <= j -> j < len / S ->
+  a = wrap32 (wrap32 (B + c) + wrap32 (wrap32 I * S)) ->
+  ea = a + off ->
+  ea + W <= mem ->
+  ea = B + PAYLOAD + j * S /\
+  B + PAYLOAD <= ea /\
+  ea + W <= B + PAYLOAD + len.
+Proof.
+  intros B c I S q off W len j mem a ea HS HW HWS HB Hlen Hfit Hmem Hoff Hq Hsplit Hj Hj0 Hjlt Ha Hea Hok.
+  rewrite wrapped_address in Ha.
+  pose proof (slot_below_len j len S HS Hj0 Hjlt) as Hs.
+  assert (HjS : 0 <= j * S) by nia.
+  assert (Htop : j * S + W <= len) by nia.
+  assert (Hx : B + c + I * S = B + PAYLOAD + j * S - off) by (rewrite Hj; nia).
+  unfold wrap32 in Ha. rewrite Hx in Ha.
+  assert (Hn : M32 <> 0) by (unfold M32; lia).
+  assert (HM : 0 < M32) by (unfold M32; lia).
+  pose proof (Z.mod_pos_bound (B + PAYLOAD + j * S - off) M32 HM) as Hb.
+  pose proof (Z.div_mod (B + PAYLOAD + j * S - off) M32 Hn) as Hd.
+  rewrite <- Ha in Hb, Hd.
+  remember ((B + PAYLOAD + j * S - off) / M32) as z eqn:Hz. clear Hz.
+  remember (j * S) as jS eqn:HjSe. clear HjSe.
+  subst ea.
+  unfold M32, PAYLOAD in *.
+  assert (Hz0 : z = 0) by lia.
+  subst z.
+  repeat split; lia.
+Qed.
+
 Print Assumptions unsigned_guard_excludes_negatives.
 Print Assumptions guarded_access_in_payload.
+Print Assumptions displaced_access_in_payload.
