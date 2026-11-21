@@ -1,0 +1,41 @@
+name: Probe — rocq
+on:
+  push:
+    branches: [probe/rocq-anchor]
+permissions:
+  contents: read
+env:
+  OPAM_CACHE_VERSION: v1
+  OCAML_VERSION: "5.4.1"
+  ROCQ_CORE_VERSION: "9.3.0"
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
+jobs:
+  compile:
+    name: Compile the probe files
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+      - name: Require the cached toolchain
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::no cached opam root for this key; the probe does not build Rocq from source"
+          exit 1
+      - name: Install opam
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends opam
+      - name: Compile
+        working-directory: proofs
+        run: |
+          eval "$(opam env)"
+          if command -v coqc >/dev/null 2>&1; then C=coqc; else C="rocq compile"; fi
+          while IFS= read -r f; do
+            case "$f" in ''|'#'*) continue;; esac
+            echo "== $f"
+            $C -Q . AlmideTrust "$f"
+          done < probe-files.txt
