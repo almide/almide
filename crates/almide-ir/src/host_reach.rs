@@ -1,0 +1,209 @@
+//! Which stdlib functions reach a host op of the primitive floor (#4827).
+//!
+//! The floor declares its sandbox exits: a `prim` fn marked `@prim_op(host)`
+//! in stdlib/prim.almd is a host op. A stdlib function reaches the host when
+//! a body that serves it calls one, directly or through a function it names:
+//! its declaration in the module's source, or a self-host registry body that
+//! serves its call name. The answer is read from those declarations and
+//! bodies, never from a module or function name.
+
+use almide_lang::ast::{Decl, Expr, ExprKind, Program};
+use std::collections::{BTreeSet, HashSet};
+use std::sync::OnceLock;
+
+/// The floor's host ops: every `prim` fn declared `@prim_op(host)`.
+pub fn prim_host_ops() -> &'static BTreeSet<String> {
+    static OPS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    OPS.get_or_init(|| {
+        almide_lang::stdlib_info::bundled_source("prim")
+            .and_then(almide_lang::parse_cached)
+            .map(host_ops_declared_in)
+            .unwrap_or_default()
+    })
+}
+
+/// The fns of `prog` whose `@prim_op` names `host` as its kind.
+pub fn host_ops_declared_in(prog: &Program) -> BTreeSet<String> {
+    prog.decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Fn { name, .. } if is_host_op(d) => Some(name.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The bodies that serve the stdlib call `module.func`: its declaration in
+/// the module's own source, and every self-host registry body registered
+/// under that call name. Empty when nothing serves it.
+pub fn serving_bodies(module: &str, func: &str) -> Vec<(&'static Program, String)> {
+    let mut out = Vec::new();
+    if let Some(prog) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) {
+        if find_fn(prog, func).is_some() {
+            out.push((prog, func.to_string()));
+        }
+    }
+    let call = format!("{module}.{func}");
+    for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
+        for (imp, name) in rows.iter() {
+            if *name == call {
+                if let Some(prog) = almide_lang::parse_cached(src) {
+                    out.push((prog, imp.to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Does a body serving the stdlib call `module.func` reach a floor host op?
+pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_stdlib(module, func, &mut seen)
+}
+
+/// Does fn `name` of `prog`, a source of stdlib `module`, reach a floor host
+/// op, directly or through a fn of the same source or a stdlib call it
+/// names? A name it spells that resolves to nothing contributes nothing.
+pub fn fn_reaches_host(prog: &Program, module: &str, name: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_in(prog, module, name, &mut seen)
+}
+
+type Seen = HashSet<(usize, String)>;
+
+/// A bodyless declaration that a self-host body also serves is that body's
+/// signature: the body is what is followed. Only a call served by nothing
+/// but a bodyless declaration is judged by that declaration.
+fn reaches_stdlib(module: &str, func: &str, seen: &mut Seen) -> bool {
+    let all = serving_bodies(module, func);
+    let bodied: Vec<_> = all.iter().filter(|(p, n)| find_fn(p, n).is_some_and(has_body)).cloned().collect();
+    let judged = if bodied.is_empty() { all } else { bodied };
+    judged.into_iter().any(|(prog, name)| reaches_in(prog, module, &name, seen))
+}
+
+fn has_body(decl: &Decl) -> bool {
+    matches!(decl, Decl::Fn { body: Some(b), .. } if !matches!(b.kind, ExprKind::Hole))
+}
+
+/// The reach of one declaration. A host op of the floor reaches the host by
+/// its own declaration. A bodyless declaration (`= _`, served by the runtime)
+/// shows no body to follow, so it is judged by what it declares: a non-empty
+/// `@category` reaches the host, an empty one does not, and with neither it
+/// reaches the host unless its module is classified `Pure`.
+fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool {
+    if !seen.insert((prog as *const Program as usize, name.to_string())) {
+        return false;
+    }
+    let Some(decl) = find_fn(prog, name) else { return false };
+    if is_host_op(decl) {
+        return true;
+    }
+    if let Decl::Fn { attrs, .. } = decl {
+        if !has_body(decl) {
+            return match attrs.iter().find(|a| a.name.as_str() == "category") {
+                Some(a) => !a.args.is_empty(),
+                None => crate::effect::module_effects(module) != Some(crate::effect::ModuleEffects::Pure),
+            };
+        }
+    }
+    named(decl).into_iter().any(|r| match r {
+        Named::Qualified(m, f) => reaches_stdlib(&m, &f, seen),
+        // A bare name of a bodyless declaration that a self-host body serves
+        // is followed into that body, as a qualified call is.
+        Named::Bare(f) => match find_fn(prog, &f) {
+            Some(d) if !has_body(d) && !serving_bodies(module, &f).is_empty() => reaches_stdlib(module, &f, seen),
+            _ => reaches_in(prog, module, &f, seen),
+        },
+    })
+}
+
+/// Is `decl` a host op of the floor (`@prim_op(host)`)?
+pub fn is_host_op(decl: &Decl) -> bool {
+    let Decl::Fn { attrs, .. } = decl else { return false };
+    attrs.iter().any(|a| {
+        a.name.as_str() == "prim_op"
+            && a.args.first().is_some_and(|x| {
+                x.name.is_none() && matches!(&x.value, almide_lang::ast::AttrValue::Ident { name } if name.as_str() == "host")
+            })
+    })
+}
+
+fn find_fn<'p>(prog: &'p Program, name: &str) -> Option<&'p Decl> {
+    prog.decls.iter().find(|d| matches!(d, Decl::Fn { name: n, .. } if n.as_str() == name))
+}
+
+enum Named {
+    Bare(String),
+    Qualified(String, String),
+}
+
+/// Every name a declaration's body spells as `f` or `m.f` — a call, a pipe
+/// target, a fn passed as a value. Over-approximate on purpose: a local that
+/// shares a fn's name only widens the reach.
+fn named(decl: &Decl) -> Vec<Named> {
+    let mut d = decl.clone();
+    let mut out = Vec::new();
+    almide_lang::ast::visit_decl_exprs_mut(&mut d, &mut |e: &mut Expr| match &e.kind {
+        ExprKind::Ident { name } => out.push(Named::Bare(name.to_string())),
+        ExprKind::Member { object, field } => {
+            if let ExprKind::Ident { name } = &object.kind {
+                out.push(Named::Qualified(name.to_string(), field.to_string()));
+            }
+        }
+        _ => {}
+    });
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leak_parse(src: String) -> &'static Program {
+        almide_lang::parse_cached(Box::leak(src.into_boxed_str())).expect("parses")
+    }
+
+    #[test]
+    fn the_floor_declares_its_host_ops() {
+        let ops = prim_host_ops();
+        for op in ["fd_write", "random_get", "write_text_file", "clock_time_get", "env_get"] {
+            assert!(ops.contains(op), "`prim.{op}` is declared @prim_op(host)");
+        }
+        for op in ["load8", "store32", "band", "alloc_str", "rc_inc"] {
+            assert!(!ops.contains(op), "`prim.{op}` is not a host op");
+        }
+    }
+
+    /// The reach is followed through a same-source helper and refuses
+    /// nothing a body does not spell (the control).
+    #[test]
+    fn a_body_reaches_a_host_op_through_a_helper() {
+        let prog = leak_parse(
+            "fn helper(p: String) -> Int = prim.write_text_file(p, p)\n\
+             fn sneaky(p: String) -> Int = helper(p)\n\
+             fn plain(p: String) -> Int = prim.load8(0)\n"
+                .to_string(),
+        );
+        assert!(fn_reaches_host(prog, "string", "sneaky"));
+        assert!(!fn_reaches_host(prog, "string", "plain"));
+    }
+
+    /// A host op reaches the host by its own declaration; another floor op
+    /// does not.
+    #[test]
+    fn a_host_op_reaches_the_host_by_its_declaration() {
+        assert!(stdlib_fn_reaches_host("prim", "fd_write"));
+        assert!(stdlib_fn_reaches_host("prim", "write_text_file"));
+        assert!(!stdlib_fn_reaches_host("prim", "load8"));
+    }
+
+    /// The served bodies: a registry body is followed under its call name.
+    #[test]
+    fn a_registry_body_is_followed_under_its_call_name() {
+        assert!(stdlib_fn_reaches_host("datetime", "now"), "clock_now reads prim.clock_time_get");
+        assert!(stdlib_fn_reaches_host("random", "int"));
+        assert!(!stdlib_fn_reaches_host("datetime", "add_days"));
+        assert!(!stdlib_fn_reaches_host("string", "trim"));
+    }
+}
