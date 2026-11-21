@@ -4904,7 +4904,7 @@ statement = "ALS-E31: the admitted `scoped` fragment is decided by the CHECKER, 
 since     = "0.64.0"
 status    = "active"
 declaration = "docs/specs/scoped.md#What is refused, and why"
-refusal   = ["tests/diagnostics/e087-scope-unscoped-callee", "tests/diagnostics/e087-scope-global", "tests/diagnostics/e087-scope-host-output"]
+refusal   = ["tests/diagnostics/e087-scope-unscoped-callee", "tests/diagnostics/e087-scope-global", "tests/diagnostics/e087-scope-host-output", "tests/diagnostics/e087-scope-effect-call", "tests/diagnostics/e087-scope-string-param-call", "tests/diagnostics/e087-scope-string-result-call"]
 challenge = ["dojo:callback-retention"]
 evidence  = [
   { path = "tests/diagnostics/e087-scope-unscoped-callee/broken.almd", class = "fixture" },
