@@ -8,7 +8,7 @@ impl Checker {
     pub(crate) fn check_concurrent_var_reach(&mut self, program: &ast::Program) {
         use crate::concurrent_reach::{Analyzer, World};
         let module = self.current_module_prefix.as_deref().map(sym);
-        let (findings, closure) = {
+        let (findings, closure, escapes) = {
             let env = &self.env;
             let aliases = &env.import_table.aliases;
             let direct = &env.import_table.direct;
@@ -38,6 +38,10 @@ impl Checker {
         }
         for f in closure {
             let d = served_app_closure_diagnostic(&f, self.source_file.clone());
+            self.diagnostics.push(d);
+        }
+        for f in escapes {
+            let d = escape_diagnostic(&f, self.source_file.clone());
             self.diagnostics.push(d);
         }
     }
@@ -122,6 +126,31 @@ fn concurrent_reach_diagnostic(
             )
         }
     };
+    let mut d = Diagnostic::error(message, hint, context).with_code("E008");
+    d.file = file;
+    if let Some(s) = f.span {
+        d.line = Some(s.line);
+        d.col = Some(s.col);
+        d.end_col = Some(s.end_col);
+    }
+    d
+}
+
+/// E008, #4903: a fn with a concurrent slot named other than as a callee.
+fn escape_diagnostic(f: &crate::concurrent_reach::EscapeFinding, file: Option<String>) -> Diagnostic {
+    let name = f.name.as_str();
+    let surface = f.surface.as_str();
+    let message = format!("{name} runs an argument concurrently ({surface}), so it can only be called directly");
+    let how = if name == "this lambda" {
+        "bind it with `let` and call it by that name".to_string()
+    } else {
+        format!("call `{name}(…)` by name, or through a `let` alias of it")
+    };
+    let hint = format!(
+        "{how}. Passed as a value — an argument, a list or record element, a `var` — its call cannot be \
+         resolved, so the concurrent argument would escape the check that keeps `var`s out of concurrent bodies."
+    );
+    let context = format!("a fn whose argument runs in {surface}, used as a value");
     let mut d = Diagnostic::error(message, hint, context).with_code("E008");
     d.file = file;
     if let Some(s) = f.span {

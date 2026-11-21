@@ -38,10 +38,20 @@ pub use closed::ClosureFinding;
 #[path = "concurrent_reach_shape.rs"]
 mod shape;
 pub use shape::may_have_sites;
+#[path = "concurrent_reach_escape.rs"]
+mod escape;
+pub use escape::EscapeFinding;
 
-/// The `fan` surfaces whose fn-valued arguments are concurrent slots.
-/// `__any_block` is the parser's spelling of `fan.any { … }`.
-const FAN_OPS: &[&str] = &["map", "settle", "any", "any_map", "race", "timeout", "bounded", "__any_block"];
+/// The surface a `fan.<op>` call is written as: `__any_block` is the
+/// parser's spelling of `fan.any { … }`. Every `fan.<op>` is a concurrency
+/// primitive, so every fn-valued argument of one is a concurrent slot — a
+/// name list here would leave an op it does not hold unchecked (#4903).
+fn fan_surface(op: &str) -> String {
+    match op {
+        "__any_block" => "fan.any".to_string(),
+        o => format!("fan.{o}"),
+    }
+}
 
 /// What kind of concurrent slot a site sits in; decides the diagnostic's
 /// wording. `surface` is the stdlib spelling the writer used (`fan.map`,
@@ -124,9 +134,10 @@ enum Bind<'a> {
     Var { body: u32 },
     /// A binding whose value is `init` — followed as a snapshot.
     Let { body: u32, init: &'a Expr },
-    /// A parameter of the top-level fn being discovered (`index`), or a
-    /// lambda / pattern binder (`None`).
-    Param { index: Option<usize>, fn_typed: bool },
+    /// A parameter of the top-level fn being discovered (`index`, `lam`
+    /// None), parameter `index` of the lambda with expression id `lam`, or a
+    /// pattern binder (`index` None).
+    Param { index: Option<usize>, fn_typed: bool, lam: Option<u32> },
 }
 
 type Scope<'a> = Vec<(Sym, Bind<'a>)>;
@@ -166,6 +177,11 @@ pub struct Analyzer<'a> {
     prog: &'a Program,
     /// Inferred slots of this program's fns.
     pub slots: HashMap<Sym, Vec<(usize, SlotKind)>>,
+    /// Inferred slots of this program's lambdas, by expression id (#4903).
+    lam_slots: HashMap<u32, Vec<(usize, SlotKind)>>,
+    /// Uses of a fn with a concurrent slot other than as a direct callee
+    /// (#4903): each hides the slot from E008, so each is refused.
+    escape_findings: Vec<EscapeFinding>,
     fn_memo: HashMap<Sym, Option<Witness>>,
     in_progress: HashSet<Sym>,
     next_body: u32,
@@ -215,6 +231,8 @@ impl<'a> Analyzer<'a> {
             written: std::cell::OnceCell::new(),
             prog,
             slots: HashMap::new(),
+            lam_slots: HashMap::new(),
+            escape_findings: Vec::new(),
             fn_memo: HashMap::new(),
             in_progress: HashSet::new(),
             next_body: 1,
@@ -259,16 +277,16 @@ impl<'a> Analyzer<'a> {
 
     /// Run slot inference to a fixpoint, then collect every site that
     /// reaches a `var`, and every `http.serve` app that reads a local.
-    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>) {
+    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>, Vec<EscapeFinding>) {
         if !self.shape.may_have_sites {
             // No site: nothing to infer and nothing to record (`Shape`).
             // `http.serve` has a declared slot, so its call is a site too.
-            return (self.findings, self.closure_findings);
+            return (self.findings, self.closure_findings, self.escape_findings);
         }
         self.infer_slots(prog);
         self.record = true;
         self.discover_program(prog);
-        (self.findings, self.closure_findings)
+        (self.findings, self.closure_findings, self.escape_findings)
     }
 
     /// Slot inference only (§3.1), to a fixpoint.
@@ -291,14 +309,27 @@ impl<'a> Analyzer<'a> {
     /// The cross-module summary of every fn of this program.
     pub fn summaries(&mut self) -> HashMap<Sym, FnSummary> {
         let names: Vec<Sym> = self.fns.keys().copied().collect();
-        names
+        let mut out: HashMap<Sym, FnSummary> = names
             .into_iter()
             .map(|n| {
                 let reach = if self.shape.may_reach { self.fn_reach(n) } else { None };
                 let slots = self.slots.get(&n).cloned().unwrap_or_default();
                 (n, FnSummary { slots, reach })
             })
-            .collect()
+            .collect();
+        // A top-level `let` bound to a fn value (`let run = (f) => fan.map(xs, f)`)
+        // is named from another module like a fn (#4903).
+        let lets: Vec<(Sym, &'a Expr)> = self.top_lets.iter().map(|(n, e)| (*n, *e)).collect();
+        for (n, init) in lets {
+            if out.contains_key(&n) {
+                continue;
+            }
+            let s = self.top_let_summary(init);
+            if s != FnSummary::default() {
+                out.insert(n, s);
+            }
+        }
+        out
     }
 
     fn discover_program(&mut self, prog: &'a Program) {
@@ -309,13 +340,15 @@ impl<'a> Analyzer<'a> {
                     self.current_fn = Some(*name);
                     for (i, p) in params.iter().enumerate() {
                         let fn_typed = (self.w.type_is_fn)(&p.ty);
-                        scope.push((p.name, Bind::Param { index: Some(i), fn_typed }));
+                        scope.push((p.name, Bind::Param { index: Some(i), fn_typed, lam: None }));
                     }
                     self.walk(body, &mut scope, Mode::Discover);
                 }
                 Decl::TopLet { value, .. } => {
                     self.current_fn = None;
-                    self.walk(value, &mut scope, Mode::Discover);
+                    // A `let` initializer may name a fn with a concurrent slot:
+                    // the binding is then an alias, held to the callee rule.
+                    self.walk_unchecked(value, &mut scope, Mode::Discover);
                 }
                 Decl::Test { body, .. } => {
                     self.current_fn = None;
@@ -352,13 +385,29 @@ impl<'a> Analyzer<'a> {
     }
 
     fn resolve_callee(&self, callee: &Expr, scope: &Scope<'a>) -> Callee {
+        self.resolve_callee_at(callee, scope, 0)
+    }
+
+    /// The callee `callee` names. A `let` alias of a fn or a lambda is
+    /// followed to what it was bound to (#4903, rule (b)): `let g = w; g(x)`
+    /// is a call of `w`.
+    fn resolve_callee_at(&self, callee: &Expr, scope: &Scope<'a>, depth: u32) -> Callee {
+        if depth > 8 {
+            return Callee::Unknown;
+        }
         match &callee.kind {
-            ExprKind::Paren { expr } => self.resolve_callee(expr, scope),
+            ExprKind::Paren { expr } => self.resolve_callee_at(expr, scope, depth + 1),
+            ExprKind::Lambda { .. } => Callee::Lambda(callee.id.0),
             ExprKind::Ident { name } => {
-                if lookup(scope, *name).is_some() {
-                    Callee::Value
+                if let Some(b) = lookup(scope, *name) {
+                    match b {
+                        Bind::Let { init, .. } => self.resolve_alias(init, scope, depth + 1),
+                        _ => Callee::Value,
+                    }
                 } else if self.fns.contains_key(name) {
                     Callee::Local(*name)
+                } else if let Some(init) = self.top_lets.get(name).copied() {
+                    self.resolve_alias(init, &Vec::new(), depth + 1)
                 } else if let Some(m) = self.w.direct.get(name) {
                     self.module_callee(*m, *name)
                 } else {
@@ -385,13 +434,32 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 // A method call on a value (UFCS): a local fn of that name,
-                // else a stdlib method.
+                // whose first argument is the receiver, else a stdlib method.
                 match self.method_fn(*field) {
-                    Some(f) => Callee::Local(f),
-                    None => Callee::Method,
+                    Some(f) => Callee::Ufcs(f),
+                    // A stdlib fn of that name declaring `@concurrent`, called
+                    // as a method: its slots count from the receiver.
+                    None => match stdlib_method_module(field.as_str()) {
+                        Some(m) => Callee::StdlibMethod(sym(m), *field),
+                        None => Callee::Method,
+                    },
                 }
             }
             _ => Callee::Unknown,
+        }
+    }
+
+    /// What a `let` bound to `init` names when called: a fn or lambda it
+    /// aliases, else an unknown value. A member is followed only when it is
+    /// module-qualified — a record field is a value.
+    fn resolve_alias(&self, init: &Expr, scope: &Scope<'a>, depth: u32) -> Callee {
+        let c = match &peel_paren(init).kind {
+            ExprKind::Member { object, field } => self.module_member(object, *field, scope).unwrap_or(Callee::Value),
+            _ => self.resolve_callee_at(init, scope, depth),
+        };
+        match c {
+            Callee::Unknown | Callee::Method | Callee::Ufcs(_) => Callee::Value,
+            c => c,
         }
     }
 
@@ -424,17 +492,14 @@ impl<'a> Analyzer<'a> {
     /// The concurrent slots of a call, as (argument index, kind).
     fn call_slots(&self, callee: &Callee, args: &[&'a Expr], scope: &Scope<'a>) -> Vec<(usize, SlotKind)> {
         match callee {
-            Callee::Fan(op) if FAN_OPS.contains(&op.as_str()) => {
-                let surface = match op.as_str() {
-                    "__any_block" => "fan.any".to_string(),
-                    o => format!("fan.{o}"),
-                };
+            Callee::Fan(op) => {
+                let surface = fan_surface(op.as_str());
                 (0..args.len())
                     .filter(|&i| self.is_fn_valued(args[i], scope))
                     .map(|i| (i, SlotKind::FanCallback { surface: surface.clone() }))
                     .collect()
             }
-            Callee::Stdlib(m, f) => {
+            Callee::Stdlib(m, f) | Callee::StdlibMethod(m, f) => {
                 let declared = stdlib_declared_slots(m.as_str(), f.as_str());
                 if declared.is_empty() {
                     return Vec::new();
@@ -452,7 +517,8 @@ impl<'a> Analyzer<'a> {
                     })
                     .collect()
             }
-            Callee::Local(f) => self.slots.get(f).cloned().unwrap_or_default(),
+            Callee::Local(f) | Callee::Ufcs(f) => self.slots.get(f).cloned().unwrap_or_default(),
+            Callee::Lambda(id) => self.lam_slots.get(id).cloned().unwrap_or_default(),
             Callee::Ext(m, f) => self
                 .w
                 .ext
@@ -497,7 +563,7 @@ impl<'a> Analyzer<'a> {
     /// Whether a lambda argument of this call is folded into the body around it.
     fn folds(&self, callee: &Callee, index: usize) -> bool {
         match callee {
-            Callee::Stdlib(m, f) => {
+            Callee::Stdlib(m, f) | Callee::StdlibMethod(m, f) => {
                 !matches!(m.as_str(), "fan" | "http")
                     && !stdlib_declared_slots(m.as_str(), f.as_str()).contains(&index)
             }
@@ -509,9 +575,26 @@ impl<'a> Analyzer<'a> {
     // ── The walk ────────────────────────────────────────────────────────
 
     fn walk(&mut self, e: &'a Expr, scope: &mut Scope<'a>, mode: Mode) {
+        if matches!(mode, Mode::Discover) && self.record {
+            self.check_escape(e, scope);
+        }
+        self.walk_unchecked(e, scope, mode);
+    }
+
+    /// [`Self::walk`] without holding `e` itself to the callee rule (#4903):
+    /// for a callee and a `let` initializer, the two places a fn with a
+    /// concurrent slot may be named. A parenthesized one is looked through.
+    fn walk_unchecked(&mut self, e: &'a Expr, scope: &mut Scope<'a>, mode: Mode) {
+        match &e.kind {
+            ExprKind::Paren { expr } => self.walk_unchecked(expr, scope, mode),
+            _ => self.walk_kind(e, scope, mode),
+        }
+    }
+
+    fn walk_kind(&mut self, e: &'a Expr, scope: &mut Scope<'a>, mode: Mode) {
         match &e.kind {
             ExprKind::Ident { name } | ExprKind::TypeName { name } => self.name_ref(*name, e.span, scope, mode),
-            ExprKind::Lambda { params, body } => self.lambda(params, body, scope, mode, false),
+            ExprKind::Lambda { params, body } => self.lambda(e.id.0, params, body, scope, mode, false),
             ExprKind::Call { callee, args, named_args, .. } => {
                 let args: Vec<&'a Expr> = args.iter().chain(named_args.iter().map(|(_, a)| a)).collect();
                 self.call(callee, &args, scope, mode);
@@ -693,7 +776,7 @@ impl<'a> Analyzer<'a> {
         for s in stmts {
             match s {
                 Stmt::Let { name, value, .. } => {
-                    self.walk(value, scope, mode);
+                    self.walk_unchecked(value, scope, mode);
                     scope.push((*name, Bind::Let { body, init: value }));
                 }
                 Stmt::Var { name, value, .. } => {
@@ -744,12 +827,12 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn lambda(&mut self, params: &'a [ast::LambdaParam], body: &'a Expr, scope: &mut Scope<'a>, mode: Mode, folded: bool) {
+    fn lambda(&mut self, id: u32, params: &'a [ast::LambdaParam], body: &'a Expr, scope: &mut Scope<'a>, mode: Mode, folded: bool) {
         let mark = scope.len();
-        for p in params {
-            scope.push((p.name, Bind::Param { index: None, fn_typed: false }));
+        for (i, p) in params.iter().enumerate() {
+            scope.push((p.name, Bind::Param { index: Some(i), fn_typed: false, lam: Some(id) }));
             for n in p.tuple_names.iter().flatten() {
-                scope.push((*n, Bind::Param { index: None, fn_typed: false }));
+                scope.push((*n, Bind::Param { index: None, fn_typed: false, lam: Some(id) }));
             }
         }
         let inner = match mode {
@@ -764,25 +847,39 @@ impl<'a> Analyzer<'a> {
 
     fn call(&mut self, callee: &'a Expr, args: &[&'a Expr], scope: &mut Scope<'a>, mode: Mode) {
         let resolved = self.resolve_callee(callee, scope);
+        // A UFCS call `x.f(a)` is `f(x, a)`: the receiver is argument 0.
+        let with_receiver: Vec<&'a Expr>;
+        let args = match (&resolved, &peel_paren(callee).kind) {
+            (Callee::Ufcs(_) | Callee::StdlibMethod(..), ExprKind::Member { object, .. }) => {
+                with_receiver = std::iter::once(&**object).chain(args.iter().copied()).collect();
+                &with_receiver[..]
+            }
+            _ => args,
+        };
         // The callee itself: a name reference (a fn body joins `X`).
-        match &callee.kind {
+        match &peel_paren(callee).kind {
             ExprKind::Member { object, .. } => {
                 if matches!(resolved, Callee::Ext(..)) {
                     if let Callee::Ext(m, f) = resolved {
                         self.ext_ref(m, f, mode);
                     }
-                } else if !matches!(resolved, Callee::Fan(_) | Callee::Stdlib(..)) {
+                } else if matches!(resolved, Callee::Ufcs(_)) {
+                    // The receiver is walked as argument 0; the fn as a callee.
+                    if let Callee::Ufcs(f) = resolved {
+                        self.name_ref(f, callee.span, scope, mode);
+                    }
+                } else if !matches!(resolved, Callee::Fan(_) | Callee::Stdlib(..) | Callee::StdlibMethod(..)) {
                     self.walk(object, scope, mode);
                 }
             }
-            _ => self.walk(callee, scope, mode),
+            _ => self.walk_unchecked(callee, scope, mode),
         }
         let slots = match mode {
             Mode::Discover => self.call_slots(&resolved, args, scope),
             Mode::Reach { .. } | Mode::Closed { .. } => Vec::new(),
         };
         let wrapper = match &resolved {
-            Callee::Local(f) | Callee::Ext(_, f) => Some(f.to_string()),
+            Callee::Local(f) | Callee::Ufcs(f) | Callee::Ext(_, f) => Some(f.to_string()),
             _ => None,
         };
         for (i, a) in args.iter().enumerate() {
@@ -791,7 +888,12 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
             match (&a.kind, self.folds(&resolved, i)) {
-                (ExprKind::Lambda { params, body }, true) => self.lambda(params, body, scope, mode, true),
+                (ExprKind::Lambda { params, body }, true) => {
+                    if matches!(mode, Mode::Discover) && self.record {
+                        self.check_escape(a, scope);
+                    }
+                    self.lambda(a.id.0, params, body, scope, mode, true)
+                }
                 _ => self.walk(a, scope, mode),
             }
         }
@@ -814,9 +916,14 @@ impl<'a> Analyzer<'a> {
             }
             Mode::Closed { .. } => self.walk(e, scope, mode),
             Mode::Discover => {
-                if let Some(index) = self.flows_from_param(e, scope, 0) {
-                    if let Some(f) = self.current_fn {
-                        self.add_slot(f, index, kind);
+                if let Some((lam, index)) = self.flows_from_param(e, scope, 0) {
+                    match lam {
+                        Some(id) => self.add_lam_slot(id, index, kind),
+                        None => {
+                            if let Some(f) = self.current_fn {
+                                self.add_slot(f, index, kind);
+                            }
+                        }
                     }
                 } else if self.record {
                     self.check_served_app(e, &kind, wrapper.as_deref(), scope);
@@ -828,16 +935,18 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// `Some(i)` when the argument, after following `let`s, is parameter `i`
-    /// of the enclosing top-level fn: the slot moves to that fn's callers.
-    fn flows_from_param(&self, e: &'a Expr, scope: &Scope<'a>, depth: u32) -> Option<usize> {
+    /// `Some((None, i))` when the argument, after following `let`s, is
+    /// parameter `i` of the enclosing top-level fn: the slot moves to that
+    /// fn's callers. `Some((Some(id), i))` when it is parameter `i` of the
+    /// lambda `id` (#4903): the slot moves to that lambda's direct callers.
+    fn flows_from_param(&self, e: &'a Expr, scope: &Scope<'a>, depth: u32) -> Option<(Option<u32>, usize)> {
         if depth > 8 {
             return None;
         }
         match &e.kind {
             ExprKind::Paren { expr } => self.flows_from_param(expr, scope, depth + 1),
             ExprKind::Ident { name } => match lookup(scope, *name)? {
-                Bind::Param { index: Some(i), .. } => Some(*i),
+                Bind::Param { index: Some(i), lam, .. } => Some((*lam, *i)),
                 Bind::Let { init, .. } => self.flows_from_param(init, scope, depth + 1),
                 _ => None,
             },
@@ -847,6 +956,14 @@ impl<'a> Analyzer<'a> {
 
     fn add_slot(&mut self, f: Sym, index: usize, kind: SlotKind) {
         let entry = self.slots.entry(f).or_default();
+        if !entry.iter().any(|(i, _)| *i == index) {
+            entry.push((index, kind));
+            self.slots_changed = true;
+        }
+    }
+
+    fn add_lam_slot(&mut self, id: u32, index: usize, kind: SlotKind) {
+        let entry = self.lam_slots.entry(id).or_default();
         if !entry.iter().any(|(i, _)| *i == index) {
             entry.push((index, kind));
             self.slots_changed = true;
@@ -956,7 +1073,7 @@ impl<'a> Analyzer<'a> {
         };
         let mut scope: Scope<'a> = params
             .iter()
-            .map(|p| (p.name, Bind::Param { index: None, fn_typed: (self.w.type_is_fn)(&p.ty) }))
+            .map(|p| (p.name, Bind::Param { index: None, fn_typed: (self.w.type_is_fn)(&p.ty), lam: None }))
             .collect();
         let b = self.fresh_body();
         // The fn's own vars are per invocation: they belong to body `b`.
@@ -990,12 +1107,26 @@ enum Callee {
     Fan(Sym),
     Stdlib(Sym, Sym),
     Local(Sym),
+    /// A local fn called by UFCS (`x.f(a)` = `f(x, a)`).
+    Ufcs(Sym),
+    /// A lambda, named directly or through `let` aliases, by expression id.
+    Lambda(u32),
     Ext(Sym, Sym),
+    /// A method call `x.f(a)` where stdlib `m.f` declares `@concurrent`.
+    StdlibMethod(Sym, Sym),
     /// A method call on a value, resolved to no local fn: a stdlib method.
     Method,
     /// A local closure value.
     Value,
     Unknown,
+}
+
+/// `e` with its parentheses looked through.
+fn peel_paren(e: &Expr) -> &Expr {
+    match &e.kind {
+        ExprKind::Paren { expr } => peel_paren(expr),
+        _ => e,
+    }
 }
 
 /// The call a pipe's right side applies: `x |> f(y)!` parses as a pipe into
@@ -1138,6 +1269,17 @@ fn stdlib_slot_table() -> &'static HashMap<&'static str, HashMap<String, Vec<usi
         }
         out
     })
+}
+
+/// The bundled stdlib module declaring `@concurrent` on a fn named `func`.
+fn stdlib_method_module(func: &str) -> Option<&'static str> {
+    let mut hits: Vec<&'static str> = stdlib_slot_table()
+        .iter()
+        .filter(|(_, t)| t.contains_key(func))
+        .map(|(m, _)| *m)
+        .collect();
+    hits.sort_unstable();
+    hits.first().copied()
 }
 
 /// The concurrent slots a bundled stdlib fn declares with `@concurrent`.
