@@ -17,6 +17,7 @@ ROOT="$PWD"
 OUT="${1:?usage: scripts/probe-witness-census.sh <out-dir>}"
 mkdir -p "$OUT/work" "$OUT/keep"
 OUT="$(cd "$OUT" && pwd)"
+: >> "$OUT/mutrows.tsv"
 W="$OUT/work"
 
 cargo build -q --bin almide || exit 1
@@ -81,12 +82,15 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
     grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
-    "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    if [ -z "${NO_MUTATE:-}" ]; then
+  "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    fi
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true
     if [ -n "$ANCHOROLD" ]; then
       MUT_ONLY=control "$ANCHOROLD" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows-old.tsv" || true
     fi
     grep '^SHAPEFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/shaperows.tsv" || true
+    grep '^JUDGEBODY' "$W/a.census" >> "$OUT/judgebodies.txt" || true
     grep '^ROUTINE' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/routinerows.tsv" || true
     grep '^CENSUSX' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fxrows.tsv" || true
     python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
@@ -261,7 +265,7 @@ print("   leg      class    shape          writes?      n   % of the class's acc
 for key in sorted(agg):
     a = acc[(key[0], key[1])] or 1
     print(f"   {key[0]:8} {key[1]:8} {key[2]:14} {'write' if key[3] == '1' else 'read':6} {agg[key]:8}   {100 * agg[key] / a:6.2f}%")
-print("== the routines the anchor file names, by body shape (calls resolved, module-specific operands masked)")
+print("== the routines the anchor file names, by their OWN body shape (each call one opaque token, module-specific operands masked)")
 shapes = collections.defaultdict(collections.Counter)
 mods = collections.Counter()
 try:
@@ -295,3 +299,6 @@ with open(out + "/mutctx.txt", "w") as o:
             o.write("      " + part + "\n")
         o.write("\n")
 PY5
+
+echo "== the judge routines' own bodies, distinct (count, shape, instructions with each callee as [role:own-shape/length])"
+sort "$OUT/judgebodies.txt" 2>/dev/null | uniq -c | sort -nr | head -30 | cut -c1-1500

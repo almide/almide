@@ -198,7 +198,6 @@ fn main() {
     if census {
         if let (Ok(bodies), Ok((alloc, _, _, judges, holds, _))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
             let imports = almide_anchor_check::function_imports(&w);
-            let mut memo = std::collections::HashMap::new();
             let mut seen = std::collections::BTreeSet::new();
             for (name, sites) in [("judge", &judges), ("hold", &holds)] {
                 for at in sites.iter() {
@@ -209,9 +208,30 @@ fn main() {
             }
             seen.insert(("alloc", alloc));
             for (name, f) in seen {
-                let n = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)).map_or(0, |b| b.ops.len());
-                let h = body_shape(&bodies, imports, f, &mut memo, 6);
+                let body = f.checked_sub(imports).and_then(|p| bodies.get(p as usize));
+                let n = body.map_or(0, |b| b.ops.len());
+                // The routine's OWN body: each call it makes is one opaque token.
+                let h = body_shape(&bodies, imports, f, &mut std::collections::HashMap::new(), 0);
                 println!("ROUTINE {name} {f} {h:016x} {n}");
+                if name == "judge" {
+                    if let Some(b) = body {
+                        let text: Vec<String> = b
+                            .ops
+                            .iter()
+                            .map(|o| match o {
+                                wasmparser::Operator::Call { function_index } => {
+                                    let ch = body_shape(&bodies, imports, *function_index, &mut std::collections::HashMap::new(), 0);
+                                    let cn = function_index.checked_sub(imports).and_then(|p| bodies.get(p as usize)).map_or(0, |b| b.ops.len());
+                                    let role = if *function_index == alloc { "alloc" } else { "fn" };
+                                    format!("call[{role}:{ch:016x}/{cn}]")
+                                }
+                                wasmparser::Operator::GlobalGet { .. } => "global.get".to_string(),
+                                o => format!("{o:?}").replace(' ', ""),
+                            })
+                            .collect();
+                        println!("JUDGEBODY {h:016x} {}", text.join(";"));
+                    }
+                }
             }
         }
     }
