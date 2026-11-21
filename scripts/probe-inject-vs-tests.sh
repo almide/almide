@@ -36,7 +36,7 @@ echo "baseline: $(wc -l < "$LIST") fixtures in $(( $(date +%s) - t0 )) s; exit c
 
 : > "$OUT/results.tsv"
 i=0
-for fam in bounds init fields rc anchors; do
+for fam in history; do
   for p in proofs/fixtures/$fam-witness/reinject/*.patch; do
     name="$(basename "$p" .patch)"
     i=$((i + 1))

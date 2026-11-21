@@ -4,7 +4,7 @@ name: Probe — injected defects against the behaviour corpus
 # Not a gate.
 on:
   push:
-    branches: [probe/inject-vs-tests-4]
+    branches: [probe/inject-vs-history]
 
 permissions:
   contents: read
@@ -31,7 +31,7 @@ jobs:
           prefix-key: "trust-spine"
       - name: Measure
         env:
-          ONLY: "rc-release-dropped rc-release-dropped-past-loop rc-release-wrong-local rc-release-before-last-use"
+          ONLY: "replay-4304-push-release-at-rc1 replay-4305-map-reserve-release-at-rc1"
         run: bash scripts/probe-inject-vs-tests.sh "$RUNNER_TEMP/inject" ${{ matrix.shard }} 1
       - name: Upload results
         if: always()
