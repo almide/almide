@@ -68,6 +68,7 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
     grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
+    "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
     grep '^CENSUSX' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fxrows.tsv" || true
     python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
   fi
@@ -179,3 +180,10 @@ for leg in sorted(names):
     for k, v in names[leg].most_common(25):
         print(f"       {k:44} {v:8}")
 PY3
+
+echo "== mutants of the located instructions (kind, verdict, count) =="
+if [ -s "$OUT/mutrows.tsv" ]; then
+  awk -F'\t' '$3 ~ /^MUT / {split($3,a," "); c[$1" "a[2]" "a[3]]+=a[4]} END{for(k in c) print "   " k, c[k]}' "$OUT/mutrows.tsv" | sort
+  echo "   survivors (first 40):"
+  grep -P '\tMUTSURV' "$OUT/mutrows.tsv" | head -40 | sed 's/^/     /' || true
+fi

@@ -22,6 +22,35 @@ fn main() {
     });
     // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
     // translation of every self-host body (lin.rs), holes as `_`.
+    // Probe only: single-byte mutants of the located instructions, each judged.
+    if args.first().map(String::as_str) == Some("--mutate") {
+        let (Some(w), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
+        let (w, b) = (std::fs::read(w).unwrap_or_default(), std::fs::read(b).unwrap_or_default());
+        let a = String::from_utf8_lossy(&std::fs::read(a).unwrap_or_default()).into_owned();
+        let located = almide_anchor_check::located(&a).unwrap_or_default();
+        let ms = almide_anchor_check::mutate::mutants(&w, &located).unwrap_or_default();
+        let mut tally: std::collections::BTreeMap<(&str, &str), usize> = std::collections::BTreeMap::new();
+        for m in &ms {
+            let mut x = w.clone();
+            x[m.pos] = m.to;
+            let verdict = if almide_anchor_check::decode(&x).is_err() {
+                "invalid"
+            } else {
+                match almide_anchor_check::check(&x, &b, &a) {
+                    Err(_) => "killed",
+                    Ok(_) => "survived",
+                }
+            };
+            *tally.entry((m.kind, verdict)).or_default() += 1;
+            if verdict == "survived" {
+                println!("MUTSURV {} {}:{} byte {} -> {}", m.kind, m.at.func, m.at.op, m.pos, m.to);
+            }
+        }
+        for ((k, v), n) in tally {
+            println!("MUT {k} {v} {n}");
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--lin-skel") {
         let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
         let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());

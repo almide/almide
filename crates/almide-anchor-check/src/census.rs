@@ -74,7 +74,7 @@ fn offset(op: &Op<'_>) -> Option<u64> {
 }
 
 /// Every `func:op` token of the anchor file's event lines.
-fn located(anchors: &str) -> Result<HashSet<At>, String> {
+pub fn located(anchors: &str) -> Result<HashSet<At>, String> {
     let (_, init, bounds, _, _, _) = parse_anchors_held(anchors)?;
     let fields = crate::fields_anchors(anchors);
     let mut out = HashSet::new();
