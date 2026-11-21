@@ -203,11 +203,6 @@ impl Emitter<'_> {
         self.fw_res(t);
     }
 
-    pub(crate) fn store_res_slot(&mut self, t: SliceTy) {
-        self.store_ty_slot(t, almide_layout::SUM_FIELD);
-        self.fw_res(t);
-    }
-
     /// Load the value slot at `field` of a block that is `sum` (or of no
     /// built-in sum: a plain slot load).
     pub(crate) fn load_slot_of(&mut self, sum: Option<Sum>, t: SliceTy, field: u32) {
