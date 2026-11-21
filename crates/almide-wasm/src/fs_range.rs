@@ -293,11 +293,9 @@ impl Emitter<'_> {
         i.i32_const(suf_at as i32 + pay).i32_const(suf_len).memory_copy(0, 0);
         i.i32_const(16).call(F_ALLOC).local_tee(herr).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
         self.fw_res_tag_back(0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.local_get(herr).local_get(hm).i32_store(slot_memarg(almide_layout::SUM_FIELD));
         self.fw_res_w(4, 0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.end();
         self.release_i32();
@@ -404,7 +402,6 @@ impl Emitter<'_> {
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
             self.fw_res_tag_back(0);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(hsr).local_get(hv);
         }
@@ -455,7 +452,6 @@ impl Emitter<'_> {
             i.local_set(hstat);
             i.local_get(hstat).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
             self.fw_res_tag_back(1);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(hstat).i64_load(slot_memarg(almide_layout::SUM_FIELD)).i64_const(0).i64_ne();
             i.i32_and();
@@ -472,7 +468,6 @@ impl Emitter<'_> {
             i.i32_const(0).local_set(hlen);
             i.local_get(hstat).i32_load(slot_memarg(almide_layout::SUM_TAG)).if_(BlockType::Empty);
             self.fw_res_tag_back(2);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             // The probe's err IS the result (the text block stays unset).
             i.local_get(hstat).local_set(herr);

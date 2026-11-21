@@ -114,7 +114,6 @@ impl Emitter<'_> {
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
             self.fw_res_tag_back(0);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(hs).local_get(params[0]);
         }
@@ -245,7 +244,6 @@ impl Emitter<'_> {
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
             self.fw_res_tag_back(0);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(hs).local_get(hacc);
         }

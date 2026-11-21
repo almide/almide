@@ -400,7 +400,6 @@ impl Emitter<'_> {
             i.local_set(ha);
             i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
             self.fw_res_tag_back(3);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(a.msg).i32_eqz();
             i.i32_and();

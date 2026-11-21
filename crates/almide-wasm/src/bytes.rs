@@ -145,7 +145,6 @@ impl Emitter<'_> {
         i.i64_load8_u(byte_k(0));
         i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
         self.fw_opt_w(8, 0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.local_get(hr);
         i.else_();

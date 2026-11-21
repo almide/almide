@@ -93,7 +93,6 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.i32_load(slot_memarg(almide_layout::SUM_TAG));
                 self.fw_res_tag_back(0);
-                #[allow(unused_variables, unused_mut)]
                 let mut i = self.f.instructions();
                 if func == "assert_ok" {
                     i.i32_eqz();

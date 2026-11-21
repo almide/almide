@@ -469,7 +469,6 @@ impl Emitter<'_> {
         i.local_get(hi).i64_extend_i32_u();
         i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
         self.fw_opt_w(8, 0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.br(2);
         i.end();

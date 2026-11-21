@@ -32,7 +32,6 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.i32_load(slot_memarg(almide_layout::SUM_TAG));
                 self.fw_res_tag_back(0);
-                #[allow(unused_variables, unused_mut)]
                 let mut i = self.f.instructions();
                 if func == "is_ok" {
                     i.i32_eqz();
@@ -75,7 +74,6 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne();
                     self.fw_res_tag_back(3);
-                    #[allow(unused_variables, unused_mut)]
                     let mut i = self.f.instructions();
                     i.if_(BlockType::Result(ValType::I32));
                     i.local_get(hs);
@@ -116,7 +114,6 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne();
                     self.fw_res_tag_back(3);
-                    #[allow(unused_variables, unused_mut)]
                     let mut i = self.f.instructions();
                     i.if_(BlockType::Result(a.val_type()));
                 }
@@ -156,7 +153,6 @@ impl Emitter<'_> {
                     i.local_set(hs);
                     i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
                     self.fw_res_tag_back(0);
-                    #[allow(unused_variables, unused_mut)]
                     let mut i = self.f.instructions();
                     if want_ok {
                         i.i32_const(0).i32_ne();
@@ -234,7 +230,6 @@ impl Emitter<'_> {
                 .i32_eqz()
                 .if_(BlockType::Empty);
             self.fw_res_tag_back(3);
-            #[allow(unused_variables, unused_mut)]
             let mut i = self.f.instructions();
             i.local_get(hok).local_get(hwo).i32_add();
             i.local_get(hr);
@@ -304,7 +299,6 @@ impl Emitter<'_> {
                     i.local_set(hs);
                     i.local_get(hs).i32_load(slot_memarg(almide_layout::SUM_TAG));
                     self.fw_res_tag_back(0);
-                    #[allow(unused_variables, unused_mut)]
                     let mut i = self.f.instructions();
                     if on_ok {
                         i.i32_const(0).i32_ne();

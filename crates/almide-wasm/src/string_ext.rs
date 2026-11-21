@@ -233,7 +233,6 @@ impl Emitter<'_> {
         i.i32_const(4).call(F_ALLOC).local_tee(hoff).local_get(hb);
         i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
         self.fw_opt_w(4, 0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.local_get(hoff);
         i.end();
@@ -392,7 +391,6 @@ impl Emitter<'_> {
         i.i32_const(4).call(F_ALLOC).local_tee(hr).local_get(hk);
         i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
         self.fw_opt_w(4, 0);
-        #[allow(unused_variables, unused_mut)]
         let mut i = self.f.instructions();
         i.local_get(hr);
         i.else_();
