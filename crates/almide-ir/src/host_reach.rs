@@ -5,9 +5,11 @@
 //! a body that serves it calls one, directly or through a function it names:
 //! its declaration in the module's source, or a self-host registry body that
 //! serves its call name. The answer is read from those declarations and
-//! bodies, never from a module or function name. A method dispatched on a
-//! parameter whose type is a protocol-bounded generic runs the conformer the
-//! caller passes, which no body here shows: that dispatch reaches the host.
+//! bodies, never from a module or function name. A method an `effect fn`
+//! dispatches on a parameter whose type is a protocol-bounded generic runs
+//! the conformer the caller passes, which no body here shows: that dispatch
+//! reaches the host. A plain `fn` cannot call an effect requirement (`Read`'s
+//! read), so its dispatches stay judged by what it names.
 
 use almide_lang::ast::{Decl, Expr, ExprKind, Program, TypeExpr};
 use std::collections::HashSet;
@@ -98,9 +100,9 @@ fn has_body(decl: &Decl) -> bool {
 /// its own declaration. A bodyless declaration (`= _`, served by the runtime)
 /// shows no body to follow, so it is judged by what it declares: a non-empty
 /// `@category` reaches the host, an empty one does not, and with neither it
-/// reaches the host unless its module is classified `Pure`. A body that
-/// dispatches a method on a protocol-bounded generic parameter reaches it too
-/// ([`dispatches_on_a_bounded_param`]).
+/// reaches the host unless its module is classified `Pure`. An `effect fn`
+/// body that dispatches a method on a protocol-bounded generic parameter
+/// reaches it too ([`dispatches_on_a_bounded_param`]).
 fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool {
     if !seen.insert((prog as *const Program as usize, name.to_string())) {
         return false;
@@ -131,14 +133,15 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
     })
 }
 
-/// Does `decl`'s body call a method on a parameter typed by one of its own
-/// generics that carries a protocol bound (`[H: Read](h: H)` calling
+/// Does `decl`, an `effect fn`, call a method on a parameter typed by one of
+/// its own generics that carries a protocol bound (`[H: Read](h: H)` calling
 /// `h.__self_read(..)`)? The method run is the conformer's that the caller
 /// supplies; the declaration shows none, so its reach is unknown and taken as
-/// the host's. Read from the declaration's shape, never from a protocol or
-/// method name.
+/// the host's. Only an `effect fn` can call a requirement that acts on the
+/// host; a plain `fn`'s dispatch (a `Body`'s bytes) cannot. Read from the
+/// declaration's shape, never from a protocol or method name.
 fn dispatches_on_a_bounded_param(decl: &Decl) -> bool {
-    let Decl::Fn { generics, params, .. } = decl else { return false };
+    let Decl::Fn { effect: Some(true), generics, params, .. } = decl else { return false };
     let bounded: HashSet<&str> = generics
         .iter()
         .flatten()
