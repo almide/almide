@@ -6,6 +6,36 @@
 
 use std::io::Write;
 
+/// Probe only: a function body's shape, with each call replaced by its
+/// callee's shape and module-specific operands (large constants, global
+/// indices) masked, so one routine reads the same in every module.
+fn body_shape(bodies: &[almide_anchor_check::Body<'_>], imports: u32, f: u32, memo: &mut std::collections::HashMap<u32, u64>, depth: u32) -> u64 {
+    if let Some(h) = memo.get(&f) {
+        return *h;
+    }
+    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return 0x1111 };
+    memo.insert(f, 0x2222);
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for op in &b.ops {
+        let s = match op {
+            wasmparser::Operator::Call { function_index } => {
+                let c = if depth == 0 { 0x3333 } else { body_shape(bodies, imports, *function_index, memo, depth - 1) };
+                format!("call#{c:x};")
+            }
+            wasmparser::Operator::I32Const { value } if *value >= 1024 || *value < -1024 => "i32.const#big;".to_string(),
+            wasmparser::Operator::GlobalGet { .. } => "global.get;".to_string(),
+            wasmparser::Operator::GlobalSet { .. } => "global.set;".to_string(),
+            o => format!("{o:?};"),
+        };
+        for c in s.bytes() {
+            h ^= u64::from(c);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    memo.insert(f, h);
+    h
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(at) = args.iter().position(|a| a == "--explain") {
@@ -45,7 +75,8 @@ fn main() {
             for (p, v) in &m.bytes {
                 x[*p] = *v;
             }
-            let verdict = if almide_anchor_check::decode(&x).is_err() {
+            let dec = almide_anchor_check::decode(&x);
+            let verdict = if dec.is_err() {
                 "invalid"
             } else {
                 match almide_anchor_check::check(&x, &b, &a) {
@@ -57,6 +88,16 @@ fn main() {
             *tally.entry((class.clone(), verdict)).or_default() += 1;
             if verdict == "survived" && (m.role == "self" || m.role == "addr" || m.role == "cond" || m.role == "control" || m.kind == "branch-depth") {
                 println!("MUTSURV {class} {}:{} -> {} {}", m.at.func, m.at.op, m.bytes.first().map_or(0, |b| b.1), m.what.replace(' ', ""));
+            }
+            // The code around a surviving mutant that could matter to safety:
+            // an address or condition operand of a bounds event, or a branch.
+            if verdict == "survived" && ((m.src == "bounds" && m.role != "value" && m.role != "self") || m.kind == "branch-depth") {
+                if let Some(bd) = dec.as_ref().ok().and_then(|bs| bs.get(m.at.func)) {
+                    let lo = m.at.op.saturating_sub(34);
+                    let hi = (m.at.op + 10).min(bd.ops.len());
+                    let ctx: Vec<String> = (lo..hi).map(|j| format!("{}{:?}", if j == m.at.op { ">>" } else { "" }, bd.ops[j]).replace(' ', "")).collect();
+                    println!("MUTCTX {class} {}:{} {}", m.at.func, m.at.op, ctx.join(" ; "));
+                }
             }
         }
         for ((k, v), n) in tally {
@@ -154,6 +195,26 @@ fn main() {
             }
         }
     }
+    if census {
+        if let (Ok(bodies), Ok((alloc, _, _, judges, holds, _))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
+            let imports = almide_anchor_check::function_imports(&w);
+            let mut memo = std::collections::HashMap::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for (name, sites) in [("judge", &judges), ("hold", &holds)] {
+                for at in sites.iter() {
+                    if let Some(wasmparser::Operator::Call { function_index }) = bodies.get(at.func).and_then(|b| b.ops.get(at.op)) {
+                        seen.insert((name, *function_index));
+                    }
+                }
+            }
+            seen.insert(("alloc", alloc));
+            for (name, f) in seen {
+                let n = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)).map_or(0, |b| b.ops.len());
+                let h = body_shape(&bodies, imports, f, &mut memo, 6);
+                println!("ROUTINE {name} {f} {h:016x} {n}");
+            }
+        }
+    }
     if let Some(Ok(rows)) = &by_function {
         for r in rows {
             println!(
@@ -172,6 +233,15 @@ fn main() {
                 "FIELDS OK: {} site(s) / {} store(s), {} access(es) ({} case field(s) under their tag test), {} tag read(s), {} unlocated",
                 r.field_sites, r.field_stores, r.field_accesses, r.field_guarded, r.field_tags, r.field_unlocated
             );
+            {
+                let mut t: std::collections::BTreeMap<(usize, &str, bool), usize> = std::collections::BTreeMap::new();
+                for (at, shape, wr) in &r.bounds_shapes {
+                    *t.entry((at.func, *shape, *wr)).or_default() += 1;
+                }
+                for ((func, shape, wr), n) in t {
+                    println!("SHAPEFN {func} {shape} {} {n}", u8::from(wr));
+                }
+            }
             match &counted {
                 Some(Ok(c)) => println!(
                     "CENSUS: frames {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk; routines {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk",
