@@ -52,7 +52,11 @@ pub struct Body<'a> {
 
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
-    let mut v = Validator::new_with_features(WasmFeatures::all());
+    // Every proposal but the threads ones: no check follows an atomic access
+    // (a store of a block's count word among them), so a module that holds
+    // one does not validate here and is not judged.
+    let followed = WasmFeatures::all() - WasmFeatures::THREADS - WasmFeatures::SHARED_EVERYTHING_THREADS;
+    let mut v = Validator::new_with_features(followed);
     let mut out = Vec::new();
     let mut memories = 0u32;
     for payload in Parser::new(0).parse_all(bytes) {
