@@ -63,13 +63,19 @@ pub(crate) fn begin_fn() -> u64 {
 /// The anchor of the instruction just emitted into `f`: `serial@offset`, or
 /// `-` when no body is open.
 pub(crate) fn at(f: &wasm_encoder::Function) -> String {
+    at_back(f, 0)
+}
+
+/// As [`at`], for the instruction that ended `back` bytes before the body's
+/// current end.
+pub(crate) fn at_back(f: &wasm_encoder::Function, back: usize) -> String {
     match state()
         .lock()
         .expect("anchor sink")
         .as_ref()
         .and_then(|s| s.open.last().copied())
     {
-        Some(k) => format!("{k}@{}", f.byte_len()),
+        Some(k) => format!("{k}@{}", f.byte_len() - back),
         None => "-".to_string(),
     }
 }

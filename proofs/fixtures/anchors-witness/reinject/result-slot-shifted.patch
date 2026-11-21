@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/field_witness.rs b/crates/almide-wasm/src/field_witness.rs
+index 8cbc28fd2d..8e51cabef0 100644
+--- a/crates/almide-wasm/src/field_witness.rs
++++ b/crates/almide-wasm/src/field_witness.rs
+@@ -206,7 +206,8 @@ impl Emitter<'_> {
+     }
+ 
+     pub(crate) fn load_res_slot(&mut self, t: SliceTy) {
+-        self.load_ty_slot(t, almide_layout::SUM_FIELD);
++        // RE-INJECTED (drill): the read lands past the Result block.
++        self.load_ty_slot(t, almide_layout::SUM_FIELD + 8);
+         self.fw_res(t);
+     }
+ 
