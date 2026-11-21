@@ -114,6 +114,12 @@
 #               admitted by signature; wasm region vocabulary follows it) and
 #               effect.fan-ordered-reach (build / bench driven; second control
 #               for the minted-symbol record) STAMPED: 36 stamped, 121 not.
+#   2026-11-21  owner ruling B (replaces "every row stamped before the final"):
+#               before v0.70.0 every fail-open row (43) is closed — hole fixed,
+#               novel test, control; stamped when all four hold, else no longer
+#               fail-open with honest cells. Rows unstamped only for missing
+#               evidence move to after the final; the unstamped ceiling stays
+#               shrink-only.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
