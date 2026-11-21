@@ -604,10 +604,19 @@ impl Emitter<'_> {
                     .i32_const(s.slot_size() as i32)
                     .call(F_ALLOC)
                     .local_tee(hold);
+                // A construction site: the payload does not leave the frame
+                // (the branch above took those), so nothing between the
+                // allocation and the store leaves the site's window.
+                let site = self.fw_opt_site(s);
                 self.lower(expr, Some(s))?;
                 self.rc_share_guard(expr, s);
                 self.witness_store(expr, s);
-                self.store_opt_slot(s);
+                if site.is_some() {
+                    self.store_ty_slot(s, almide_layout::OPTION_FIELD);
+                    self.fw_store(site, 0);
+                } else {
+                    self.store_opt_slot(s);
+                }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
         Ok(hty)
