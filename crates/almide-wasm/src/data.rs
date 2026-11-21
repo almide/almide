@@ -640,6 +640,11 @@ impl Emitter<'_> {
         self.f.instructions().local_set(val);
         let hold = self.hold_i32()?;
         self.f.instructions().i32_const(size).call(F_ALLOC).local_set(hold);
+        // A `some` block is a construction site: its allocation is held to the
+        // slot's size and its one store to the slot. A Result block's two
+        // stores stay plain accesses (its layout names the value slot at both
+        // widths, and a site stores every field of its kind).
+        let site = if tag.is_none() && size as u32 == side.slot_size() { self.fw_opt_site(side) } else { None };
         if let Some(tag) = tag {
             self.f.instructions().local_get(hold).i32_const(tag);
             self.store_res_tag();
@@ -648,6 +653,9 @@ impl Emitter<'_> {
         debug_assert!(field == if tag.is_some() { almide_layout::SUM_FIELD } else { almide_layout::OPTION_FIELD });
         if tag.is_some() {
             self.store_res_slot(side);
+        } else if site.is_some() {
+            self.store_ty_slot(side, almide_layout::OPTION_FIELD);
+            self.fw_store(site, 0);
         } else {
             self.store_opt_slot(side);
         }
