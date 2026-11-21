@@ -54,13 +54,52 @@ pub struct Body<'a> {
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
     let mut v = Validator::new_with_features(WasmFeatures::all());
     let mut out = Vec::new();
+    let mut memories = 0u32;
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
+        one_plain_memory(&payload, &mut memories)?;
         if let ValidPayload::Func(func, body) = v.payload(&payload).map_err(|e| e.to_string())? {
             out.push(decode_body(func, body)?);
         }
     }
     Ok(out)
+}
+
+/// The memories `payload` declares or imports, held to one in the module
+/// that is unshared and 32-bit. No check looks at which memory an instruction
+/// names: a count read from one memory bounds nothing in another, and a
+/// shared memory may be written by another thread between a check and its
+/// access. Such a module is not judged.
+fn one_plain_memory(payload: &wasmparser::Payload<'_>, seen: &mut u32) -> Result<(), String> {
+    let mut found = Vec::new();
+    match payload {
+        wasmparser::Payload::MemorySection(r) => {
+            for m in r.clone() {
+                found.push(m.map_err(|e| e.to_string())?);
+            }
+        }
+        wasmparser::Payload::ImportSection(r) => {
+            for i in r.clone().into_imports() {
+                if let wasmparser::TypeRef::Memory(m) = i.map_err(|e| e.to_string())?.ty {
+                    found.push(m);
+                }
+            }
+        }
+        _ => {}
+    }
+    for m in found {
+        *seen += 1;
+        if *seen > 1 {
+            return Err("the module has more than one memory: the checks do not follow which memory an instruction names".into());
+        }
+        if m.shared {
+            return Err("the module's memory is shared: another thread may write it between a check and its access".into());
+        }
+        if m.memory64 {
+            return Err("the module's memory is 64-bit: the checks read 32-bit addresses".into());
+        }
+    }
+    Ok(())
 }
 
 /// One defined function's body, validated, with its depths and provenance.
