@@ -28,7 +28,7 @@ use almide_ir::{IrFieldDecl, IrProgram, IrTypeDecl, IrTypeDeclKind, IrVariantKin
 use almide_lang::types::Ty;
 use crate::lower::LowerError;
 use crate::native_callback_host::canon;
-use crate::native_foreign::{convert_value, host_type};
+use crate::native_foreign::{convert_value, host_type, in_nominal};
 use crate::render_native::{wall, NTy};
 use crate::render_native_rec as rec;
 use std::cell::RefCell;
@@ -332,7 +332,7 @@ fn agreed(((ctor, fields), (their_ctor, their_fields)): (&DeclaredCase, &Spelled
     if ctor != their_ctor || fields.len() != their_fields.len() { return None; }
     let own: Vec<Ty> = scope.iter().map(|p| parameter(p)).collect();
     let fields = fields.iter().zip(their_fields).map(|((label, ty), (their_label, spelled))| {
-        let (owned, spelled) = (canon(&host_type(&bound(ty, scope, &own)).ok()?), canon(spelled));
+        let (owned, spelled) = (canon(&in_nominal(|| host_type(&bound(ty, scope, &own))).ok()?), canon(spelled));
         let boxed = spelled == format!("AlmideBox<{owned}>");
         (label == their_label && (boxed || spelled == owned)).then(|| Slot { label: label.clone(), ty: ty.clone(), boxed })
     }).collect::<Option<Vec<_>>>()?;
@@ -349,7 +349,7 @@ pub(crate) fn host_named(name: &str, args: &[Ty]) -> Result<String, LowerError> 
     });
     let host = found.ok_or_else(|| wall(format!("native: callback type `{name}` has no host definition to carry")))?;
     if args.is_empty() { return Ok(host); }
-    Ok(format!("{host}<{}>", args.iter().map(host_type).collect::<Result<Vec<_>, _>>()?.join(", ")))
+    Ok(format!("{host}<{}>", in_nominal(|| args.iter().map(host_type).collect::<Result<Vec<_>, _>>())?.join(", ")))
 }
 
 /// The carried definitions as the runtime index reads them: the runtime types
@@ -450,7 +450,7 @@ fn own_fields(kind: NTy, tag: Option<u32>, n: usize) -> Result<Vec<(NTy, bool)>,
 fn crossed(place: &str, slot: &Slot, (kind, own_boxed): (NTy, bool), to_host: bool) -> Result<String, LowerError> {
     let (from_boxed, wrap) = if to_host { (own_boxed, slot.boxed.then_some("AlmideBox")) } else { (slot.boxed, own_boxed.then_some("Box")) };
     let source = if from_boxed { format!("&**{place}") } else { place.to_string() };
-    let value = convert_value(&source, &slot.ty, kind, to_host, 0, true)?;
+    let value = in_nominal(|| convert_value(&source, &slot.ty, kind, to_host, 0, true))?;
     Ok(match wrap {
         Some(wrap) => format!("{wrap}::new({value})"),
         None => value,

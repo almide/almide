@@ -26,14 +26,34 @@ fn callback(value: &str, params: &[Ty], ret: &Ty, effect: bool, kind: NTy) -> Re
     Ok(format!("{{ let __foreign_env = &{value}; let __foreign_index = __foreign_env.words().first().copied().unwrap_or_else(|| almide_abort(\"index out of bounds\")); move |{}| -> {} {{ {bindings}{body} }} }}", host_params.join(", "), host_type(&ret_ty)?))
 }
 
+thread_local! {
+    static IN_NOMINAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `f` with the host spellings of a value held INSIDE a record or variant, or
+/// in a generic argument of one: the program's own types, which the host uses
+/// as they are (ADR-0037 ruling (A)) — a list there is the `AlmideList` block,
+/// where a list the host passes or receives directly is std's `Vec`.
+pub(crate) fn in_nominal<R>(f: impl FnOnce() -> R) -> R {
+    let was = IN_NOMINAL.with(|n| n.replace(true));
+    let r = f();
+    IN_NOMINAL.with(|n| n.set(was));
+    r
+}
+
+pub(crate) fn nominal() -> bool {
+    IN_NOMINAL.with(std::cell::Cell::get)
+}
+
 pub(crate) fn host_type(ty: &Ty) -> Result<String, LowerError> {
     if let Some(s) = scalar_host_type(ty) { return Ok(s.into()); }
+    let list = if nominal() { "AlmideList" } else { "Vec" };
     Ok(match ty {
-        Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => "AlmideRcCow<Vec<u8>>".into(),
+        Ty::Unit => "()".into(), Ty::String => "AlmideString".into(), Ty::Bytes => format!("AlmideRcCow<{list}<u8>>"),
         t if crate::render_native_rec::is_matrix_ty(t) => "AlmideRcCow<AlmideMatrix>".into(),
         Ty::Applied(c, a) => {
             let name = match c {
-                C::List => "Vec", C::Option => "Option", C::Result => "Result",
+                C::List => list, C::Option => "Option", C::Result => "Result",
                 C::Map => "AlmideMap", C::Set => "AlmideSet",
                 _ => return Err(wall("native: foreign callback has no host container type")),
             };

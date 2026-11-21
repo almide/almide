@@ -420,29 +420,34 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             if !mut_prefix.is_empty() {
                 param_name = format!("{}{}", mut_prefix, param_name);
             }
-            let type_s = match p.borrow {
-                ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
-                // A fn-typed param the body only calls is a borrowed callable
-                // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
-                ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
-                    format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
-                }
-                ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
-                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
-                ParamBorrow::RefStr => "&str".to_string(),
-                ParamBorrow::RefSlice => {
-                    if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
-                        if let Some(inner) = args.first() {
-                            format!("&[{}]", render_type_fn(fn_ctx, inner))
-                        } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
-                    } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
-                }
-            };
+            let type_s = fn_param_type_str(fn_ctx, p);
             fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("{}: {}", param_name, type_s))
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The Rust type a fn definition spells for the param `p`, from its borrow mode.
+fn fn_param_type_str(fn_ctx: &RenderContext, p: &IrParam) -> String {
+    match p.borrow {
+        ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
+        // A fn-typed param the body only calls is a borrowed callable
+        // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
+        ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
+            format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
+        }
+        ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
+        ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
+        ParamBorrow::RefStr => "&str".to_string(),
+        ParamBorrow::RefSlice => {
+            if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
+                if let Some(inner) = args.first() {
+                    format!("&[{}]", render_type_fn(fn_ctx, inner))
+                } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+            } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+        }
+    }
 }
 
 /// Function body: render Block contents directly (no IIFE wrapper).

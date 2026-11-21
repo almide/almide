@@ -35,6 +35,8 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
         // holds the list block. The copy is made here, at the boundary.
         Ty::Bytes if crate::render_native_rec::is_bytes(kind) => Ok(if !to_host {
             format!("AlmideList::<u8>::from(&({e})[..])")
+        } else if host_uses_almide_types && nominal() {
+            format!("AlmideRcCow::from(AlmideList::<u8>::from(&({e})[..]))")
         } else if host_uses_almide_types {
             format!("AlmideRcCow::from(({e})[..].to_vec())")
         } else { format!("({e})[..].to_vec()") }),
@@ -43,7 +45,7 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
                 NTy::Vec => Some(NTy::I64), NTy::VecStr => Some(NTy::Str),
                 NTy::Rec(i) => crate::render_native_rec::list_elem(i), _ => None,
             }.ok_or_else(|| wall("native: foreign list has no declared element kind"))?;
-            let collection = if to_host { "Vec<_>" } else { "AlmideList<_>" };
+            let collection = if to_host && !(host_uses_almide_types && nominal()) { "Vec<_>" } else { "AlmideList<_>" };
             Ok(format!("({e}).iter().map(|{x}| {}).collect::<{collection}>()", nested(&x, &a[0], k)?))
         }
         Ty::Applied(C::Set, a) if a.len() == 1 => {
