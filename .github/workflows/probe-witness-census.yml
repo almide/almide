@@ -3,7 +3,7 @@ name: Probe — witness census
 # census of every artifact the structural wall judges. Not a gate.
 on:
   push:
-    branches: [probe/v4-routines]
+    branches: [probe/named-routines]
 
 permissions:
   contents: read
@@ -26,6 +26,8 @@ jobs:
           prefix-key: "trust-spine"
       - name: Install wabt
         run: sudo apt-get update -q && sudo apt-get install -y -q wabt
+      - name: Unit tests of the checker
+        run: cargo test -q -p almide-anchor-check 2>&1 | tail -60
       - name: Measure
         env:
           NO_MUTATE: "1"

@@ -59,8 +59,11 @@
 //! shared block is never written or resized in place. A write of the list's
 //! variable and a store of its count word still reject.
 //!
-//! TRUSTED: that a recorded judge site calls a copy-on-write judge; that a
-//! recorded hold calls rc_inc and the routines honour the copy-on-write
+//! A recorded judge site and a recorded hold are held to the routines'
+//! bodies by `check` (routines.rs); the checks in this file take them as
+//! given.
+//!
+//! TRUSTED: that the routines honour the copy-on-write
 //! contract (a block with a second holder is never resized in place); that a
 //! call changes a block's count only when it is handed the block (a block
 //! another local aliases is shared, so no routine shrinks it in place); the
