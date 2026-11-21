@@ -144,6 +144,28 @@ impl Emitter<'_> {
         fw::site(k, self.f)
     }
 
+    /// As [`Self::fw_opt`], by the slot's width, for the access that ended
+    /// `back` bytes of instructions ago.
+    pub(crate) fn fw_opt_w(&mut self, w: u32, back: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: w, fields: vec![(almide_layout::OPTION_FIELD, w)] });
+        fw::access_back(k, 0, self.f, back);
+    }
+
+    /// As [`Self::fw_res`], by the slot's width, for the access that ended
+    /// `back` bytes of instructions ago.
+    pub(crate) fn fw_res_w(&mut self, w: u32, back: usize) {
+        if !fw::armed() {
+            return;
+        }
+        let k = (3 * (SUM_BASE + 2), 0);
+        fw::declare(k, &Self::res_layout());
+        fw::access_back(k, if w == 8 { 2 } else { 1 }, self.f, back);
+    }
+
     /// A Result block: its tag word, then one 8-byte value slot read at the
     /// width of the side it holds (fields 1 and 2 name the same slot).
     fn res_layout() -> Layout {

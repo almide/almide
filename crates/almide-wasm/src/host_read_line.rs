@@ -24,6 +24,9 @@ impl Emitter<'_> {
             // some(line): a 4-byte option cell holding the handle (env.get's shape).
             i.i32_const(4).call(F_ALLOC).local_set(cell);
             i.local_get(cell).local_get(line).i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+            self.fw_opt_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(cell);
             i.else_();
             i.local_get(line).call(F_DEC_FLAT);
