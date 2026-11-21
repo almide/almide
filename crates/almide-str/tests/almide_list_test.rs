@@ -574,3 +574,43 @@ fn a_panic_while_extending_keeps_the_elements_written_so_far() {
     let c: AlmideList<i64> = (0..3).collect();
     assert_eq!(&c[..], &[0, 1, 2]);
 }
+
+#[test]
+fn a_pusher_copies_a_shared_block_at_its_first_push_and_writes_the_length_back() {
+    // A shared block: the first push copies it, the other owner keeps its elements.
+    let mut a: AlmideList<AlmideStr> = vec![AlmideStr::from("x")].into();
+    let keep = a.clone();
+    {
+        let mut p = a.pusher();
+        for i in 0..20 {
+            p.push(AlmideStr::from(format!("s{i}").as_str()));
+        }
+    }
+    assert_eq!(a.len(), 21);
+    assert_eq!(keep.len(), 1);
+    assert_eq!(a[20].as_str(), "s19");
+    // The static empty block, and a pusher that never pushes changes nothing.
+    let mut e: AlmideList<u8> = AlmideList::new();
+    drop(e.pusher());
+    assert_eq!(e.len(), 0);
+    {
+        let mut p = e.pusher();
+        for x in [1i64, 255, 256, -1] {
+            p.push_lane(x);
+        }
+    }
+    assert_eq!(&e[..], &[1u8, 255, 0, 255]);
+    // A panic between pushes leaves the length covering what was written.
+    let mut b: AlmideList<i64> = AlmideList::new();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut p = b.pusher();
+        for i in 0..10 {
+            if i == 6 {
+                panic!("body");
+            }
+            p.push(i);
+        }
+    }));
+    assert!(r.is_err());
+    assert_eq!(&b[..], &[0, 1, 2, 3, 4, 5]);
+}

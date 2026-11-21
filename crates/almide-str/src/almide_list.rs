@@ -174,15 +174,19 @@ impl<T> AlmideList<T> {
         }
         let cap = if extra == 0 { len } else { need.max(len.saturating_mul(2)).max(4) };
         let fresh = AlmideList::<T> { ptr: almide_list_alloc::<T>(cap), _elems: PhantomData };
-        for (i, x) in self.as_slice().iter().enumerate() {
-            // SAFETY: slot `i < len <= cap` of the fresh block is uninitialised; `len` is bumped after each write, so a
-            // panicking `clone` leaves the fresh block holding exactly the elements written so far.
-            unsafe {
-                fresh.data().add(i).write(x.clone());
-                (*fresh.ptr.as_ptr()).len = i + 1;
-            }
-        }
+        fresh.fill_fresh(self.as_slice());
         *self = fresh;
+    }
+
+    /// Fills this fresh, unique, empty block (capacity at least `src.len()`) with clones of `src`. A panicking `clone`
+    /// leaves the block holding exactly the elements written so far, so dropping it drops those.
+    fn fill_fresh(&self, src: &[T]) where T: Clone {
+        debug_assert!(self.is_unique() && self.is_empty() && self.capacity() >= src.len());
+        let mut set = AlmideListSetLen { block: self.ptr, len: 0 };
+        // SAFETY: the block is unique and empty with room for `src.len()` elements, so the slots are uninitialised and
+        // `src` (a live list's elements) cannot point into them.
+        let dst = unsafe { std::slice::from_raw_parts_mut(self.data().cast::<std::mem::MaybeUninit<T>>(), src.len()) };
+        almide_list_clone_into(dst, src, &mut set.len);
     }
 
     /// Grows a unique heap block so `need` elements fit. The capacity at least doubles.
@@ -236,6 +240,15 @@ impl<T> AlmideList<T> {
             return;
         }
         self.push_slow(x);
+    }
+
+    /// An appender for a loop that only pushes to this list (ADR-0037 implementation notes: appends in loops). It
+    /// keeps the data pointer, length and capacity in locals and writes the length back when dropped, so the loop
+    /// does not reload the block header (and recheck its owner count) after every element store. The first push
+    /// makes the block unique with room, exactly where `push` would copy a shared or static block.
+    #[inline]
+    pub fn pusher(&mut self) -> AlmideListPusher<'_, T> where T: Clone {
+        AlmideListPusher { data: self.data(), len: 0, cap: 0, list: self }
     }
 
     /// `push` when the block is shared, static or full.
@@ -293,13 +306,14 @@ impl<T> AlmideList<T> {
             return;
         }
         self.reserve_unique(xs.len());
-        let data = self.data();
-        let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
-        for x in xs {
-            // SAFETY: the block is unique with room for `xs.len()` more elements; slot `set.len` is uninitialised.
-            unsafe { data.add(set.len).write(x.clone()) };
-            set.len += 1;
-        }
+        let len = self.len();
+        let mut set = AlmideListSetLen { block: self.ptr, len };
+        // SAFETY: the block is unique with room for `xs.len()` more elements, and slots `len..len + xs.len()` are
+        // uninitialised; `xs` cannot point into them (it is a shared borrow, and they hold no element yet).
+        let spare = unsafe {
+            std::slice::from_raw_parts_mut(self.data().add(len).cast::<std::mem::MaybeUninit<T>>(), xs.len())
+        };
+        almide_list_clone_into(spare, xs, &mut set.len);
     }
 
     /// Another owner of the same block (ADR-0037 D4): the `Vec::to_vec` spelling of an owned copy, O(1) here.
@@ -425,13 +439,7 @@ impl<T> AlmideList<T> {
         // SAFETY: the block is freshly allocated, sized and aligned for the header.
         unsafe { block.as_ptr().write(AlmideListHeader { rc: AlmideListCount::new(1), len: 0, cap: need }) };
         let fresh = AlmideList::<T> { ptr: block, _elems: PhantomData };
-        for (i, x) in self.as_slice().iter().enumerate() {
-            // SAFETY: slot `i < len <= need` of the fresh block is uninitialised; `len` is bumped after each write.
-            unsafe {
-                fresh.data().add(i).write(x.clone());
-                (*fresh.ptr.as_ptr()).len = i + 1;
-            }
-        }
+        fresh.fill_fresh(self.as_slice());
         *self = fresh;
         Ok(())
     }
@@ -484,10 +492,20 @@ impl<T> AlmideList<T> {
 }
 
 impl<T> Drop for AlmideList<T> {
+    /// The static empty block (what `new`, `Default` and `std::mem::take` leave) inlines to one load and compare;
+    /// releasing a heap block stays out of line.
+    #[inline]
     fn drop(&mut self) {
-        if self.is_static() {
-            return;
+        if !self.is_static() {
+            self.release();
         }
+    }
+}
+
+impl<T> AlmideList<T> {
+    /// Gives up this handle's count on a heap block, freeing the block (and dropping its elements) at the last one.
+    #[inline(never)]
+    fn release(&mut self) {
         if self.header().rc.fetch_sub(1, AtomicOrdering::Release) != 1 {
             return;
         }
@@ -673,6 +691,95 @@ impl<T: Clone> Drop for AlmideListIntoIter<T> {
                 std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(self.list.data().add(self.next), self.end - self.next));
             }
         }
+    }
+}
+
+/// Writes clones of `src` into the uninitialised `dst` (the same length), counting each one into `len` as it lands so a
+/// panicking `clone` leaves `len` covering the elements written so far. The two slices arrive as distinct borrows, so
+/// the backend knows they do not overlap: for an element whose clone is a plain copy the loop becomes one `memcpy`
+/// (the shape of `MaybeUninit::write_clone_of_slice`, which is newer than the workspace's minimum Rust).
+#[inline]
+fn almide_list_clone_into<T: Clone>(dst: &mut [std::mem::MaybeUninit<T>], src: &[T], len: &mut usize) {
+    let n = dst.len();
+    let src = &src[..n];
+    for i in 0..n {
+        dst[i].write(src[i].clone());
+        *len += 1;
+    }
+}
+
+/// See [`AlmideList::pusher`]. `cap == 0` means no push has made the block unique yet: the next push takes the slow
+/// path, which does. While `cap > 0` the block is unique (the `&mut` borrow keeps any other owner from being made),
+/// `len` counts its initialised elements and the header's length is stale until [`Self::commit`].
+pub struct AlmideListPusher<'a, T: Clone> {
+    list: &'a mut AlmideList<T>,
+    data: *mut T,
+    len: usize,
+    cap: usize,
+}
+
+impl<'a, T: Clone> AlmideListPusher<'a, T> {
+    /// Appends `x`.
+    #[inline]
+    pub fn push(&mut self, x: T) {
+        if self.len == self.cap {
+            self.refill();
+        }
+        // SAFETY: `cap > 0` after `refill`, so the block is unique with room for `len + 1`; slot `len` is uninitialised.
+        unsafe { self.data.add(self.len).write(x) };
+        self.len += 1;
+    }
+
+    /// Appends an `Int` lane as one element, converted as the render converts that lane to the element type
+    /// (`Bytes` keeps the low 8 bits).
+    #[inline]
+    pub fn push_lane(&mut self, x: i64) where T: AlmideLaneElem {
+        self.push(T::from_lane(x));
+    }
+
+    /// Writes the length back, makes the block unique with room for one more, and reloads the locals.
+    #[cold]
+    #[inline(never)]
+    fn refill(&mut self) {
+        self.commit();
+        self.list.reserve_unique(1);
+        self.data = self.list.data();
+        self.len = self.list.len();
+        self.cap = self.list.capacity();
+    }
+
+    #[inline]
+    fn commit(&mut self) {
+        if self.cap != 0 {
+            // SAFETY: `cap > 0` means the block is the unique heap block this pusher has been filling.
+            unsafe { (*self.list.ptr.as_ptr()).len = self.len };
+        }
+    }
+}
+
+impl<'a, T: Clone> Drop for AlmideListPusher<'a, T> {
+    #[inline]
+    fn drop(&mut self) {
+        self.commit();
+    }
+}
+
+/// An element type an `Int` lane converts to by Rust's `as` cast, as the native render converts it.
+pub trait AlmideLaneElem {
+    fn from_lane(x: i64) -> Self;
+}
+
+impl AlmideLaneElem for u8 {
+    #[inline]
+    fn from_lane(x: i64) -> u8 {
+        x as u8
+    }
+}
+
+impl AlmideLaneElem for i64 {
+    #[inline]
+    fn from_lane(x: i64) -> i64 {
+        x
     }
 }
 
