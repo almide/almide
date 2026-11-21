@@ -261,6 +261,14 @@ impl<'b, 'a> Bounds<'b, '_, 'a> {
                 operands::covers(flow, cmp, at.op)
                     .map_err(|e| format!("`{tok}` against its check at {}:{}: {e}", c.func, c.op))?;
                 rep.bounds_operands += 1;
+                let shape = match self.ctx.bodies[at.func].ops[cmp] {
+                    wasmparser::Operator::I64GeU => "list-index",
+                    wasmparser::Operator::I32GeU => "exit-test",
+                    wasmparser::Operator::I32Eqz => "byte-or-room",
+                    wasmparser::Operator::Call { .. } => "fresh-block",
+                    _ => "other",
+                };
+                rep.bounds_shapes.push((at, shape, kind == 'w'));
             }
         }
         Ok(())

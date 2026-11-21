@@ -3,7 +3,7 @@ name: Probe — witness census
 # census of every artifact the structural wall judges. Not a gate.
 on:
   push:
-    branches: [probe/v3-measure, probe/v3-measure-dev]
+    branches: [probe/v4-measure, probe/v4-measure-dev]
 
 permissions:
   contents: read
@@ -27,8 +27,6 @@ jobs:
       - name: Install wabt
         run: sudo apt-get update -q && sudo apt-get install -y -q wabt
       - name: Measure
-        env:
-          OLD_REF: probe/sum-census
         run: bash scripts/probe-witness-census.sh "$RUNNER_TEMP/census"
       - name: Upload rows and rejected artifacts
         if: always()
@@ -42,5 +40,8 @@ jobs:
             ${{ runner.temp }}/census/mutrows.tsv
             ${{ runner.temp }}/census/mutrows-old.tsv
             ${{ runner.temp }}/census/storerows.tsv
+            ${{ runner.temp }}/census/shaperows.tsv
+            ${{ runner.temp }}/census/routinerows.tsv
+            ${{ runner.temp }}/census/mutctx.txt
             ${{ runner.temp }}/census/keep
 

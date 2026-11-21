@@ -115,6 +115,9 @@ pub struct Report {
     pub bounds_unlocated: usize,
     /// Located accesses whose guard's operands were held to them.
     pub bounds_operands: usize,
+    /// Probe only: each located bounds access, its guard's shape, and
+    /// whether it writes.
+    pub bounds_shapes: Vec<(At, &'static str, bool)>,
     /// #4013 / #4279: the fields witness's located construction sites,
     /// their field stores, field accesses (of which `field_guarded` are
     /// variant case fields held to their tag test), tag reads, and events
