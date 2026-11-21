@@ -65,6 +65,10 @@ struct Probe {
     test: String,
     expect_by: BTreeMap<String, String>,
     mcp_args: BTreeMap<String, String>,
+    /// Columns whose built artifact (`{out}`) is executed after the build
+    /// succeeds, its output appended: a decision observable only when the
+    /// built program runs (a serialized fan) is then read off the artifact.
+    exec_out: Vec<String>,
 }
 
 fn strs(v: Option<&toml::Value>) -> Vec<String> {
@@ -105,6 +109,7 @@ fn load_probe(id: &str, dir: &Path) -> Probe {
             .and_then(|v| v.as_table())
             .map(|a| a.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
             .unwrap_or_default(),
+        exec_out: strs(t.get("exec_out")),
     }
 }
 
@@ -227,9 +232,14 @@ fn drive(p: &Probe, col: &str, side: Side) -> Result<(), String> {
                 cmd.env(k, v);
             }
             let o = cmd.output().map_err(|e| format!("spawn: {e}"))?;
-            let t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            let mut t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
             if !p.exit_any && o.status.success() {
                 return Err(format!("`almide {}` exited 0:\n{}", args.join(" "), tail(&t)));
+            }
+            if o.status.success() && p.exec_out.iter().any(|c| c == col) {
+                let b = Command::new(&at.out).current_dir(&at.cwd).stdin(Stdio::null()).output().map_err(|e| format!("spawn {}: {e}", at.out))?;
+                t.push_str(&String::from_utf8_lossy(&b.stdout));
+                t.push_str(&String::from_utf8_lossy(&b.stderr));
             }
             t
         }

@@ -15,7 +15,10 @@
 //       route-matrix probe directory that runs the `runs` cells;
 //   c4  `control_patch` (proofs/decision-controls/<id>.patch) exists, with the
 //       test it turns red (`control_test`) and when that was seen
-//       (`control_seen`), and the row carries its `stamp`.
+//       (`control_seen`), and the row carries its `stamp`. A row whose rule
+//       has two checks one patch cannot each neuter names a second control
+//       (`control_extra` = proofs/decision-controls/<id>.<what>.patch, with
+//       `control_extra_test` and `control_extra_seen`), held to the same rules.
 //
 // Every patch a row names must still APPLY to the tree (`git apply --check`)
 // and name the row's `control_test` on its `# control_test:` line, and every
@@ -36,7 +39,7 @@ import process
 
 type Verdict = { lines: List[String], ok: Bool }
 
-type Row = { id: String, status: String, from: String, unknown: String, cells: List[(String, String)], novel: String, probe: String, control_patch: String, control_test: String, control_seen: String, stamp: String, reasons_empty: Bool }
+type Row = { id: String, status: String, from: String, unknown: String, cells: List[(String, String)], novel: String, probe: String, control_patch: String, control_test: String, control_seen: String, control_extra: String, control_extra_test: String, control_extra_seen: String, stamp: String, reasons_empty: Bool }
 
 // What the effectful half found on disk: the paths that exist, and the text of
 // each `novel` test file.
@@ -85,6 +88,9 @@ fn row_of(block: List[String]) -> Row = Row {
   control_patch: scalar(block, "control_patch"),
   control_test: scalar(block, "control_test"),
   control_seen: scalar(block, "control_seen"),
+  control_extra: scalar(block, "control_extra"),
+  control_extra_test: scalar(block, "control_extra_test"),
+  control_extra_seen: scalar(block, "control_extra_seen"),
   stamp: scalar(block, "stamp"),
   reasons_empty: raw(block, "reasons") == "[]" or raw(block, "reasons") == "",
 }
@@ -171,7 +177,7 @@ fn stamp_findings(r: Row, ev: Evidence) -> List[String] = {
   else if r.control_seen == "" then [
     p + "c4: the control never ran (control_seen is empty)"
   ]
-  else []
+  else extra_findings(r, ev, p)
   let st = if r.stamp == "" then [p + "no `stamp` (<sha> <date>)"]
   else []
   let rs = if r.reasons_empty then []
@@ -239,11 +245,30 @@ fn judge(text: String, ev: Evidence) -> List[String] = {
   ) + count_line("failopen_ceiling", c.failopen, cap.failopen)
 }
 
+// A second control (`control_extra`, for a row whose rule has two checks a
+// single patch cannot each neuter): it lives beside the first as
+// proofs/decision-controls/<id>.<what>.patch, names its own test and has run.
+fn extra_prefix(r: Row) -> String = "proofs/decision-controls/" + r.id + "."
+
+fn extra_findings(r: Row, ev: Evidence, p: String) -> List[String] = if r.control_extra == "" then []
+else if not string.starts_with(r.control_extra, extra_prefix(r)) or not string.ends_with(r.control_extra, ".patch") then [
+  p + "c4: control_extra must be " + extra_prefix(r) + "<what>.patch"
+]
+else if not has(ev, r.control_extra) then [p + "c4: " + r.control_extra + " does not exist"]
+else if r.control_extra_test == "" then [
+  p + "c4: no control_extra_test (the test the second patch turns red)"
+]
+else if r.control_extra_seen == "" then [
+  p + "c4: the second control never ran (control_extra_seen is empty)"
+]
+else []
+
 // The paths a STAMPED row points at, so the effectful half can look them up.
 fn wanted(rows: List[Row]) -> List[String] = rows |> list.filter((r) => r.status == "STAMPED") |> list.flat_map((r) => [
   novel_file(r),
   r.probe,
-  "proofs/decision-controls/" + r.id + ".patch"
+  "proofs/decision-controls/" + r.id + ".patch",
+  r.control_extra
 ]) |> list.filter((p) => p != "") |> list.unique
 
 // One named patch: where it must live, that it names the row's test, that it applies.
@@ -267,11 +292,29 @@ effect fn patch_findings(root: String, r: Row) -> List[String] = {
   }
 }
 
+// The second patch a row names: that it names its test and still applies.
+effect fn extra_patch_findings(root: String, r: Row) -> List[String] = {
+  let text = fs.read_text(root + "/" + r.control_extra) ?? ""
+  if text == "" then [
+    r.id + ": " + r.control_extra + " does not exist"
+  ]
+  else if not string.contains(text, "# control_test: " + r.control_extra_test + "\n") then [
+    r.id + ": " + r.control_extra + " does not name the row's control_extra_test `" + r.control_extra_test + "`"
+  ]
+  else match process.exec("git", ["-C", root, "apply", "--check", r.control_extra]) {
+    ok(_) => [],
+    err(_) => [
+      r.id + ": " + r.control_extra + " no longer applies — re-derive it against the moved check"
+    ],
+  }
+}
+
 effect fn controls(root: String, rows: List[Row]) -> List[String] = {
   let named = rows |> list.filter((r) => r.control_patch != "")
-  let bad = named |> list.map((r) => patch_findings(root, r)!)!
+  let extras = rows |> list.filter((r) => r.control_extra != "")
+  let bad = (named |> list.map((r) => patch_findings(root, r)!)!) + (extras |> list.map((r) => extra_patch_findings(root, r)!)!)
   let files = (fs.list_dir(root + "/proofs/decision-controls") ?? []) |> list.filter((f) => string.ends_with(f, ".patch"))
-  let owned = named |> list.map((r) => r.control_patch)
+  let owned = (named |> list.map((r) => r.control_patch)) + (extras |> list.map((r) => r.control_extra))
   let orphans = files |> list.filter((f) => not list.contains(owned, "proofs/decision-controls/" + f)) |> list.map((f) => "proofs/decision-controls/" + f + " belongs to no row's control_patch")
   list.flatten(bad) + orphans
 }
@@ -316,6 +359,21 @@ test "a STAMPED row whose patch file is missing fails, and one with all evidence
   }
   assert(judge(forged(ctl), missing) |> list.any((b) => string.contains(b, "does not exist")))
   assert_eq(judge(forged(ctl), full_evidence()), [])
+}
+
+test "a second control must sit beside the row's patch, exist and have run" {
+  let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"tests/x_test.rs::novel_x\"\ncontrol_seen = \"abc 2026-11-19\"\n"
+  let extra = ctl + "control_extra = \"proofs/decision-controls/x.forged.c1.patch\"\ncontrol_extra_test = \"tests/x_test.rs::novel_y\"\n"
+  let ev = Evidence {
+    present: full_evidence().present + ["proofs/decision-controls/x.forged.c1.patch"],
+    texts: full_evidence().texts,
+  }
+  assert(judge(forged(extra), ev) |> list.any((b) => string.contains(b, "second control never ran")))
+  let seen = extra + "control_extra_seen = \"abc 2026-11-21\"\n"
+  assert_eq(judge(forged(seen), ev), [])
+  assert(judge(forged(seen), full_evidence()) |> list.any((b) => string.contains(b, "x.forged.c1.patch does not exist")))
+  let elsewhere = string.replace(seen, "decision-controls/x.forged.c1.patch", "decision-controls/y.c1.patch")
+  assert(judge(forged(elsewhere), ev) |> list.any((b) => string.contains(b, "control_extra must be")))
 }
 
 test "a STAMPED row that decides from a name, or lets an unknown item through, fails" {
