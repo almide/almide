@@ -77,8 +77,8 @@ one() { # one <leg> <file>
   printf '%s\t%s\tyes\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$leg" "$f" \
     "$(size "$W/a.wasm")" "$(size "$W/a.bundle")" "$(size "$W/a.anchors")" "$(size "$W/a.lcert")" \
     "$vrc" "$vns" "$arc" "$ans" "$lns" "$census" "$verdict" >> "$OUT/rows.tsv"
-  # Keep what a rejection needs to be read by hand.
-  if [ "$arc" -ne 0 ]; then
+  # Keep what a rejection needs to be read by hand (and two accepted modules whose mutants are read).
+  if [ "$arc" -ne 0 ] || [ "$(basename "$f")" = args_surface.almd ] || [ "$(basename "$f")" = result_eq.almd ]; then
     local d="$OUT/keep/$(basename "$f" .almd)"
     mkdir -p "$d"
     cp "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" "$W/a.anchor" "$d/" 2>/dev/null
