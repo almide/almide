@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "118"
+# unstamped_ceiling     = "117"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
-# failopen_ceiling      = "40"
+# failopen_ceiling      = "39"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -128,6 +128,10 @@
 #               after #4817 (@spawns_process + reach): one probe driven on every
 #               route but lsp, the batch-1a novel test, the neuter red. STAMPED:
 #               39 stamped, 118 not, 175 skipped, 40 fail-open.
+#   2026-11-21  env.run-project-dir re-read after #4842 (the override is held to
+#               the private base's rules): novel fresh-directory test, probe on
+#               run/build/bench/native/wasm, control red. STAMPED: 40 stamped,
+#               117 not, 175 skipped, 39 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1604,24 +1608,25 @@ items = [
   "src/cli/build_dir.rs::shared_run_project_dir",
 ]
 keys = []
-decides = "ALMIDE_RUN_PROJECT_DIR replaces the private per-user cache base (#4180: 0700, owned by euid, no symlink) for native binaries and the wasm run cache with an unchecked create_dir_all"
-from = "text"
-unknown = "allow"
-unknown_note = "scope Tool -> honoured under the lock; a shared directory lets another user plant a binary AND its digest record, which cached_binary_intact then accepts"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (native cache, wasm_run_cache.rs:87,111)", build = "runs (build.rs:200)", test = "per-file override dirs (unknown)", bench = "runs (build_native_cached)", native = "runs", wasm = "runs (run cache)", wasi = "unknown", component = "unknown", lsp = "n.a.", mcp = "unknown", emit = "n.a." }
+decides = "ALMIDE_RUN_PROJECT_DIR replaces the private per-user cache base; the override is used only when it is a real directory owned by the effective uid and closed to group and other writers (a missing one is made 0700), else the command refuses before building (#4842)"
+from = "type"
+unknown = "refuse"
+unknown_note = "judged by the directory itself (file type, owner, mode), not its name: a fresh directory others can write, a symlink, or another owner's is refused (the novel test makes fresh ones). The switch stays scope Tool (not held by the lock): what it may name is bounded instead"
+routes = { check = "n.a.: builds no binary", check_json = "n.a.: builds no binary", check_effects = "n.a.: builds no binary", run = "runs", build = "runs", test = "n.a.: almide test builds its workers under the private base, never the override (shared_run_project_dir: run.rs, build.rs, wasm_run_cache.rs, clean.rs only)", bench = "runs", native = "runs", wasm = "runs", wasi = "n.a.: the stock build caches nothing in it", component = "n.a.: the stock build caches nothing in it", lsp = "n.a.: builds no binary", mcp = "n.a.: almide_check / almide_test build no binary in the override", emit = "n.a.: emits source, builds no binary" }
 tests = [
   "tests/run_cache_recovery_test.rs",
   "tests/wasm_run_cache_test.rs",
 ]
 control_note = "NONE"
 issues = [4842]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-  "lock:not-held (Tool)",
-]
+status = "STAMPED"
+stamp = "ef40f4d5d3 2026-11-21"
 note = "build_dir.rs:84-88 vs private_base_in/ensure_private_dir :115-160; run.rs:173-176 create_dir_all only. secaudit listed it as low; not filed."
+probe = "tests/decision-probes/env.run-project-dir"
+novel = "tests/decision_run_dir_novel_test.rs::novel_an_override_others_could_write_into_is_refused"
+control_patch = "proofs/decision-controls/env.run-project-dir.patch"
+control_test = "tests/decision_run_dir_novel_test.rs::novel_an_override_others_could_write_into_is_refused"
+control_seen = "ef40f4d5d3 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.certify-ownership"
