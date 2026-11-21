@@ -90,6 +90,21 @@ pub fn located(anchors: &str) -> Result<HashSet<At>, String> {
     Ok(out)
 }
 
+/// Probe only: every located instruction with the witness that names it.
+pub fn located_by(anchors: &str) -> Result<std::collections::HashMap<At, &'static str>, String> {
+    let (_, init, bounds, _, _, _) = parse_anchors_held(anchors)?;
+    let fields = crate::fields_anchors(anchors);
+    let mut out = std::collections::HashMap::new();
+    for (name, line) in [("init", init.as_str()), ("bounds", bounds.as_str()), ("fields", fields.as_str())] {
+        for t in line.split(|c: char| c.is_whitespace() || c == ';' || c == '|').filter(|t| !t.is_empty()) {
+            if let Ok(Some(at)) = parse_at(t) {
+                out.insert(at, name);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// The census of `bodies` against `anchors`.
 pub fn census(bodies: &[Body<'_>], anchors: &str) -> Result<Census, String> {
     census_with(bodies, anchors, &HashSet::new())

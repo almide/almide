@@ -184,6 +184,8 @@ PY3
 echo "== mutants of the located instructions (kind, verdict, count) =="
 if [ -s "$OUT/mutrows.tsv" ]; then
   awk -F'\t' '$3 ~ /^MUT / {split($3,a," "); c[$1" "a[2]" "a[3]]+=a[4]} END{for(k in c) print "   " k, c[k]}' "$OUT/mutrows.tsv" | sort
-  echo "   survivors (first 40):"
-  grep -P '\tMUTSURV' "$OUT/mutrows.tsv" | head -40 | sed 's/^/     /' || true
+  echo "   survivors on the located instruction itself, by class and instruction shape:"
+  grep -P '\tMUTSURV' "$OUT/mutrows.tsv" | awk -F'\t' '{split($3,a," "); w=a[5]; gsub(/[0-9]+/,"N",w); c[$1" "a[2]" "w]++} END{for(k in c) print c[k], k}' | sort -nr | head -40 | sed 's/^/     /' || true
+  echo "   examples:"
+  grep -P '\tMUTSURV' "$OUT/mutrows.tsv" | awk -F'\t' '{split($3,a," "); k=$1" "a[2]; if (n[k]++ < 3) print}' | head -45 | sed 's/^/     /' || true
 fi

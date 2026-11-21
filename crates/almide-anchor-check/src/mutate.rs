@@ -20,6 +20,13 @@ pub struct Mutant {
     pub kind: &'static str,
     pub pos: usize,
     pub to: u8,
+    /// The witness naming the located instruction this mutant belongs to.
+    pub src: &'static str,
+    /// 0 when the mutated instruction is the located one itself; otherwise
+    /// how many instructions before it.
+    pub dist: usize,
+    /// The mutated instruction, as decoded.
+    pub what: String,
 }
 
 /// How many instructions before a located one are mutated with it.
@@ -53,7 +60,7 @@ fn one(wasm: &[u8], op: &Op<'_>, off: usize) -> Option<(&'static str, usize, u8)
 }
 
 /// Every mutant of `wasm` at and just before the instructions in `located`.
-pub fn mutants(wasm: &[u8], located: &HashSet<At>) -> Result<Vec<Mutant>, String> {
+pub fn mutants(wasm: &[u8], located: &std::collections::HashMap<At, &'static str>) -> Result<Vec<Mutant>, String> {
     let mut out = Vec::new();
     let mut func = 0usize;
     for payload in Parser::new(0).parse_all(wasm) {
@@ -64,18 +71,23 @@ pub fn mutants(wasm: &[u8], located: &HashSet<At>) -> Result<Vec<Mutant>, String
             let off = r.original_position();
             ops.push((r.read().map_err(|e| e.to_string())?, off));
         }
-        let mut want: HashSet<usize> = HashSet::new();
+        // Each instruction belongs to the nearest located one at or after it.
+        let mut want: std::collections::BTreeMap<usize, (&'static str, usize)> = std::collections::BTreeMap::new();
         for k in 0..ops.len() {
-            if located.contains(&At { func, op: k }) {
-                want.extend(k.saturating_sub(BACK)..=k);
+            if let Some(src) = located.get(&At { func, op: k }) {
+                for j in k.saturating_sub(BACK)..=k {
+                    let d = k - j;
+                    if want.get(&j).is_none_or(|(_, old)| d < *old) {
+                        want.insert(j, (src, d));
+                    }
+                }
             }
         }
-        let mut ks: Vec<usize> = want.into_iter().collect();
-        ks.sort_unstable();
-        for k in ks {
+        let _: HashSet<usize> = HashSet::new();
+        for (k, (src, dist)) in want {
             let (op, off) = &ops[k];
             if let Some((kind, pos, to)) = one(wasm, op, usize::try_from(*off).unwrap_or(usize::MAX)) {
-                out.push(Mutant { at: At { func, op: k }, kind, pos, to });
+                out.push(Mutant { at: At { func, op: k }, kind, pos, to, src, dist, what: format!("{op:?}") });
             }
         }
         func += 1;

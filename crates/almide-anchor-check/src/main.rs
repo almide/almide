@@ -27,9 +27,9 @@ fn main() {
         let (Some(w), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
         let (w, b) = (std::fs::read(w).unwrap_or_default(), std::fs::read(b).unwrap_or_default());
         let a = String::from_utf8_lossy(&std::fs::read(a).unwrap_or_default()).into_owned();
-        let located = almide_anchor_check::located(&a).unwrap_or_default();
+        let located = almide_anchor_check::located_by(&a).unwrap_or_default();
         let ms = almide_anchor_check::mutate::mutants(&w, &located).unwrap_or_default();
-        let mut tally: std::collections::BTreeMap<(&str, &str), usize> = std::collections::BTreeMap::new();
+        let mut tally: std::collections::BTreeMap<(String, &str), usize> = std::collections::BTreeMap::new();
         for m in &ms {
             let mut x = w.clone();
             x[m.pos] = m.to;
@@ -41,9 +41,10 @@ fn main() {
                     Ok(_) => "survived",
                 }
             };
-            *tally.entry((m.kind, verdict)).or_default() += 1;
-            if verdict == "survived" {
-                println!("MUTSURV {} {}:{} byte {} -> {}", m.kind, m.at.func, m.at.op, m.pos, m.to);
+            let class = format!("{}/{}/{}", m.src, if m.dist == 0 { "self" } else { "operand" }, m.kind);
+            *tally.entry((class.clone(), verdict)).or_default() += 1;
+            if verdict == "survived" && m.dist == 0 {
+                println!("MUTSURV {class} {}:{} -> {} {}", m.at.func, m.at.op, m.to, m.what.replace(' ', ""));
             }
         }
         for ((k, v), n) in tally {
