@@ -269,11 +269,6 @@ class = "legacy"
 names = 21
 
 [[site]]
-id = "crates/almide-frontend/src/check/scoped.rs::SCOPED_SCALAR_MODULES::table"
-class = "legacy"
-names = 4
-
-[[site]]
 id = "crates/almide-frontend/src/check/static_dispatch.rs::resolve_module_call_member::or-chain"
 class = "legacy"
 names = 2
