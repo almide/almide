@@ -689,11 +689,6 @@ class = "legacy"
 names = 137
 
 [[site]]
-id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
-class = "legacy"
-names = 53
-
-[[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
 class = "legacy"
 names = 7
