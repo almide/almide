@@ -259,7 +259,6 @@ impl Emitter<'_> {
                             .i32_const(msg as i32)
                             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
                         self.fw_res_w(4, 0);
-                        let mut i = self.f.instructions();
                     } else {
                         // ok(acc)
                         i.i32_const(16)
@@ -271,7 +270,6 @@ impl Emitter<'_> {
                             .local_get(hacc)
                             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
                         self.fw_res_w(4, 0);
-                        let mut i = self.f.instructions();
                     }
                 }
                 if !first_ok_wins {
