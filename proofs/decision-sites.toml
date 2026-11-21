@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "110"
+# unstamped_ceiling     = "108"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
-# failopen_ceiling      = "33"
+# failopen_ceiling      = "30"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -149,6 +149,12 @@
 #               red. Fresh novel tests and probes; anchor.branch-target-depth's
 #               control re-pointed at the control table. STAMPED: 47 stamped,
 #               110 not, 175 skipped, 33 fail-open.
+#   2026-11-21  owner rulings 2026-11-21: #4903 rule (b) — a fn with a concurrent
+#               slot is called only by name, a `let` alias is followed, any other
+#               use as a value is E008 (effect.e007-e008-fan-context STAMPED);
+#               manifest.package-name refused by parse_toml (STAMPED); #4904 E420
+#               on the value and method routes (scope.e420-local-fn closed, c1
+#               prefix stays). 49 stamped, 108 not, 175 skipped, 30 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1039,19 +1045,26 @@ keys = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_timeout::S1::E007",
 ]
 decides = "E007: fan block / fan.bounded / fan.min / fan.timeout / fan.settle in a pure context; E008: a var reachable from a concurrent body"
-from = "mixed:declaration+name"
-unknown = "allow"
-unknown_note = "E007: each fan form has its own `can_call_effect` arm (declaration). E008: FAN_OPS is a name list; Callee::Unknown/Value/Method and a fan op not in FAN_OPS fall to `_ => Vec::new()` (concurrent_reach.rs:463). Not probed"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "E007: each fan form has its own `can_call_effect` arm. E008 (#4903, rule (b)): every fn-valued argument of any `fan.<op>` call is a slot (no op list), a stdlib `@concurrent` parameter is a slot (also when called as a method), and a user fn's or lambda's parameter flowing into one is an inferred slot; a `let` alias is followed to the fn or lambda it names, and every other use of a slotted fn as a value (argument, list / tuple / record element, `var`) is refused with E008. The `http` spelling selects only the handler wording and disables folding (the fail-closed direction)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/diagnostics/e007-bounded-in-helper",
   "tests/diagnostics/e007-timeout-in-pure-helper",
 ]
-control_note = "NONE"
-issues = []
-status = "UNSTAMPED"
-reasons = ["c1:name-keyed (FAN_OPS, `fan`/`http` module names)", "c2:fail-open read (E008: Callee::Unknown/Value/Method fall to `_ => Vec::new()`), not yet probed; E007 is a declaration rule", "c4:no-control (a neuter is located in the row's note; not run)"]
+issues = [4903]
+status = "STAMPED"
 note = "Front-end validate_after_solve, so every checker route runs it."
+probe = "tests/decision-probes/effect.e007-e008-fan-context"
+novel = "tests/decision_e008_value_novel_test.rs::novel_a_fan_wrapper_used_as_a_value_is_refused"
+control_patch = "proofs/decision-controls/effect.e007-e008-fan-context.patch"
+control_test = "tests/decision_e008_value_novel_test.rs::novel_a_fan_wrapper_used_as_a_value_is_refused"
+control_extra = "proofs/decision-controls/effect.e007-e008-fan-context.alias.patch"
+control_extra_test = "tests/decision_e008_value_novel_test.rs::novel_a_let_alias_of_a_fan_wrapper_holds_its_callback_to_e008"
+stamp = "d203a5fa30 2026-11-21"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "fsscope.native-guard-map"
@@ -2175,17 +2188,21 @@ items = [
   "src/project_fetch.rs::add_dep_to_toml",
 ]
 keys = []
-decides = "a [package].name with `-` is refused by parse_toml; where the name becomes a file name (build/compile/install) only ASCII letters/digits/_ pass"
-from = "text"
-unknown = "allow"
-unknown_note = "parse_toml accepts any name without `-` (e.g. `../x`, U+202E is refused by control-text); the hyphen refusal is not in the check_manifest gate, so a hyphen drops [permissions] on .ok() readers (#4829)"
-routes = { check = "runs:via parse_toml", check_json = "runs", check_effects = "runs", run = "runs", build = "runs+plain-name", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "runs", emit = "runs" }
+decides = "a [package].name outside the plain-name grammar (ASCII letters, digits, `_`, not starting with a digit) is refused by parse_toml, so every route that reads the manifest refuses it (a `-` keeps its rename hint)"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "one declared grammar (check_plain_name) read by the manifest reader itself; an empty / absent name declares none. The novel test puts each non-plain spelling into a fresh identifier"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = ["tests/install_destination_test.rs"]
-control_note = "NONE"
 issues = [4829]
-status = "UNSTAMPED"
-reasons = ["c1: a one-character blacklist (`-`, project.rs:674-684); the plain-name grammar applies only at file-name sites (project.rs:665-672)", "c2: a name with a space, `/`, `..`, a leading digit or a non-ASCII letter is read (issue draft issue-package-name-grammar)", "c4: no control"]
+status = "STAMPED"
 note = "#4829 closed: a hyphen now ends every command (governing_manifest) instead of dropping [permissions]. No evidence written (c1 / c2 need the grammar)."
+probe = "tests/decision-probes/manifest.package-name"
+novel = "tests/decision_package_name_novel_test.rs::novel_a_fresh_non_plain_package_name_is_refused_on_every_route"
+control_patch = "proofs/decision-controls/manifest.package-name.patch"
+control_test = "tests/decision_package_name_novel_test.rs::novel_a_fresh_non_plain_package_name_is_refused_on_every_route"
+stamp = "d203a5fa30 2026-11-21"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "manifest.control-text"
@@ -4188,14 +4205,19 @@ keys = [
 ]
 decides = "a `local fn` is called only from its own module (a `mod fn` from its own package)"
 from = "mixed:declaration+prefix"
-unknown = "allow"
+unknown = "refuse"
 status = "UNSTAMPED"
-reasons = ["c1:prefix (package from the module name)", "c2:fail-open (no visibility entry; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "a fn with no visibility entry returns admitted (infer_loops_records.rs:539-541); the package is the module name's first segment. Not probed"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
+reasons = ["c1:prefix (a `mod fn`'s package is the module name's first segment)"]
+unknown_note = "#4904: the visibility check runs on the call routes, on a module fn named as a value (`let g = m.f`, `list.map(xs, m.f)`) and on a method call (`x.f()` resolved to a convention or cross-module fn); a restricted fn whose declaring module is unknown is judged against its key's prefix, which refuses. A fn with no visibility entry is declared public (registration stores every non-public one)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = ["tests/diagnostics/e420-local-fn-from-entry"]
-issues = []
+issues = [4904]
 note = "infer_loops_records.rs:538-596."
+probe = "tests/decision-probes/scope.e420-local-fn"
+novel = "tests/decision_e420_value_novel_test.rs::novel_a_local_fn_is_refused_on_every_route_from_another_module"
+control_patch = "proofs/decision-controls/scope.e420-local-fn.patch"
+control_test = "tests/decision_e420_value_novel_test.rs::novel_a_local_fn_is_refused_on_every_route_from_another_module"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.lock-readonly"
