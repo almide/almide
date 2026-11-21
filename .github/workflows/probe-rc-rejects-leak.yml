@@ -1,0 +1,47 @@
+name: Probe — the programs the RC byte check refuses, under the allocation counter
+# A one-off measurement on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/rc-rejects-leak-2]
+
+permissions:
+  contents: read
+
+jobs:
+  count:
+    name: Allocation counters
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Build
+        run: cargo build -q --release --bin almide
+      - name: Run each under the allocation counter
+        run: |
+          set -u
+          for f in examples/minesweeper.almd \
+            research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/seed/almide/main.almd \
+            research/benchmark/lang-bench/tasks-example/xlang/t0-smoke/edits/01-add-sub/solution/almide/main.almd \
+            research/benchmark/perf/fannkuchredux/fannkuchredux.almd \
+            research/benchmark/perf/fft/fft.almd \
+            research/benchmark/perf/listbuild/listbuild_prealloc.almd \
+            research/benchmark/perf/onebrc/onebrc.almd \
+            research/benchmark/perf/v1-shapes/chunked_line_fold.almd \
+            research/benchmark/perf/v1-shapes/map_keyed_counting.almd \
+            research/benchmark/perf/v1-shapes/never_fallible.almd \
+            examples/lisp.almd examples/raytracer.almd; do
+            echo "== $f"
+            ALMIDE_WASM_ALLOC_COUNT=1 timeout 300 ./target/release/almide run "$f" --target wasm > out.txt 2> err.txt < /dev/null
+            echo "exit $? ; stdout $(wc -l < out.txt) line(s), $(wc -c < out.txt) byte(s)"
+            grep -iE "alloc|free|live|leak" out.txt err.txt | tail -6 | cut -c1-240
+            head -2 err.txt | cut -c1-200
+          done
