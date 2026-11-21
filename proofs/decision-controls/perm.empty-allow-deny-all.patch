@@ -1,0 +1,14 @@
+# Negative control of perm.empty-allow-deny-all (proofs/decision-sites.toml): an explicit `allow = []` reads as an absent key (unchecked) instead of granting nothing
+# control_test: tests/decision_batch1a_test.rs::novel_an_empty_allow_refuses_every_capability_a_fresh_fn_reaches
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -304,7 +304,7 @@
+     almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
+     // An absent `allow` is unchecked; an explicit `allow = []` allows no
+     // capability at all (#4101).
+-    if let Some(allow) = &proj.permissions {
++    if let Some(allow) = proj.permissions.as_ref().filter(|a| !a.is_empty()) {
+         check_permissions(ir, allow)?;
+         proc_grant_without_list(proj, false)?;
+     }

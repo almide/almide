@@ -1,0 +1,4 @@
+// The probe of deps.symlink-walk: dep/src/ext links out of the package.
+import dep.ext.evil
+
+effect fn main() -> Unit = println(evil.evil())

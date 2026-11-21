@@ -10,8 +10,44 @@ pub const SRC_ARGS: &str = r#"
 
 import env
 
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
+/// True on --name before `--`; a one-letter name also matches -name. No short form is derived. Err on a dash-written or empty name.
+effect fn has_flag(name: String) -> Bool = {
+  __name_ok("args.has_flag", name)!
+  __has(__options(env.args()), name)
+}
+
+
+
+
+
+
+@category
+fn __name_ok(reader: String, name: String) -> Result[Unit, String] =
+  if name != "" and not string.starts_with(name, "-") then ok(())
+  else {
+    let bare = __undash(name)
+    err(if bare == "" then reader + ": the name is empty: write it without dashes, as in \"out\""
+    else reader + ": write the name without its dashes: \"" + bare + "\"")
+  }
+
+@category
+fn __undash(s: String) -> String = if string.starts_with(s, "-") then __undash(string.drop(s, 1)) else s
+
+
+
+@category
+fn __names_ok(reader: String, names: List[String], i: Int) -> Result[Unit, String] =
+  if i >= list.len(names) then ok(())
+  else {
+    __name_ok(reader, list.get(names, i) ?? "")!
+    __names_ok(reader, names, i + 1)
+  }
+
+
+
+
+@category
+fn __short(name: String, long: String) -> String = if string.len(name) == 1 then "-" + name else long
 
 
 
@@ -22,8 +58,8 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
-  let short = if string.len(name) == 1 then "-" + name else "--" + name
-  __flag_at(args, "--" + name, short, 0)
+  let long = "--" + name
+  __flag_at(args, long, __short(name, long), 0)
 }
 
 
@@ -53,24 +89,42 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
     else __flag_at(args, long, short, i + 1)
   }
 
-/// Value of --name=v or --name v before `--`; none if absent.
+/// Value of --name=v or --name v before `--` (a one-letter name also -n=v, -n v); none if absent. Err on a dash-written or empty name.
 effect fn option(name: String) -> String? = {
-  let args = __options(env.args())
-  let long = "--" + name
-  let eq_prefix = long + "="
+  __name_ok("args.option", name)!
+  __option(__options(env.args()), name)
+}
 
-  let eq_match = __find_prefixed(args, eq_prefix, 0)
-  match eq_match {
-    some(a) => string.strip_prefix(a, eq_prefix),
-    none => {
-      let idx = list.index_of(args, long)
-      match idx {
-        some(i) => list.get(args, i + 1),
-        none => none,
-      }
+
+
+@category
+fn __option(args: List[String], name: String) -> String? = {
+  let long = "--" + name
+  let short = __short(name, long)
+  let long_eq = long + "="
+  let short_eq = if string.len(name) == 1 then short + "=" else long_eq
+
+  match __find_either_prefixed(args, long_eq, short_eq, 0) {
+    some(v) => some(v),
+    none => match __index_either(args, long, short, 0) {
+      some(i) => list.get(args, i + 1),
+      none => none,
     },
   }
 }
+
+
+@category
+fn __find_either_prefixed(args: List[String], long: String, short: String, i: Int) -> String? =
+  if i >= list.len(args) then none
+  else {
+    let a = list.get(args, i) ?? ""
+    if string.starts_with(a, long) then string.strip_prefix(a, long)
+    else if string.starts_with(a, short) then string.strip_prefix(a, short)
+    else __find_either_prefixed(args, long, short, i + 1)
+  }
+
+
 
 @category
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
@@ -78,8 +132,21 @@ fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   else if string.starts_with(list.get(args, i) ?? "", prefix) then list.get(args, i)
   else __find_prefixed(args, prefix, i + 1)
 
-/// Args before `--` that are not flags or values of the named options, then all after `--`.
-effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
+
+@category
+fn __index_either(args: List[String], long: String, short: String, i: Int) -> Int? =
+  if i >= list.len(args) then none
+  else {
+    let a = list.get(args, i) ?? ""
+    if a == long or a == short then some(i)
+    else __index_either(args, long, short, i + 1)
+  }
+
+/// Args before `--` that are not flags or values of the named options, then all after `--`. Err on a dash-written or empty name.
+effect fn positional(options: List[String]) -> List[String] = {
+  __names_ok("args.positional", options, 0)!
+  __positional(env.args(), options)
+}
 
 
 
@@ -106,7 +173,7 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
   else {
     let a = list.get(args, i) ?? ""
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
-    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(
+    else if __names_value(options, a) then __positional_at(
       args,
       options,
       i + 2,
@@ -114,6 +181,13 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
     )
     else __positional_at(args, options, i + 1, acc)
   }
+
+
+
+@category
+fn __names_value(options: List[String], a: String) -> Bool =
+  if string.starts_with(a, "--") then list.contains(options, string.drop(a, 2))
+  else string.len(a) == 2 and list.contains(options, string.drop(a, 1))
 "#;
 pub const SRC_BASE64: &str = r#"
 
@@ -2168,7 +2242,8 @@ else list.len(bytes.split(b, needle)) - 1
 
 fn __bytes_media_type(b: Bytes) -> String = "application/octet-stream"
 
-fn __bytes_to_text(b: Bytes) -> String = to_string_lossy(b)
+
+fn __bytes_to_bytes(b: Bytes) -> Bytes = b
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -5988,11 +6063,6 @@ fn max(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_float_clamp")
 fn clamp(x: Float, lo: Float, hi: Float) -> Float = _
 
-/// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
-@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
-@intrinsic("almide_rt_float_sign")
-fn sign(n: Float) -> Float = _
-
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 fn signum(x: Float) -> Float = if float.is_nan(x) then x
 else if float.to_bits(x) < 0 then -1.0 else 1.0
@@ -6616,14 +6686,6 @@ fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
 }
 
 fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)
-
-
-
-
-fn float_sign(n: Float) -> Float = {
-  let nan = prim.fne(n, n)
-  if nan then n else prim.fcopysign(1.0, n)
-}
 
 
 
@@ -10230,7 +10292,7 @@ fn script_json(v: Value) -> SafeHtml = {
 @script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
-fn __safe_html_to_text(h: SafeHtml) -> String = to_string(h)
+fn __safe_html_to_bytes(h: SafeHtml) -> Bytes = bytes.from_string(to_string(h))
 "##;
 pub const SRC_HTTP: &str = r#"
 
@@ -10279,7 +10341,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
   status,
-  body.__self_to_text(),
+  body.__self_to_bytes(),
   ["Content-Type", body.__self_media_type()],
 )
 
@@ -10295,14 +10357,14 @@ fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) 
   }
   http.__with_headers(
     status,
-    body.__self_to_text(),
+    body.__self_to_bytes(),
     ["Content-Type", body.__self_media_type()] + __flat(headers),
   )
 }
 
 /// resp with its body replaced by body and its Content-Type by body's type.
 fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http_response_put_header(
-  http.__http_response_put_body(resp, body.__self_to_text()),
+  http.__http_response_put_body_bytes(resp, body.__self_to_bytes()),
   "Content-Type",
   body.__self_media_type(),
 )
@@ -10319,23 +10381,23 @@ mod type TypedBody: Body = { media_type: String, bytes: Bytes }
 
 fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
-fn __typed_body_to_text(b: TypedBody) -> String = bytes.to_string_lossy(b.bytes)
+fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
-local fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __with_headers(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
 
 
 
 
 @intrinsic("almide_rt_http___http_response_flat")
 @borrow_ref(flat)
-local fn __http_response_flat(status: Int, body: String, flat: List[String]) -> HttpResponse = _
+local fn __http_response_flat(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
   302,
-  "",
+  bytes.from_string(""),
   ["Location", url, "Content-Type", string.__string_media_type("")],
 )
 
@@ -10364,7 +10426,7 @@ fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 /// Body text; a fetched body is decoded as lossy UTF-8.
 fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 
-/// Body as bytes: a fetched body exactly as sent, a request's set_body_bytes exactly as given, otherwise the UTF-8 bytes of body(m).
+/// Body as bytes: a fetched body exactly as sent, a bytes body exactly as given, otherwise the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
 /// m with header name set, any case: the first match replaced in place, else appended; a response refuses Content-Type.
@@ -10376,7 +10438,7 @@ fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self
 /// m with its body replaced; a response's Content-Type becomes text/plain; charset=utf-8.
 fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 
-/// m with its body replaced by body: a request keeps the bytes exactly; a response decodes them as lossy UTF-8 and its Content-Type becomes application/octet-stream.
+/// m with its body replaced by body, kept exactly; a response's Content-Type becomes application/octet-stream.
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
@@ -10420,6 +10482,11 @@ local fn __http_response_put_header(m: HttpResponse, name: String, value: String
 @intrinsic("almide_http_set_body")
 @consume(m)
 local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
+
+
+@intrinsic("almide_http_set_body_bytes")
+@consume(m)
+local fn __http_response_put_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = _
 
 
 local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
@@ -10629,6 +10696,7 @@ fn new_request(method: String, target: String, body: String, headers: List[(Stri
 
 @intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
+@consume(method, target, body)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
@@ -11363,7 +11431,12 @@ fn http_req_repr(req: List[String]) -> String = {
 
 @implements("http.__http_response_repr")
 fn http_resp_repr(resp: List[String]) -> String = {
-  let status = list.get(resp, 0) ?? "0"
+
+  let cell = list.get(resp, 0) ?? "0"
+  let status = match string.index_of(cell, "/") {
+    some(i) => string.slice(cell, 0, i),
+    none => cell,
+  }
   let body = __hq_quote(list.get(resp, 1) ?? "")
   "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
 }
@@ -11386,8 +11459,43 @@ pub const SRC_HTTP_RESPONSE: &str = r#"
 
 
 
+import hex
+
 @implements("http.__http_response_flat")
-fn http_response_flat(status: Int, body: String, flat: List[String]) -> List[String] = [int.to_string(status), body] + flat
+fn http_response_flat(status: Int, body: Bytes, flat: List[String]) -> List[String] = __hr_body_cells(
+  int.to_string(status),
+  body,
+) + flat
+
+
+
+
+
+
+
+
+fn __hr_body_cells(status: String, body: Bytes) -> List[String] = match bytes.to_string(body) {
+  ok(text) => [status, text],
+  err(_) => [status + "/" + hex.encode(body), bytes.to_string_lossy(body)],
+}
+
+
+
+
+fn __hr_status(resp: List[String]) -> String = __hr_cell_status(list.get(resp, 0) ?? "0")
+
+fn __hr_cell_status(cell: String) -> String = match string.index_of(cell, "/") {
+  some(i) => string.slice(cell, 0, i),
+  none => cell,
+}
+
+fn __hr_raw_hex(resp: List[String]) -> String? = {
+  let cell = list.get(resp, 0) ?? "0"
+  match string.index_of(cell, "/") {
+    some(i) => some(string.drop(cell, i + 1)),
+    none => none,
+  }
+}
 
 fn http_json(status: Int, body: String) -> List[String] = {
   let st = int.to_string(status)
@@ -11424,7 +11532,7 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
+fn http_with_headers(status: Int, body: Bytes, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
   let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
@@ -11436,7 +11544,7 @@ fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[Stri
     (m, (i, low, _)) => if map.contains(m, low) then m
     else map.set(m, low, i),
   )
-  [st, body] + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
+  __hr_body_cells(st, body) + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
     k,
     map.get(last, low) ?? ""
   ]
@@ -11445,17 +11553,29 @@ fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[Stri
 
 
 
-fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
-  resp,
-  0,
-  int.to_string(code),
-)
+
+
+
+fn http_status(resp: List[String], code: Int) -> List[String] = {
+  let cell = list.get(resp, 0) ?? "0"
+  let next = match string.index_of(cell, "/") {
+    some(i) => int.to_string(code) + "/" + string.drop(cell, i + 1),
+    none => int.to_string(code),
+  }
+  list.set(resp, 0, next)
+}
 
 
 
 fn http_body(resp: List[String]) -> String = bytes.to_string_lossy(http_body_bytes(resp))
 
-fn http_body_bytes(resp: List[String]) -> Bytes = bytes.from_string(list.get(resp, 1) ?? "")
+fn http_body_bytes(resp: List[String]) -> Bytes = {
+  let text = bytes.from_string(list.get(resp, 1) ?? "")
+  match __hr_raw_hex(resp) {
+    some(h) => hex.decode(h) ?? text,
+    none => text,
+  }
+}
 
 fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
 
@@ -11476,7 +11596,7 @@ fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[Stri
   else __hr_set(resp, i + 2, key, value)
 
 
-fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? "0") ?? 0
+fn http_status_code(resp: List[String]) -> Int = int.parse(__hr_status(resp)) ?? 0
 
 
 fn http_header_values(resp: List[String], key: String) -> List[String] = __hr_all(resp, 2, key, [])
@@ -11502,7 +11622,19 @@ fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_f
 fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
 
-fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
+
+
+fn http_set_body(resp: List[String], body: String) -> List[String] = {
+  let status = __hr_cell_status(list.get(resp, 0) ?? "0")
+  list.set(list.set(resp, 0, status), 1, body)
+}
+
+
+@implements("http.__http_response_put_body_bytes")
+fn http_set_body_bytes(resp: List[String], body: Bytes) -> List[String] = {
+  let cells = __hr_body_cells(__hr_cell_status(list.get(resp, 0) ?? "0"), body)
+  list.set(list.set(resp, 0, list.get(cells, 0) ?? ""), 1, list.get(cells, 1) ?? "")
+}
 "#;
 pub const SRC_HTTP_SERVE: &str = r#"
 
@@ -11524,13 +11656,17 @@ pub const SRC_HTTP_SERVE: &str = r#"
 
 
 
+
 import hash
+import hex
 
 effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
 
 effect fn __http_serve_next() -> Result[List[String], String] = _
 
-effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
+
+
+effect fn __http_serve_reply(frame: String, body: Bytes) -> Result[Unit, String] = _
 
 
 
@@ -11588,8 +11724,28 @@ fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
   (list.len(resp) - 2) / 2,
 ) |> list.map((i) => (list.get(resp, 2 + 2 * i) ?? "", list.get(resp, 3 + 2 * i) ?? ""))
 
+
+
+fn __hs_status(resp: List[String]) -> String = {
+  let cell = list.get(resp, 0) ?? ""
+  match string.index_of(cell, "/") {
+    some(i) => string.slice(cell, 0, i),
+    none => cell,
+  }
+}
+
+
+fn __hs_body(resp: List[String]) -> Bytes = {
+  let cell = list.get(resp, 0) ?? ""
+  let text = bytes.from_string(list.get(resp, 1) ?? "")
+  match string.index_of(cell, "/") {
+    some(i) => hex.decode(string.drop(cell, i + 1)) ?? text,
+    none => text,
+  }
+}
+
 fn __hs_refusal(resp: List[String]) -> String? = {
-  let status = list.get(resp, 0) ?? ""
+  let status = __hs_status(resp)
   let code = int.parse(status) ?? 0
   match __hs_pairs(resp) |> list.filter_map(((k, v)) => __hs_bad_header(k, v)) |> list.first {
     some(why) => some(why),
@@ -11668,7 +11824,11 @@ effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
         },
         none => resp,
       }
-      __http_serve_reply(__hs_frame(__hs_shaped(answer)))!
+      let shaped = __hs_shaped(answer)
+      __http_serve_reply(
+        __hs_frame([__hs_status(shaped), ""] + list.drop(shaped, 2)),
+        __hs_body(shaped),
+      )!
     }
   }
 }
@@ -11790,11 +11950,6 @@ fn count_leading_zeros(x: Int) -> Int = _
 fn count_trailing_zeros(x: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
-@deprecated(since=15, use="int.count_ones")
-@intrinsic("almide_rt_int_pop_count")
-fn pop_count(n: Int) -> Int = _
-
-/// Number of set bits; 64 for -1.
 @intrinsic("almide_rt_int_pop_count")
 fn count_ones(x: Int) -> Int = _
 
@@ -11805,11 +11960,6 @@ fn bit_reverse(x: Int) -> Int = _
 /// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
 fn byte_swap(x: Int) -> Int = _
-
-/// Bits needed to hold n; 0 for 0, 64 if negative.
-@deprecated(since=15, use="int.bit_length")
-@intrinsic("almide_rt_int_bit_width")
-fn bit_width(n: Int) -> Int = _
 
 /// Bits needed to hold x; 0 for 0, 64 if negative.
 @intrinsic("almide_rt_int_bit_width")
@@ -31633,15 +31783,31 @@ effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_outp
   c.timeout_ms,
 )
 
-/// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+/// Runs c on this terminal (its stdin too, unless c.stdin is set); ok on exit 0, err on any other exit, a signal, a failed start or the deadline.
 @ordered
-effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+effect fn run(c: ProcessCommand) -> Result[Unit, String] = match __os_run(
   c.cmd,
   c.args,
   c.dir,
   c.stdin,
   c.timeout_ms,
-)
+) {
+  ok(0) => ok(()),
+  ok(code) => err("process.run(${__run_operand(c)}): ${__run_ended(code)}"),
+  err(e) => err(e),
+}
+
+
+
+
+
+
+local fn __run_ended(code: Int) -> String = if code == -1 then "ended by a signal" else "exited with status ${code}"
+
+local fn __run_operand(c: ProcessCommand) -> String = if c.dir == "" then __quoted(c.cmd)
+else "${__quoted(c.dir)}, ${__quoted(c.cmd)}"
+
+local fn __quoted(s: String) -> String = "\"${string.__err_text(s)}\""
 
 /// Starts c in its own process group and returns at once; its output is captured.
 @ordered
@@ -32222,10 +32388,6 @@ fn is_match(re: Regex, s: String) -> Bool = regex.__is_match(re.pattern, s)
 
 /// re matches the whole of s.
 fn is_full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
-
-/// re matches the whole of s (renamed regex.is_full_match).
-@deprecated(since=15, use="regex.is_full_match")
-fn full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
 
 /// Leftmost match of re in s, or none.
 fn find(re: Regex, s: String) -> String? = regex.__find(re.pattern, s)
@@ -38086,7 +38248,8 @@ fn __err_text(s: String) -> String = _
 
 fn __string_media_type(s: String) -> String = "text/plain; charset=utf-8"
 
-fn __string_to_text(s: String) -> String = s
+
+fn __string_to_bytes(s: String) -> Bytes = bytes.from_string(s)
 
 
 /// Quote a String and escape backslash, quote, newline, carriage return and tab.
@@ -42779,7 +42942,7 @@ local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> V
 
 fn __value_media_type(v: Value) -> String = "application/json"
 
-fn __value_to_text(v: Value) -> String = __stringify(v)
+fn __value_to_bytes(v: Value) -> Bytes = bytes.from_string(__stringify(v))
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 

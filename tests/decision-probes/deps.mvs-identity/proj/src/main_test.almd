@@ -1,0 +1,6 @@
+// The probe of deps.mvs-identity: `codec` is declared by two origins.
+import codec
+
+test "two origins of one name" {
+  assert_eq(codec.who(), "one")
+}

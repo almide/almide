@@ -89,6 +89,44 @@ effect fn main() -> Unit = {{
     );
 }
 
+/// ADR-0038's stream line writer inside threaded arms: an interpolated
+/// `println` line (scalar and string holes) and an `eprintln` line from each
+/// arm reach stdout and stderr in arm order, though the arms complete in
+/// reverse. The writer used to lock the stream itself, so on the native legs
+/// the lines came out in completion order (`end C`, `end B`, `end A`).
+#[test]
+fn stream_lines_from_threaded_arms_keep_arm_order_on_both_streams() {
+    let src = r#"import env
+
+effect fn arm(name: String, n: Int, ms: Int) -> Result[String, String] = {
+  env.sleep_ms(ms)
+  println("end ${name} ${n}")
+  eprintln("err ${name}")
+  println(int.to_string(n))
+  ok(name)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan { arm("A", 1, 150)!, arm("B", 2, 75)!, arm("C", 3, 0)! }
+  println("block ${a}${b}${c}")
+}
+"#;
+    let (_dir, file) = write("stream_lines.almd", src);
+    let legs: [(&str, &[&str], Option<(&str, &str)>); 4] = [
+        ("native", &["run"], None),
+        ("native forced parallel", &["run"], Some(("ALMIDE_FAN_COST_OFF", "1"))),
+        ("native sequential", &["run"], Some(("ALMIDE_FAN_SEQUENTIAL", "1"))),
+        ("wasm", &["run", "--target", "wasm"], None),
+    ];
+    for (leg, args, env) in legs {
+        let (out, err, code) = almide(&file, args, env);
+        assert_eq!(code, 0, "[{leg}] exit {code}: {err}");
+        assert_eq!(out, "end A 1\n1\nend B 2\n2\nend C 3\n3\nblock ABC\n", "[{leg}] stdout");
+        let errs: Vec<&str> = err.lines().filter(|l| l.starts_with("err ")).collect();
+        assert_eq!(errs, ["err A", "err B", "err C"], "[{leg}] stderr:\n{err}");
+    }
+}
+
 #[test]
 fn the_lowest_index_error_is_returned_and_every_element_still_runs() {
     let src = format!(

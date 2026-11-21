@@ -1,0 +1,4 @@
+// The probe of deps.cache-only: a dependency that is not cached is reported, never fetched.
+import noveldep
+
+effect fn main() -> Unit = println("probe ran")

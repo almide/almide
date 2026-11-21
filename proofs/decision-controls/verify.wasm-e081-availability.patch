@@ -1,0 +1,27 @@
+# Negative control of verify.wasm-e081-availability (proofs/decision-sites.toml): check --json drops --target wasm again: the availability verdict never reaches the JSON report.; and the wasm test lane walls on the stock p1 audit what the embedded host runs (#4857 ruling A)
+# control_test: tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program
+diff --git a/src/cli/check.rs b/src/cli/check.rs
+--- a/src/cli/check.rs
++++ b/src/cli/check.rs
+@@ -394,7 +394,7 @@
+     }
+     // #4857: `--target wasm` — the wasm route's verdict (E081 / E082 / E083),
+     // the same pipeline `check --target wasm` runs, reported as JSON rows.
+-    if clean && wasm_target {
++    if clean && wasm_target && file.is_empty() {
+         let (built, refusals) = super::wasm_compile::capturing_route_refusals(|| {
+             super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false)
+         });
+diff --git a/src/cli/test_wasm.rs b/src/cli/test_wasm.rs
+--- a/src/cli/test_wasm.rs
++++ b/src/cli/test_wasm.rs
+@@ -210,6 +210,9 @@
+         .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op) && !almide_wasm::ABORT_SITE_OPS.contains(op))
+     {
+         wall("host audit (stock artifact)", format!("op {op} is not served by the p1 shim"));
++        if true {
++            return None;
++        }
+         return Some(TestModule { almide: bytes, wasi: None, no_stock: Some(format!("op {op} is not served by the p1 shim, so there is no stock artifact; the embedded host serves it")) });
+     }
+     if abort_sites {

@@ -38,6 +38,7 @@ use almide_ir::free_vars::collect_pattern_bindings;
 use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
 use almide_ir::*;
 use almide_lang::types::Ty;
+use almide_lang::types::constructor::TypeConstructorId;
 
 use crate::canonicalize::protocols::{
     builtin_protocol, protocol_closure, DECODE_PROTOCOL, ENCODE_PROTOCOL, PROTOCOL_PARTS, STRICT_DECODE_METHOD,
@@ -98,6 +99,9 @@ struct FnEntry<'a> {
 
 struct TypeInfo<'a> {
     decl: &'a IrTypeDecl,
+    /// The declaring module (`None`: the entry file). A name written inside
+    /// this declaration resolves in this module first (#4884).
+    module: Option<&'a str>,
     /// Declared by a bundled stdlib module: a leaf value with no input
     /// surface of its own.
     stdlib: bool,
@@ -145,14 +149,31 @@ impl<'a> Cx<'a> {
         }
     }
 
-    fn type_info(&self, name: &str) -> Option<&TypeInfo<'a>> {
-        self.types.get(name).or_else(|| self.types.get(last_segment(name)))
+    /// #4884: a type by its nominal identity — the canonical name the
+    /// checker typed it with (`acct.User` for a module's, `User` for the
+    /// entry's), or a bare name written inside a declaration of module `ctx`,
+    /// which is that module's own. Never another module's same-named type.
+    fn type_info(&self, name: &str, ctx: Option<&str>) -> Option<&TypeInfo<'a>> {
+        self.types.get(name).or_else(|| {
+            let m = ctx.filter(|_| !name.contains('.'))?;
+            self.types.get(&format!("{m}.{name}"))
+        })
+    }
+
+    /// The canonical name `name` resolves to (see `type_info`).
+    fn type_key(&self, name: &str, ctx: Option<&str>) -> Option<String> {
+        let info = self.type_info(name, ctx)?;
+        let bare = last_segment(info.decl.name.as_str());
+        Some(match info.module {
+            Some(m) => format!("{m}.{bare}"),
+            None => bare.to_string(),
+        })
     }
 
     /// `Some("Codec")` / `Some("Encode")` when the type's declared protocol
     /// closure holds `Encode`.
     fn sent_out_as(&self, name: &str) -> Option<&'static str> {
-        let declared: Vec<Sym> = self.type_info(name)?.decl.deriving.clone().unwrap_or_default();
+        let declared: Vec<Sym> = self.type_info(name, None)?.decl.deriving.clone().unwrap_or_default();
         if !declared.iter().any(|p| protocol_closure(p.as_str()).contains(&ENCODE_PROTOCOL)) {
             return None;
         }
@@ -162,11 +183,13 @@ impl<'a> Cx<'a> {
             .unwrap_or(ENCODE_PROTOCOL))
     }
 
+    /// `outer` is a canonical name (`type_key`).
     fn nested_sent_out(&self, outer: &str, seen: &mut HashSet<String>) -> Option<HandDecode> {
-        if !seen.insert(last_segment(outer).to_string()) {
+        if !seen.insert(outer.to_string()) {
             return None;
         }
-        let info = self.type_info(outer)?;
+        let info = self.type_info(outer, None)?;
+        let ctx = info.module;
         let fields: Vec<(String, &Ty)> = match &info.decl.kind {
             IrTypeDeclKind::Record { fields } => fields.iter().map(|f| (f.name.to_string(), &f.ty)).collect(),
             IrTypeDeclKind::Variant { cases, .. } => cases.iter().flat_map(|c| match &c.kind {
@@ -182,11 +205,12 @@ impl<'a> Cx<'a> {
             let mut leaves = Vec::new();
             leaf_nominals(fty, &mut leaves);
             for leaf in leaves {
+                let Some(leaf) = self.type_key(leaf.as_str(), ctx) else { continue };
                 let leaf = leaf.as_str();
-                if last_segment(leaf) == last_segment(outer) {
+                if leaf == outer {
                     continue;
                 }
-                let Some(li) = self.type_info(leaf) else { continue };
+                let Some(li) = self.type_info(leaf, None) else { continue };
                 if li.stdlib {
                     continue;
                 }
@@ -205,7 +229,10 @@ impl<'a> Cx<'a> {
 
     /// The verdict on a call of `name` inside `holder`: `Some` when `name`
     /// is a `Decode` requirement of a type that may not take request data.
-    fn sink(&self, name: &str, holder: &FnEntry<'a>) -> Option<HandDecode> {
+    /// #4884: the decoded type is the one the checker typed the call's
+    /// result with (`Result[T, String]`), never the spelling before the dot,
+    /// which another module may declare too.
+    fn sink(&self, name: &str, holder: &FnEntry<'a>, ret: &Ty) -> Option<HandDecode> {
         let (ty, method) = name.rsplit_once('.')?;
         if !self.decode_methods.iter().any(|m| m == method) {
             return None;
@@ -216,14 +243,20 @@ impl<'a> Cx<'a> {
         if is_type_param {
             return Some(HandDecode::Forwarded { tv: bare.to_string(), holder: qualified(holder) });
         }
-        let info = self.type_info(ty)?;
+        let decoded = match ret {
+            Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => &args[0],
+            other => other,
+        };
+        let Ty::Named(decoded, _) = decoded else { return None };
+        let key = self.type_key(decoded.as_str(), holder.module)?;
+        let info = self.type_info(&key, None)?;
         if info.stdlib {
             return None;
         }
-        if let Some(proto) = self.sent_out_as(ty) {
+        if let Some(proto) = self.sent_out_as(&key) {
             return Some(HandDecode::SentOut { ty: bare.to_string(), proto });
         }
-        self.nested_sent_out(ty, &mut HashSet::new())
+        self.nested_sent_out(&key, &mut HashSet::new())
     }
 }
 
@@ -321,12 +354,12 @@ impl<'c, 'a> Walk<'c, 'a> {
         }
     }
 
-    fn call(&mut self, target: &CallTarget, args: &[IrExpr], site: Option<Span>) {
+    fn call(&mut self, target: &CallTarget, args: &[IrExpr], ret: &Ty, site: Option<Span>) {
         let (cx, summaries) = (self.cx, self.summaries);
         // The sink first: a derived `User.decode` is also a fn of the
         // program, and its summary must not stand in for the verdict.
         if let CallTarget::Named { name } = target
-            && let Some(why) = cx.sink(name.as_str(), self.entry)
+            && let Some(why) = cx.sink(name.as_str(), self.entry, ret)
         {
             if self.any(args) {
                 self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
@@ -422,7 +455,7 @@ impl IrVisitor for Walk<'_, '_> {
                 }
             }
             IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-                self.call(target, args, e.span);
+                self.call(target, args, &e.ty, e.span);
             }
             _ => {}
         }
@@ -566,17 +599,20 @@ fn source_types(program: &IrProgram, fns: &[FnEntry<'_>]) -> Vec<Ty> {
     sources
 }
 
-/// Every declared type by its name, a module's also by `module.Name`.
+/// Every declared type by its nominal identity: the entry's by its name, a
+/// module's by `module.Name`.
 fn type_table(program: &IrProgram) -> HashMap<String, TypeInfo<'_>> {
     let mut types: HashMap<String, TypeInfo<'_>> = HashMap::new();
     for d in &program.type_decls {
-        types.entry(d.name.to_string()).or_insert(TypeInfo { decl: d, stdlib: false });
+        types.entry(d.name.to_string()).or_insert(TypeInfo { decl: d, module: None, stdlib: false });
     }
+    // #4884: a module's type only under `module.Name` — its nominal identity.
+    // Under its bare name it shadowed (or was shadowed by) another module's.
     for m in &program.modules {
         let stdlib = almide_lang::stdlib_info::is_bundled_module(m.name.as_str());
         for d in &m.type_decls {
-            types.entry(d.name.to_string()).or_insert(TypeInfo { decl: d, stdlib });
-            types.entry(format!("{}.{}", m.name, last_segment(d.name.as_str()))).or_insert(TypeInfo { decl: d, stdlib });
+            types.entry(format!("{}.{}", m.name, last_segment(d.name.as_str())))
+                .or_insert(TypeInfo { decl: d, module: Some(m.name.as_str()), stdlib });
         }
     }
     types

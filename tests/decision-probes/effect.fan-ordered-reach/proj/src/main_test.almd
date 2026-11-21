@@ -1,0 +1,29 @@
+import env
+import fs
+
+effect fn write_late(path: String) -> Result[String, String] = {
+  env.sleep_ms(80)
+  fs.write_text(path, "new")!
+  ok("wrote")
+}
+
+effect fn read_early(path: String) -> Result[String, String] = ok(fs.read_text(path)!)
+
+let ops: List[(String) -> Result[String, String]] = [write_late, read_early]
+
+effect fn call_op(i: Int, p: String) -> Result[String, String] = {
+  let f = list.get(ops, i) ?? ((q) => ok(q))
+  f(p)
+}
+
+test "fan arms through fn values run in arm order" {
+  let d = fs.create_temp_dir("fanProbe")!
+  let p = d + "/f.txt"
+  fs.write_text(p, "old")!
+  let (x, y) = fan {
+    call_op(0, p)!
+    call_op(1, p)!
+  }
+  fs.remove_all(d)!
+  assert_eq(y, "new")
+}

@@ -1,0 +1,13 @@
+// The probe of effect.e011-closure-mutation: a closure in a pure fn changes a
+// LOCAL var the fn declared (E011; a module-level var is admitted, #4859).
+fn apply(ws: List[Int], f: (Int) -> Int) -> Int = list.fold(ws, 0, (a, w) => a + f(w))
+
+fn tally(ws: List[Int]) -> Int = {
+  var seen = 0
+  apply(ws, (w) => {
+    seen = seen + w
+    w
+  }) + seen
+}
+
+effect fn main() -> Unit = println(int.to_string(tally([1, 2, 3])))

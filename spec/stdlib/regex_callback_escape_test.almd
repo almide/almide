@@ -1,5 +1,5 @@
 // regex.captures_all, regex.escape, regex.replace_with,
-// regex.replace_first_with and the deprecated regex.full_match. Before this
+// regex.replace_first_with and the deprecated regex.is_full_match. Before this
 // file no test called any of them on either leg (proofs/stdlib-test-coverage.txt).
 import regex
 
@@ -83,10 +83,10 @@ test "regex.replace_first_with sees an unmatched group as none" {
 }
 
 // ── full_match (deprecated alias of is_full_match) ──
-test "regex.full_match agrees with regex.is_full_match" {
+test "regex.is_full_match agrees with regex.is_full_match" {
   let re = regex.new("[0-9]+")
-  assert_eq(regex.full_match(re, "123"), true)
-  assert_eq(regex.full_match(re, "123a"), false)
-  assert_eq(regex.full_match(regex.new(""), ""), true)
-  assert_eq(regex.full_match(re, "456"), regex.is_full_match(re, "456"))
+  assert_eq(regex.is_full_match(re, "123"), true)
+  assert_eq(regex.is_full_match(re, "123a"), false)
+  assert_eq(regex.is_full_match(regex.new(""), ""), true)
+  assert_eq(regex.is_full_match(re, "456"), regex.is_full_match(re, "456"))
 }

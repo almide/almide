@@ -167,7 +167,10 @@ fn print_error_explanation(code: &str) {
 /// deep input (see `tests/compiler_stack_test.rs`).
 const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
 
-fn compiler_stack_size() -> usize {
+/// Every thread that parses or compiles user source runs on this stack (#4880):
+/// the parser's nesting budget is sized for it, so a worker on the 2 MiB
+/// default overflowed below the budget and aborted instead of refusing.
+pub(crate) fn compiler_stack_size() -> usize {
     match almide_base::env::var("ALMIDE_COMPILER_STACK") {
         Some(v) => v.trim().parse::<usize>().ok().filter(|n| *n > 0).unwrap_or(COMPILER_STACK_SIZE),
         None => COMPILER_STACK_SIZE,

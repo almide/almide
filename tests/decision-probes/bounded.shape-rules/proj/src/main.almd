@@ -1,0 +1,17 @@
+// The probe of bounded.shape-rules: a @bounded fn calls, inside a counted
+// loop, a @bounded helper that builds a List — the allocation is reached
+// through the callee (E071, #4871; the member rule of #4855 has its own
+// novel test).
+@bounded
+fn pair_len(i: Int) -> Int = list.len([i, i])
+
+@bounded
+fn shape() -> Int = {
+  var n = 0
+  for i in 0..<4 {
+    n = n + pair_len(i)
+  }
+  n
+}
+
+effect fn main() -> Unit = println("${shape()}")

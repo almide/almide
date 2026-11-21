@@ -39,10 +39,18 @@ impl Checker {
             let Decl::Fn { name, params, return_type, export_attrs, body: Some(body), span, .. } = decl else { continue };
             // #4354: an `@export(wasm)` fn's Region parameter is lent from
             // the host's `(base, len)` for the call, the same rule.
-            let Some(target) = export_attrs.iter().map(|a| a.target.as_str()).find(|t| matches!(*t, "c" | "wasm")) else {
+            // c1 (decision-site ledger): EVERY export is lent its Region by a
+            // caller outside the program, whatever the target spells — an
+            // unknown target is judged, never skipped. The target only picks
+            // the wording.
+            let Some(target) = export_attrs.iter().map(|a| a.target.as_str()).find(|t| matches!(*t, "c" | "wasm")).or_else(|| export_attrs.first().map(|a| a.target.as_str())) else {
                 continue;
             };
-            let host = if target == "c" { "the C caller's buffer" } else { "the wasm host's range of the module's memory" };
+            let host = match target {
+                "c" => "the C caller's buffer",
+                "wasm" => "the wasm host's range of the module's memory",
+                _ => "its caller's memory",
+            };
             let lent: Vec<Sym> = params.iter().filter(|p| is_region(&self.resolve_type_expr(&p.ty))).map(|p| p.name).collect();
             if lent.is_empty() {
                 continue;
@@ -94,6 +102,14 @@ impl Checker {
                         {
                             lent.insert(*name);
                         }
+                        // #4862: a destructuring binding that names a lent
+                        // name makes every name it binds lent; the escape
+                        // rules then read each one's own type.
+                        if let Stmt::LetDestructure { pattern, value, .. } = s
+                            && mentions(value, &lent)
+                        {
+                            lent.extend(crate::concurrent_reach::pattern_binders(pattern));
+                        }
                     }
                 }
             });
@@ -111,6 +127,9 @@ impl Checker {
                 for s in stmts {
                     if let Stmt::Var { name, .. } | Stmt::Let { name, .. } = s {
                         locals.insert(*name);
+                    }
+                    if let Stmt::LetDestructure { pattern, .. } = s {
+                        locals.extend(crate::concurrent_reach::pattern_binders(pattern));
                     }
                 }
             }

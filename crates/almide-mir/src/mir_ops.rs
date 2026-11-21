@@ -10,6 +10,18 @@ use std::collections::BTreeSet;
 
 pub use almide_lang::self_host_registry::self_host_runtime;
 
+/// The slot take of a mutable global or a shared cell: the lowering emits it
+/// as an `Op::CallFn` with the slot's address, and every render serves it
+/// inline (no body links it). The one declaration of the name; the lowering,
+/// the native slot passes, the linked-call check and the call-mode witness's
+/// served set read it from here (#4828).
+pub(crate) const MG_TAKE: &str = "__mg_take";
+
+/// The compiler-injected accessors: `Op::CallFn` targets the lowering itself
+/// emits and every render serves inline. A callee is admitted by membership
+/// here, never by the shape of its name.
+pub(crate) const INJECTED_ACCESSORS: &[&str] = &[MG_TAKE];
+
 /// The names of `Op::CallFn` targets (and generated-drop targets) that resolve
 /// to no `MirFunction` in the program — a call that no linked body answers.
 pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
@@ -23,7 +35,7 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
                 Op::DropWrapperRec { drop_fn, .. } => format!("__drop_{}", crate::lower::drop_fn_ident(drop_fn)),
                 _ => continue,
             };
-            if name != "__mg_take" && !defined.contains(name.as_str()) {
+            if !INJECTED_ACCESSORS.contains(&name.as_str()) && !defined.contains(name.as_str()) {
                 missing.insert(name);
             }
         }

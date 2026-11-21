@@ -1,0 +1,14 @@
+// The probe of ownership.e119-lent-region-escape: a lent Region bound through a
+// destructuring let, then stored (E119, #4862).
+import ffi
+
+var stash: Region? = none
+
+@export(c, "keep")
+fn keep(r: Region) -> Int = {
+  let (a, _) = (r, 1)
+  stash = some(a)
+  0
+}
+
+effect fn main() -> Unit = println("x")

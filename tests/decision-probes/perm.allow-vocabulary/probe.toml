@@ -1,0 +1,2 @@
+# The probe of perm.allow-vocabulary: An allow name that is no capability.
+expect = "unknown capability"

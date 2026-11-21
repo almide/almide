@@ -1,0 +1,5 @@
+test "pair" {
+  let ace1 = 1
+  let асе1 = 2
+  assert_eq(ace1 + асе1, 3)
+}

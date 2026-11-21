@@ -1,0 +1,9 @@
+// The probe of verify.wasm-e081-availability: a call the wasm host does not
+// serve (E081, #4857).
+import unix
+
+effect fn grab() -> Unit = {
+  let _ = unix.shm_create(64)
+}
+
+effect fn main() -> Unit = grab()!

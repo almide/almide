@@ -1,7 +1,7 @@
 // @contract: C-049, C-306
 // min/max; 0.58.0 still ships the retired tie rule. Remove when the
 // implementation catches up (same lag as float_signed_zero_minmax).
-// `float.sign` == Rust `f64::signum`: copysign(1.0, x) for every non-NaN x
+// `float.signum` == Rust `f64::signum`: copysign(1.0, x) for every non-NaN x
 // (sign(0.0)=1, sign(-0.0)=-1, sign(±inf)=±1), NaN for NaN — NOT the old
 // three-way (0 for ±0.0/NaN). `float.max`/`min` IGNORE a
 // NaN operand and return the other; on ±0 ties both follow IEEE 754-2019
@@ -14,13 +14,13 @@ fn main() -> Unit = {
   let nan: Float = math.log2(-43.0)
   // NaN
   // signum
-  println(float.to_string(float.sign(0.0)))
+  println(float.to_string(float.signum(0.0)))
   //  1
-  println(float.to_string(float.sign(-0.0)))
+  println(float.to_string(float.signum(-0.0)))
   // -1
-  println(float.to_string(float.sign(5.0)))
+  println(float.to_string(float.signum(5.0)))
   //  1
-  println(float.to_string(float.sign(-5.0)))
+  println(float.to_string(float.signum(-5.0)))
   // -1
   // NaN-ignoring min/max (float.*)
   println(float.to_string(float.max(nan, 5.0)))
@@ -44,27 +44,27 @@ fn main() -> Unit = {
   // signed-zero TIES (ALS-T23): min → -0, max → +0 in EITHER order. Locks
   // out llvm.maxnum/maxsd (second-operand-on-ties) on native and raw
   // f64.max/min on wasm. Zeros built at runtime to defeat const-folding;
-  // ±0 distinguished via float.sign (= signum, above).
+  // ±0 distinguished via float.signum (= signum, above).
   let one: Float = float.abs(-1.0)
   // runtime 1.0
   let pz: Float = one * 0.0
   // +0.0
   let mz: Float = (0.0 - one) * 0.0
   // -0.0
-  println(float.to_string(float.sign(float.max(mz, pz))))
+  println(float.to_string(float.signum(float.max(mz, pz))))
   //  1 (max → +0)
-  println(float.to_string(float.sign(float.max(pz, mz))))
+  println(float.to_string(float.signum(float.max(pz, mz))))
   //  1
-  println(float.to_string(float.sign(float.min(mz, pz))))
+  println(float.to_string(float.signum(float.min(mz, pz))))
   // -1 (min → -0)
-  println(float.to_string(float.sign(float.min(pz, mz))))
+  println(float.to_string(float.signum(float.min(pz, mz))))
   // -1
-  println(float.to_string(float.sign(float.max(mz, pz))))
+  println(float.to_string(float.signum(float.max(mz, pz))))
   //  1
-  println(float.to_string(float.sign(float.max(pz, mz))))
+  println(float.to_string(float.signum(float.max(pz, mz))))
   //  1
-  println(float.to_string(float.sign(float.min(mz, pz))))
+  println(float.to_string(float.signum(float.min(mz, pz))))
   // -1
   // -1
-  println(float.to_string(float.sign(float.min(pz, mz))))
+  println(float.to_string(float.signum(float.min(pz, mz))))
 }

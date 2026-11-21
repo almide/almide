@@ -1,0 +1,7 @@
+# A switch the lock holds, inherited: every route that reads it must say IGNORED.
+expect = "ALMIDE_CONTROL_IGNORE_SKIP_DECODE is set but IGNORED"
+exit = "any"
+global = ["--lock-switches"]
+
+[env]
+ALMIDE_CONTROL_IGNORE_SKIP_DECODE = "1"

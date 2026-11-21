@@ -12,9 +12,15 @@
 //! `unsafe_op_in_unsafe_fn`. `almide_str.rs` is written to the same splice discipline
 //! as almide-rt-core, so the runtime can `include!` it verbatim.
 
-mod almide_str;
+// ADR-0037's list block is spliced after the string block (it shares the
+// marking window and the imports), so the crate builds them as one module too.
+mod almide_str {
+    include!("almide_str.rs");
+    include!("almide_list.rs");
+}
 
 pub use almide_str::{almide_str_mark_reachable, AlmideStr, AlmideStrHeader, AlmideStrStatic, AlmideUniqueStr, AlmideIntText, AlmideIntoStrList, almide_str_list};
+pub use almide_str::AlmideList;
 
 /// The source text of `almide_str.rs`, which every generated native program
 /// splices in as its Almide String.

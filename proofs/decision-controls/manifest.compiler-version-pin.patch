@@ -1,0 +1,14 @@
+# Negative control of manifest.compiler-version-pin (proofs/decision-sites.toml): every [package].almide minimum is met
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_future_compiler_pin_is_refused_on_every_compiling_command
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -1181,7 +1181,7 @@
+         ))?;
+     let have = semver::Version::parse(installed)
+         .map_err(|e| format!("internal: installed version '{}' unparseable: {}", installed, e))?;
+-    if req.matches(&have) { return Ok(()); }
++    if true || req.matches(&have) { return Ok(()); }
+     Err(format!(
+         "package '{}' requires almide >= {}\n  installed version: {}\n  run 'almide upgrade' to update, \
+          or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass (a release build honours it only with \

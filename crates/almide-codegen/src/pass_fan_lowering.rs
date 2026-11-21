@@ -214,6 +214,17 @@ impl<'a> OrderedReach<'a> {
                             self.hit = true;
                         }
                     }
+                    // #4856: a callee this walk cannot see the body of — a fn
+                    // VALUE (a parameter, a captured local, a field) or a method
+                    // the checker left unresolved — may be an `@ordered` fn.
+                    // Unknown is ordered: the arm is serialized. A lambda literal
+                    // or a named fn reference is walked where it stands.
+                    (Some(CallTarget::Computed { callee }), _)
+                        if !matches!(callee.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) =>
+                    {
+                        self.hit = true;
+                    }
+                    (Some(CallTarget::Method { .. }), _) => self.hit = true,
                     _ => {}
                 }
                 if !self.hit {

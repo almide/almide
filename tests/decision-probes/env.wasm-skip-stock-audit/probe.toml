@@ -1,0 +1,7 @@
+# A switch the lock holds, inherited: every route that reads it must say IGNORED.
+expect = "ALMIDE_WASM_SKIP_STOCK_AUDIT is set but IGNORED"
+exit = "any"
+global = ["--lock-switches"]
+
+[env]
+ALMIDE_WASM_SKIP_STOCK_AUDIT = "1"

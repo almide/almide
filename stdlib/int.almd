@@ -115,11 +115,6 @@ fn count_leading_zeros(x: Int) -> Int = _
 fn count_trailing_zeros(x: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
-@deprecated(since=15, use="int.count_ones")
-@intrinsic("almide_rt_int_pop_count")
-fn pop_count(n: Int) -> Int = _
-
-/// Number of set bits; 64 for -1.
 @intrinsic("almide_rt_int_pop_count")
 fn count_ones(x: Int) -> Int = _
 
@@ -130,11 +125,6 @@ fn bit_reverse(x: Int) -> Int = _
 /// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
 fn byte_swap(x: Int) -> Int = _
-
-/// Bits needed to hold n; 0 for 0, 64 if negative.
-@deprecated(since=15, use="int.bit_length")
-@intrinsic("almide_rt_int_bit_width")
-fn bit_width(n: Int) -> Int = _
 
 /// Bits needed to hold x; 0 for 0, 64 if negative.
 @intrinsic("almide_rt_int_bit_width")

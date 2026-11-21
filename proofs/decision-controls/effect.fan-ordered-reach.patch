@@ -1,0 +1,26 @@
+# Negative control of effect.fan-ordered-reach (proofs/decision-sites.toml): a callee the walk cannot see (a fn value, an unresolved method) answers not ordered again.
+# control_test: tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order
+diff --git a/crates/almide-codegen/src/pass_fan_lowering.rs b/crates/almide-codegen/src/pass_fan_lowering.rs
+--- a/crates/almide-codegen/src/pass_fan_lowering.rs
++++ b/crates/almide-codegen/src/pass_fan_lowering.rs
+@@ -220,7 +220,7 @@
+                     // Unknown is ordered: the arm is serialized. A lambda literal
+                     // or a named fn reference is walked where it stands.
+                     (Some(CallTarget::Computed { callee }), _)
+-                        if !matches!(callee.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) =>
++                        if !matches!(callee.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) && self.hit =>
+                     {
+                         self.hit = true;
+                     }
+diff --git a/crates/almide-codegen/src/pass_fan_lowering.rs b/crates/almide-codegen/src/pass_fan_lowering.rs
+--- a/crates/almide-codegen/src/pass_fan_lowering.rs
++++ b/crates/almide-codegen/src/pass_fan_lowering.rs
+@@ -224,7 +224,7 @@
+                     {
+                         self.hit = true;
+                     }
+-                    (Some(CallTarget::Method { .. }), _) => self.hit = true,
++                    (Some(CallTarget::Method { .. }), _) => {}
+                     _ => {}
+                 }
+                 if !self.hit {

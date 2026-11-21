@@ -1,0 +1,2 @@
+# The probe of perm.empty-allow-deny-all: allow = [] grants nothing: standard output is a violation.
+expect = "capability violation"

@@ -101,7 +101,7 @@ fn accessed(op: &Op, consts: &BTreeMap<ValueId, i64>) -> Option<i64> {
         Op::Prim { kind: PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. }, args, .. } => {
             args.first().and_then(|a| slot_addr(consts, a))
         }
-        Op::CallFn { name, args, .. } if name == "__mg_take" => match args.as_slice() {
+        Op::CallFn { name, args, .. } if name == crate::mir_ops::MG_TAKE => match args.as_slice() {
             [CallArg::Scalar(a)] => slot_addr(consts, a),
             _ => None,
         },
@@ -132,7 +132,7 @@ fn blocks(op: &Op, a: i64, consts: &BTreeMap<ValueId, i64>, quiet: &Quiet) -> bo
         | Op::CallIndirect { .. }
         | Op::CallImport { .. } => true,
         // A take of another slot is no read of this one.
-        Op::CallFn { name, .. } if name == "__mg_take" => accessed(op, consts).is_none_or(|b| b == a),
+        Op::CallFn { name, .. } if name == crate::mir_ops::MG_TAKE => accessed(op, consts).is_none_or(|b| b == a),
         Op::CallFn { name, .. } => !quiet.call(name),
         _ => accessed(op, consts) == Some(a),
     }
@@ -263,7 +263,7 @@ fn take_after(ops: &[Op], i: usize, a: i64, consts: &BTreeMap<ValueId, i64>, qui
     let mut depth = 0usize;
     for (j, o) in ops.iter().enumerate().skip(i + 1) {
         match o {
-            Op::CallFn { name, .. } if depth == 0 && name == "__mg_take" && accessed(o, consts) == Some(a) => return Some((j, reread)),
+            Op::CallFn { name, .. } if depth == 0 && name == crate::mir_ops::MG_TAKE && accessed(o, consts) == Some(a) => return Some((j, reread)),
             Op::Prim { kind: PrimKind::LoadHandle, .. } if accessed(o, consts) == Some(a) => reread = true,
             Op::LoopStart | Op::IfThen { .. } => depth += 1,
             Op::LoopEnd | Op::EndIf { .. } if depth > 0 => depth -= 1,
@@ -302,7 +302,7 @@ pub(crate) fn slot_reads(func: &MirFunction) -> SlotReads {
         }
         for (j, op) in ops.iter().enumerate() {
             if let (Op::CallFn { name, dst: Some(t), .. }, Some(a)) = (op, accessed(op, &consts)) {
-                if name == "__mg_take" && dropped_by_store(ops, j, a, &consts) {
+                if name == crate::mir_ops::MG_TAKE && dropped_by_store(ops, j, a, &consts) {
                     out.dropped_takes.insert(*t);
                 }
             }

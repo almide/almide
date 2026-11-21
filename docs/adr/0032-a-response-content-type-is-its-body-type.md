@@ -25,7 +25,7 @@ The owner's ruling: the Content-Type comes from the body's type, never from a he
 A builtin protocol `Body` (the noun family `Encode` / `Decode` / `HttpMessage` already uses) has two requirements:
 
 - `T.media_type() -> String`: the Content-Type a response with this body carries;
-- `body.to_text() -> String`: the body on the wire. A built response holds its body as text until #4311 gives it an exact bytes slot, so the requirement is the text (a Bytes body decodes as lossy UTF-8, Q16). It was `to_bytes` in the proposal; as text, a String body costs no round trip and `string` does not reach `bytes` (the #4289 reach gate in `bundled_reach.rs`). Inside the stdlib both are per-type functions marked `__self_` (`__safe_html_media_type`); a type declared outside the stdlib writes them by their plain names, `fn T.media_type(self)` and `fn T.to_text(self)` (Q24).
+- `body.to_bytes() -> Bytes`: the body on the wire, kept exactly by the built response (amendment A1, #4311). It was `to_text() -> String` until 0.70.0, when a Bytes body decoded as lossy UTF-8 (Q16, withdrawn by A1). A conformer's `to_bytes` body is reached only once a `Body` requirement is called, so `string` still does not reach `bytes` in a program that builds no response (the #4289 reach gate in `bundled_reach.rs`). Inside the stdlib both are per-type functions marked `__self_` (`__safe_html_media_type`); a type declared outside the stdlib writes them by their plain names, `fn T.media_type(self)` and `fn T.to_bytes(self)` (Q24).
 
 | Body type | Content-Type | Declared in |
 |---|---|---|
@@ -170,6 +170,15 @@ Answers (2026-10-29): Q1 ○, Q2 ○ (owner), Q3 ○, Q4 ○, Q5 ○ as amended 
 3. The media grant (D7): `[trust] media`, the dependency survey, E118, and the owners section of `almide deps`. SVG is the almide/svg package's.
 4. The new http surface, then `almide fix` rewrites and the epoch break, in the same change as the removal of the interim guard and E115.
 5. Gates: a matrix test that every `Body` conformer's media type is the one its declaration states; that `http.typed` refuses exactly the union of `@media_owns`; and that no header writer reaches Content-Type. Negative controls for each.
+
+## Amendment A1 — a Body hands over its bytes (#4311, 2026-11-20)
+
+The owner ruled ○ on 2026-11-20: `Body`'s second requirement is `to_bytes(self) -> Bytes`, and it replaces `to_text(self) -> String`. Q16's known limitation is withdrawn.
+
+- A built response keeps a Bytes body exactly. `http.response(s, b)`, `http.typed(t, b)`, `with_body`, `set_body_bytes` and `with_headers` all answer `body_bytes` with the bytes given and `body` with their lossy UTF-8 decoding. `http.serve` writes them unchanged on every lane.
+- Native keeps the bytes in the response's `body_raw` slot when they are not UTF-8, the slot a fetched response already used. The wasm rep holds them in its body cell, as the host writes a fetched body, and the serve loop hands the body to the host as bytes beside the header cells.
+- Before, every Bytes body was decoded as lossy UTF-8 when the response was built: the 256 byte values came back as 512 bytes on both legs (C-275, spec/stdlib/http_response_body_bytes_test.almd).
+- It breaks a type outside the stdlib that conforms to `Body`: `fn T.to_text(self) -> String` becomes `fn T.to_bytes(self) -> Bytes` (dialect epoch 17).
 
 ## Amendment (2026-11-20, #4868): a grant names the package's typed origin
 

@@ -97,6 +97,17 @@ fn put_values_back<V>(
     }
 }
 
+/// How a mutable binding was declared — what E011 decides from (#4859).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MutableDecl {
+    /// A `var` inside a fn body, declared at this lambda nesting depth.
+    Local { lambda_depth: usize },
+    /// A module-level `var`.
+    TopLevel,
+    /// A `mut` parameter.
+    Param,
+}
+
 #[derive(Clone)]
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
@@ -219,8 +230,10 @@ pub struct TypeEnv {
     pub mutable_vars: std::collections::HashSet<Sym>,
     /// Escape analysis: current lambda nesting depth (0 = not in lambda).
     pub lambda_depth: usize,
-    /// Escape analysis: the lambda depth at which each `var` was declared.
-    pub var_lambda_depth: std::collections::HashMap<Sym, usize>,
+    /// Escape analysis (E011): how each mutable binding was declared — a
+    /// local `var` (with the lambda depth it was declared at), a module-level
+    /// `var`, or a `mut` parameter.
+    pub(crate) mutable_decl: std::collections::HashMap<Sym, MutableDecl>,
     /// Variables that are function parameters (for better error messages).
     pub param_vars: std::collections::HashSet<Sym>,
     /// Declaration locations: variable name -> (line, col)
@@ -388,7 +401,7 @@ impl TypeEnv {
             mutable_vars: std::collections::HashSet::new(),
             mutable_top_lets: std::collections::HashSet::new(),
             lambda_depth: 0,
-            var_lambda_depth: std::collections::HashMap::new(),
+            mutable_decl: std::collections::HashMap::new(),
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),

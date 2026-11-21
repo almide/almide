@@ -4,13 +4,20 @@
 impl Derive<'_> {
     /// Aggregate Set members need the same source-field equality check as
     /// Map keys. Do this during derivation, before the table is installed.
-    fn set_element_type(&self, t: &almide_lang::types::Ty) -> bool {
+    /// Any other element is refused: the set type is pruned and every fn
+    /// that names it walls (#4799: the refusal is a `wall`, not a bare
+    /// `false`).
+    fn set_element_type(&self, t: &almide_lang::types::Ty) -> Result<(), crate::lower::LowerError> {
         use almide_lang::types::{constructor::TypeConstructorId as C, Ty};
         match t {
-            Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => true,
+            Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => Ok(()),
             Ty::Applied(C::List | C::Set, a) if a.len() == 1 => self.set_element_type(&a[0]),
-            Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => self.exact_eq_type(t, &mut Default::default()),
-            _ => false,
+            Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if self.exact_eq_type(t, &mut Default::default()) {
+                Ok(())
+            } else {
+                Err(crate::render_native::wall("native: a Set element type with no exact equality"))
+            },
+            _ => Err(crate::render_native::wall("native: a Set element type with no exact equality")),
         }
     }
     fn exact_eq_decl(&self, n: &str, visiting: &mut std::collections::BTreeSet<String>) -> bool {
@@ -210,6 +217,25 @@ mod equality_tests {
             assert!(native_set_element_kind(NTy::Rec(i)));
         }
         assert!(!is_native_set(&Ty::set_of(bad)));
+    }
+
+    /// A Set element with no exact equality or runtime representation
+    /// (`Set[List[Float]]`, `Set[Option[Int]]`) is refused by a `wall`
+    /// (#4799): no set table is derived for it and it is not a native set.
+    #[test]
+    fn a_set_element_without_exact_equality_is_a_wall() {
+        let floats = Ty::set_of(Ty::list(Ty::Float));
+        let options = Ty::set_of(Ty::option(Ty::Int));
+        let mut roots = Vec::new();
+        for t in [&floats, &options] { collect_tuples(t, &mut roots); }
+        let decls = derive_records(&Default::default(), &Default::default(), &roots);
+        let _guard = install(decls);
+        for t in [floats, options] {
+            assert!(!is_native_set(&t), "{t:?}");
+            let Ty::Applied(_, a) = &t else { unreachable!() };
+            let err = native_set_element_type(&a[0]).expect_err("refused");
+            assert!(format!("{err:?}").contains("no exact runtime representation"), "{err:?}");
+        }
     }
 
     #[test]

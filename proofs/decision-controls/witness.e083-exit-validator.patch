@@ -1,0 +1,14 @@
+# Negative control of witness.e083-exit-validator (proofs/decision-sites.toml): only the recorded windows are judged: an exit no plan accounts for passes.
+# control_test: crates/almide-wasm/tests/exit_unrecorded.rs::novel_an_exit_no_plan_records_is_refused
+diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+--- a/crates/almide-wasm/src/exit_plan.rs
++++ b/crates/almide-wasm/src/exit_plan.rs
+@@ -765,7 +765,7 @@ pub(crate) fn validate_exits(
+ /// hold is the transfer of a recorded plan. One no plan claims is an exit the
+ /// emitter wrote without recording it — with an empty ledger too.
+ fn every_transfer_planned(ops: &[(usize, Op)], transfers: &[usize], d: &Defects<'_>) -> Result<(), EmitError> {
+-    let unplanned = |j: &usize| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j);
++    let unplanned = |j: &usize| matches!(ops[*j].1, Op::Return | Op::ReturnCall) && !transfers.contains(j) && d.function.is_empty();
+     match (0..ops.len()).find(unplanned) {
+         None => Ok(()),
+         Some(j) => Err(d.at(

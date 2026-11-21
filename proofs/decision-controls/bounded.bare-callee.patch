@@ -1,0 +1,35 @@
+# Negative control of bounded.bare-callee (proofs/decision-sites.toml): every callee bound to a local value is decided by its spelling again — the bounded profile judges it as the same-named profile fn (#4878) and the checker types a pipe stage as that fn (#4882)
+# control_test: tests/decision_batch1a_test.rs::novel_a_value_spelled_like_a_profile_fn_is_an_indirect_callee
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -357,7 +357,7 @@
+             }
+             // #4878: an edge is a callee the checker bound to a top-level
+             // fn; one bound to a local value is an indirect call (E074).
+-            if ck.value_callees.contains(&callee.id) {
++            if false && ck.value_callees.contains(&callee.id) {
+                 return;
+             }
+             let name = match &callee.kind {
+@@ -923,7 +923,7 @@
+             // The text is the one a value callee with no same-named fn always
+             // got (the unknown-bare-callee arm below), so only the shadowing
+             // case changes verdict.
+-            ast::ExprKind::Ident { .. } if self.checker.value_callees.contains(&callee.id) => {
++            ast::ExprKind::Ident { .. } if false && self.checker.value_callees.contains(&callee.id) => {
+                 self.err(
+                     "calling a function outside the profile is not admissible in a @bounded function",
+                     "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+diff --git a/crates/almide-frontend/src/check/infer_calls_closures.rs b/crates/almide-frontend/src/check/infer_calls_closures.rs
+--- a/crates/almide-frontend/src/check/infer_calls_closures.rs
++++ b/crates/almide-frontend/src/check/infer_calls_closures.rs
+@@ -1588,7 +1588,7 @@
+     /// as one function and run as another.
+     fn pipe_through_fn_typed_local(&mut self, callee: &mut ast::Expr, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+         let local = self.env.lookup_var(name).map(|t| resolve_ty(t, &self.uf))?;
+-        if !matches!(local, Ty::Fn { .. }) {
++        if true || !matches!(local, Ty::Fn { .. }) {
+             return None;
+         }
+         let _ = self.infer_expr(callee);

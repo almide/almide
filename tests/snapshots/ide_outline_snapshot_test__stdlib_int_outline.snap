@@ -59,7 +59,6 @@ fn int.accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bo
 fn int.band(a: Int, b: Int) -> Int
 fn int.bit_length(x: Int) -> Int
 fn int.bit_reverse(x: Int) -> Int
-fn int.bit_width(n: Int) -> Int
 fn int.bnot(x: Int) -> Int
 fn int.bor(a: Int, b: Int) -> Int
 fn int.bshl(a: Int, n: Int) -> Int
@@ -92,7 +91,6 @@ fn int.modulo(a: Int, b: Int) -> Int
 fn int.next_power_of_two(x: Int) -> Int
 fn int.parse(s: String) -> Result[Int, String]
 fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]
-fn int.pop_count(n: Int) -> Int
 fn int.pow(base: Int, exp: Int) -> Int
 fn int.prefix_radix(b: Int) -> Int
 fn int.prev_power_of_two(x: Int) -> Int

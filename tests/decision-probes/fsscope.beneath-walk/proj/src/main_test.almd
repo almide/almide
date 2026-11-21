@@ -1,0 +1,7 @@
+import fs
+
+test "a symlink out of the root is refused" {
+  let base = if fs.is_dir("proj/data") then "proj" else "."
+  let root = fs.open_root(base + "/data")!
+  assert_eq(fs.root_read_text(root, "link/s.txt"), err("fs: path escapes root: link/s.txt"))
+}

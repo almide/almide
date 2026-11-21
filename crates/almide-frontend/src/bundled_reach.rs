@@ -184,13 +184,17 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
             }
             reached.insert(name);
             let prog = auto_program(name);
-            let (later, now): (Vec<&'static Decl>, Vec<&'static Decl>) =
-                prog.decls.iter().chain(prog.imports.iter()).partition(|d| is_protocol_generic_fn(d));
+            let (later, now): (Vec<&'static Decl>, Vec<&'static Decl>) = prog
+                .decls
+                .iter()
+                .chain(prog.imports.iter())
+                .partition(|d| is_protocol_generic_fn(d) || requirement_of(name, d).is_some());
             spell_unit(prog, now.into_iter(), &mut spelled);
             deferred.extend(later.into_iter().map(|d| (*name, prog, d)));
             grew = true;
         }
-        let (named, rest): (Vec<_>, Vec<_>) = deferred.into_iter().partition(|(m, _, d)| fn_is_named(&spelled, m, d));
+        let (named, rest): (Vec<_>, Vec<_>) =
+            deferred.into_iter().partition(|(m, _, d)| fn_is_named(&spelled, m, d) || requirement_called(&spelled, m, d));
         deferred = rest;
         for (_, prog, d) in named {
             spell_unit(prog, std::iter::once(d), &mut spelled);
@@ -201,6 +205,37 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
         }
     }
     modules.iter().map(|(n, ..)| *n).filter(|n| reached.contains(n)).collect()
+}
+
+/// The built-in protocol requirement `module`'s function `d` satisfies for
+/// one of its built-in conformers, as `(protocol, requirement)` — read off the
+/// conformance table (`builtin_conformance_requirements`: each protocol's
+/// declared conformers and requirements, and the function the checker
+/// resolves each to), never off the function's spelling.
+fn requirement_of(module: &str, d: &Decl) -> Option<&'static (&'static str, String)> {
+    static TABLE: OnceLock<std::collections::HashMap<(String, String), (&'static str, String)>> = OnceLock::new();
+    let Decl::Fn { name, .. } = d else { return None };
+    TABLE
+        .get_or_init(|| {
+            crate::canonicalize::protocols::builtin_conformance_requirements()
+                .into_iter()
+                .map(|r| ((r.module.to_string(), r.function), (r.protocol, r.requirement)))
+                .collect()
+        })
+        .get(&(module.to_string(), name.as_str().to_string()))
+}
+
+/// #4311: a conformer's requirement function is spelled only once its
+/// requirement is called — on a type variable bounded by the protocol
+/// (`body.__self_to_bytes()` in `http.response[B: Body]`) or as a member — or
+/// once it is named itself ([`fn_is_named`]). Spelled with its module, the
+/// body of String's `Body` requirement (`bytes.from_string`) loaded `bytes`,
+/// and through it `int`, `float`, `math` and `map`, into every program that
+/// used a string function (the #4289 fan-out).
+fn requirement_called(spelled: &Spelled, module: &str, d: &Decl) -> bool {
+    requirement_of(module, d).is_some_and(|(protocol, requirement)| {
+        spelled.protocol_members.contains(&(protocol.to_string(), requirement.clone())) || spelled.members.contains(requirement)
+    })
 }
 
 /// A function generic over a built-in protocol bound (`[S: Numeric]`).
@@ -631,6 +666,21 @@ mod tests {
         assert!(!r.contains(&"int8"), "{r:?}");
     }
 
+    /// #4311, the negative control of the deferred requirement bodies: a
+    /// program that calls `Body`'s requirement (`http.response` over a
+    /// String) reaches String's requirement body and, through it, `bytes`.
+    #[test]
+    fn calling_a_requirement_spells_its_conformer_body() {
+        let entry = almide_lang::parser::Parser::new(almide_lang::lexer::Lexer::tokenize(
+            "import http\nfn main() -> Unit = println(http.body(http.response(200, \"x\")))\n",
+        ))
+        .parse()
+        .expect("parse");
+        let http = almide_lang::stdlib_info::bundled_source("http").and_then(almide_lang::parse_cached).expect("http parses");
+        let r = reached_auto_bundled([&entry, http]);
+        assert!(r.contains(&"string") && r.contains(&"bytes"), "{r:?}");
+    }
+
     #[test]
     fn a_requirement_call_reaches_a_spelled_only_conformer_only_when_spelled() {
         // `list.join[T: Text]` answers through `T.__join`: String has
@@ -779,5 +829,23 @@ mod tests {
         let json = almide_lang::parse_cached(json_src).expect("json parses");
         let l = super::live_bundled(std::iter::once(&prog), &[("json", json)], &|_| true);
         assert!(is_live(&l, "string", "from_codepoint"), "{:?}", l.live_fns.get("string"));
+    }
+
+    /// #4311 at function granularity: String's `Body` requirement body
+    /// (`bytes.from_string`) stays dormant while nothing calls `Body`'s
+    /// requirement, so a string program loads no `bytes`; a program that
+    /// builds a response over a String calls it, and its body is live with
+    /// `bytes` loaded (the negative control).
+    #[test]
+    fn a_dispatch_only_requirement_body_waits_for_its_requirement_call() {
+        let l = live("fn main() -> Unit = println(string.trim(\" x \"))\n");
+        assert!(!is_live(&l, "string", "__string_to_bytes"), "{:?}", l.live_fns.get("string"));
+        assert!(!l.auto_modules.contains(&"bytes"), "{:?}", l.auto_modules);
+        let tokens = almide_lang::lexer::Lexer::tokenize("import http\nfn main() -> Unit = println(http.body(http.response(200, \"x\")))\n");
+        let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
+        let http = almide_lang::parse_cached(almide_lang::stdlib_info::bundled_source("http").expect("http")).expect("http parses");
+        let l = super::live_bundled(std::iter::once(&prog), &[("http", http)], &|_| true);
+        assert!(is_live(&l, "string", "__string_to_bytes"), "{:?}", l.live_fns.get("string"));
+        assert!(l.auto_modules.contains(&"bytes"), "{:?}", l.auto_modules);
     }
 }

@@ -1,0 +1,8 @@
+scoped fn chk(n: Int) -> Int = {
+  assert_ne(n, 0)
+  n
+}
+
+test "a scoped fn calls an unnamed builtin" {
+  assert_eq(chk(3), 3)
+}

@@ -1,0 +1,3 @@
+import svg
+
+fn main() -> Unit = println(svg.label())

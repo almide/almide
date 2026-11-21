@@ -31,14 +31,14 @@ pub(crate) fn borrow_reads(func: &MirFunction) -> BTreeSet<ValueId> {
 fn borrow_reads_of(func: &MirFunction) -> BTreeSet<ValueId> {
     let root = roots(func);
     let readers = readers_of(func, &root);
-    let mut out = BTreeSet::new();
-    // The block each read was loaded from: a reference through a borrowed
-    // read (`&v6.f1` with `v6 = &v1.f0`) borrows that read's own block too.
-    let mut loaded_from: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    // Each borrowed read, with the block it was loaded from: a reference
+    // through a borrowed read (`&v6.f1` with `v6 = &v1.f0`) borrows that
+    // read's own block too. One map, so every read up the chain carries its
+    // block and the walk has no "block unknown" case (#4799).
+    let mut out: BTreeMap<ValueId, ValueId> = BTreeMap::new();
     for (i, op) in func.ops.iter().enumerate() {
         let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args } = op else { continue };
         let Some(&base) = args.first().and_then(|a| root.get(a)) else { continue };
-        loaded_from.insert(*d, base);
         if func.ret == Some(*d) {
             continue;
         }
@@ -52,8 +52,7 @@ fn borrow_reads_of(func: &MirFunction) -> BTreeSet<ValueId> {
         let mut held = base;
         let mut chain_ok = true;
         let mut seen = BTreeSet::from([*d]);
-        while out.contains(&held) && seen.insert(held) {
-            let Some(&up) = loaded_from.get(&held) else { break };
+        while let Some(&up) = out.get(&held).filter(|_| seen.insert(held)) {
             if !block_untouched(func, i, end, up, &root) {
                 chain_ok = false;
                 break;
@@ -61,10 +60,10 @@ fn borrow_reads_of(func: &MirFunction) -> BTreeSet<ValueId> {
             held = up;
         }
         if chain_ok {
-            out.insert(*d);
+            out.insert(*d, base);
         }
     }
-    out
+    out.into_keys().collect()
 }
 
 /// The borrow-only reads of `func` taken at an index that is rebound while

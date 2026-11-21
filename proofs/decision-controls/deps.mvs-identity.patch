@@ -1,0 +1,14 @@
+# Negative control of deps.mvs-identity (proofs/decision-sites.toml): two origins declaring one package name are unified by MVS again (the #4834 refusal never fires)
+# control_test: tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fresh_name_are_refused
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -1071,7 +1071,7 @@
+     // grant by that name would follow the swap. Refused, naming both.
+     let origin = crate::project::PackageOrigin::of(dep);
+     let required_by = shown.join(" → ");
+-    if let Some(other) = fetched.iter().find(|f| f.pkg_id.name == actual_pkg_id.name && f.origin != origin) {
++    if let Some(other) = fetched.iter().find(|f| false && f.pkg_id.name == actual_pkg_id.name && f.origin != origin) {
+         return Err(format!(
+             "error: two sources declare the package `{name}`\n  \
+              {} (required by {})\n  \

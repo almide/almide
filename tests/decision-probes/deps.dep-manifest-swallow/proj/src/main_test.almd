@@ -1,0 +1,5 @@
+import bad
+
+test "bad" {
+  assert_eq(bad.number(), 7)
+}

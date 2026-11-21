@@ -106,6 +106,7 @@ pub(crate) fn resolve_extras(
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
+            Helper::NamedOp { op: crate::work::NamedOp::HashTy, .. } => vec![ValType::I32],
             Helper::JsonValuePretty { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32]
             }

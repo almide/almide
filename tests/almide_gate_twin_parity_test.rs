@@ -290,6 +290,26 @@ fn oracle() -> String {
         .unwrap_or_else(|| almide().to_string())
 }
 
+/// A `PATH` whose first `almide` is `oracle`: a scratch directory holding one
+/// link to it, ahead of the caller's PATH.
+fn oracle_first_on_path(oracle: &str) -> String {
+    let dir = scratch("oracle-bin");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create the oracle PATH dir");
+    let oracle = std::fs::canonicalize(oracle).expect("canonical oracle path");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&oracle, dir.join("almide")).expect("link the oracle");
+    #[cfg(not(unix))]
+    std::fs::copy(&oracle, dir.join("almide.exe")).expect("copy the oracle");
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    let mut parts = vec![dir];
+    parts.extend(std::env::split_paths(&rest));
+    std::env::join_paths(parts)
+        .expect("join PATH")
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn scratch(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("almide-gate-twin-{}-{name}", std::process::id()))
 }
@@ -340,8 +360,18 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
         ),
     )
     .expect("write forged baseline");
+    // The gate's toolchain stamp (proofs/lib/stamp.sh) FAILS unless the PATH
+    // `almide` is the workspace build, and it is the only PATH `almide` the
+    // gate consults (the fixtures run through ALMIDE_BIN). Inheriting the
+    // caller's PATH made this test's verdict depend on whatever binary the
+    // machine had installed: a `make install` from before a workspace
+    // `cargo test` relinked target/release/almide turned the forged run into
+    // the stamp's FATAL and none of the rows below appeared (#4881). The PATH
+    // `almide` is the oracle, so the stamp describes the binary under test.
+    let path = oracle_first_on_path(&oracle);
     let env_with = |baseline: &Path, walled: &Path| {
         vec![
+            ("PATH", path.clone()),
             ("ALMIDE_BIN", oracle.clone()),
             ("OUTPUT_PARITY_SPEC", corpus.to_string()),
             (
@@ -401,6 +431,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
 
     if !have_tools {
         let _ = std::fs::remove_file(&ledger);
+        let _ = std::fs::remove_dir_all(scratch("oracle-bin"));
         return;
     }
 
@@ -529,6 +560,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     );
     let _ = std::fs::remove_file(&short);
     let _ = std::fs::remove_file(&ledger);
+    let _ = std::fs::remove_dir_all(scratch("oracle-bin"));
 }
 
 /// The comparison must be able to SEE a difference — a diff that cannot fail is

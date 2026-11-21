@@ -1,0 +1,3 @@
+expect = "E085"
+main = "stdlib/string.almd"
+test = "stdlib/string.almd"

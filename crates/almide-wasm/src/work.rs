@@ -23,6 +23,9 @@ pub(crate) enum NamedOp {
     /// The ordering twin of `EqTy`: ONE inlined level of an `ETy`'s
     /// total-order compare.
     CmpTy,
+    /// `$named_hashty_<ety>(key) -> i32` — the deep key hash of an `ETy`
+    /// (map_index_deep.rs, #4887). One param, not two.
+    HashTy,
 }
 
 /// A per-program emitted helper (assembled right after `main`, BEFORE the

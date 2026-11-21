@@ -1,0 +1,2 @@
+# The probe of front.e101-confusables: An all-Cyrillic spelling beside its ASCII skeleton twin in one file.
+expect = "E101"

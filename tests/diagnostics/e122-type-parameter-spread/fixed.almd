@@ -1,0 +1,10 @@
+// A record-shape bound is checked against each instance at the call, so the
+// spread copies only records whose fields are visible here.
+type Point = { x: Int, y: Int }
+
+fn copy[A: { .. }](x: A) -> A = { ...x }
+
+fn main() -> Unit = {
+  let p = copy(Point { x: 1, y: 2 })
+  println("${p.x} ${p.y}")
+}

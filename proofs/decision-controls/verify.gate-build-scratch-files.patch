@@ -1,0 +1,14 @@
+# Negative control of verify.gate-build-scratch-files (proofs/decision-sites.toml): a scratch name that already exists is entered (a planted symlink is followed).
+# control_test: tests/decision_scratch_dir_test.rs::novel_a_planted_scratch_name_is_skipped_never_followed
+diff --git a/crates/almide-base/src/private_dir.rs b/crates/almide-base/src/private_dir.rs
+--- a/crates/almide-base/src/private_dir.rs
++++ b/crates/almide-base/src/private_dir.rs
+@@ -17,7 +17,7 @@
+         std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+         match b.create(&dir) {
+             Ok(()) => return Ok(dir),
+-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
++            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(dir),
+             Err(e) => return Err(e),
+         }
+     }

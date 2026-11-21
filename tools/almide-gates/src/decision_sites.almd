@@ -1,0 +1,356 @@
+// `decision-sites` — the judge half of the decision-site ledger.
+//
+// `proofs/decision-sites.toml` has one row per place in the compiler, the CLI
+// or the runtime glue that decides PASS or REFUSE for a capability, scope,
+// trust, purity, verification or ownership property. The detector half is
+// `tests/decision_sites_test.rs` (it needs `syn`, so it is Rust): it finds the
+// sites by what they emit and keeps every row's `keys` equal to the tree. This
+// half reads the ROWS and the evidence they point at (#2128's split), and it is
+// the one place that says what STAMPED means:
+//
+//   c1  `from` is a declaration, a type or reach — never a name;
+//   c2  `unknown = "refuse"`, and `novel` names a test that calls a
+//       tests/support/novel.rs generator (an item no test author listed);
+//   c3  every route cell is `runs` or `n.a.: <why>`, and `probe` names the
+//       route-matrix probe directory that runs the `runs` cells;
+//   c4  `control_patch` (proofs/decision-controls/<id>.patch) exists, with the
+//       test it turns red (`control_test`) and when that was seen
+//       (`control_seen`), and the row carries its `stamp`.
+//
+// Every patch a row names must still APPLY to the tree (`git apply --check`)
+// and name the row's `control_test` on its `# control_test:` line, and every
+// patch must belong to a row — a check that moved leaves its control behind
+// as a failure here, not as a patch that silently no longer neuters anything.
+// Whether a patch turns its test red is a cargo build, so it is run by
+// scripts/run-decision-controls.sh on a build VM and recorded in `control_seen`.
+//
+// A row that says STAMPED and misses any of these is a failure: the ledger
+// never sits above its evidence. On every row: a `skipped` route cell must
+// name its issue (`#NNNN`), an UNSTAMPED row must say why (`reasons`). And the
+// four counts — rows not STAMPED, UNCLASSIFIED rows, `skipped` cells, rows with
+// `unknown = "allow"` — are held at the ceilings in the ledger's header, which
+// only fall: a count above its ceiling is a failure, and so is a count below
+// it (commit the fall).
+import fs
+import process
+
+type Verdict = { lines: List[String], ok: Bool }
+
+type Row = { id: String, status: String, from: String, unknown: String, cells: List[(String, String)], novel: String, probe: String, control_patch: String, control_test: String, control_seen: String, stamp: String, reasons_empty: Bool }
+
+// What the effectful half found on disk: the paths that exist, and the text of
+// each `novel` test file.
+type Evidence = { present: List[String], texts: List[(String, String)] }
+
+type Ceilings = { unstamped: Int, unclassified: Int, skipped: Int, failopen: Int }
+
+// `\"` inside a quoted value, kept out of the way of the quote splitter.
+fn shield(s: String) -> String = string.replace(s, "\\\"", "§Q§")
+
+fn unshield(s: String) -> String = string.replace(s, "§Q§", "\"")
+
+fn field_line(lines: List[String], key: String) -> String? = lines |> list.find((l) => string.starts_with(l, key + " = "))
+
+fn raw(lines: List[String], key: String) -> String = match field_line(lines, key) {
+  some(l) => string.trim(string.drop(l, string.len(key) + 3)),
+  none => "",
+}
+
+fn scalar(lines: List[String], key: String) -> String = {
+  let v = shield(raw(lines, key))
+  if string.starts_with(v, "\"") and string.ends_with(v, "\"") and string.len(v) >= 2 then unshield(string.slice(v, 1, string.len(v) - 1))
+  else unshield(v)
+}
+
+// The text between two quoted values, `, check = ` -> `check`.
+fn key_of(between: String) -> String = string.trim(string.replace(string.replace(string.replace(between, "{", ""), ",", ""), "=", ""))
+
+// `{ check = "runs", lsp = "n.a.: why" }` -> [("check", "runs"), ("lsp", "n.a.: why")].
+fn cells_of(inline: String) -> List[(String, String)] = {
+  let parts = string.split(shield(inline), "\"")
+  let n = list.len(parts) / 2
+  list.range(0, n) |> list.map((i) => {
+    (key_of(list.get(parts, i * 2) ?? ""), unshield(list.get(parts, i * 2 + 1) ?? ""))
+  })
+}
+
+fn row_of(block: List[String]) -> Row = Row {
+  id: scalar(block, "id"),
+  status: scalar(block, "status"),
+  from: scalar(block, "from"),
+  unknown: scalar(block, "unknown"),
+  cells: cells_of(raw(block, "routes")),
+  novel: scalar(block, "novel"),
+  probe: scalar(block, "probe"),
+  control_patch: scalar(block, "control_patch"),
+  control_test: scalar(block, "control_test"),
+  control_seen: scalar(block, "control_seen"),
+  stamp: scalar(block, "stamp"),
+  reasons_empty: raw(block, "reasons") == "[]" or raw(block, "reasons") == "",
+}
+
+// Every `[[site]]` block, as its lines.
+fn blocks(text: String) -> List[List[String]] = string.split(text, "\n[[site]]\n") |> list.drop(1) |> list.map((b) => string.split(b, "\n"))
+
+fn rows_of(text: String) -> List[Row] = blocks(text) |> list.map((b) => row_of(b))
+
+// `# unstamped_ceiling = "107"` -> 107; -1 when the header does not say.
+fn ceiling(text: String, name: String) -> Int = {
+  let hit = string.split(text, "\n") |> list.find((l) => string.starts_with(l, "# " + name + " "))
+  match hit {
+    some(l) => {
+      let v = string.trim(list.get(string.split(l, "="), 1) ?? "")
+      int.parse(string.replace(v, "\"", "")) ?? -1
+    },
+    none => -1,
+  }
+}
+
+fn ceilings(text: String) -> Ceilings = Ceilings {
+  unstamped: ceiling(text, "unstamped_ceiling"),
+  unclassified: ceiling(text, "unclassified_ceiling"),
+  skipped: ceiling(text, "skipped_route_ceiling"),
+  failopen: ceiling(text, "failopen_ceiling"),
+}
+
+fn is_skipped(v: String) -> Bool = string.starts_with(v, "skipped")
+
+// Does the cell name an issue, `#` followed by a digit?
+fn cites_issue(v: String) -> Bool = list.drop(string.split(v, "#"), 1) |> list.any((s) => string.len(s) > 0 and string.is_digit(string.take(s, 1)))
+
+fn decided_cell(v: String) -> Bool = v == "runs" or string.starts_with(v, "runs ") or string.starts_with(
+  v,
+  "runs:",
+) or string.starts_with(v, "n.a.: ") and string.len(string.trim(string.drop(v, 6))) > 0
+
+fn has(ev: Evidence, path: String) -> Bool = list.contains(ev.present, path)
+
+fn text_of(ev: Evidence, path: String) -> String = match list.find(ev.texts, (p) => p.0 == path) {
+  some(p) => p.1,
+  none => "",
+}
+
+fn novel_file(r: Row) -> String = list.get(string.split(r.novel, "::"), 0) ?? ""
+
+fn novel_fn(r: Row) -> String = list.last(string.split(r.novel, "::")) ?? ""
+
+// Why a STAMPED row is not, one line per missing condition.
+fn stamp_findings(r: Row, ev: Evidence) -> List[String] = {
+  let p = r.id + ": STAMPED but "
+  let c1 = if list.contains(["declaration", "type", "reach"], r.from) then []
+  else [
+    p + "c1: decides from `" + r.from + "` (declaration | type | reach)"
+  ]
+  let novel_text = text_of(ev, novel_file(r))
+  let c2 = if r.unknown != "refuse" then [
+    p + "c2: unknown = `" + r.unknown + "` (an unknown item must be refused)"
+  ]
+  else if r.novel == "" then [p + "c2: no `novel` test"]
+  else if not has(ev, novel_file(r)) then [p + "c2: novel test file " + novel_file(r) + " does not exist"]
+  else if not string.contains(novel_text, "fn " + novel_fn(r)) then [p + "c2: " + novel_file(r) + " has no fn " + novel_fn(r)]
+  else if not string.contains(novel_text, "novel::") then [
+    p + "c2: " + novel_file(r) + " calls no tests/support/novel.rs generator"
+  ]
+  else []
+  let undecided = r.cells |> list.filter((c) => not decided_cell(c.1)) |> list.map((c) => c.0 + " = `" + c.1 + "`")
+  let runs = r.cells |> list.any((c) => string.starts_with(c.1, "runs"))
+  let c3 = if list.len(r.cells) == 0 then [p + "c3: no route cells"]
+  else if list.len(undecided) > 0 then [
+    p + "c3: route cells not `runs` / `n.a.: <why>`: " + list.join(undecided, ", ")
+  ]
+  else if runs and (r.probe == "" or not has(ev, r.probe)) then [
+    p + "c3: `runs` cells but no probe directory (`probe` = `" + r.probe + "`)"
+  ]
+  else []
+  let want_patch = "proofs/decision-controls/" + r.id + ".patch"
+  let c4 = if r.control_patch != want_patch then [p + "c4: control_patch must be " + want_patch]
+  else if not has(ev, want_patch) then [p + "c4: " + want_patch + " does not exist"]
+  else if r.control_test == "" then [
+    p + "c4: no control_test (the test the patch turns red)"
+  ]
+  else if r.control_seen == "" then [
+    p + "c4: the control never ran (control_seen is empty)"
+  ]
+  else []
+  let st = if r.stamp == "" then [p + "no `stamp` (<sha> <date>)"]
+  else []
+  let rs = if r.reasons_empty then []
+  else [p + "it still lists reasons"]
+  c1 + c2 + c3 + c4 + st + rs
+}
+
+fn row_findings(r: Row, ev: Evidence) -> List[String] = {
+  let skipped = r.cells |> list.filter((c) => is_skipped(c.1) and not cites_issue(c.1)) |> list.map((c) => r.id + ": route " + c.0 + " is skipped without an issue (`skipped: #NNNN …`)")
+  let status = match r.status {
+    "STAMPED" => stamp_findings(r, ev),
+    "UNSTAMPED" => if r.reasons_empty then [
+      r.id + ": UNSTAMPED without `reasons`"
+    ]
+    else [],
+    "UNCLASSIFIED" => [],
+    other => [
+      r.id + ": status `" + other + "` (STAMPED | UNSTAMPED | UNCLASSIFIED)"
+    ],
+  }
+  skipped + status
+}
+
+fn count_line(name: String, n: Int, cap: Int) -> List[String] =
+  if cap < 0 then ["header: no `# " + name + "` line"]
+  else if n > cap then [
+    name + ": " + int.to_string(n) + " is above the ceiling " + int.to_string(cap) + " — the count only falls; a rise is a reviewed header line"
+  ]
+  else if n < cap then [name + ": " + int.to_string(n) + " is below the ceiling " + int.to_string(cap) + " — lower the ceiling to " + int.to_string(n) + " in this change"]
+  else []
+
+type Counts = { rows: Int, stamped: Int, unstamped: Int, unclassified: Int, skipped: Int, failopen: Int }
+
+fn counts(rows: List[Row]) -> Counts = Counts {
+  rows: list.len(rows),
+  stamped: rows |> list.filter((r) => r.status == "STAMPED") |> list.len,
+  unstamped: rows |> list.filter((r) => r.status != "STAMPED") |> list.len,
+  unclassified: rows |> list.filter((r) => r.status == "UNCLASSIFIED") |> list.len,
+  skipped: rows |> list.fold(
+    0,
+    (acc, r) => acc + (r.cells |> list.filter((c) => is_skipped(c.1)) |> list.len),
+  ),
+  failopen: rows |> list.filter((r) => r.unknown == "allow") |> list.len,
+}
+
+// The whole verdict over the ledger text and the evidence found on disk.
+fn judge(text: String, ev: Evidence) -> List[String] = {
+  let rows = rows_of(text)
+  let c = counts(rows)
+  let cap = ceilings(text)
+  let ids = rows |> list.map((r) => r.id)
+  let dup = ids |> list.filter((i) => (ids |> list.filter((j) => j == i) |> list.len) > 1) |> list.unique |> list.map((i) => i + ": duplicate id")
+  let empty = if list.len(rows) == 0 then [
+    "no [[site]] rows — refusing to judge an empty ledger"
+  ]
+  else []
+  empty + dup + (rows |> list.flat_map((r) => row_findings(r, ev))) + count_line(
+    "unstamped_ceiling",
+    c.unstamped,
+    cap.unstamped,
+  ) + count_line("unclassified_ceiling", c.unclassified, cap.unclassified) + count_line(
+    "skipped_route_ceiling",
+    c.skipped,
+    cap.skipped,
+  ) + count_line("failopen_ceiling", c.failopen, cap.failopen)
+}
+
+// The paths a STAMPED row points at, so the effectful half can look them up.
+fn wanted(rows: List[Row]) -> List[String] = rows |> list.filter((r) => r.status == "STAMPED") |> list.flat_map((r) => [
+  novel_file(r),
+  r.probe,
+  "proofs/decision-controls/" + r.id + ".patch"
+]) |> list.filter((p) => p != "") |> list.unique
+
+// One named patch: where it must live, that it names the row's test, that it applies.
+effect fn patch_findings(root: String, r: Row) -> List[String] = {
+  let want = "proofs/decision-controls/" + r.id + ".patch"
+  let text = fs.read_text(root + "/" + r.control_patch) ?? ""
+  if r.control_patch != want then [
+    r.id + ": control_patch must be " + want
+  ]
+  else if text == "" then [
+    r.id + ": " + want + " does not exist"
+  ]
+  else if not string.contains(text, "# control_test: " + r.control_test + "\n") then [
+    r.id + ": " + want + " does not name the row's control_test `" + r.control_test + "`"
+  ]
+  else match process.exec("git", ["-C", root, "apply", "--check", want]) {
+    ok(_) => [],
+    err(_) => [
+      r.id + ": " + want + " no longer applies — re-derive it against the moved check"
+    ],
+  }
+}
+
+effect fn controls(root: String, rows: List[Row]) -> List[String] = {
+  let named = rows |> list.filter((r) => r.control_patch != "")
+  let bad = named |> list.map((r) => patch_findings(root, r)!)!
+  let files = (fs.list_dir(root + "/proofs/decision-controls") ?? []) |> list.filter((f) => string.ends_with(f, ".patch"))
+  let owned = named |> list.map((r) => r.control_patch)
+  let orphans = files |> list.filter((f) => not list.contains(owned, "proofs/decision-controls/" + f)) |> list.map((f) => "proofs/decision-controls/" + f + " belongs to no row's control_patch")
+  list.flatten(bad) + orphans
+}
+
+effect fn run(root: String) -> Verdict = {
+  let path = root + "/proofs/decision-sites.toml"
+  let text = fs.read_text(path)!
+  let rows = rows_of(text)
+  let paths = wanted(rows)
+  let present = paths |> list.filter((p) => fs.exists(root + "/" + p))
+  let texts = present |> list.filter((p) => string.ends_with(p, ".rs")) |> list.map((p) => (p, fs.read_text(root + "/" + p) ?? ""))
+  let bad = judge(text, Evidence { present: present, texts: texts }) + controls(root, rows)!
+  let c = counts(rows)
+  let summary = int.to_string(c.rows) + " rows, " + int.to_string(c.stamped) + " stamped, " + int.to_string(c.unstamped) + " not stamped (" + int.to_string(c.unclassified) + " unclassified), " + int.to_string(c.skipped) + " skipped route cells, " + int.to_string(c.failopen) + " fail-open"
+  if list.len(bad) > 0 then Verdict {
+    lines: (bad |> list.map((b) => "::error::decision-sites: " + b)) + ["decision-sites: FAILED — " + int.to_string(list.len(bad)) + " finding(s); " + summary],
+    ok: false,
+  } else Verdict { lines: ["decision-sites OK: " + summary], ok: true }
+}
+
+fn header(u: Int, c: Int, s: Int, f: Int) -> String = "# unstamped_ceiling     = \"${int.to_string(u)}\"\n# unclassified_ceiling  = \"${int.to_string(c)}\"\n# skipped_route_ceiling = \"${int.to_string(s)}\"\n# failopen_ceiling      = \"${int.to_string(f)}\"\n"
+
+fn forged(extra: String) -> String = header(0, 0, 0, 0) + "\n[[site]]\nid = \"x.forged\"\nfrom = \"declaration\"\nunknown = \"refuse\"\nroutes = { check = \"runs\", lsp = \"n.a.: no code\" }\nnovel = \"tests/x_test.rs::novel_x\"\nprobe = \"tests/decision-probes/x.forged\"\nstatus = \"STAMPED\"\nstamp = \"abc 2026-11-19\"\nreasons = []\n" + extra
+
+fn full_evidence() -> Evidence = Evidence {
+  present: ["tests/x_test.rs", "tests/decision-probes/x.forged", "proofs/decision-controls/x.forged.patch"],
+  texts: [
+    ("tests/x_test.rs", "fn novel_x() { let m = novel::fresh_module(); }")
+  ],
+}
+
+test "a forged STAMPED row with no control fails" {
+  let bad = judge(forged(""), full_evidence())
+  assert(bad |> list.any((b) => string.contains(b, "c4: control_patch must be")))
+}
+
+test "a STAMPED row whose patch file is missing fails, and one with all evidence passes" {
+  let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"tests/x_test.rs::novel_x\"\ncontrol_seen = \"abc 2026-11-19\"\n"
+  let missing = Evidence {
+    present: ["tests/x_test.rs", "tests/decision-probes/x.forged"],
+    texts: full_evidence().texts,
+  }
+  assert(judge(forged(ctl), missing) |> list.any((b) => string.contains(b, "does not exist")))
+  assert_eq(judge(forged(ctl), full_evidence()), [])
+}
+
+test "a STAMPED row that decides from a name, or lets an unknown item through, fails" {
+  let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"t\"\ncontrol_seen = \"abc\"\n"
+  let named = string.replace(forged(ctl), "from = \"declaration\"", "from = \"name\"")
+  assert(judge(named, full_evidence()) |> list.any((b) => string.contains(b, "c1:")))
+  let open = string.replace(forged(ctl), "unknown = \"refuse\"", "unknown = \"allow\"")
+  assert(judge(open, full_evidence()) |> list.any((b) => string.contains(b, "c2:")))
+}
+
+test "a novel test that calls no generator does not count" {
+  let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"t\"\ncontrol_seen = \"abc\"\n"
+  let ev = Evidence {
+    present: full_evidence().present,
+    texts: [("tests/x_test.rs", "fn novel_x() { refuse(\"known\") }")],
+  }
+  assert(judge(forged(ctl), ev) |> list.any((b) => string.contains(b, "generator")))
+}
+
+test "a skipped cell without an issue fails; one naming #NNNN does not" {
+  let row = "\n[[site]]\nid = \"y\"\nunknown = \"refuse\"\nroutes = { check = \"skipped: own copy\", run = \"skipped: #4815 check --json\" }\nstatus = \"UNSTAMPED\"\nreasons = [\"c3\"]\n"
+  let bad = judge(header(1, 0, 2, 0) + row, Evidence { present: [], texts: [] })
+  assert_eq(bad, [
+    "y: route check is skipped without an issue (`skipped: #NNNN …`)"
+  ])
+}
+
+test "a ceiling holds in both directions" {
+  let row = "\n[[site]]\nid = \"y\"\nunknown = \"allow\"\nroutes = { check = \"runs\" }\nstatus = \"UNSTAMPED\"\nreasons = [\"c2\"]\n"
+  assert_eq(judge(header(1, 0, 0, 1) + row, Evidence { present: [], texts: [] }), [])
+  assert(judge(header(0, 0, 0, 1) + row, Evidence { present: [], texts: [] }) |> list.any((b) => string.contains(b, "above the ceiling")))
+  assert(judge(header(2, 0, 0, 1) + row, Evidence { present: [], texts: [] }) |> list.any((b) => string.contains(b, "below the ceiling")))
+}
+
+test "route cells read through escaped quotes and commas" {
+  let c = cells_of("{ check = \"runs\", lsp = \"n.a.: no \\\"code\\\", ever\" }")
+  assert_eq(c, [("check", "runs"), ("lsp", "n.a.: no \"code\", ever")])
+}

@@ -103,6 +103,13 @@ pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Int
 pub struct Checker {
     pub env: TypeEnv,
     pub type_map: crate::types::TypeMap,
+    /// #4878: the bare call callees (call position and pipe stage) of the
+    /// program under check that the checker bound to a local VALUE — a
+    /// parameter, a `let`, a lambda parameter — rather than to a top-level
+    /// fn. Recorded by binding at the call, read by the bounded profile, so a
+    /// parameter that shares a profile fn's spelling is an indirect callee.
+    /// Per program: `infer_module` brackets it like `type_map`.
+    pub value_callees: std::collections::HashSet<crate::ast::ExprId>,
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
@@ -312,8 +319,10 @@ pub struct Checker {
     pub(crate) eq_reported: std::collections::HashSet<(String, usize, usize, String, usize, usize)>,
     /// Record-update bases (`{ ...b }`) awaiting the post-solve opaque
     /// check (E033): a base whose type is still open at the spread is
-    /// judged once it resolves.
-    pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// judged once it resolves. The third column is the type parameters
+    /// with a record-shape bound in scope at the spread: a base that
+    /// resolves to any OTHER type parameter is E122 (#4285).
+    pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>, Vec<Sym>)>,
     /// Comparison operand pairs awaiting the post-solve one-type check
     /// (E037, #4018 / security row 11b): see `eq_operands.rs`.
     pub(crate) deferred_eq_pair_checks: Vec<eq_operands::EqPairSite>,
@@ -715,6 +724,7 @@ impl Checker {
     pub fn from_env(env: TypeEnv) -> Self {
         Checker {
             env, type_map: crate::types::TypeMap::new(),
+            value_callees: std::collections::HashSet::new(),
             diagnostics: Vec::new(),
             source_file: None, source_text: None,
             in_bundled_module: false,
@@ -1296,6 +1306,8 @@ impl Checker {
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
         let saved_top_effect_aliases = self.collect_top_effect_aliases(&program.decls);
+        // #4878: the value-bound callees this program's bounded check reads.
+        self.value_callees.clear();
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.env.top_effect_aliases = saved_top_effect_aliases;
         self.solve_constraints();

@@ -1,0 +1,9 @@
+@inline_rust("{ let _ = {p}; 1i64 }")
+fn touch(p: String) -> Int = 1
+
+@pure
+fn clean(p: String) -> Int = touch(p) + 1
+
+test "clean" {
+  assert_eq(clean("x"), 2)
+}

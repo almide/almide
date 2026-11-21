@@ -1,0 +1,2 @@
+# The probe of effect.foreign-top: An entry @inline_rust fn is every category; allow = ["IO"] refuses its caller.
+expect = "capability violation"

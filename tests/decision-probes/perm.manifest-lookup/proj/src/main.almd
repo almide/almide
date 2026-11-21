@@ -1,0 +1,3 @@
+import reach
+
+effect fn main() -> Unit = println(reach.peek("s.txt")!)

@@ -29,7 +29,7 @@ struct FnLoop<'a> {
     chains: crate::render_native_interp::Chains,
     printed: std::collections::BTreeSet<usize>,
     scalar_defs: std::collections::BTreeSet<usize>,
-    scalar_prints: BTreeMap<usize, (ValueId, bool)>,
+    scalar_prints: BTreeMap<usize, (ValueId, bool, bool)>,
     /// The owned values released right after each op (`early_releases`).
     early: BTreeMap<usize, Vec<ValueId>>,
     /// The slot snapshots released right after each op (`snapshot_releases`).
@@ -95,6 +95,11 @@ fn render_fn(
         // #1950: SIGPIPE's default disposition first, as the standard
         // codegen's `main` (the shared text, already 4-space indented).
         out.push_str(almide_codegen::main_sigpipe_prelude_text());
+        // #4620: the allocator policy, as the standard codegen's `main`.
+        out.push_str(almide_codegen::main_alloc_prelude_text());
+        // #4787: the generated key types register here (the marker becomes
+        // the call, or nothing, once every generated type is known).
+        out.push_str(crate::render_native_rec::KEY_TYPES_MARKER);
         line!("almide_stack_guard_install();");
         line!("let _almide_host_exit = AlmideHostExitGuard;");
     }
@@ -349,17 +354,18 @@ fn render_printed_scalar(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerErr
             writeln!(st.out, $($arg)*).unwrap();
         }};
     }
-    let Some(&(n, is_bool)) = st.scalar_prints.get(&i) else { return Ok(false) };
+    let Some(&(n, is_bool, stderr)) = st.scalar_prints.get(&i) else { return Ok(false) };
+    let sink = if stderr { "rt_eprintln_fmt" } else { "rt_println_fmt" };
     if st.tys.get(&n) != Some(&NTy::I64) {
         return Err(wall("native: a printed number that is not an Int"));
     }
     st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
     if is_bool {
-        line!("rt_println_fmt(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
+        line!("{sink}(format_args!(\"{{}}\", if {} != 0 {{ \"true\" }} else {{ \"false\" }}));", var(n));
     } else {
         // By value: a reference would pin the local to memory. Through
         // `AlmideIntText`, the runtime's digit writer (render_native_interp).
-        line!("rt_println_fmt(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
+        line!("{sink}(format_args!(\"{{}}\", crate::almide_str_block::AlmideIntText({})));", var(n));
     }
     Ok(true)
 }
@@ -379,10 +385,9 @@ fn render_chain_final(st: &mut FnLoop<'_>, i: usize) -> Result<bool, LowerError>
     // Printed by the next op and read by nothing else: one println!,
     // the macro `rt_print_str` prints through (a fan program's glue
     // routes that same macro).
-    if let (Some(j), Some(code)) = (
-        crate::render_native_interp::printed_by(func, i, dst),
-        crate::render_native_interp::render_print(pieces, &st.tys),
-    ) {
+    if let Some((j, code)) = crate::render_native_interp::printed_by(func, i, dst)
+        .and_then(|(j, stderr)| Some((j, crate::render_native_interp::render_print(pieces, &st.tys, stderr)?)))
+    {
         st.printed.insert(j);
         st.tys.insert(dst, NTy::Str);
         st.used_shims.push(crate::render_native_shims::PRINT_SHIMS);
@@ -515,6 +520,12 @@ fn render_fn_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<(), LowerError
     Ok(())
 }
 
+thread_local! {
+    /// The field-of-a-payload take a `Dup` arm's guard found, for the arm to
+    /// render (#4799: computed once, not again in the arm).
+    static NESTED_TAKE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 /// The move-shaped arms of the general op match: a dead handle, a borrow-join
 /// arm, and the copies, error carriers and reassignments that move their
 /// source instead of cloning it. `Ok(false)` = none of them.
@@ -631,11 +642,13 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             if !crate::render_native_move::drill_no_moves()
                 && matches!(st.tys.get(src), Some(NTy::VecRef | NTy::StrRef | NTy::VecStrRef | NTy::RecRef(_)))
                 && crate::render_native_rec::has_default(owned_of_ref(st.tys[src]))
-                && crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
-                    .is_some() =>
+                && NESTED_TAKE.with(|c| {
+                    // Decided once: the arm below renders the take this found.
+                    *c.borrow_mut() = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms);
+                    c.borrow().is_some()
+                }) =>
         {
-            let take = crate::render_native_addr::nested_field_take(func, i, *src, |v| st.tys.get(&v).copied(), &st.borrows.arms)
-                .expect("a field of a payload");
+            let take = NESTED_TAKE.with(|c| c.borrow_mut().take()).expect("a field of a payload");
             let owned = owned_of_ref(st.tys[src]);
             st.tys.insert(*dst, owned);
             // A by-value move consumed the carrier: no early release names it.

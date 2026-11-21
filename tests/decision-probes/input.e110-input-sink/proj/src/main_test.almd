@@ -1,0 +1,12 @@
+import http
+
+type Acct: Codec = { name: String, admin: Bool }
+
+effect fn handle(req: HttpRequest) -> Int = match http.decode_json[List[Acct]](req) {
+  ok(xs) => list.len(xs),
+  err(_) => 0,
+}
+
+test "a sent-out type decoded inside a list" {
+  assert_eq(1, 1)
+}

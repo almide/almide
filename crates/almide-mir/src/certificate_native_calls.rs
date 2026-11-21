@@ -32,11 +32,10 @@
 ///   when a param has no event), a MOVE param's line without the leading `i`
 ///   (the checker seeds it from the mode), then the rest in emission order.
 ///
-/// A callee outside the program that the render resolves to the native
-/// runtime (a shim, a floor body, the list concat, a dotted self-hosted
-/// stdlib name or a `__` helper — borrowing by the renderer contract) has no
-/// row; any other unknown callee gets the out-of-range block index, which the
-/// checker rejects.
+/// A callee outside the program that the render serves — by membership in
+/// the sets it serves from, never by the spelling of the name
+/// ([`render_served_callee`], #4828) — has no row; any other unknown callee
+/// gets the out-of-range block index, which the checker rejects.
 pub fn native_calls_witness(functions: &[MirFunction]) -> String {
     native_calls_witness_with(functions, &BTreeMap::new())
 }
@@ -68,16 +67,10 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
     }
     runtime_blocks.sort();
     let unknown = names.len() + runtime_blocks.len();
-    // A callee outside the program is one the render resolves to the native
-    // runtime (a shim, a floor body, the list concat) — all of which borrow
-    // their heap args by the renderer contract — or a dotted / `__` name.
-    let known = |n: &str| {
-        n.contains('.')
-            || n.starts_with("__")
-            || crate::render_native_shims::shim(n).is_some()
-            || crate::native_floor::declared(n).is_some()
-            || crate::native_list_ops::is_list_concat(n)
-    };
+    // A callee outside the program has no row only when the render serves it
+    // and borrows its heap args by the renderer contract
+    // ([`render_served_callee`]); any other gets the rejected index.
+    let known = render_served_callee;
     let (table_targets, table_unseeable) = call_modes_witness_func_table(&program, &names);
     let heap_modes = |f: &MirFunction| -> Vec<String> {
         f.params
@@ -192,4 +185,24 @@ fn native_host_site(callee: &str) -> Option<usize> {
     crate::host_ops::native_host_class(row.module)?;
     let symbol = crate::native_floor::declared(callee)?.symbol.as_str();
     Some(crate::host_ops::native_host_id(symbol).unwrap_or(crate::host_ops::native_host_call_count()))
+}
+
+/// Is `name`, a callee outside the program, one the render serves and whose
+/// heap arguments it borrows by the renderer contract (#4828)? Membership in
+/// the sets it serves from and whose convention is declared: the self-host
+/// registry's call names, the native shims, the declared native floor, the
+/// list concat ops, the host ops and the compiler-injected accessors
+/// (`mir_ops::INJECTED_ACCESSORS`). The spelling of a name — a `.` in it or
+/// a leading `__` — admits nothing: a callee in none of these sets gets the
+/// out-of-range row the checker rejects.
+pub(crate) fn render_served_callee(name: &str) -> bool {
+    static REGISTERED: std::sync::OnceLock<std::collections::HashSet<&'static str>> = std::sync::OnceLock::new();
+    REGISTERED
+        .get_or_init(|| crate::lower::registry_sig::registered_call_names().into_iter().collect())
+        .contains(name)
+        || crate::render_native_shims::shim(name).is_some()
+        || crate::native_floor::declared(name).is_some()
+        || crate::native_list_ops::is_list_concat(name)
+        || crate::host_ops::host_op_for_call_name(name).is_some()
+        || crate::mir_ops::INJECTED_ACCESSORS.contains(&name)
 }

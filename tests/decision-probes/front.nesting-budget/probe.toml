@@ -1,0 +1,2 @@
+# The probe of front.nesting-budget: 600 nested interpolation holes (#4841).
+expect = "nesting too deep"

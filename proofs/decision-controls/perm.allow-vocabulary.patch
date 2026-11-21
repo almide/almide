@@ -1,0 +1,14 @@
+# Negative control of perm.allow-vocabulary (proofs/decision-sites.toml): an allow name that is no capability reads as `IO` instead of being refused
+# control_test: tests/decision_batch1a_test.rs::novel_a_fresh_capability_name_is_refused_on_every_route
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -891,7 +891,7 @@
+     use almide_ir::effect::Effect;
+     let mut out = std::collections::HashSet::new();
+     for name in allow {
+-        let leaves = Effect::granted_by(name).ok_or_else(|| {
++        let leaves = Effect::granted_by(name).or_else(|| Effect::granted_by("IO")).ok_or_else(|| {
+             unknown_capability_message(name, "[permissions].allow", &Effect::grantable_names())
+         })?;
+         out.extend(leaves);

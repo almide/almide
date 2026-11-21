@@ -1,0 +1,5 @@
+// A spread with an override is a spread too: `{ ...x, name: n }` on a type
+// parameter without a record shape copies fields nobody declared here.
+fn rename[A](x: A, n: String) -> A = { ...x, name: n }
+
+fn main() -> Unit = println("${rename(1, "a")}")

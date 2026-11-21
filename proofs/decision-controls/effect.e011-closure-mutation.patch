@@ -1,0 +1,14 @@
+# Negative control of effect.e011-closure-mutation (proofs/decision-sites.toml): a local var a closure changes is admitted like a module-level var (#4859)
+# control_test: tests/decision_gap_fixes_test.rs::novel_e011_by_declaration_kind
+diff --git a/crates/almide-frontend/src/check/infer_closure_escape.rs b/crates/almide-frontend/src/check/infer_closure_escape.rs
+--- a/crates/almide-frontend/src/check/infer_closure_escape.rs
++++ b/crates/almide-frontend/src/check/infer_closure_escape.rs
+@@ -25,7 +25,7 @@
+         // whose declaration was not recorded is refused inside a closure,
+         // never admitted.
+         let refused = match self.env.mutable_decl.get(&name).copied() {
+-            Some(MutableDecl::Local { lambda_depth }) => self.env.lambda_depth > lambda_depth,
++            Some(MutableDecl::Local { lambda_depth }) => { let _ = lambda_depth; false }
+             Some(MutableDecl::TopLevel) | Some(MutableDecl::Param) => false,
+             None => self.env.lambda_depth > 0,
+         };

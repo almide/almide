@@ -148,9 +148,11 @@ impl Checker {
         let call_sig = self.lookup_call_sig(callee);
         let mut arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
+        let callee_id = callee.id;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
                 let name = name.clone();
+                self.note_value_callee(callee_id, &name);
                 // Register callee's type for variables that hold function values (Skip for builtins/functions — they don't need ExprId registration)
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
@@ -526,6 +528,19 @@ impl Checker {
         // still win: they are registered under `{prefix}.{name}` as well, and
         // that is what `declares_it_itself` asks about. For the entry program
         // (no prefix) the bare key IS its own, so nothing changes there.
+        // #4886: the same for a module's own DERIVED `Type.method`: its bare
+        // key is shared with every same-named type (the entry program's
+        // holds it), its canonical `{prefix}.Type.method` is the module's own.
+        if let (Some(p), Some((ty, _))) = (&self.current_module_prefix, name.split_once('.'))
+            && almide_base::names::is_type_side_name(ty)
+        {
+            let own = sym(&format!("{}.{}", p, name));
+            if !self.env.explicit_convention_fns.contains(&own)
+                && let Some(sig) = self.env.functions.get(&own)
+            {
+                return (Some(sig.clone()), None);
+            }
+        }
         let declares_it_itself = match (&self.current_module_prefix, name.contains('.')) {
             (Some(p), false) => self.env.functions.contains_key(&sym(&format!("{}.{}", p, name))),
             _ => true,
@@ -1238,9 +1253,19 @@ impl Checker {
         Some(Ty::Unknown)
     }
 
+    /// #4878: record a bare callee the checker binds to a local VALUE (a
+    /// parameter, a `let`, a lambda parameter) — the binding in scope at the
+    /// call, not the spelling — so the bounded profile reads it as an
+    /// indirect call even when a top-level fn shares its name.
+    pub(crate) fn note_value_callee(&mut self, id: crate::ast::ExprId, name: &str) {
+        if self.env.lookup_var(name).is_some() {
+            self.value_callees.insert(id);
+        }
+    }
+
     /// Type a call THROUGH a Fn-typed local binding (a `let`, or a function
     /// PARAMETER). `None` when the name's local is not a function.
-    fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
+    pub(crate) fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
         let Ty::Fn { is_effect, params, ret } = ty else { return None };
         // #1521: the zip below silently DROPS surplus/missing arguments, so a
         // fn-typed VALUE called at the wrong arity passed check (arity checks

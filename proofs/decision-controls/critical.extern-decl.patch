@@ -1,0 +1,14 @@
+# Negative control of critical.extern-decl (proofs/decision-sites.toml): an @extern declaration is no longer refused under --profile critical.
+# control_test: tests/decision_novel_test.rs::novel_extern_fn_with_a_fresh_name_under_critical
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -37,7 +37,7 @@
+         let mut diags: Vec<Diagnostic> = Vec::new();
+         // #4008: an `@extern` fn's body is foreign code — outside the
+         // memory-safety guarantee, so critical refuses the declaration itself.
+-        if critical {
++        if critical && program.decls.is_empty() {
+             for decl in &program.decls {
+                 if let ast::Decl::Fn { name, extern_attrs, span, .. } = decl
+                     && !extern_attrs.is_empty()

@@ -125,6 +125,12 @@ fn cmp(i: &mut Sink<'_>, key: IdxKey, needle: u32, k: u32, push_addr: impl FnOnc
             push_addr(i);
             i.i32_load(w(0)).call(F_STR_CMP);
         }
+        // the type's total order (`NamedOp::CmpTy`), sign(needle - key)
+        IdxKey::Deep(d) => {
+            i.local_get(needle);
+            push_addr(i);
+            i.i32_load(w(0)).call(d.cmp);
+        }
     }
 }
 
@@ -349,10 +355,7 @@ fn emit_new() -> Function {
 fn emit_add(key: IdxKey, insert: u32) -> Function {
     let (t, block, esz, koff, slot) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let (cap, t2, needle) = (5u32, 6u32, 7u32);
-    let mut f = Function::new([(2, ValType::I32), (1, match key {
-        IdxKey::Int => ValType::I64,
-        IdxKey::Str => ValType::I32,
-    })]);
+    let mut f = Function::new([(2, ValType::I32), (1, key.needle())]);
     let mut i = f.instructions();
     i.local_get(t).i32_load(w(COUNT)).local_get(t).i32_load(w(CAP)).i32_ge_u().if_(BlockType::Empty);
     i.local_get(t).i32_load(w(CAP)).local_set(cap);
@@ -418,12 +421,12 @@ fn emit_build_all(key: IdxKey, add: u32, new: u32) -> Function {
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(ord).local_get(n).i32_ge_u().br_if(1);
     i.local_get(ord).i32_const(1).i32_add().local_set(ord);
-    if key == IdxKey::Str {
+    if key.is_handle() {
         key_addr_of_slot(&mut i, (block, esz, koff), ord);
         i.i32_load(w(0)).if_(BlockType::Empty);
     }
     i.local_get(t).local_get(block).local_get(esz).local_get(koff).local_get(ord).call(add).local_set(t);
-    if key == IdxKey::Str {
+    if key.is_handle() {
         i.end();
     }
     i.br(0).end().end();
@@ -468,10 +471,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
 }
 
 fn needle(key: IdxKey) -> ValType {
-    match key {
-        IdxKey::Int => ValType::I64,
-        IdxKey::Str => ValType::I32,
-    }
+    key.needle()
 }
 
 /// The helper bodies of the ordered family; `me` is the helper's own

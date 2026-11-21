@@ -215,11 +215,27 @@ impl Checker {
     /// E033 for a record update whose base resolved, after the solve, to a
     /// foreign opaque record — the base was still open where the spread
     /// was inferred (`{ ...x }` on a lambda parameter).
+    ///
+    /// E122 (#4285) for a base that resolved to a type parameter with no
+    /// record-shape bound. The body is checked once, before any
+    /// instantiation, so the E033 rule never saw the instance:
+    /// `fn copy[A](x: A) -> A = { ...x }` copied a `Secret` outside its
+    /// module. A record-shape bound (`[A: { .. }]`) is checked against each
+    /// instance at the call, which refuses a foreign opaque record there.
     fn validate_opaque_spreads(&mut self) {
-        for (ty, span) in std::mem::take(&mut self.deferred_opaque_spreads) {
+        for (ty, span, shaped) in std::mem::take(&mut self.deferred_opaque_spreads) {
             let resolved = resolve_ty(&ty, &self.uf);
             let saved = self.current_span;
             self.current_span = span;
+            if let Ty::TypeVar(name) = &resolved
+                && !shaped.contains(name)
+            {
+                let msg = format!("cannot spread a value of type parameter '{name}': its fields are not known here");
+                let hint = format!(
+                    "a spread copies a record's fields, and an instance of '{name}' may be a type whose fields are closed outside its module (an opaque type such as `Secret`): bound it with a record shape, `[{name}: {{ .. }}]`, or take the record type itself"
+                );
+                self.emit(err(msg, hint, format!("type parameter {name}")).with_code("E122"));
+            }
             self.reject_foreign_opaque_record(&resolved, "build a record update of");
             self.current_span = saved;
         }

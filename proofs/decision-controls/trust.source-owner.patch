@@ -1,0 +1,14 @@
+# Negative control of trust.source-owner (proofs/decision-sites.toml): every source counts as trusted again (is_trusted answers true), so a fresh owner on a fresh host is fetched
+# control_test: tests/decision_deps_novel_test.rs::novel_trust_a_fresh_owner_on_a_fresh_host_is_refused_before_any_fetch
+diff --git a/src/trust.rs b/src/trust.rs
+--- a/src/trust.rs
++++ b/src/trust.rs
+@@ -57,7 +57,7 @@
+ /// Is `source` covered by `proj_owners` (`[trust] owners`, already
+ /// validated) or by default?
+ pub fn is_trusted(proj_owners: &[String], source: &GitSource) -> bool {
+-    default_owner().covers(source) || proj_owners.iter().filter_map(|o| TrustPrefix::parse(o).ok()).any(|o| o.covers(source))
++    true || default_owner().covers(source) || proj_owners.iter().filter_map(|o| TrustPrefix::parse(o).ok()).any(|o| o.covers(source))
+ }
+ 
+ /// The trust refusal for a dependency fetched while building (`chain` is the

@@ -1,0 +1,51 @@
+// @contract: C-181
+// A name given to an `args` reader is written without its dashes (#4866).
+// `args.option("--out")` compared against `----out` and was silently never
+// matched; every reader now answers a dash-written or empty name with an err
+// naming the dash-free form, whatever argv holds (the suite passes none). A
+// dash-free name reads as before: with no arguments, no flag is set and no
+// option has a value. Reading `-o v` for a one-letter name needs argv, so
+// that rule's evidence is tests/args_parse_cross_test.rs.
+import args
+
+fn shown[A](r: Result[A, String], f: (A) -> String) -> String = match r {
+  ok(v) => "ok ${f(v)}",
+  err(e) => "err ${e}",
+}
+
+test "a dash-written flag name is an err naming the dash-free form" {
+  assert_eq(
+    shown(args.has_flag("--quiet"), (b) => "${b}"),
+    "err args.has_flag: write the name without its dashes: \"quiet\"",
+  )
+  assert_eq(
+    shown(args.has_flag("-q"), (b) => "${b}"),
+    "err args.has_flag: write the name without its dashes: \"q\"",
+  )
+}
+
+test "a dash-written option name is an err naming the dash-free form" {
+  assert_eq(
+    shown(args.option("--out"), (v) => v ?? "none"),
+    "err args.option: write the name without its dashes: \"out\"",
+  )
+}
+
+test "an empty name, or one of dashes only, is an err" {
+  let want = "err args.option: the name is empty: write it without dashes, as in \"out\""
+  assert_eq(shown(args.option(""), (v) => v ?? "none"), want)
+  assert_eq(shown(args.option("--"), (v) => v ?? "none"), want)
+}
+
+test "a dash-written name among positional's option names is an err" {
+  assert_eq(
+    shown(args.positional(["out", "-o"]), (v) => list.join(v, ",")),
+    "err args.positional: write the name without its dashes: \"o\"",
+  )
+}
+
+test "dash-free names read as before" {
+  assert_eq(shown(args.has_flag("quiet"), (b) => "${b}"), "ok false")
+  assert_eq(shown(args.option("o"), (v) => v ?? "none"), "ok none")
+  assert_eq(shown(args.positional(["out", "o"]), (v) => "[${list.join(v, ",")}]"), "ok []")
+}

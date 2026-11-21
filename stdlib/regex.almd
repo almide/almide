@@ -30,10 +30,6 @@ fn is_match(re: Regex, s: String) -> Bool = regex.__is_match(re.pattern, s)
 /// re matches the whole of s.
 fn is_full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
 
-/// re matches the whole of s (renamed regex.is_full_match).
-@deprecated(since=15, use="regex.is_full_match")
-fn full_match(re: Regex, s: String) -> Bool = regex.__full_match(re.pattern, s)
-
 /// Leftmost match of re in s, or none.
 fn find(re: Regex, s: String) -> String? = regex.__find(re.pattern, s)
 

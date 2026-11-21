@@ -41,7 +41,9 @@ judges every certified fixture's bundle with the extracted checker, the Rocq
 kernel and `almide-verify`, all three agreeing, and pins the SHA-256 of the
 file `almide build --target wasm` wrote. The rows below do not apply to it;
 the recorded events are held to the instructions the bytes contain by
-`almide-anchor-check` per build — the bounds, init and fields events located
+`almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI;
+it is not linked into `almide` or `almide-verify`, so a user's build is not
+anchor-checked, #4849) — the bounds, init and fields events located
 one by one (#4011 (d)), the ownership witness's RC events matched one to one
 to the rc_inc and release calls on the values they name, every matched
 release its local's last read (#4277). What it still trusts there: that the

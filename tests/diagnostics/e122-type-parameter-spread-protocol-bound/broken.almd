@@ -1,0 +1,7 @@
+// A protocol bound gives a type parameter no fields: the spread is refused
+// with or without an override, whatever the bound.
+fn touch[A: Eq](x: A) -> A = { ...x }
+
+fn main() -> Unit = {
+  println("${touch(1)}")
+}

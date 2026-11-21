@@ -1,0 +1,12 @@
+# The serialization is not a refusal: the probe is a program whose fan arms
+# reach an @ordered write through fn values read from a top-level let, which
+# the walk cannot see (#4856). Serialized, the reader sees what the writer
+# wrote; run on threads (v0.69.1), it prints `wrote old`.
+expect = "wrote new"
+exit = "any"
+
+[expect_by]
+# the test route: the refusal-asserting test passes
+test = "1 passed"
+# emit: the inline (arm-order) fan form, not the thread scope
+emit = "let __almide_fan_r0 = (move ||"
