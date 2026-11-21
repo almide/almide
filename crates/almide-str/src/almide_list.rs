@@ -202,13 +202,25 @@ impl<T> AlmideList<T> {
 
     /// The elements for writing. A shared or static block is copied first, so the write is never seen by another owner;
     /// the borrow of `self` keeps the list from being cloned while the slice is lent.
+    #[inline]
     pub fn make_mut(&mut self) -> &mut [T] where T: Clone {
-        if self.is_empty() {
+        let len = self.len();
+        if len == 0 {
             return &mut [];
         }
-        self.reserve_unique(0);
+        // The copy of a shared block stays out of line: an element write in a loop inlines only the count check.
+        if !self.is_unique() {
+            self.unshare();
+        }
         // SAFETY: the block is unique and holds `len` initialised elements; the borrow of `self` is the only access.
-        unsafe { std::slice::from_raw_parts_mut(self.data(), self.len()) }
+        unsafe { std::slice::from_raw_parts_mut(self.data(), len) }
+    }
+
+    /// Replaces a shared block with a unique copy of its elements.
+    #[cold]
+    #[inline(never)]
+    fn unshare(&mut self) where T: Clone {
+        self.reserve_unique(0);
     }
 
     pub fn push(&mut self, x: T) where T: Clone {
