@@ -190,6 +190,7 @@ impl Emitter<'_> {
                     .i32_load(slot_memarg(almide_layout::SUM_TAG))
                     .i32_eqz()
                     .if_(BlockType::Empty);
+                self.fw_res_tag_back(3);
                 self.append_lit("ok(");
                 self.f.instructions().local_get(hr);
                 self.load_res_slot(ot);
@@ -261,6 +262,7 @@ impl Emitter<'_> {
                     }
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(SliceTy::Tuple(id), None, k);
                     self.disp_part((k + 1 == n).then_some(")"), |em| em.emit_display_at(fty, true, ir_arg(ir, k), path))?;
                 }
                 self.append_lit(")");
@@ -407,6 +409,9 @@ impl Emitter<'_> {
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
                 let mut fields: Vec<_> = def.fields.clone();
+                // Each field's index in the layout, by its offset (the display
+                // order below may differ).
+                let layout_order: Vec<u32> = def.fields.iter().map(|f| f.offset).collect();
                 if name.is_empty() {
                     // Anonymous record shape: "{ f: v }", fields in NAME
                     // order (the oracle's structural display).
@@ -426,6 +431,9 @@ impl Emitter<'_> {
                     self.append_lit(&format!("{}: ", fi.name));
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fi.ty, fi.offset);
+                    if let Some(pos) = layout_order.iter().position(|&o| o == fi.offset) {
+                        self.fw_field(SliceTy::Named(ti), None, pos);
+                    }
                     let inst = self.types.instance_field_ir(ir, 0, &fi.name);
                     let fir = inst.as_ref().or(fi.ir.as_ref()).or_else(|| record_field_ir(ir, &fi.name));
                     self.disp_part((k + 1 == n).then_some(" }"), |em| em.emit_display_at(fi.ty, true, fir, path))?;
