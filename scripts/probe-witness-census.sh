@@ -76,7 +76,7 @@ one() { # one <leg> <file>
   fi
   local census="-"
   if [ "$arc" -eq 0 ]; then
-    census="$("$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>&1 | grep -m1 '^CENSUS' || echo -)"
+    census="$("$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>&1 | grep -m1 '^CENSUS:' || echo -)"
   fi
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
@@ -86,6 +86,8 @@ one() { # one <leg> <file>
     if [ -n "$ANCHOROLD" ]; then
       MUT_ONLY=control "$ANCHOROLD" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows-old.tsv" || true
     fi
+    grep '^SHAPEFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/shaperows.tsv" || true
+    grep '^ROUTINE' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/routinerows.tsv" || true
     grep '^CENSUSX' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fxrows.tsv" || true
     python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
   fi
@@ -237,3 +239,59 @@ for key in sorted(agg):
     loc = a[1] + a[2] + a[3]
     print(f"   {key[0]:8} {key[1]:8} {a[0]:8} {a[1]:7} {a[2]:7} {a[3]:7} {a[4]:7} {a[5]:7} {a[6]:7}  {100 * loc / (a[0] or 1):7.1f}%  {a[0] - loc:9}")
 PY4
+
+python3 - "$OUT/fnrows.tsv" "$OUT/shaperows.tsv" "$OUT/routinerows.tsv" "$OUT/mutrows.tsv" "$OUT" <<'PY5'
+import sys, collections, re
+fn, shp, rtn, mut, out = sys.argv[1:6]
+klass = {}
+acc = collections.Counter()
+for l in open(fn):
+    r = l.rstrip("\n").split("\t")
+    klass[(r[0], r[1], r[5])] = r[3]
+    acc[(r[0], r[3])] += int(r[7])
+agg = collections.Counter()
+try:
+    for l in open(shp):
+        leg, file, func, shape, wr, n = l.rstrip("\n").split("\t")
+        agg[(leg, klass.get((leg, file, func), "runtime"), shape, wr)] += int(n)
+except FileNotFoundError:
+    pass
+print("== located bounds accesses by the shape of their guard (list-index is the shape Proposition 1 covers)")
+print("   leg      class    shape          writes?      n   % of the class's accesses")
+for key in sorted(agg):
+    a = acc[(key[0], key[1])] or 1
+    print(f"   {key[0]:8} {key[1]:8} {key[2]:14} {'write' if key[3] == '1' else 'read':6} {agg[key]:8}   {100 * agg[key] / a:6.2f}%")
+print("== the routines the anchor file names, by body shape (calls resolved, module-specific operands masked)")
+shapes = collections.defaultdict(collections.Counter)
+mods = collections.Counter()
+try:
+    for l in open(rtn):
+        leg, file, name, f, h, n = l.rstrip("\n").split("\t")
+        shapes[name][(h, n)] += 1
+        mods[name] += 1
+except FileNotFoundError:
+    pass
+for name in sorted(shapes):
+    print(f"   {name}: {mods[name]} (module, callee) pairs, {len(shapes[name])} distinct body shape(s)")
+    for (h, n), c in shapes[name].most_common(12):
+        print(f"       {h} {n:>5} instruction(s)  in {c}")
+ctx = collections.defaultdict(list)
+for l in open(mut):
+    p = l.rstrip("\n").split("\t")
+    if len(p) < 3 or not p[2].startswith("MUTCTX "):
+        continue
+    f = p[2].split(" ", 3)
+    norm = re.sub(r"\d+", "N", f[3])
+    ctx[(p[0], f[1], norm)].append((p[1], f[2], f[3]))
+print(f"== the code around the surviving bounds-operand and branch mutants: {sum(len(v) for v in ctx.values())} survivor(s), {len(ctx)} distinct shape(s) (numbers masked)")
+with open(out + "/mutctx.txt", "w") as o:
+    for i, (key, v) in enumerate(sorted(ctx.items(), key=lambda kv: (-len(kv[1]), kv[0]))):
+        files = collections.Counter(x[0] for x in v)
+        head = f"#{i} {key[0]} {key[1]}: {len(v)} survivor(s) in {len(files)} file(s), e.g. {v[0][0]} {v[0][1]}"
+        print("   " + head)
+        o.write(head + "\n")
+        o.write("   files: " + ", ".join(f"{k} x{n}" for k, n in files.most_common(8)) + "\n")
+        for part in v[0][2].split(" ; "):
+            o.write("      " + part + "\n")
+        o.write("\n")
+PY5

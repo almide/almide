@@ -580,3 +580,42 @@ fn an_if_on_a_local_the_path_set_takes_only_the_arm_its_value_selects() -> Resul
     assert!(rc("local.get 0 call $alloc drop local.get 1 if else local.get 0 drop end", "d0").is_err());
     Ok(())
 }
+
+// ── a slot's replaced occupant, the container held in a global ─────────────
+
+/// The container lives in global `$g`: its slot's occupant is released, and
+/// a later store writes "that slot" again. Function 2 (`$swap`) rebinds
+/// `$g`; function 3 (`$quiet`) does nothing.
+fn replaced_through_a_global(between: &str) -> Result<RcReport, String> {
+    let bytes = wat::parse_str(format!(
+        r#"(module (memory 1)
+             (global $g (mut i32) (i32.const 64))
+             (func $alloc (param i32) (result i32) i32.const 64)
+             (func $main (local i32 i32)
+               global.get $g i32.load offset=12 call $alloc drop
+               {between}
+               global.get $g local.get 1 i32.store offset=12)
+             (func $swap i32.const 128 global.set $g)
+             (func $quiet nop))"#
+    ))
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let releases = [0u32].into_iter().collect();
+    let mut r = RcReport::default();
+    check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, "r-@0-2".into())], &[vec![], vec![]], &mut r).map(|()| r)
+}
+
+#[test]
+fn a_replaced_occupant_of_a_global_container_is_matched() -> Result<(), String> {
+    replaced_through_a_global("")?;
+    replaced_through_a_global("call $quiet")?;
+    Ok(())
+}
+
+/// The call between the release and the store rebinds the global: the store
+/// writes another block's slot, and the released occupant stays in the first.
+#[test]
+fn a_replaced_occupant_across_a_call_that_rebinds_the_global_is_refused() {
+    let r = replaced_through_a_global("call $swap");
+    assert!(r.is_err(), "accepted a slot replacement across a call that may rebind the container's global");
+}

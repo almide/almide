@@ -226,3 +226,48 @@ fn a_callee_whose_only_write_is_a_call_that_never_returns_is_read_only() -> Resu
     assert_eq!(r.field_guarded, 1);
     Ok(())
 }
+
+// ── a variant held in a global, read across a call ─────────────────────────
+
+/// The block lives in global `$g`. Function 2 (`$swap`) rebinds `$g` and
+/// writes no memory; function 3 (`$quiet`) does nothing.
+fn global_held(between: &str) -> Result<Report, String> {
+    let bytes = wat::parse_str(format!(
+        r#"(module (memory 1)
+             (global $g (mut i32) (i32.const 64))
+             (func $alloc (param i32) (result i32) i32.const 64)
+             (func $main
+               global.get $g i32.load offset=12 i32.const 1 i32.eq
+               if
+                 {between}
+                 global.get $g i64.load offset=20 drop
+               end)
+             (func $swap i32.const 128 global.set $g)
+             (func $quiet nop))"#
+    ))
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    let read = if between.is_empty() { "1:6" } else { "1:7" };
+    check_fields(&bodies, 0, 0, VAR_W, &format!("-;-;1:1;{read}"), &mut r).map(|()| r)
+}
+
+#[test]
+fn a_case_field_of_a_global_with_nothing_between_is_accepted() -> Result<(), String> {
+    assert_eq!(global_held("")?.field_guarded, 1);
+    Ok(())
+}
+
+#[test]
+fn a_case_field_of_a_global_across_a_call_that_sets_no_global_is_accepted() -> Result<(), String> {
+    assert_eq!(global_held("call $quiet")?.field_guarded, 1);
+    Ok(())
+}
+
+/// The call between the tag test and the read rebinds the global: the read
+/// is of another block, whose tag nothing tested.
+#[test]
+fn a_case_field_of_a_global_across_a_call_that_rebinds_it_is_refused() {
+    let r = global_held("call $swap");
+    assert!(r.is_err(), "accepted a case field read of a global a call between may rebind: {:?}", r.map(|r| r.field_guarded));
+}
