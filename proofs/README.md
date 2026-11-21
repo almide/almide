@@ -82,7 +82,8 @@ compiler with qualified use in safety-critical settings).
   (crates/almide-wasm/src/witness_bounds.rs) for every access whose check
   #3345 may elide, and `structural-wall.sh` judges it three ways (extracted
   checker, kernel, almide-verify). That the witness's events are the
-  accesses the bytes contain is trusted, as for the ownership witness.
+  accesses the bytes contain is checked per build by `almide-anchor-check`
+  on the shipped module (#4011 (d)), not proven.
 
 - **#4014: `CoreSafe.v` — well-typed core programs are MemorySafe.** A
   typed core of the source language — ints, bools, int lists with value
@@ -129,8 +130,11 @@ compiler with qualified use in safety-critical settings).
   store that initializes its whole extent (the constructor discipline).
   `InitCert.v` subsequently replaces initialization/layout assumptions with
   accepted construction sites; the structural emitter records `init`
-  witnesses for list literals and range lists, not all allocation sites. `read_before_init_not_initialized` is its
-  control. Not reached: the link from the certificates' events to the bytes.
+  witnesses for list literals and range lists, and `fields` witnesses for
+  record, tuple and variant construction (`FieldCert.v`), not all allocation sites. `read_before_init_not_initialized` is its
+  control. The link from the certificates' events to the bytes is checked per
+  build (`almide-anchor-check`: bounds, init and fields events located one by
+  one, RC events matched to the shipped calls), not proven.
 
 ## Verify (the third-party `make verify-trust`)
 

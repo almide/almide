@@ -275,7 +275,7 @@ arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
 compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
 `check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
-the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with 18 accept/refuse unit modules and three byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. Since sec-rows-2-3-4 (2026-10-27) the compare's OPERANDS are checked too (crates/almide-anchor-check/src/operands.rs): each located access is held to its slot's check over the shipped instructions — same index, `len / S` of the block it addresses in its own slot size, within one slot, the check dominating, and no change of the index or the list between (a write only by the list's own copy-on-write judge, whose calls the anchor file's `judges` line locates; no other call handed the list; no store of its count word) — the hoisted count and the payload pointer included, which also checks what the kills stood for; 578 of 578 located accesses on the 995-fixture corpus, and three operand drills in `scripts/witness-reinject.sh anchors`. TRUSTED: that a located judge call is a copy-on-write judge (returns a block of its argument's count), that only a call handed a block shrinks it in place, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator and the string reads below (#4281), which no witness records. And
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects five lost-instruction bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 44227745821, 2026-11-18): 1390/1390 bounds witnesses of 1054 fixtures accepted, recording 2841 reads and 189 writes against 1095 emitted checks and 1470 loop exit tests in 501 non-empty witnesses; on the first measurement (trust-spine run 40085282713, 2026-10-24) 954/954, with 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. Since #4011 (d) each bounds and init event also carries an ANCHOR into the shipped module, and `almide-anchor-check` (crates/almide-anchor-check — wasmparser's decoder and validator, no compiler code; itself trusted, with its accept/refuse unit modules and 15 byte-level drills, `scripts/witness-reinject.sh anchors`) requires every located event to be the instruction it names on every structural-wall artifact: a check an unsigned compare opening an `if` that aborts, an access a load or store, a site's allocation size and its stores' width, offset and address local with no branch out and no unrecorded store, a fill's exact countdown. Since sec-rows-2-3-4 (2026-10-27) the compare's OPERANDS are checked too (crates/almide-anchor-check/src/operands.rs): each located access is held to its slot's check over the shipped instructions — same index, `len / S` of the block it addresses in its own slot size, within one slot, the check dominating, and no change of the index or the list between (a write only by the list's own copy-on-write judge, whose calls the anchor file's `judges` line locates; no other call handed the list; no store of its count word) — the hoisted count and the payload pointer included, which also checks what the kills stood for; 2519 of 2519 located accesses on the 1054-fixture corpus (trust-spine run 44227745821), and the operand drills in `scripts/witness-reinject.sh anchors`. TRUSTED: that a located judge call is a copy-on-write judge (returns a block of its argument's count), that only a call handed a block shrinks it in place, the representation, that the anchor file's `alloc` index is `$alloc`, and every heap access outside the index operator and the string reads below (#4281), which no witness records. And
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and
@@ -319,9 +319,10 @@ slot, and then MemorySafe and initializing at every count. The structural leg
 emits the `init` witness per build for every list literal and every range
 list (a loop fill) (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
 judges it with the extracted checker, the kernel and almide-verify (on the
-certified corpus, trust-spine run 40094443633: 2973 sites in 554 non-empty
-witnesses, all accepted); every
-other allocation site (records, variants, strings, the runtime's routines)
+certified corpus, trust-spine run 44227745821: 3655 sites in 640 non-empty
+witnesses, all accepted). Record, tuple and variant construction is recorded
+by the fields witness below, not by this one; every other allocation site
+(strings, Option and Result blocks, maps, the runtime's routines)
 records nothing yet, so `sited` — every allocation a recorded site — holds of
 a run only when all its allocations are list literals or ranges. TRUSTED: the recording
 discipline, and that a site's block stays private until its last store. And
@@ -356,10 +357,10 @@ each variant CASE field's read to a tag test of its own address that
 guards it (an enclosing `if` whose condition implies `tag == C`, the address
 the same variable or the same field re-loaded with nothing that may write
 memory between; a call only when the callee's body writes none, a fixpoint
-over the module). On the 1000-fixture certified corpus (GCE, ba31c7646): 1000/1000
+over the module). On the 1054-fixture certified corpus (trust-spine run 44227745821): 1054/1054
 `fields` witnesses accepted by all three verdicts and FIELDS OK on every
-artifact — 3998 sites / 8636 stores, 5390 field accesses (552 variant case
-fields held to their tag test), 614 tag reads. TRUSTED: that a block's static type is its layout (the
+artifact — 4338 sites / 9355 stores, 5882 field accesses (576 variant case
+fields held to their tag test), 642 tag reads. TRUSTED: that a block's static type is its layout (the
 representation, trusted already for the bounds and init witnesses; the IR is
 cast-free and FieldAssign is refused),
 and the one row #4279 adds (owner ruling, 2026-10-30):
@@ -414,7 +415,9 @@ existing count rule), and a loop-guarded read must lie inside its loop.
 On the 1001-fixture certified corpus (GCE, e23e4ea28): 1001/1001 bounds
 witnesses accepted by all three verdicts, recording 1083 loop exit tests
 (429 before) and 850 emitted checks, and ANCHORS OK on every artifact with
-1899 located accesses held to their guards (1018 before).
+1899 located accesses held to their guards (1018 before); on the
+1054-fixture corpus of trust-spine run 44227745821, 1470 loop exit tests, 1095
+emitted checks and 2519 located accesses.
 The drills `string-test-one-byte-loose`, `string-loop-exit-loosened` and
 `string-prefix-length-test-loosened` (`scripts/witness-reinject.sh
 anchors`) each read ANCHORS REJECT, and 33 accept/refuse modules sit in
