@@ -381,27 +381,98 @@ impl<T> AlmideList<T> {
         }
     }
 
-    /// The list's elements as a `Vec` for an edit `Vec` already has, then back: moved through when unique.
-    fn edit_as_vec<R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R where T: Clone {
-        let mut v = std::mem::take(self).into_vec();
-        let r = f(&mut v);
-        *self = AlmideList::from(v);
-        r
+    /// Keeps the elements `keep` accepts, in order. `keep` sees the last element kept so far (`None` before the
+    /// first) and the candidate. A unique block is compacted in place (no allocation, as `Vec::retain`); a shared
+    /// one is left to its other owners and only the kept elements are cloned. A panic in `keep` or in a dropped
+    /// element's `drop` leaves the list holding the elements kept so far and then the ones not yet looked at.
+    fn compact(&mut self, mut keep: impl FnMut(Option<&T>, &T) -> bool) where T: Clone {
+        let len = self.len();
+        if len == 0 {
+            return;
+        }
+        if !self.is_unique() {
+            let mut out = AlmideList::new();
+            for x in self.as_slice() {
+                if keep(out.last(), x) {
+                    out.push(x.clone());
+                }
+            }
+            *self = out;
+            return;
+        }
+        struct Compacting<T> {
+            block: NonNull<AlmideListHeader>,
+            data: *mut T,
+            read: usize,
+            kept: usize,
+            len: usize,
+        }
+        impl<T> Drop for Compacting<T> {
+            fn drop(&mut self) {
+                // SAFETY: slots `..kept` and `read..len` hold the live elements, each once; the unread ones move down
+                // to follow the kept ones (overlapping, hence `copy`), and `len` counts both.
+                unsafe {
+                    if self.kept != self.read {
+                        std::ptr::copy(self.data.add(self.read), self.data.add(self.kept), self.len - self.read);
+                    }
+                    (*self.block.as_ptr()).len = self.kept + (self.len - self.read);
+                }
+            }
+        }
+        let mut c = Compacting { block: self.ptr, data: self.data(), read: 0, kept: 0, len };
+        while c.read < len {
+            // SAFETY: the block is unique (the borrow of `self` is the only access); slot `read` is live and distinct
+            // from slot `kept - 1` (kept <= read), the last element kept.
+            unsafe {
+                let cur = c.data.add(c.read);
+                let last = if c.kept == 0 { None } else { Some(&*c.data.add(c.kept - 1)) };
+                if keep(last, &*cur) {
+                    if c.kept != c.read {
+                        std::ptr::copy_nonoverlapping(cur, c.data.add(c.kept), 1);
+                    }
+                    c.kept += 1;
+                    c.read += 1;
+                } else {
+                    // Counted as gone before its drop runs, so a panicking drop is never repeated.
+                    c.read += 1;
+                    std::ptr::drop_in_place(cur);
+                }
+            }
+        }
     }
 
-    /// Keeps the elements `f` accepts, in order, as `Vec::retain`.
-    pub fn retain(&mut self, f: impl FnMut(&T) -> bool) where T: Clone {
-        self.edit_as_vec(|v| v.retain(f));
+    /// Keeps the elements `f` accepts, in order, as `Vec::retain` (in place when the block is unique).
+    pub fn retain(&mut self, mut f: impl FnMut(&T) -> bool) where T: Clone {
+        self.compact(|_, x| f(x));
     }
 
-    /// Removes consecutive repeated elements, as `Vec::dedup`.
+    /// Removes consecutive repeated elements, as `Vec::dedup` (in place when the block is unique).
     pub fn dedup(&mut self) where T: Clone + PartialEq {
-        self.edit_as_vec(|v| v.dedup());
+        self.compact(|last, x| last.is_none_or(|l| !(x == l)));
     }
 
-    /// Splits the list at `at`, keeping `..at` and returning `at..`, as `Vec::split_off`.
+    /// Splits the list at `at`, keeping `..at` and returning `at..`, as `Vec::split_off`. A unique block moves the
+    /// tail into the new list; a shared one clones it.
     pub fn split_off(&mut self, at: usize) -> AlmideList<T> where T: Clone {
-        self.edit_as_vec(|v| AlmideList::from(v.split_off(at)))
+        let len = self.len();
+        assert!(at <= len, "`at` split index (is {at}) should be <= len (is {len})");
+        if at == len {
+            return AlmideList::new();
+        }
+        let out = AlmideList::<T> { ptr: almide_list_alloc::<T>(len - at), _elems: PhantomData };
+        if !self.is_unique() {
+            out.fill_fresh(&self.as_slice()[at..]);
+            self.truncate(at);
+            return out;
+        }
+        // SAFETY: both blocks are unique; `at..len` is initialised here and `out` has room for it. The elements move:
+        // this list's `len` drops to `at`, so each is owned exactly once.
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.data().add(at), out.data(), len - at);
+            (*out.ptr.as_ptr()).len = len - at;
+            (*self.ptr.as_ptr()).len = at;
+        }
+        out
     }
 
     /// Moves every element of `other` onto the end of this list, as `Vec::append`.
@@ -410,9 +481,30 @@ impl<T> AlmideList<T> {
         self.extend(moved);
     }
 
-    /// Removes the elements in `range` and returns them, as `Vec::drain` (collected: the list is edited at once).
-    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> std::vec::IntoIter<T> where T: Clone {
-        self.edit_as_vec(|v| v.drain(range).collect::<Vec<T>>().into_iter())
+    /// Removes the elements in `range` and yields them, as `Vec::drain`: in place in a unique block (a shared one is
+    /// copied first), with no allocation. The elements not taken are dropped and the tail moves down when the drain is
+    /// dropped; while it lives the list holds only `..start`, so forgetting it leaks the rest and is still sound.
+    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> AlmideListDrain<'_, T> where T: Clone {
+        use std::ops::Bound;
+        let len = self.len();
+        let start = match range.start_bound() {
+            Bound::Included(&s) => s,
+            Bound::Excluded(&s) => s.checked_add(1).expect("attempted to index slice from after maximum usize"),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&e) => e.checked_add(1).expect("attempted to index slice up to maximum usize"),
+            Bound::Excluded(&e) => e,
+            Bound::Unbounded => len,
+        };
+        assert!(start <= end, "slice index starts at {start} but ends at {end}");
+        assert!(end <= len, "range end index {end} out of range for slice of length {len}");
+        if start < end {
+            self.reserve_unique(0);
+            // SAFETY: the block is unique (non-empty, so never the static one).
+            unsafe { (*self.ptr.as_ptr()).len = start };
+        }
+        AlmideListDrain { block: self.ptr, data: self.data(), next: start, end, start, tail: end, tail_len: len - end, _list: PhantomData }
     }
 
     /// Room for exactly `extra` more elements in a unique block, as `Vec::try_reserve_exact`: an allocation the system
@@ -682,6 +774,82 @@ impl<T: Clone> Clone for AlmideListIntoIter<T> {
 
 impl<T: Clone> ExactSizeIterator for AlmideListIntoIter<T> {}
 impl<T: Clone> std::iter::FusedIterator for AlmideListIntoIter<T> {}
+
+/// The iterator of [`AlmideList::drain`]: yields `start..end` by value out of a unique block. On drop it drops the
+/// elements not taken and moves the tail `tail..tail + tail_len` down to `start`.
+pub struct AlmideListDrain<'a, T> {
+    block: NonNull<AlmideListHeader>,
+    data: *mut T,
+    next: usize,
+    end: usize,
+    start: usize,
+    tail: usize,
+    tail_len: usize,
+    _list: PhantomData<&'a mut AlmideList<T>>,
+}
+
+impl<T> Iterator for AlmideListDrain<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        let i = self.next;
+        self.next += 1;
+        // SAFETY: `i` is in the drained range of a unique block, taken once; the list no longer counts it.
+        Some(unsafe { self.data.add(i).read() })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.next;
+        (n, Some(n))
+    }
+}
+
+impl<T> DoubleEndedIterator for AlmideListDrain<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        self.end -= 1;
+        // SAFETY: as `next`.
+        Some(unsafe { self.data.add(self.end).read() })
+    }
+}
+
+impl<T> ExactSizeIterator for AlmideListDrain<'_, T> {}
+impl<T> std::iter::FusedIterator for AlmideListDrain<'_, T> {}
+
+impl<T> Drop for AlmideListDrain<'_, T> {
+    fn drop(&mut self) {
+        if self.start == self.tail {
+            // Nothing was drained: the list (possibly the static block) was not touched.
+            return;
+        }
+        /// Moves the tail down even when an element's drop below panics.
+        struct MoveTail<T> {
+            block: NonNull<AlmideListHeader>,
+            data: *mut T,
+            start: usize,
+            tail: usize,
+            tail_len: usize,
+        }
+        impl<T> Drop for MoveTail<T> {
+            fn drop(&mut self) {
+                // SAFETY: the block is unique; `tail..tail + tail_len` is live and moves (overlapping, hence `copy`) to
+                // `start`, where every drained slot has been taken or dropped.
+                unsafe {
+                    std::ptr::copy(self.data.add(self.tail), self.data.add(self.start), self.tail_len);
+                    (*self.block.as_ptr()).len = self.start + self.tail_len;
+                }
+            }
+        }
+        let _tail = MoveTail { block: self.block, data: self.data, start: self.start, tail: self.tail, tail_len: self.tail_len };
+        let (next, end) = (self.next, self.end);
+        self.next = end;
+        // SAFETY: `next..end` were never taken; each is dropped once here.
+        unsafe { std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(self.data.add(next), end - next)) };
+    }
+}
 
 impl<T: Clone> Drop for AlmideListIntoIter<T> {
     fn drop(&mut self) {

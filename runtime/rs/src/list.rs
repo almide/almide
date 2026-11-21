@@ -92,7 +92,7 @@ pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> AlmideList<T> 
 
 // Consuming functions (templates use .to_vec())
 pub fn almide_rt_list_map<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideList<B> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
-pub fn almide_rt_list_filter<A: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let f = move |a| f(a); xs.into_iter().filter(|x| f(x.clone())).collect() }
+pub fn almide_rt_list_filter<A: Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let f = move |a| f(a); xs.retain(|x| f(x.clone())); xs }
 pub fn almide_rt_list_fold<A: Clone, B: Clone>(xs: AlmideList<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> B { let f = move |a, b| f(a, b); xs.into_iter().fold(init, f) }
 pub fn almide_rt_list_find<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.iter().find(|x| f((*x).clone())).cloned() }
 pub fn almide_rt_list_any<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().any(|x| f(x.clone())) }
@@ -1208,13 +1208,15 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Clone, F: Fn(A) 
 pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: AlmideList<A>, f: F) -> AlmideList<A> {
     xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
-        return xs.into_iter().filter(|x| f(x.clone())).collect();
+        let mut xs = xs;
+        xs.retain(|x| f(x.clone()));
+        return xs;
     }
     let site = almide_rt_list_par_filter::<A, F> as fn(AlmideList<A>, F) -> AlmideList<A> as usize;
     let n = xs.len();
     let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
-        let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
+        let out = clock.calling(|| { let mut xs = xs; xs.retain(|x| f(x.clone())); (xs, n) });
         clock.record();
         return out;
     }

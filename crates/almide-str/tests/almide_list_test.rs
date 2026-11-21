@@ -614,3 +614,53 @@ fn a_pusher_copies_a_shared_block_at_its_first_push_and_writes_the_length_back()
     assert!(r.is_err());
     assert_eq!(&b[..], &[0, 1, 2, 3, 4, 5]);
 }
+
+/// `retain`, `dedup`, `drain` and `split_off` edit a unique block where it lies (no allocation, the elements move or
+/// drop once each); a shared block keeps its other owner's elements; a panic part way leaves every element owned once.
+#[test]
+fn in_place_edits_keep_a_unique_block_and_unwind_cleanly() {
+    let s = |x: &str| x.to_string();
+    let mut a: AlmideList<String> = AlmideList::from(vec![s("a"), s("b"), s("b"), s("c"), s("d"), s("d")]);
+    let at = a.as_slice().as_ptr() as usize;
+    a.dedup();
+    assert_eq!(a.as_slice(), &[s("a"), s("b"), s("c"), s("d")]);
+    a.retain(|x| x != "b");
+    assert_eq!(a.as_slice(), &[s("a"), s("c"), s("d")]);
+    {
+        let mut d = a.drain(..1);
+        assert_eq!(d.next(), Some(s("a")));
+    }
+    assert_eq!(a.as_slice(), &[s("c"), s("d")]);
+    a.push(s("e"));
+    drop(a.drain(1..2)); // dropped without being read: the element drops, the tail moves down
+    assert_eq!(a.as_slice(), &[s("c"), s("e")]);
+    let tail = a.split_off(1);
+    assert_eq!((a.as_slice(), tail.as_slice()), (&[s("c")][..], &[s("e")][..]));
+    assert_eq!(a.as_slice().as_ptr() as usize, at, "every edit stayed in the block");
+
+    // shared: the other owner keeps every element
+    let mut b: AlmideList<String> = AlmideList::from(vec![s("x"), s("y"), s("y"), s("z")]);
+    let keep = b.clone();
+    b.retain(|x| x != "x");
+    assert_eq!(b.as_slice(), &[s("y"), s("y"), s("z")]);
+    let mut c = keep.clone();
+    c.dedup();
+    let rev: Vec<String> = c.drain(1..).rev().collect();
+    assert_eq!(rev, vec![s("z"), s("y")]);
+    let mut d = keep.clone();
+    let t = d.split_off(2);
+    assert_eq!((d.len(), t.as_slice()), (2, &[s("y"), s("z")][..]));
+    assert_eq!(keep.as_slice(), &[s("x"), s("y"), s("y"), s("z")]);
+
+    // a panic in the predicate: what was kept and what was not yet looked at both stay, once each
+    let mut e: AlmideList<String> = AlmideList::from(vec![s("p"), s("drop"), s("boom"), s("q")]);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        e.retain(|x| if x == "boom" { panic!("stop") } else { x != "drop" })
+    }));
+    assert!(r.is_err());
+    assert_eq!(e.as_slice(), &[s("p"), s("boom"), s("q")]);
+    let empty: &mut AlmideList<String> = &mut AlmideList::new();
+    assert_eq!(empty.drain(..).count(), 0);
+    empty.retain(|_| false);
+    assert!(empty.split_off(0).is_empty());
+}
