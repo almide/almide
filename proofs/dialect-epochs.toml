@@ -837,6 +837,7 @@ breaks = [
   "`int.bit_width(n)` → rewrite as `int.bit_length(n)`: the same answer (deprecated since epoch 15)",
   "`float.sign(x)` → rewrite as `float.signum(x)`: the same answer, 1.0 for 0.0 and -1.0 for -0.0 (deprecated since epoch 15)",
   "a type conforming to `Body` hands the response its bytes (#4311, ADR-0032 amendment A1, C-275): `fn T.to_text(self) -> String` is no longer a requirement — write `fn T.to_bytes(self) -> Bytes` (from a String, `bytes.from_string(text)`). A built response now keeps a Bytes body exactly, where every Bytes body was decoded as lossy UTF-8: `http.body_bytes` of a response built from bytes that are not UTF-8 answers them instead of their lossy decoding, and `http.serve` sends them unchanged",
+  "host Rust code (a package's `native/*.rs`, or a host calling an Almide package) sees a `List` field of a program record or variant as `AlmideList<T>`, the native shared list block (ADR-0037), where it was `Vec<T>`: build such a field with `vec![..].into()`. Function parameters and returns stay `&[T]` / `Vec<T>` with copies at the boundary",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
