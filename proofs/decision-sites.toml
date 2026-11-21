@@ -32,6 +32,9 @@
 #   c4  a negative control: proofs/decision-controls/<id>.patch removes the
 #       check and `control_test` turns red (`control_seen = "<sha> <date>"`,
 #       recorded from scripts/run-decision-controls.sh).
+#       A rule with two checks one patch cannot each neuter names a second
+#       control beside it (`control_extra` = <id>.<what>.patch, with
+#       `control_extra_test` / `control_extra_seen`).
 #
 # Status: STAMPED (`stamp = "<sha> <date>"`) | UNSTAMPED (`reasons` says which
 # condition fails) | UNCLASSIFIED (not yet read to a verdict; never counted as
@@ -41,7 +44,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "123"
+# unstamped_ceiling     = "121"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "187"
 # failopen_ceiling      = "43"
@@ -107,6 +110,10 @@
 #               operator-matrix novel, cells name the CI verifier and quote #4849)
 #               and native.media-grant (#4892 case-keeping grant key, novel,
 #               control) STAMPED: 34 stamped, 123 not.
+#   2026-11-21  tenth engineer: ownership.e087-scoped-callee (e410b68def merged:
+#               admitted by signature; wasm region vocabulary follows it) and
+#               effect.fan-ordered-reach (build / bench driven; second control
+#               for the minted-symbol record) STAMPED: 36 stamped, 121 not.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -946,21 +953,25 @@ items = [
 ]
 keys = []
 decides = "a fan arm whose closure reaches an @ordered stdlib fn (ADR-0024 D3) is serialized instead of run in parallel"
-from = "mixed:declaration+reach"
+from = "reach"
 unknown = "refuse"
 unknown_note = "a callee the walk cannot see — a fn value (Computed, not a lambda literal or fn reference) or an unresolved Method call — is read as ordered and the arm is serialized (#4856)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "unknown: the matrix does not execute a built artifact; build lowers the fan as run does (run / native / emit are driven)", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "unknown: bench verifies the output but does not print it, and a serial and a parallel run take the same 80 ms here", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
+routes = { check = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", check_json = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", check_effects = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", run = "runs", build = "runs: the route matrix runs the built binary (probe `exec_out`); observed 2026-11-21 ds-2 serialized in+out, threaded under the #4856 control", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "runs: a threaded run fails the probe's assert, so bench refuses to time it; observed 2026-11-21 ds-2 timed (serialized) in+out, refused under the #4856 control", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", mcp = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", emit = "runs" }
 tests = ["tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order"]
 control_note = "NONE"
 issues = [4856, 4893]
-status = "UNSTAMPED"
-reasons = ["c3:build / bench not driven (see cells)"]
+status = "STAMPED"
+reasons = []
+stamp = "16d18342c7 2026-11-21"
 note = "Lowering-time guard (serial vs parallel), included because the task lists @ordered determinism; may belong to the concurrency ledger. c1 (2026-11-21): the `almide_rt_<module>_<fn>` reconstruction in stdlib_info::is_ordered_runtime_symbol was LIVE on the Rust codegen route (emit: without it the fans of fanenv.almd and two spec fixtures were threaded, under every pass order) AND on the native v1 route (pipeline_native_bundled.rs Resolve mints `almide_rt_unix_shm_write` before fan_native.rs marks fans: without the clause spec/embedded_cross/fan_ordered_shm_arms.almd threaded on native, caught by embedded_cross_test). Every mint site now records the fn it names: ResolveCalls, StdlibLowering, the v1 user-module rewrite (pipeline.rs) and the v1 bundled resolve. It also missed a module-internal call StdlibLowering renames (`almide_rt_<m>_<f>` of a user module fn): such an arm was threaded (#4893; the minted-symbol test sees 2 thread groups on the old tree, 3 without the clause, 1 with the record). Replaced by CodegenAnnotations.minted_call_symbols, recorded where ResolveCalls / StdlibLowering mint the symbol; the c1 control (record lookup off, ds/fanc1.patch) turns the test red (3), observed ds-2 2026-11-21."
 novel = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 control_patch = "proofs/decision-controls/effect.fan-ordered-reach.patch"
 control_test = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 probe = "tests/decision-probes/effect.fan-ordered-reach"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/effect.fan-ordered-reach.minted.patch"
+control_extra_test = "tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order"
+control_extra_seen = "16d18342c7 ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "effect.e007-e008-fan-context"
@@ -3917,21 +3928,25 @@ keys = [
   "crates/almide-frontend/src/check/scoped.rs::scoped_err::S1::E087",
   "crates/almide-frontend/src/check/scoped.rs::scoped_err::S1::E088",
 ]
-decides = "a scoped fn may call only scoped fns, scalar-module members and the admitted builtins"
-from = "mixed:declaration+type+name"
+decides = "a scoped fn may call only scoped fns, stdlib fns whose declared signature is effect-free with scalar arguments and result (C-364 amended), and the admitted builtins"
+from = "declaration"
 unknown = "refuse"
-status = "UNSTAMPED"
-reasons = ["c1:name-keyed (SCOPED_SCALAR_MODULES; print*/assert names pick the message)"]
-unknown_note = "any bare callee that is not a local, a scoped program fn, or one of the worded refusals (print*, assert*) is refused as a call the region cannot follow (#4860); the names only pick the wording"
+status = "STAMPED"
+reasons = []
+stamp = "16d18342c7 2026-11-21"
+unknown_note = "a stdlib call is admitted by its declared signature (no effect, no @ordered / memory-unsafe / signals mark, every argument and the result as instantiated a scalar); an unknown signature or type is refused. Any bare callee that is not a local, a scoped program fn, or one of the worded refusals (print*, assert*) is refused as a call the region cannot follow (#4860); the names only pick the wording"
 routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "runs", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e087-scope-unscoped-callee"]
+tests = ["tests/diagnostics/e087-scope-unscoped-callee", "tests/diagnostics/e087-scope-effect-call", "tests/diagnostics/e087-scope-string-param-call", "tests/diagnostics/e087-scope-string-result-call", "tests/decision_gap_fixes_test.rs::novel_e087_a_stdlib_call_admitted_by_its_signature"]
 issues = [4860]
-note = "scoped.rs / scoped_walk.rs / scoped_shape.rs; inside a module scoped is refused outright (scoped.rs:41-46)."
+note = "scoped.rs / scoped_walk.rs / scoped_shape.rs; inside a module scoped is refused outright (scoped.rs:41-46). c1 (2026-11-21, e410b68def merged): SCOPED_SCALAR_MODULES removed — a stdlib callee is admitted by its signature, so `int.to_string` (old list, String result) is refused and `datetime.hour` (never listed, Int -> Int) is admitted and runs alike on native and wasm; the print*/assert* names only choose the refusal wording (every non-scoped bare callee is refused, #4860) — counted c1-clean by the coordinator's ruling 2026-11-21. The backends' region-pure lists (pass_region_window.rs / almide-wasm region.rs SCALAR_MODULES) are a lowering choice, not this decision; the wasm one refused the newly admitted `datetime.hour` region with E083 until d6fa4eb268 made it admit by the same signature rule (the novel test runs the program on native and wasm)."
 novel = "tests/decision_gap_fixes_test.rs::novel_e087_an_unnamed_builtin_in_a_scoped_fn"
 control_patch = "proofs/decision-controls/ownership.e087-scoped-callee.patch"
 control_test = "tests/decision_gap_fixes_test.rs::novel_e087_an_unnamed_builtin_in_a_scoped_fn"
 control_seen = "73b18e7eee 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 probe = "tests/decision-probes/ownership.e087-scoped-callee"
+control_extra = "proofs/decision-controls/ownership.e087-scoped-callee.signature.patch"
+control_extra_test = "tests/decision_gap_fixes_test.rs::novel_e087_a_stdlib_call_admitted_by_its_signature"
+control_extra_seen = "16d18342c7 ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "ownership.e088-scoped-tail-recursion"

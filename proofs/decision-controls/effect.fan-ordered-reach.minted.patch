@@ -1,0 +1,14 @@
+# Negative control of effect.fan-ordered-reach (c1, proofs/decision-sites.toml): a minted call symbol answers not ordered (the record of the fn it names is not read)
+# control_test: tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order
+diff --git a/crates/almide-codegen/src/pass_fan_lowering.rs b/crates/almide-codegen/src/pass_fan_lowering.rs
+--- a/crates/almide-codegen/src/pass_fan_lowering.rs
++++ b/crates/almide-codegen/src/pass_fan_lowering.rs
+@@ -256,7 +256,7 @@
+     /// A minted call symbol: the fn the record names, by its declaration —
+     /// the stdlib's `@ordered` mark, else its body (in that module only).
+     fn minted_reaches_ordered(&self, symbol: Sym) -> bool {
+-        let Some(&(module, func)) = self.minted.get(&symbol) else { return false };
++        let Some(&(module, func)) = self.minted.get(&symbol).filter(|_| false) else { return false };
+         almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) || self.body_reaches_ordered((Some(module), func))
+     }
+ 
