@@ -105,7 +105,7 @@ CI leg that lowers — Test WASM, Cross-Target, Trust Spine — exercises it on
 every build.
 
 The per-class regression pins for all five are in
-[`proofs/TRUSTED_BASE.md`](../../proofs/TRUSTED_BASE.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
+[`proofs/TRUSTED_BASE-HISTORY.md`](../../proofs/TRUSTED_BASE-HISTORY.md#the-five-2026-07-03-trusted-zone-bug-classes-and-their-regression-pins).
 
 The row stayed live after that gate shipped. #1537 (2026-08, reported from a
 real downstream project) was another instance: `desugar_guard`'s nested rewrite
