@@ -70,7 +70,7 @@ fn finish_native_fn(
     }
     if borrowed_loop { out.push_str("    }\n"); }
     out.push_str("}\n");
-    let mut out = crate::render_native_loops::iterator_loops(drop_unread_static_strs(out));
+    let mut out = crate::render_native_elem_slices::hoisted_slices(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out)));
     let ret_nty = if is_main { None } else { ret_override.or_else(|| func.ret.map(|v| tys[&v])) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).

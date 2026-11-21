@@ -223,7 +223,25 @@ impl<T> AlmideList<T> {
         self.reserve_unique(0);
     }
 
+    /// Appends `x`. The common case (a unique block with room) inlines; growing or copying a shared block is out of line.
+    #[inline]
     pub fn push(&mut self, x: T) where T: Clone {
+        let len = self.len();
+        if len < self.capacity() && self.is_unique() {
+            // SAFETY: the block is unique with room for `len + 1` elements; slot `len` is uninitialised.
+            unsafe {
+                self.data().add(len).write(x);
+                (*self.ptr.as_ptr()).len = len + 1;
+            }
+            return;
+        }
+        self.push_slow(x);
+    }
+
+    /// `push` when the block is shared, static or full.
+    #[cold]
+    #[inline(never)]
+    fn push_slow(&mut self, x: T) where T: Clone {
         self.reserve_unique(1);
         let len = self.len();
         // SAFETY: the block is unique with room for `len + 1` elements; slot `len` is uninitialised.

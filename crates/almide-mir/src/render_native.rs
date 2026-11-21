@@ -171,7 +171,7 @@ const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_ins
 /// decode loop called per symbol paid a call frame per symbol).
 pub(crate) const OOB_SHIM: &str = "#[cold]\n#[inline(never)]\nfn almide_oob() -> ! {\n    almide_abort(\"index out of bounds\")\n}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize]\n}";
-const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut AlmideList<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
+const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut [i64], i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
 
 /// Borrow a stringy value as `&str` for a call argument.
 pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
