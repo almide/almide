@@ -74,7 +74,7 @@ pub fn mutants(wasm: &[u8], located: &HashSet<At>) -> Result<Vec<Mutant>, String
         ks.sort_unstable();
         for k in ks {
             let (op, off) = &ops[k];
-            if let Some((kind, pos, to)) = one(wasm, op, *off) {
+            if let Some((kind, pos, to)) = one(wasm, op, usize::try_from(*off).unwrap_or(usize::MAX)) {
                 out.push(Mutant { at: At { func, op: k }, kind, pos, to });
             }
         }
