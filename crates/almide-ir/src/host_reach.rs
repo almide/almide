@@ -234,6 +234,42 @@ mod tests {
         assert!(!stdlib_fn_reaches_host("prim", "load8"));
     }
 
+    /// A fn receiving a handle through a protocol bound and reading it reaches
+    /// the host, whatever it declares; the control is the same body with
+    /// `@category()` over a concrete receiver, which reaches nothing.
+    #[test]
+    fn a_read_dispatched_on_a_bounded_handle_reaches_the_host() {
+        let prog = leak_parse(
+            "@category\neffect fn take[H: Read](h: H, n: Int) -> Result[Bytes, String] = h.__self_read(n)\n\
+             @category\neffect fn take_plain(h: Stdin, n: Int) -> Result[Bytes, String] = h.__self_read(n)\n\
+             effect fn via_helper[H: Read](h: H) -> Result[Bytes, String] = take(h, 4)\n"
+                .to_string(),
+        );
+        assert!(fn_reaches_host(prog, "io", "take"));
+        assert!(fn_reaches_host(prog, "io", "via_helper"), "reached through a same-source helper");
+        assert!(!fn_reaches_host(prog, "io", "take_plain"));
+    }
+
+    /// The rule is the declaration's shape, not the `Read` protocol: a
+    /// generic over a user protocol dispatching its method reaches the host;
+    /// the same call over a concrete type, and a bounded generic that only
+    /// passes its param on as data, do not.
+    #[test]
+    fn a_method_on_any_protocol_bounded_param_reaches_the_host() {
+        let prog = leak_parse(
+            "protocol Shape {\n  fn area(self) -> Int\n}\n\
+             type Sq: Shape = { side: Int }\n\
+             fn Sq.area(self) -> Int = self.side * self.side\n\
+             fn total[S: Shape](s: S) -> Int = s.area()\n\
+             fn total_sq(s: Sq) -> Int = s.area()\n\
+             fn keep[S: Shape](s: S) -> List[S] = [s]\n"
+                .to_string(),
+        );
+        assert!(fn_reaches_host(prog, "geom", "total"));
+        assert!(!fn_reaches_host(prog, "geom", "total_sq"));
+        assert!(!fn_reaches_host(prog, "geom", "keep"));
+    }
+
     /// The served bodies: a registry body is followed under its call name.
     #[test]
     fn a_registry_body_is_followed_under_its_call_name() {
