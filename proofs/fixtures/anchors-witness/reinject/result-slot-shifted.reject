@@ -1,1 +1,1 @@
-ANCHORS REJECT: pending
+ANCHORS REJECT: fields item 2 `a3145734 c0 f2`: a: 8 bytes at offset 28, the layout of (3145734, 0) says field 2 is 8 at 20
