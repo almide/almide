@@ -372,6 +372,16 @@ mod tests {
         assert!(!is_pure("http", "__http_response_reaches_net"));
     }
 
+    /// #4827: holding a handle is the capability, not purity. The generic
+    /// handle fns dispatch to the caller's conformer (`h.__self_read`), so
+    /// they stay refused although they declare `@category()`.
+    #[test]
+    fn the_generic_handle_fns_are_not_pure() {
+        for f in ["read", "read_exact", "read_to_end", "write", "close"] {
+            assert!(!is_pure("io", f), "io.{f} reads or writes a handle");
+        }
+    }
+
     #[test]
     fn pure_modules_list_is_sorted_and_unique() {
         // Auditability + a cheap guard against accidental duplicates.

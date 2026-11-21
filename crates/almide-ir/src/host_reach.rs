@@ -5,9 +5,11 @@
 //! a body that serves it calls one, directly or through a function it names:
 //! its declaration in the module's source, or a self-host registry body that
 //! serves its call name. The answer is read from those declarations and
-//! bodies, never from a module or function name.
+//! bodies, never from a module or function name. A method dispatched on a
+//! parameter whose type is a protocol-bounded generic runs the conformer the
+//! caller passes, which no body here shows: that dispatch reaches the host.
 
-use almide_lang::ast::{Decl, Expr, ExprKind, Program};
+use almide_lang::ast::{Decl, Expr, ExprKind, Program, TypeExpr};
 use std::collections::HashSet;
 #[cfg(test)]
 use std::collections::BTreeSet;
@@ -96,7 +98,9 @@ fn has_body(decl: &Decl) -> bool {
 /// its own declaration. A bodyless declaration (`= _`, served by the runtime)
 /// shows no body to follow, so it is judged by what it declares: a non-empty
 /// `@category` reaches the host, an empty one does not, and with neither it
-/// reaches the host unless its module is classified `Pure`.
+/// reaches the host unless its module is classified `Pure`. A body that
+/// dispatches a method on a protocol-bounded generic parameter reaches it too
+/// ([`dispatches_on_a_bounded_param`]).
 fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool {
     if !seen.insert((prog as *const Program as usize, name.to_string())) {
         return false;
@@ -113,6 +117,9 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
             };
         }
     }
+    if dispatches_on_a_bounded_param(decl) {
+        return true;
+    }
     named(decl).into_iter().any(|r| match r {
         Named::Qualified(m, f) => reaches_stdlib(&m, &f, seen),
         // A bare name of a bodyless declaration that a self-host body serves
@@ -122,6 +129,29 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
             _ => reaches_in(prog, module, &f, seen),
         },
     })
+}
+
+/// Does `decl`'s body call a method on a parameter typed by one of its own
+/// generics that carries a protocol bound (`[H: Read](h: H)` calling
+/// `h.__self_read(..)`)? The method run is the conformer's that the caller
+/// supplies; the declaration shows none, so its reach is unknown and taken as
+/// the host's. Read from the declaration's shape, never from a protocol or
+/// method name.
+fn dispatches_on_a_bounded_param(decl: &Decl) -> bool {
+    let Decl::Fn { generics, params, .. } = decl else { return false };
+    let bounded: HashSet<&str> = generics
+        .iter()
+        .flatten()
+        .filter(|g| g.bounds.as_ref().is_some_and(|b| !b.is_empty()))
+        .map(|g| g.name.as_str())
+        .collect();
+    let receivers: HashSet<String> = params
+        .iter()
+        .filter(|p| matches!(&p.ty, TypeExpr::Simple { name } if bounded.contains(name.as_str())))
+        .map(|p| p.name.to_string())
+        .collect();
+    !receivers.is_empty()
+        && named(decl).into_iter().any(|r| matches!(r, Named::Qualified(m, _) if receivers.contains(&m)))
 }
 
 /// Is `decl` a host op of the floor (`@prim_op(host)`)?
@@ -202,6 +232,42 @@ mod tests {
         assert!(stdlib_fn_reaches_host("prim", "fd_write"));
         assert!(stdlib_fn_reaches_host("prim", "write_text_file"));
         assert!(!stdlib_fn_reaches_host("prim", "load8"));
+    }
+
+    /// A fn receiving a handle through a protocol bound and reading it reaches
+    /// the host, whatever it declares; the control is the same body with
+    /// `@category()` over a concrete receiver, which reaches nothing.
+    #[test]
+    fn a_read_dispatched_on_a_bounded_handle_reaches_the_host() {
+        let prog = leak_parse(
+            "@category\neffect fn take[H: Read](h: H, n: Int) -> Result[Bytes, String] = h.__self_read(n)\n\
+             @category\neffect fn take_plain(h: Stdin, n: Int) -> Result[Bytes, String] = h.__self_read(n)\n\
+             effect fn via_helper[H: Read](h: H) -> Result[Bytes, String] = take(h, 4)\n"
+                .to_string(),
+        );
+        assert!(fn_reaches_host(prog, "io", "take"));
+        assert!(fn_reaches_host(prog, "io", "via_helper"), "reached through a same-source helper");
+        assert!(!fn_reaches_host(prog, "io", "take_plain"));
+    }
+
+    /// The rule is the declaration's shape, not the `Read` protocol: a
+    /// generic over a user protocol dispatching its method reaches the host;
+    /// the same call over a concrete type, and a bounded generic that only
+    /// passes its param on as data, do not.
+    #[test]
+    fn a_method_on_any_protocol_bounded_param_reaches_the_host() {
+        let prog = leak_parse(
+            "protocol Shape {\n  fn area(self) -> Int\n}\n\
+             type Sq: Shape = { side: Int }\n\
+             fn Sq.area(self) -> Int = self.side * self.side\n\
+             fn total[S: Shape](s: S) -> Int = s.area()\n\
+             fn total_sq(s: Sq) -> Int = s.area()\n\
+             fn keep[S: Shape](s: S) -> List[S] = [s]\n"
+                .to_string(),
+        );
+        assert!(fn_reaches_host(prog, "geom", "total"));
+        assert!(!fn_reaches_host(prog, "geom", "total_sq"));
+        assert!(!fn_reaches_host(prog, "geom", "keep"));
     }
 
     /// The served bodies: a registry body is followed under its call name.
