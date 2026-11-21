@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "116"
+# unstamped_ceiling     = "114"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
-# failopen_ceiling      = "39"
+# failopen_ceiling      = "37"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -137,6 +137,11 @@
 #               fs natively (@fs_shm_dir) and on the embedded host (unix path
 #               gate). Probe on every route, two controls red. STAMPED: 41
 #               stamped, 116 not, 175 skipped, 39 fail-open.
+#   2026-11-21  owner ruling: an unknown key in any almide.toml section is an
+#               error (one MANIFEST_SCHEMA table, did-you-mean hint, dialect
+#               epoch 17). manifest.unknown-keys and net.permissions-unknown-key
+#               refuse on every route, novel fresh-key tests, controls red.
+#               STAMPED: 43 stamped, 114 not, 175 skipped, 37 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1450,26 +1455,25 @@ control_extra_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, pa
 
 [[site]]
 id = "net.permissions-unknown-key"
-at = "src/project.rs::manifest_warnings"
-items = [
-  "src/project.rs::manifest_warnings",
-]
+at = "src/project.rs::refuse_unknown_keys (MANIFEST_SCHEMA [permissions])"
+items = ["src/project.rs::refuse_unknown_keys", "src/project.rs::MANIFEST_SCHEMA"]
 keys = []
-decides = "an unknown [permissions] key (e.g. `net = []`, a misspelled `fs`) is only a warning; the build proceeds with that bound absent"
-from = "name"
-unknown = "allow"
-unknown_note = "PERMISSION_KEYS = allow/proc/fs/native (project.rs:906); anything else -> unknown_key_warnings (project.rs:993). There is no run-time network address policy: sockets are bounded only by the Net.* capability category"
-routes = { check = "runs (warning)", check_json = "unknown", check_effects = "unknown", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs: inherit_network + allow_tcp/udp/name_lookup (component_host.rs:181)", lsp = "unknown", mcp = "unknown", emit = "unknown" }
-tests = []
-control_note = "NONE"
+decides = "an unknown [permissions] key (`net = []`, a misspelled `fs`) is refused before any command runs (#4851, now through the one MANIFEST_SCHEMA refusal), naming the keys [permissions] declares"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "PERMISSION_KEYS (allow/proc/fs/native) is the [permissions] row of MANIFEST_SCHEMA; any other key, whatever its name, is refused. There is no run-time network address policy: sockets are bounded only by the Net.* capability category"
+routes = { check = "runs", check_json = "runs: the refusal is on stderr and the exit is 1 (no envelope)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs: an error diagnostic on the document (project_refusal_for)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused", "tests/manifest_unknown_key_test.rs::a_misspelled_security_key_or_table_is_refused"]
+control_note = "[permissions] keys are accepted whatever their name (control_patch)"
 issues = [4851]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "A security-meaning key the tool does not know (`fs` misspelled as `fs_allow`, or a hoped-for `net`) yields a warning, not a refusal, so the author believes a bound exists that is not enforced."
+status = "STAMPED"
+stamp = "107cc444da 2026-11-21"
+note = "A security-meaning key the tool does not know (`fs` misspelled as `fs_allow`, or a hoped-for `net`) used to warn, so the author believed a bound existed that was not enforced; #4851 refused it, and the 2026-11-21 ruling moved the refusal onto the one schema table."
+probe = "tests/decision-probes/net.permissions-unknown-key"
+novel = "tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused"
+control_patch = "proofs/decision-controls/net.permissions-unknown-key.patch"
+control_test = "tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused"
+control_seen = "107cc444da 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on all 14 routes"
 
 [[site]]
 id = "net.httpoxy"
@@ -2256,30 +2260,25 @@ note = "Line scanner (project.rs:680-759) is diagnostic quality; the binding ref
 
 [[site]]
 id = "manifest.unknown-keys"
-at = "src/project.rs::manifest_warnings / unknown_key_warnings (dispatch.rs::report_manifest_warnings)"
-items = [
-  "src/project.rs::manifest_warnings",
-  "src/project.rs::unknown_key_warnings",
-  "src/dispatch.rs::report_manifest_warnings",
-]
+at = "src/project.rs::refuse_unknown_keys (MANIFEST_SCHEMA)"
+items = ["src/project.rs::refuse_unknown_keys", "src/project.rs::MANIFEST_SCHEMA", "src/project.rs::manifest_warnings", "src/dispatch.rs::report_manifest_warnings"]
 keys = []
-decides = "an unknown top-level table, [package]/[permissions]/[trust]/dependency key, or a dependency naming neither git nor path is a WARNING only; the command runs as if the key were absent"
-from = "name"
-unknown = "allow"
-unknown_note = "a typo of the restricting table or key (`[permission]`, `alow`) drops the restriction: absent `allow` is unchecked, so every capability is granted with exit 0 (probe P2)"
-routes = { check = "runs:warn only", check_json = "runs:warn row", check_effects = "runs:warn only", run = "runs:warn only", build = "runs:warn only", test = "runs:warn only", bench = "runs:warn only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/manifest_unknown_key_test.rs::package_permissions_and_top_level_tables_warn",
-  "tests/manifest_unknown_key_test.rs::the_cli_warns_once_and_exits_zero",
-]
-control_note = "NONE"
+decides = "a key almide.toml writes outside its section's declaration in MANIFEST_SCHEMA (top-level tables, [package], [permissions], [trust], each [dependencies] entry, each [target.<platform>]) is refused by check_manifest on every command, with the declared keys and the one a single edit away (owner ruling 2026-11-21, dialect epoch 17); only a dependency entry that declares nothing still warns"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the vocabulary is the schema table, not the key's name: any key outside its section's declared list is refused, so a fresh key (the novel tests make one per section) is refused; [native-deps] and [trust].media are maps keyed by crate name / package source and declare no list. A dependency's own manifest is read by parse_toml only (manifest.dep-manifest-swallow)"
+routes = { check = "runs", check_json = "runs: the refusal is on stderr and the exit is 1 (no envelope)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs: an error diagnostic on the document (project_refusal_for)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused", "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route", "tests/manifest_unknown_key_test.rs::package_permissions_and_top_level_tables_are_refused_in_file_order", "tests/manifest_unknown_key_test.rs::the_cli_refuses_once_and_exits_non_zero"]
+control_note = "the refusal accepts every key (control_patch)"
 issues = [4851]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "By design per #3382 (project.rs:981 'A warning never fails a command'), but fail-open for a security table: probe P2 `[permission] allow = []` / `[permissions] alow = []` -> 'No errors found' while `allow = []` refuses. No open issue. bugs-final: unchanged."
+status = "STAMPED"
+stamp = "107cc444da 2026-11-21"
+note = "#3382 made an unknown key a warning; #4851 refused it in [permissions]/[trust]; the owner ruling of 2026-11-21 refuses it in every section (one line in dialect epoch 17)."
+probe = "tests/decision-probes/manifest.unknown-keys"
+novel = "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route"
+control_patch = "proofs/decision-controls/manifest.unknown-keys.patch"
+control_test = "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route"
+control_seen = "107cc444da 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on all 14 routes"
 
 [[site]]
 id = "manifest.permission-list-shape"
