@@ -187,6 +187,6 @@ pub(crate) fn abort_pending(state: &Mutex<ServeState>, abort: &str) -> Option<St
     let id = std::mem::take(&mut st.pending_id);
     drop(st);
     let plain = [("Content-Type".to_string(), "text/plain".to_string())];
-    let _ = http_server_write(conn, 500, &plain, &http_server_handler_error_body(&id));
+    let _ = http_server_write(conn, 500, &plain, http_server_handler_error_body(&id));
     Some(http_server_handler_abort_line(&id, abort))
 }

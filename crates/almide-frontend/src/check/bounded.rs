@@ -364,7 +364,7 @@ fn user_call_cycle<'a>(
                 ast::ExprKind::Ident { name } => name.as_str(),
                 ast::ExprKind::Member { object, field }
                     if matches!(object.kind, ast::ExprKind::Ident { .. })
-                        && ck.type_map.get(&object.id).is_some() =>
+                        && ck.type_map.contains_key(&object.id) =>
                 {
                     field.as_str()
                 }
@@ -1052,7 +1052,7 @@ impl BoundedCx<'_, '_> {
         // #4840: a receiver the checker typed as a VALUE (a parameter or local,
         // whatever its spelling — `math`, `io`) makes `x.f(...)` a call
         // through that value: indirect, never a stdlib member.
-        if self.checker.type_map.get(&object.id).is_some() {
+        if self.checker.type_map.contains_key(&object.id) {
             // `p.norm()` on a value is UFCS for the user fn `norm(p)`: judged
             // as that direct call; anything else through a value is indirect.
             if self.fns.contains_key(f) {

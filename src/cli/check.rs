@@ -57,11 +57,11 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     let dep_paths = super::dep_paths_for(file);
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
     // #4187: the modules a package's native code calls back into, as the
     // build loads them, so the whole program judged here is the one it builds.
     let self_versioned = resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e); std::process::exit(1); });
 
     let canon = canonicalize::canonicalize_program(
         program,
@@ -435,7 +435,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>, wasm_target: bool) ->
         out(&format!("{}", crate::diagnostic_render::to_json(d)));
     }
     if let Some(d) = almide::lint_shebang::split_string_warning(file, &source_text) {
-        out(&format!("{}", crate::diagnostic_render::to_json(&d)));
+        out(&crate::diagnostic_render::to_json(&d));
     }
 
     // Lower to IR for unused variable warnings (skip if type errors)

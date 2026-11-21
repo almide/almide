@@ -110,19 +110,15 @@ fn run_ends(pred: impl Fn(char) -> bool) -> Vec<char> {
         let hit = pred(c);
         match (prev, hit) {
             (None, true) => out.push(c),
-            (Some(p), false) => {
-                if out.last() != Some(&p) {
-                    out.push(p);
-                }
-            }
+            (Some(p), false) if out.last() != Some(&p) => out.push(p),
             _ => {}
         }
         prev = if hit { Some(c) } else { None };
     }
-    if let Some(p) = prev {
-        if out.last() != Some(&p) {
-            out.push(p);
-        }
+    if let Some(p) = prev
+        && out.last() != Some(&p)
+    {
+        out.push(p);
     }
     out
 }

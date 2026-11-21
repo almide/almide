@@ -1728,7 +1728,7 @@ impl Checker {
                 let callee_id = callee.id;
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => {
-                        let name = name.clone();
+                        let name = *name;
                         self.pipe_named_call(callee, callee_id, &name, &all_arg_tys)
                     }
                     ExprKind::Member { object, field, .. } if self.local_shadows_module(object) => {
@@ -1755,7 +1755,7 @@ impl Checker {
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
             ExprKind::Ident { name, .. } => {
-                let name = name.clone();
+                let name = *name;
                 self.arg_spans = vec![left_span];
                 self.pipe_named_call(right, right_id, &name, &[left_ty])
             }

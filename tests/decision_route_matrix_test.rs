@@ -117,10 +117,10 @@ fn rows() -> Vec<(Probe, BTreeMap<String, String>)> {
         let Some(p) = r.get("probe").and_then(|v| v.as_str()) else { continue };
         let id = r.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
         // `DECISION_PROBES=a,b` narrows the observer to the named rows.
-        if let Ok(only) = std::env::var("DECISION_PROBES") {
-            if !only.split(',').any(|o| o == id) {
-                continue;
-            }
+        if let Ok(only) = std::env::var("DECISION_PROBES")
+            && !only.split(',').any(|o| o == id)
+        {
+            continue;
         }
         let cells = r
             .get("routes")
@@ -298,10 +298,10 @@ fn lsp(p: &Probe, at: &Place) -> Result<String, String> {
             if r.read_exact(&mut buf).is_err() {
                 return;
             }
-            if let Ok(v) = serde_json::from_slice(&buf) {
-                if tx.send(v).is_err() {
-                    return;
-                }
+            if let Ok(v) = serde_json::from_slice(&buf)
+                && tx.send(v).is_err()
+            {
+                return;
             }
         }
     });
@@ -326,7 +326,6 @@ fn lsp(p: &Probe, at: &Place) -> Result<String, String> {
     }
     send(serde_json::json!({"jsonrpc":"2.0","id":9,"method":"shutdown"}));
     send(serde_json::json!({"jsonrpc":"2.0","method":"exit"}));
-    drop(send);
     drop(stdin);
     // Give the server the shutdown it asked for before reading its stderr.
     let stop = Instant::now() + Duration::from_secs(10);
