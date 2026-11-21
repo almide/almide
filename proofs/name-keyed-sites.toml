@@ -274,11 +274,6 @@ class = "legacy"
 names = 2
 
 [[site]]
-id = "crates/almide-frontend/src/concurrent_reach.rs::FAN_OPS::table"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
 class = "legacy"
 names = 38

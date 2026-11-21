@@ -1030,6 +1030,7 @@ items = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_settle",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_timeout",
   "crates/almide-frontend/src/check/concurrent_reach_check.rs::concurrent_reach_diagnostic",
+  "crates/almide-frontend/src/check/concurrent_reach_check.rs::escape_diagnostic",
 ]
 files = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs",
@@ -1037,6 +1038,7 @@ files = [
 ]
 keys = [
   "crates/almide-frontend/src/check/concurrent_reach_check.rs::concurrent_reach_diagnostic::S1::E008",
+  "crates/almide-frontend/src/check/concurrent_reach_check.rs::escape_diagnostic::S1::E008",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan::S1::E007",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_bounded::S1::E007",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_race::S1::E007",
