@@ -41,9 +41,9 @@ fn main() {
                     Ok(_) => "survived",
                 }
             };
-            let class = format!("{}/{}/{}", m.src, if m.dist == 0 { "self" } else { "operand" }, m.kind);
+            let class = format!("{}/{}/{}", m.src, m.role, m.kind);
             *tally.entry((class.clone(), verdict)).or_default() += 1;
-            if verdict == "survived" && m.dist == 0 {
+            if verdict == "survived" && (m.role == "self" || m.role == "addr" || m.role == "cond") {
                 println!("MUTSURV {class} {}:{} -> {} {}", m.at.func, m.at.op, m.to, m.what.replace(' ', ""));
             }
         }
