@@ -20,7 +20,7 @@ use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_mir::certificate::{
     apply_manifest_caps, call_modes_witness, cap_witness_string, name_witness_string,
-    ownership_certificate, transitive_cap_witness_string,
+    ownership_certificate, render_served_callee, transitive_cap_witness_string,
 };
 use almide_optimize::{mono, optimize};
 use std::collections::BTreeMap;
@@ -262,17 +262,15 @@ fn main() {
         // without them every CallIndirect would be unknowable (sentinel REJECT).
         "modes" => {
             let program = lower_program_with_lifted_lambdas(&ir, &globals, &global_inits);
-            // Dotted callees are self-hosted stdlib calls, and `__`-prefixed
-            // OUT-OF-PROGRAM callees are the render-linked runtime helpers
-            // (`__str_concat` / `__list_concat` — the greeter-lambda class):
-            // both are purity-gated at lowering and borrow heap args by the
-            // renderer contract (the same class classify_corpus's
-            // `is_known_free` names for caps). An in-program `__lambda_*` /
-            // `__drop_*` resolves by index FIRST, so the policy only reaches
-            // genuinely out-of-program names.
+            // An OUT-OF-PROGRAM callee has no row only by membership in what
+            // the render serves (`__str_concat` / `__list_concat`, the
+            // self-host registry, the floor, ...): the same predicate the
+            // verify --mir witness uses, never the spelling of the name
+            // (#4828). An in-program `__lambda_*` / `__drop_*` resolves by
+            // index FIRST, so the predicate only reaches out-of-program names.
             print!(
                 "{}",
-                call_modes_witness(&program, &|n: &str| n.contains('.') || n.starts_with("__"))
+                call_modes_witness(&program, &render_served_callee)
             );
         }
         other => die(format!(
