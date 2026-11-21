@@ -138,7 +138,7 @@ value = 2
 [[row]]
 kind  = "pub-unused"
 key   = "almide-syntax"
-value = 29
+value = 28
 [[row]]
 kind  = "pub-unused"
 key   = "almide-tools"
