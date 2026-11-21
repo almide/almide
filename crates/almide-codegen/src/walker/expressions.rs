@@ -565,7 +565,13 @@ fn render_expr_to_vec(ctx: &RenderContext, inner: &IrExpr) -> String {
     if matches!(&inner.kind, IrExprKind::Range { .. }) {
         format!("({}).collect::<AlmideList<_>>()", render_expr(ctx, inner))
     } else {
-        format!("({}).to_list()", render_expr(ctx, inner))
+        let r = render_expr(ctx, inner);
+        // A plain name needs no parentheses (`xs.to_list()`).
+        if r.chars().all(|c| c == '_' || c.is_ascii_alphanumeric()) {
+            format!("{r}.to_list()")
+        } else {
+            format!("({r}).to_list()")
+        }
     }
 }
 

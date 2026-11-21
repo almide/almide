@@ -51,20 +51,15 @@ impl std::ops::IndexMut<usize> for AlmideMatrix {
     }
 }
 
-// `(0..rows).map(|r| (0..cols).map(..).collect::<Vec<f64>>()).collect()` keeps working.
-impl FromIterator<AlmideList<f64>> for AlmideMatrix {
-    fn from_iter<I: IntoIterator<Item = AlmideList<f64>>>(iter: I) -> Self {
-        let rows: AlmideList<AlmideList<f64>> = iter.into_iter().collect();
-        let r = rows.len();
-        let c = if r > 0 { rows[0].len() } else { 0 };
-        mk(r, c, rows.into_iter().flatten().collect())
-    }
-}
-
-// `vec![vec![x; cols]; rows].into()` keeps working.
+// `vec![vec![x; cols]; rows].into()` keeps working. Rows collect through
+// the std-Vec `FromIterator` below only: a second `FromIterator` over
+// `AlmideList<f64>` rows makes every untyped inner `.collect()` ambiguous
+// (E0283), in this runtime and in host code alike.
 impl From<AlmideList<AlmideList<f64>>> for AlmideMatrix {
     fn from(v: AlmideList<AlmideList<f64>>) -> Self {
-        v.into_iter().collect()
+        let r = v.len();
+        let c = if r > 0 { v[0].len() } else { 0 };
+        mk(r, c, v.iter().flat_map(|row| row.iter().copied()).collect())
     }
 }
 
@@ -443,7 +438,7 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     }
     let total_cols: usize = matrices.iter().map(|m| if m.is_empty() { 0 } else { m[0].len() }).sum();
     (0..rows).map(|r| {
-        let mut row = AlmideList::with_capacity(total_cols);
+        let mut row = std::vec::Vec::with_capacity(total_cols);
         for m in matrices {
             if !m.is_empty() {
                 row.extend_from_slice(&m[r]);

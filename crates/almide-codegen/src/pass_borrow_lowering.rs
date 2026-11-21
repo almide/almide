@@ -216,7 +216,12 @@ fn owned_read(p: IrExpr) -> IrExpr {
     let ty = p.ty.clone();
     match &ty {
         Ty::String => method_call(p, "to_string", ty),
-        Ty::Applied(TypeConstructorId::List, _) => method_call(p, "to_list", ty),
+        // The `ToVec` node renders `(x).to_list()` (ADR-0037), with no
+        // method name for the UFCS split to key on.
+        Ty::Applied(TypeConstructorId::List, _) => {
+            let span = p.span;
+            mk(IrExprKind::ToVec { expr: Box::new(p) }, ty, span)
+        }
         _ => {
             let span = p.span;
             mk(IrExprKind::Clone { expr: Box::new(p) }, ty, span)

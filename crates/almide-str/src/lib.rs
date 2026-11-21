@@ -42,6 +42,6 @@ macro_rules! almide_list {
         use $crate::{AlmideListFill as _, AlmideListFillZeroed as _};
         (&&$crate::AlmideListElem::new($x)).almide_list_fill($n)
     }};
-    ($($x:expr),+ $(,)?) => { $crate::AlmideList::from(::std::vec![$($x),+]) };
+    ($($x:expr),+ $(,)?) => { $crate::AlmideList::from([$($x),+]) };
 }
 

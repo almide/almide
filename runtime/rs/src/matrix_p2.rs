@@ -91,7 +91,7 @@ pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &[i64]) -> Almide
     let cols = m[0].len();
     indices.iter().map(|&idx| {
         let i = idx as usize;
-        if i < m.len() { m[i].to_list() } else { almide_list![0.0f64; cols] }
+        if i < m.len() { m[i].to_vec() } else { ::std::vec![0.0f64; cols] }
     }).collect()
 }
 
@@ -132,7 +132,7 @@ pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> Almid
 // each non-empty member's width is checked against it and its rows appended.
 pub fn almide_rt_matrix_concat_rows<M: std::ops::Deref<Target = AlmideMatrix>>(xs: &[M]) -> AlmideMatrix {
     let Some(first) = xs.iter().position(|m| !m.is_empty()) else {
-        return xs.last().map_or_else(|| mk(0, 0, AlmideList::new()), |m| (**m).clone());
+        return xs.last().map_or_else(|| mk(0, 0, std::vec::Vec::new()), |m| (**m).clone());
     };
     let cols = xs[first].cols;
     let rest = || xs[first + 1..].iter().filter(|m| !m.is_empty());

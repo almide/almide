@@ -635,7 +635,7 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         "clone" | "to_string"
         // Vec<T>
         | "len" | "push" | "pop" | "insert" | "remove" | "contains"
-        | "iter" | "into_iter" | "collect" | "is_empty" | "to_vec" | "to_list" | "get"
+        | "iter" | "into_iter" | "collect" | "is_empty" | "get"
         // HashMap<K,V>
         | "keys" | "values" | "contains_key" | "entry" | "or_insert"
         // String

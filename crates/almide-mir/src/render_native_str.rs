@@ -32,5 +32,5 @@ pub(crate) fn almide_list_macro() -> &'static str {
     "#[allow(unused_macros)]\nmacro_rules! almide_list {\n    \
      () => { AlmideList::new() };\n    \
      ($x:expr; $n:expr) => { (&&AlmideListElem::new($x)).almide_list_fill($n) };\n    \
-     ($($x:expr),+ $(,)?) => { AlmideList::from(::std::vec![$($x),+]) };\n}\n\n"
+     ($($x:expr),+ $(,)?) => { AlmideList::from([$($x),+]) };\n}\n\n"
 }

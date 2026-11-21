@@ -361,7 +361,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&prelude_string::string_prelude(vis));
     // ADR-0037 D6: an Almide list is `AlmideList<T>`, the counted block the
     // string prelude splices in; `almide_list![..]` builds one as `vec!` does a Vec.
-    s.push_str(&format!("{macro_attr}#[allow(unused_macros)]\nmacro_rules! almide_list {{\n    () => {{ $crate::AlmideList::new() }};\n    ($x:expr; $n:expr) => {{ (&&$crate::AlmideListElem::new($x)).almide_list_fill($n) }};\n    ($($x:expr),+ $(,)?) => {{ $crate::AlmideList::from(::std::vec![$($x),+]) }};\n}}\n"));
+    s.push_str(&format!("{macro_attr}#[allow(unused_macros)]\nmacro_rules! almide_list {{\n    () => {{ $crate::AlmideList::new() }};\n    ($x:expr; $n:expr) => {{ (&&$crate::AlmideListElem::new($x)).almide_list_fill($n) }};\n    ($($x:expr),+ $(,)?) => {{ $crate::AlmideList::from([$($x),+]) }};\n}}\n"));
     s.push_str("impl<T: Clone> AlmideConcat<AlmideList<T>> for AlmideList<T> { type Output = AlmideList<T>; #[inline(always)] fn concat(self, rhs: AlmideList<T>) -> AlmideList<T> { let mut r = self; r.extend(rhs); r } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,

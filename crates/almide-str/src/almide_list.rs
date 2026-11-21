@@ -559,6 +559,24 @@ impl<T> From<Vec<T>> for AlmideList<T> {
     }
 }
 
+impl<T, const N: usize> From<[T; N]> for AlmideList<T> {
+    /// A literal's elements moved into one block of exactly `N` (`almide_list![a, b, ..]`): one allocation, where
+    /// going through `vec!` allocated the `Vec` buffer and then the block.
+    fn from(a: [T; N]) -> Self {
+        let out = AlmideList::<T>::with_capacity(N);
+        if N > 0 {
+            let a = std::mem::ManuallyDrop::new(a);
+            // SAFETY: the fresh block is unique with room for `N` elements; they are moved out of `a` bit for bit,
+            // and `a` is never dropped, so each element has exactly one owner.
+            unsafe {
+                std::ptr::copy_nonoverlapping(a.as_ptr(), out.data(), N);
+                (*out.ptr.as_ptr()).len = N;
+            }
+        }
+        out
+    }
+}
+
 impl<T: Clone> From<&AlmideList<T>> for AlmideList<T> {
     /// Another owner of the block, O(1) (ADR-0037 D4): `Vec::from(&v)` is a copy in std's spelling.
     fn from(xs: &AlmideList<T>) -> Self {
@@ -574,7 +592,8 @@ impl<T: Clone> From<&[T]> for AlmideList<T> {
     }
 }
 
-impl<T: Clone> FromIterator<T> for AlmideList<T> {
+// The full path: `FromIterator` is only in the 2021 prelude (see almide_str.rs).
+impl<T: Clone> std::iter::FromIterator<T> for AlmideList<T> {
     fn from_iter<I: IntoIterator<Item = T>>(it: I) -> Self {
         let it = it.into_iter();
         let mut out = AlmideList::with_capacity(it.size_hint().0);
@@ -596,6 +615,15 @@ impl<'a, T> IntoIterator for &'a AlmideList<T> {
 impl<T: PartialEq> PartialEq for AlmideList<T> {
     fn eq(&self, o: &Self) -> bool {
         self.as_slice() == o.as_slice()
+    }
+}
+
+// A borrowed list (`*xs` of a `&[T]` param) compared with a list value, the
+// way `[T] == Vec<T>` holds for std vectors. Only this direction: a second
+// `PartialEq` on `AlmideList` would make `list == iter.collect()` ambiguous.
+impl<T: PartialEq> PartialEq<AlmideList<T>> for [T] {
+    fn eq(&self, o: &AlmideList<T>) -> bool {
+        self == o.as_slice()
     }
 }
 
