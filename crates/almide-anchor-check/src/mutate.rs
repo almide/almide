@@ -78,7 +78,7 @@ pub fn mutants(wasm: &[u8], located: &std::collections::HashMap<At, &'static str
                 for j in k.saturating_sub(BACK)..=k {
                     let d = k - j;
                     if want.get(&j).is_none_or(|(_, old)| d < *old) {
-                        want.insert(j, (src, d));
+                        want.insert(j, (*src, d));
                     }
                 }
             }
