@@ -45,12 +45,11 @@ pub(crate) fn emit_map_reserve() -> Function {
     // block here would hand its entries' handles to `base` uncounted, so
     // that broken precondition is the defined abort, never a decrement.
     // Precondition: a heap block reaches this grow path only uniquely held (rc == 1).
-    i.local_get(block).global_get(G_LINE_END).i32_ge_u();
-    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_gt_u();
-    i.i32_and().if_(BlockType::Empty);
-    i.unreachable();
+    // REPLAY (probe only): the release as it was before the every-path
+    // fix — the outgrown block handed to `$free` whenever its count reads 1.
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(block).call(F_FREE);
     i.end();
-    i.local_get(block).call(F_DEC_FLAT);
     i.local_get(base);
     i.end();
     f
