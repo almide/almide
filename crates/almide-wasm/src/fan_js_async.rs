@@ -342,6 +342,9 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_set(hp);
                 i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                self.fw_res_tag_back(0);
+                #[allow(unused_variables, unused_mut)]
+                let mut i = self.f.instructions();
                 i.if_(BlockType::Empty);
                 // the first err IS the result: no later slot is taken.
                 i.local_get(hp).local_set(hr);
@@ -363,7 +366,13 @@ impl Emitter<'_> {
             i.local_get(hs).call(F_DEC_FLAT);
             i.local_get(hr).i32_eqz().if_(BlockType::Empty);
             i.i32_const(16).call(F_ALLOC).local_tee(hr).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr).local_get(hacc).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.else_();
             i.local_get(hacc).call(acc_dec);
             i.end();
@@ -400,6 +409,7 @@ impl Emitter<'_> {
             let hv = self.hold_val(b)?;
             self.f.instructions().local_set(hv);
             self.f.instructions().i32_const(16).call(F_ALLOC).local_tee(hr).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
             self.f.instructions().local_get(hr).local_get(hv);
             self.store_res_slot(b);
             self.f.instructions().br(1);
@@ -410,6 +420,9 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(hp);
             i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+            self.fw_res_tag_back(1);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.if_(BlockType::Empty);
             i.local_get(hp).local_set(hr).br(2);
             i.end();
@@ -424,7 +437,13 @@ impl Emitter<'_> {
             i.local_get(hs).call(F_DEC_FLAT);
             i.local_get(hr).i32_eqz().if_(BlockType::Empty);
             i.i32_const(16).call(F_ALLOC).local_tee(hr).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr).i32_const(msg as i32).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.end();
             i.local_get(hr);
         }

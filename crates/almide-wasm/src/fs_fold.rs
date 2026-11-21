@@ -113,6 +113,9 @@ impl Emitter<'_> {
                 .local_tee(hs)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hs).local_get(params[0]);
         }
         self.store_res_slot(acc_ty);
@@ -241,6 +244,9 @@ impl Emitter<'_> {
                 .local_tee(hs)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hs).local_get(hacc);
         }
         self.store_res_slot(acc_ty);

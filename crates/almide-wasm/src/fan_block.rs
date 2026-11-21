@@ -130,6 +130,7 @@ impl Emitter<'_> {
             .local_get(c.hold)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
+        self.fw_res_tag_back(2);
         let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
@@ -199,6 +200,7 @@ impl Emitter<'_> {
             .local_get(blk)
             .local_get(self.tmp_i32_local)
             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
         if c.owned {
             let dec = self.dec_fn_of(c.ty);
             self.f.instructions().local_get(hold).call(dec);
@@ -397,6 +399,9 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(ha);
             i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
+            self.fw_res_tag_back(3);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(a.msg).i32_eqz();
             i.i32_and();
             if let Some(first) = a.first {

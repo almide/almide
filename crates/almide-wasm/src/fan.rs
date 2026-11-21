@@ -193,6 +193,9 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_set(hr);
                     i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     match herr {
                         None => {
                             // err → release it and skip this element; ok → hr
@@ -251,9 +254,15 @@ impl Emitter<'_> {
                             .local_tee(hr)
                             .i32_const(1)
                             .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                        self.fw_res_tag_back(0);
+                        #[allow(unused_variables, unused_mut)]
+                        let mut i = self.f.instructions();
                         i.local_get(hr)
                             .i32_const(msg as i32)
                             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                        self.fw_res_w(4, 0);
+                        #[allow(unused_variables, unused_mut)]
+                        let mut i = self.f.instructions();
                     } else {
                         // ok(acc)
                         i.i32_const(16)
@@ -264,6 +273,9 @@ impl Emitter<'_> {
                         i.local_get(hr)
                             .local_get(hacc)
                             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                        self.fw_res_w(4, 0);
+                        #[allow(unused_variables, unused_mut)]
+                        let mut i = self.f.instructions();
                     }
                 }
                 if !first_ok_wins {
@@ -424,6 +436,9 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(hp);
             i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.i32_eqz().if_(BlockType::Empty);
             // winner: hr = the ok Result, break to the abandon sweep.
             i.local_get(hp).local_set(hr);
@@ -459,9 +474,15 @@ impl Emitter<'_> {
                 .local_tee(hr)
                 .i32_const(1)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr)
                 .i32_const(msg as i32)
                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.end();
             i.local_get(hr);
         }
@@ -533,12 +554,18 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(hp);
             i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.if_(BlockType::Empty);
             // first err IS the whole result
             i.local_get(hp).local_set(hr);
             i.else_();
             i.local_get(hacc).local_get(hp);
             i.i32_load(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.call(F_LIST_PUSH_4).local_set(hacc);
             // #3137: the payload's credit moved into the list; the shell
             // is released.
@@ -561,9 +588,15 @@ impl Emitter<'_> {
                 .local_tee(hr)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr)
                 .local_get(hacc)
                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.else_();
             i.local_get(hacc).call(acc_dec);
             i.end();
@@ -663,6 +696,9 @@ impl Emitter<'_> {
                         .i32_load(slot_memarg(almide_layout::SUM_TAG))
                         .i32_eqz()
                         .br_if(0);
+                    self.fw_res_tag_back(3);
+                    #[allow(unused_variables, unused_mut)]
+                    let mut i = self.f.instructions();
                     i.local_get(hr).call(dec);
                     result_ty.get_or_insert(got);
                 }
@@ -678,6 +714,7 @@ impl Emitter<'_> {
                         .local_tee(hr)
                         .i32_const(0)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.fw_res_tag_back(0);
                     self.f.instructions().local_get(hr).local_get(hv);
                     self.store_res_slot(pure);
                     self.release_val(pure);
@@ -697,9 +734,15 @@ impl Emitter<'_> {
                 .local_tee(hr)
                 .i32_const(1)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr)
                 .i32_const(msg as i32)
                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.end();
             i.local_get(hr);
         }

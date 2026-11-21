@@ -364,7 +364,13 @@ impl Emitter<'_> {
             i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
             i.i32_const(16).call(F_ALLOC).local_set(hr);
             i.local_get(hr).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hr);
             i.else_();
             // ok: pull the 32 LE bytes into scratch, build the record
@@ -394,7 +400,13 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.i32_const(16).call(F_ALLOC).local_set(hb);
             i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hb).local_get(hr).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hb);
             i.end();
         }
@@ -422,7 +434,13 @@ impl Emitter<'_> {
         let hs = self.tmp_i32_local;
         i.i32_const(16).call(F_ALLOC).local_set(hs);
         i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         i.local_get(hs);
         i.else_();
         // ok: pull 8 LE bytes into a scratch block, load the i64
@@ -431,9 +449,15 @@ impl Emitter<'_> {
         let hs2 = self.tmp_i32_local;
         i.i32_const(16).call(F_ALLOC).local_set(hs2);
         i.local_get(hs2).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         i.local_get(hs2);
         i.local_get(hb).i64_load(slot_memarg(0));
         i.i64_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(8, 0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         // #3137: the 8-byte scratch is read out; it was never released.
         i.local_get(hb).call(F_DEC_FLAT);
         let _ = i;
@@ -462,7 +486,13 @@ impl Emitter<'_> {
         i.local_get(hs);
         i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64();
         i.i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         i.local_get(hs).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        self.fw_res_w(4, 0);
+        #[allow(unused_variables, unused_mut)]
+        let mut i = self.f.instructions();
         i.local_get(hs);
         let _ = i;
         self.release_i32();
@@ -493,7 +523,13 @@ impl Emitter<'_> {
                 .local_tee(hb)
                 .i32_const(0)
                 .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_res_tag_back(0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hb);
             i.else_();
             i.local_get(hret);
@@ -503,13 +539,25 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(hb);
             i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+            self.fw_res_tag_back(1);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.if_(BlockType::Empty);
             let hs = self.tmp_i32_local;
             i.i32_const(4).call(F_ALLOC).local_set(hs);
             i.local_get(hs);
             i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.i32_store(slot_memarg(almide_layout::OPTION_FIELD));
+            self.fw_opt_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.local_get(hb).local_get(hs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            self.fw_res_w(4, 0);
+            #[allow(unused_variables, unused_mut)]
+            let mut i = self.f.instructions();
             i.end();
             i.local_get(hb);
             i.end();
