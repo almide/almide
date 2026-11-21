@@ -10,6 +10,7 @@ mod declarations;
 pub(crate) mod key_encode;
 mod expressions;
 pub mod helpers;
+mod loop_appender;
 pub(crate) mod runtime_owned;
 mod statements;
 mod types;

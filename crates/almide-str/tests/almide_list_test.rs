@@ -615,6 +615,63 @@ fn a_pusher_copies_a_shared_block_at_its_first_push_and_writes_the_length_back()
     assert_eq!(&b[..], &[0, 1, 2, 3, 4, 5]);
 }
 
+/// The standard render's appender loops (#4906): the list is pushed inside nested control flow, the loop is left by
+/// `break`, by `return` and by `?`, and the list is read and pushed again after each loop; the length written back
+/// covers exactly the elements pushed, and a block shared before the loop keeps its other owner's elements.
+#[test]
+fn a_pusher_writes_the_length_back_on_every_way_out_of_the_loop() {
+    fn by_return(xs: &mut AlmideList<AlmideStr>, stop: i64) -> i64 {
+        let mut p = xs.pusher();
+        let mut i = 0i64;
+        loop {
+            if i == stop {
+                return i;
+            }
+            if i % 2 == 0 {
+                p.push(AlmideStr::from(format!("r{i}").as_str()));
+            } else {
+                match i % 3 {
+                    0 => p.push(AlmideStr::from("t")),
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+    }
+    fn by_question(xs: &mut AlmideList<i64>, items: &[Result<i64, String>]) -> Result<(), String> {
+        let mut p = xs.pusher();
+        for r in items {
+            p.push(r.clone()?);
+        }
+        Ok(())
+    }
+    let mut a: AlmideList<AlmideStr> = vec![AlmideStr::from("x")].into();
+    let keep = a.clone();
+    {
+        let mut p = a.pusher();
+        let mut j = 0;
+        while j < 40 {
+            if j == 33 {
+                break;
+            }
+            p.push(AlmideStr::from(format!("b{j}").as_str()));
+            j += 1;
+        }
+    }
+    assert_eq!((a.len(), keep.len()), (34, 1));
+    assert_eq!((a[0].as_str(), a[33].as_str()), ("x", "b32"));
+    assert_eq!(by_return(&mut a, 7), 7);
+    assert_eq!(a.len(), 34 + 4 + 1);
+    assert_eq!((a[34].as_str(), a[36].as_str(), a[38].as_str()), ("r0", "t", "r6"));
+    a.push(AlmideStr::from("after"));
+    assert_eq!(a.len(), 40);
+    let mut n: AlmideList<i64> = AlmideList::new();
+    assert_eq!(by_question(&mut n, &[Ok(1), Ok(2), Err("e".into()), Ok(4)]), Err("e".to_string()));
+    assert_eq!(&n[..], &[1, 2]);
+    assert_eq!(by_question(&mut n, &[Ok(3)]), Ok(()));
+    assert_eq!(&n[..], &[1, 2, 3]);
+}
+
 /// `retain`, `dedup`, `drain` and `split_off` edit a unique block where it lies (no allocation, the elements move or
 /// drop once each); a shared block keeps its other owner's elements; a panic part way leaves every element owned once.
 #[test]

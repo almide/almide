@@ -194,12 +194,15 @@ fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> Str
     let body_str = indent_lines(&body_raw, 4);
     // #3460: `while true` (the TCO loop, or a source `while true`) is `loop`,
     // which rustc's `while_true` lint asks for.
-    if matches!(cond.kind, IrExprKind::LitBool { value: true }) {
-        return ctx.templates.render_with("loop_block", None, &[], &[("body", body_str.as_str())])
-            .unwrap_or_else(|| format!("loop {{\n{body_str}\n}}"));
-    }
-    ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
-        .unwrap_or_else(|| "while _ { }".to_string())
+    let rendered = if matches!(cond.kind, IrExprKind::LitBool { value: true }) {
+        ctx.templates.render_with("loop_block", None, &[], &[("body", body_str.as_str())])
+            .unwrap_or_else(|| format!("loop {{\n{body_str}\n}}"))
+    } else {
+        ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
+            .unwrap_or_else(|| "while _ { }".to_string())
+    };
+    // #4906: a loop that only appends to a list keeps its length in a local.
+    super::loop_appender::with_appender(ctx, &[cond], body, rendered)
 }
 
 /// `Member { object, field }` case of `render_expr`.
