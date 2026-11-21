@@ -1,0 +1,6 @@
+import process
+
+test "exec" {
+  let _ = process.exec("almide-probe-unlisted", [])
+  assert(true)
+}

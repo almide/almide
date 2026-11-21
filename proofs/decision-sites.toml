@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "120"
+# unstamped_ceiling     = "118"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "180"
-# failopen_ceiling      = "42"
+# skipped_route_ceiling = "175"
+# failopen_ceiling      = "40"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -124,6 +124,10 @@
 #               from the declaration, novel fresh-directory test, probe driven on
 #               run/build/test/bench/native/wasm/emit (bench compiles since #4899),
 #               control red. STAMPED: 37 stamped, 120 not, 180 skipped, 42 fail-open.
+#   2026-11-21  perm.proc-allowlist-static and proc.native-no-runtime-list re-read
+#               after #4817 (@spawns_process + reach): one probe driven on every
+#               route but lsp, the batch-1a novel test, the neuter red. STAMPED:
+#               39 stamped, 118 not, 175 skipped, 40 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -326,17 +330,22 @@ items = [
   "src/cli/mod.rs::check_proc_allowlist",
 ]
 keys = []
-decides = "every process.{exec,output,run,start} call must name its command as a string literal on [permissions] proc; non-literal command or the fn passed as a value is refused"
-from = "name"
-unknown = "allow"
-unknown_note = "a spawning fn not in PROC_SPAWNING (process.__os_run/__os_output/__os_start today; any future spawner) passes (#4817); match is module == \"process\" and func name, FnRef by \"process.\" prefix"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
+decides = "every call that reaches a process spawn must name its command as a string literal on [permissions] proc; the spawning fns are read off the @spawns_process leaves and what each bundled fn reaches (src/cli/proc_spawn.rs, #4817); a computed command, or a spawning fn passed as a value, is refused"
+from = "reach"
+unknown = "refuse"
+unknown_note = "Stale draft (PROC_SPAWNING name table) superseded by #4817: the spawning fns are read off @spawns_process and reach (src/cli/proc_spawn.rs). Driven 2026-11-21 (ds-2): every route but lsp refuses the probe inside and outside the project."
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.: produces and runs no code", mcp = "runs", emit = "runs" }
 tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route", "tests/proc_allowlist_test.rs::a_command_the_list_cannot_check_is_refused_too", "tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing"]
 control_note = "NONE"
 issues = [4817, 4815]
-status = "UNSTAMPED"
-reasons = ["c1: PROC_SPAWNING names the spawning fns (mod.rs:180-185); a fn value is matched by its `process.` prefix (mod.rs:257)", "c2: a spawning fn not on the table (process.__os_run / __os_output / __os_start, stdlib/process.almd:105-114) passes (#4817)", "c2: no novel test", "c4: no control"]
+status = "STAMPED"
+stamp = "edd22e2812 2026-11-21"
 note = "Listed in proofs/name-keyed-sites.toml (src/cli/mod.rs::PROC_SPAWNING::table). #4815 closed: check --json and check --effects run this gate (check.rs:394-402, 525-531), so the draft cells skipped #4815 are stale (VM). Batch 1a wrote no evidence: c1 / c2 need the declaration fix first (#4817)."
+probe = "tests/decision-probes/perm.proc-allowlist-static"
+novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_patch = "proofs/decision-controls/perm.proc-allowlist-static.patch"
+control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_seen = "edd22e2812 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "perm.proc-signal-kill"
@@ -1498,17 +1507,22 @@ items = [
   "crates/almide-rt-core/src/process_core.rs::almide_proc_exec",
 ]
 keys = []
-decides = "native process spawning has no run-time allowlist: the bound is only the static check_proc_allowlist over named process.* calls"
-from = "name"
-unknown = "allow"
-unknown_note = "process.__os_run / __os_output / __os_start (public) are not in PROC_SPAWNING and spawn any command (#4817); any future spawning runtime fn likewise"
-routes = { check = "static only", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "static only", build = "static only", test = "static only", bench = "static only", native = "no run-time check", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "static only" }
+decides = "native process spawning has no run-time allowlist: every call that reaches a spawn is judged before the build by perm.proc-allowlist-static (read off @spawns_process and reach, #4817), and a command it cannot trace is refused, so no native artifact is produced that spawns outside [permissions] proc"
+from = "reach"
+unknown = "refuse"
+unknown_note = "a fresh module or fn reaching a spawn (the novel test makes one) is refused statically on every route; residual, stdlib-internal: a new runtime leaf that spawns without @spawns_process (see perm.proc-allowlist-static)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces and runs no code", mcp = "runs", emit = "runs" }
 tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route"]
 control_note = "NONE"
 issues = [4817, 4815]
-status = "UNSTAMPED"
-reasons = ["c1: the only bound is PROC_SPAWNING by name (mod.rs:180-185)", "c2: process.__os_run / __os_output / __os_start spawn any command (#4817)", "c4: no control"]
-note = "runtime/rs/src/process.rs carries no list. #4815 closed: check --json / --effects run the static gate now."
+status = "STAMPED"
+stamp = "edd22e2812 2026-11-21"
+note = "Stale draft superseded by #4817. The static gate is the bound on native; the embedded wasm host keeps its own run-time list (perm.proc-host-bound). Same probe, novel test and neuter as perm.proc-allowlist-static, observed 2026-11-21 (ds-2)."
+probe = "tests/decision-probes/perm.proc-allowlist-static"
+novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_patch = "proofs/decision-controls/proc.native-no-runtime-list.patch"
+control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_seen = "edd22e2812 2026-11-21 ds-2: the same neuter as perm.proc-allowlist-static, patched red"
 
 [[site]]
 id = "proc.command-path-resolution"
