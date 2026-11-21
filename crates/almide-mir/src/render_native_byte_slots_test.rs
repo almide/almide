@@ -23,8 +23,9 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     let dir = std::env::temp_dir().join(format!("almide-native-byte-words-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create the temp dir");
     let mut source = format!(
-        "{}\n{}\nfn main() {{ let {}: i64 = std::env::args().nth(1).unwrap().parse().unwrap();\n",
+        "{}\n{}\n{}\nfn main() {{ let {}: i64 = std::env::args().nth(1).unwrap().parse().unwrap();\n",
         crate::native_floor::floor_header(),
+        crate::render_native_str::almide_string_alias(),
         crate::render_native::OOB_SHIM,
         var(index)
     );

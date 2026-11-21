@@ -468,3 +468,15 @@ fn a_clone_that_panics_mid_fill_drops_what_was_written() {
     // two clones written, then the original: three drops
     assert_eq!((clones.get(), drops.get()), (3, 3));
 }
+
+#[test]
+fn a_literal_moves_its_elements_into_one_exact_block() {
+    let l: AlmideList<String> = almide_list!["a".to_string(), "bc".to_string(), "d".to_string()];
+    assert_eq!(l.len(), 3);
+    assert_eq!(l.capacity(), 3);
+    assert_eq!(l.iter().map(|s| s.as_str()).collect::<Vec<_>>(), ["a", "bc", "d"]);
+    let one: AlmideList<i64> = almide_list![7];
+    assert_eq!(one.as_slice(), &[7]);
+    let empty: AlmideList<String> = AlmideList::from([] as [String; 0]);
+    assert!(empty.is_empty());
+}
