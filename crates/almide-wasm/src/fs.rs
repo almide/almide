@@ -615,7 +615,7 @@ impl Emitter<'_> {
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
                     i.local_get(hs).local_get(params[0]);
                 }
-                self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+                self.store_res_slot(acc_ty);
                 self.f.instructions().local_get(hs).end();
                 for _ in 0..5 {
                     self.release_i32();

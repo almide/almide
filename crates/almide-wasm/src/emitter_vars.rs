@@ -187,8 +187,9 @@ impl Emitter<'_> {
             .local_tee(hb)
             .i32_const(0)
             .i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_res_tag_back(0);
         self.f.instructions().local_get(hb).local_get(hv);
-        self.store_ty_slot(raw, almide_layout::SUM_FIELD);
+        self.store_res_slot(raw);
         self.f.instructions().local_get(hb);
         self.release_i32();
         self.release_val(raw);

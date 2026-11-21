@@ -185,7 +185,7 @@ impl Emitter<'_> {
         let joined = self.is_str_list(ert);
         self.emit_abort_message(ert, err_ir, |s| {
             s.f.instructions().local_get(hold);
-            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+            s.load_res_slot(ert);
         })?;
         let blk = self.hold_i32()?;
         self.f
@@ -230,7 +230,7 @@ impl Emitter<'_> {
     /// owned carrier's spine released (the payload keeps its credit).
     pub(crate) fn fan_carrier_payload(&mut self, c: &FanCarrier) {
         self.f.instructions().local_get(c.hold);
-        self.load_ty_slot(c.p, almide_layout::SUM_FIELD);
+        self.load_res_slot(c.p);
         self.f.instructions().local_set(c.hv);
         if c.owned {
             self.f.instructions().local_get(c.hold).call(F_DEC_FLAT);
@@ -405,7 +405,7 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.local_get(ha);
         }
-        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        self.load_res_slot(ert);
         match typed {
             None => {
                 self.f.instructions().local_set(a.msg).end();
@@ -415,7 +415,7 @@ impl Emitter<'_> {
             }
         }
         self.f.instructions().local_get(ha);
-        self.load_ty_slot(p, almide_layout::SUM_FIELD);
+        self.load_res_slot(p);
         self.f.instructions().local_set(hv);
         if owned {
             self.f.instructions().local_get(ha).call(F_DEC_FLAT);

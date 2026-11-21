@@ -37,7 +37,7 @@ impl Emitter<'_> {
         // The element handle inside the Option block takes +1
         // (leak-not-dangle until the Option's typed drop, stage 2c).
         self.arm_share_handle_top(elem);
-        self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(elem);
         self.f.instructions().local_get(hr).end();
         self.release_i32();
         self.release_i32();
@@ -509,7 +509,7 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(hr)
             .local_get(params[0]);
-        self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(elem);
         self.f.instructions().local_get(hr).end();
         self.witness_branch_close();
         for _ in 0..4 {

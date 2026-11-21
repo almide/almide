@@ -37,7 +37,7 @@ impl Emitter<'_> {
         let blk = self.hold_i32()?;
         let sep = self.pool.intern(", ");
         self.f.instructions().local_get(self.scr_i32_local).local_tee(car);
-        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        self.load_res_slot(ert);
         // $list_join borrows both and hands back a fresh String.
         self.f
             .instructions()
@@ -84,7 +84,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(self.scr_i32_local).local_set(car);
         self.emit_repr_message(ert, err_ir, |s| {
             s.f.instructions().local_get(car);
-            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+            s.load_res_slot(ert);
         })?;
         let msg = self.hold_i32()?;
         let start = self.hold_i32()?;
@@ -223,9 +223,10 @@ impl Emitter<'_> {
             .local_get(hb)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
+        self.fw_res_tag_back(2);
         self.emit_abort_message(ert, err_ir.as_ref(), |s| {
             s.f.instructions().local_get(hb);
-            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+            s.load_res_slot(ert);
         })?;
         self.emit_error_frame_abort();
         if let Some(dec) = owned_dec {

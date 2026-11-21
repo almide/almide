@@ -201,7 +201,7 @@ impl Emitter<'_> {
         self.f.instructions().local_tee(hr).if_(BlockType::Empty);
         let some_at = self.arm_anchor_here();
         self.f.instructions().local_get(hacc).local_get(hr);
-        self.load_ty_slot(b, almide_layout::OPTION_FIELD);
+        self.load_opt_slot(b);
         if b.val_type() == ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }

@@ -270,17 +270,18 @@ impl Emitter<'_> {
                             .i32_ne();
                     }
                     i.if_(BlockType::Result(et.val_type()));
+                    if !is_option {
+                        self.fw_res_tag_back(5);
+                    }
+                    let mut i = self.f.instructions();
                     i.local_get(hdef);
                     i.else_().local_get(hrecv);
                 }
-                self.load_ty_slot(
-                    et,
-                    if is_option {
-                        almide_layout::OPTION_FIELD
-                    } else {
-                        almide_layout::SUM_FIELD
-                    },
-                );
+                if is_option {
+                    self.load_opt_slot(et);
+                } else {
+                    self.load_res_slot(et);
+                }
                 // The payload handed out is a SHARE of the receiver's (+1):
                 // with the retained default, both branches hand back an
                 // owned value (#2010 stage 2c).

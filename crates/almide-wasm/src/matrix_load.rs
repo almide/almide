@@ -194,7 +194,7 @@ impl Emitter<'_> {
         i.i32_const(SliceTy::Matrix.slot_size() as i32).call(F_ALLOC).local_tee(hbox);
         i.local_get(ho);
         let _ = i;
-        self.store_ty_slot(SliceTy::Matrix, almide_layout::OPTION_FIELD);
+        self.store_opt_slot(SliceTy::Matrix);
         {
             let mut i = self.f.instructions();
             i.local_get(hbox);

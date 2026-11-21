@@ -349,7 +349,7 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(hp);
             }
-            self.load_ty_slot(b, almide_layout::SUM_FIELD);
+            self.load_res_slot(b);
             self.f.instructions().local_set(hv);
             self.fan_overlap_push(hacc, hv, b);
             // the payload's credit moved into the list; the shell goes.
@@ -401,7 +401,7 @@ impl Emitter<'_> {
             self.f.instructions().local_set(hv);
             self.f.instructions().i32_const(16).call(F_ALLOC).local_tee(hr).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
             self.f.instructions().local_get(hr).local_get(hv);
-            self.store_ty_slot(b, almide_layout::SUM_FIELD);
+            self.store_res_slot(b);
             self.f.instructions().br(1);
             self.release_val(b);
         } else {
