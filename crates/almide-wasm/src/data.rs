@@ -55,15 +55,21 @@ impl Emitter<'_> {
                     .instructions()
                     .i32_const(16)
                     .call(F_ALLOC)
-                    .local_tee(hold)
+                    .local_tee(hold);
+                // A construction site: the payload does not leave the frame
+                // (the branch above took those).
+                let site = self.fw_res_site(side);
+                self.f
+                    .instructions()
                     .i32_const(i32::from(!is_ok))
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                self.fw_res_tag_back(0);
+                self.fw_store(site, 0);
                 self.f.instructions().local_get(hold);
                 self.lower(expr, Some(side))?;
                 self.rc_share_guard(expr, side);
                 self.witness_store(expr, side);
-                self.store_res_slot(side);
+                self.store_ty_slot(side, almide_layout::SUM_FIELD);
+                self.fw_store(site, 1);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
                 hty
@@ -649,25 +655,18 @@ impl Emitter<'_> {
         self.f.instructions().local_set(val);
         let hold = self.hold_i32()?;
         self.f.instructions().i32_const(size).call(F_ALLOC).local_set(hold);
-        // A `some` block is a construction site: its allocation is held to the
-        // slot's size and its one store to the slot. A Result block's two
-        // stores stay plain accesses (its layout names the value slot at both
-        // widths, and a site stores every field of its kind).
-        let site = if tag.is_none() && size as u32 == side.slot_size() { self.fw_opt_site(side) } else { None };
+        // A construction site either way: the allocation is held to the
+        // block's size and each store to its field.
+        debug_assert!(field == if tag.is_some() { almide_layout::SUM_FIELD } else { almide_layout::OPTION_FIELD });
+        debug_assert!(size as u32 == if tag.is_some() { 16 } else { side.slot_size() });
+        let site = if tag.is_some() { self.fw_res_site(side) } else { self.fw_opt_site(side) };
         if let Some(tag) = tag {
-            self.f.instructions().local_get(hold).i32_const(tag);
-            self.store_res_tag();
+            self.f.instructions().local_get(hold).i32_const(tag).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_store(site, 0);
         }
         self.f.instructions().local_get(hold).local_get(val);
-        debug_assert!(field == if tag.is_some() { almide_layout::SUM_FIELD } else { almide_layout::OPTION_FIELD });
-        if tag.is_some() {
-            self.store_res_slot(side);
-        } else if site.is_some() {
-            self.store_ty_slot(side, almide_layout::OPTION_FIELD);
-            self.fw_store(site, 0);
-        } else {
-            self.store_opt_slot(side);
-        }
+        self.store_ty_slot(side, field);
+        self.fw_store(site, usize::from(tag.is_some()));
         self.f.instructions().local_get(hold);
         self.release_i32();
         self.release_val(side);

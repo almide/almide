@@ -166,6 +166,21 @@ impl Emitter<'_> {
         fw::access_back(k, if w == 8 { 2 } else { 1 }, self.f, back);
     }
 
+    /// A Result block holding a `t` was just set (or teed) into its local,
+    /// right after its allocation of 16 bytes: a construction site of the
+    /// Result kind of that slot width, whose tag store is field 0 and whose
+    /// value store is field 1. (Reads name the one Result kind whose layout
+    /// carries the slot at both widths; a site needs a kind it fills.)
+    pub(crate) fn fw_res_site(&mut self, t: SliceTy) -> Option<fw::Site> {
+        if !fw::armed() {
+            return None;
+        }
+        let w = width(t);
+        let k = (3 * (SUM_BASE + 3 + u32::from(w == 8)), 0);
+        fw::declare(k, &Layout { n: 1, z: 16, fields: vec![(almide_layout::SUM_TAG, 4), (almide_layout::SUM_FIELD, w)] });
+        fw::site(k, self.f)
+    }
+
     /// A Result block: its tag word, then one 8-byte value slot read at the
     /// width of the side it holds (fields 1 and 2 name the same slot).
     fn res_layout() -> Layout {
@@ -223,11 +238,5 @@ impl Emitter<'_> {
             Some(Sum::Res) => self.load_res_slot(t),
             None => self.load_ty_slot(t, field),
         }
-    }
-
-    /// Store the tag on the stack into the Result block under it.
-    pub(crate) fn store_res_tag(&mut self) {
-        self.f.instructions().i32_store(crate::slot_memarg(almide_layout::SUM_TAG));
-        self.fw_res_tag();
     }
 }
