@@ -111,7 +111,7 @@ use std::collections::{HashMap, HashSet};
 use wasmparser::Operator as Op;
 
 use crate::decode::{store_width, Body};
-use crate::operands::{chain, Flow, Src, T, FUEL};
+use crate::operands::{chain, global_sets, Flow, GlobalSets, Src, T, FUEL};
 
 mod after;
 mod events;
@@ -364,8 +364,11 @@ pub fn check_rc(
     windows: &[Vec<(usize, usize, usize)>; 2],
     rep: &mut RcReport,
 ) -> Result<(), String> {
+    // The globals each function's call may set: a container held in a global
+    // is another block after a call that rebinds it (operands/globals.rs).
+    let sets = global_sets(bodies, imports);
     for (pos, events) in frames {
-        let fr = Frame::new(bodies, imports, rc_fns, *pos, events, windows)?;
+        let fr = Frame::new(bodies, imports, rc_fns, *pos, events, windows, &sets)?;
         rep.calls += fr.calls[..fr.live].iter().filter(|c| c.1 != 'j').count();
         rep.events += fr.ev.evs.len();
         fr.verdict(rep)?;
@@ -432,6 +435,7 @@ impl<'x, 'a> Frame<'x, 'a> {
         pos: usize,
         events: &str,
         windows: &'x [Vec<(usize, usize, usize)>; 2],
+        sets: &GlobalSets,
     ) -> Result<Self, String> {
         let judged: HashSet<usize> = rc_fns.judges.iter().filter(|j| j.func == pos).map(|j| j.op).collect();
         let b = bodies.get(pos).ok_or_else(|| format!("rc: no defined function at position {pos}"))?;
@@ -441,7 +445,7 @@ impl<'x, 'a> Frame<'x, 'a> {
             b,
             pos,
             judged,
-            fl: Flow::new(b, HashSet::new()),
+            fl: Flow::new(b, HashSet::new()).with_global_sets(sets.clone()),
             windows,
             sigs: rc_fns.sigs,
             calls: Vec::new(),

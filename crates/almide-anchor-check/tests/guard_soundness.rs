@@ -156,3 +156,20 @@ fn a_try_table_is_refused() {
     let r = decoded("(module (tag $e) (func (block (try_table (catch_all 0) (throw $e)))))");
     assert!(r.as_ref().is_err_and(|e| e.contains("does not follow")), "{r:?}");
 }
+
+// ── a loop that takes parameters ───────────────────────────────────────────
+
+/// A branch to a loop that takes parameters carries values across its back
+/// edge on the operand stack; the checker follows a value across a back
+/// edge only through a local, a global or memory.
+#[test]
+fn a_loop_that_takes_parameters_is_refused() {
+    let r = decoded("(module (func (param i32) local.get 0 (loop (param i32) drop)))");
+    assert!(r.is_err(), "decoded a module whose loop takes a parameter");
+}
+
+/// A loop with no parameters is followed as before.
+#[test]
+fn a_loop_without_parameters_is_decoded() {
+    assert!(decoded("(module (func (loop nop)))").is_ok());
+}
