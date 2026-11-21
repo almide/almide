@@ -1,0 +1,43 @@
+name: Probe — injected defects against the behaviour corpus
+# A one-off measurement on its own branch: for each reinject patch of the wasm
+# witnesses, how many fixtures change behaviour under the patched compiler.
+# Not a gate.
+on:
+  push:
+    branches: [probe/inject-vs-tests-4]
+
+permissions:
+  contents: read
+
+jobs:
+  shard:
+    name: Shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Measure
+        env:
+          ONLY: "rc-release-dropped rc-release-dropped-past-loop rc-release-wrong-local rc-release-before-last-use"
+        run: bash scripts/probe-inject-vs-tests.sh "$RUNNER_TEMP/inject" ${{ matrix.shard }} 1
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: inject-vs-tests-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/inject/results.tsv
+            ${{ runner.temp }}/inject/repro
