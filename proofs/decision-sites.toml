@@ -44,7 +44,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "117"
+# unstamped_ceiling     = "116"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
 # failopen_ceiling      = "39"
@@ -132,6 +132,11 @@
 #               the private base's rules): novel fresh-directory test, probe on
 #               run/build/bench/native/wasm, control red. STAMPED: 40 stamped,
 #               117 not, 175 skipped, 39 fail-open.
+#   2026-11-21  net.shm-create-tempfile: C-393 amended (almide/als#270, pin
+#               03c2eaac); the region's directory is judged under [permissions]
+#               fs natively (@fs_shm_dir) and on the embedded host (unix path
+#               gate). Probe on every route, two controls red. STAMPED: 41
+#               stamped, 116 not, 175 skipped, 39 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1419,23 +1424,29 @@ id = "net.shm-create-tempfile"
 at = "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_open"
 items = [
   "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_open",
+  "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_dir",
+  "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::shm_create",
 ]
 keys = []
-decides = "unix.shm_create creates (then unlinks) a file in $XDG_RUNTIME_DIR or the temp dir with plain std::fs, outside [permissions] fs"
-from = "type"
+decides = "unix.shm_create makes an unnamed file in the directory almide_shm_dir answers ($XDG_RUNTIME_DIR when it names a directory, else the temp dir); under [permissions] fs that directory is judged first (C-393): natively by the @fs_shm_dir guard read off the declaration, on the embedded host by the unix path gate"
+from = "declaration"
 unknown = "refuse"
-unknown_note = "the backing file has no name any path reaches (#4850): Linux O_TMPFILE in the runtime dir; elsewhere a fresh 0700 directory made with create (AlreadyExists -> next name, never followed) and the file create_new in it, both unlinked at once"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: the runtime core (almide_shm_open_in), not driven by a probe", build = "runs: the runtime core (almide_shm_open_in), not driven by a probe", test = "runs: the runtime core (almide_shm_open_in), not driven by a probe", bench = "runs: the runtime core (almide_shm_open_in), not driven by a probe", native = "runs: the runtime core (almide_shm_open_in), not driven by a probe", wasm = "runs: the embedded host links the same core (net_unix_host ops 113-116)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "runs: the runtime core (almide_shm_open_in), not driven by a probe" }
-tests = []
-control_note = "NONE"
+unknown_note = "the backing file has no name any path reaches (#4850): Linux O_TMPFILE in the runtime dir; elsewhere a fresh 0700 directory made with create (AlreadyExists -> next name, never followed) and the file create_new in it, both unlinked at once. A directory outside every grant (any name: the novel test makes a fresh one) is refused with the fs refusal before any file is made"
+routes = { check = "n.a.: makes no region", check_json = "n.a.: makes no region", check_effects = "n.a.: makes no region", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs: the embedded host links the same core (net_unix_host op 113) behind the unix path gate", wasi = "n.a.: the stock build refuses the unix family (E081)", component = "n.a.: the unix family is walled (E081)", lsp = "n.a.: makes no region", mcp = "n.a.: makes no region", emit = "runs: the emitted Rust wraps the leaf in __almide_fs_shm_dir!" }
+probe = "tests/decision-probes/net.shm-create-tempfile"
+tests = ["tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets", "crates/almide-codegen/src/fs_scope.rs::tests::the_shm_create_leaf_is_guarded_by_its_directory"]
+control_note = "two controls: the backing file keeps a name (control_patch); the region's directory is not judged (control_extra: no mark natively, no gate embedded; each half alone was also red, q70)"
 issues = [4850]
-status = "UNSTAMPED"
-reasons = ["c3:no probe yet: the cells are read, not driven by the route matrix"]
-note = "net_unix_core.rs:330-347: env-chosen dir (XDG_RUNTIME_DIR, a direct std::env read in rt-core), program-unnamed file, unlinked at once — low impact; a sibling of #4832 that #4832's title does not name."
+status = "STAMPED"
+stamp = "d3cf1880d5 2026-11-21"
+note = "C-393 amended in almide/als#270 (the directory of a shared-memory region is judged like a socket path). The bind is not beneath a held descriptor: the region has no name, so a directory swapped after the decision only moves an unnamed inode."
 control_patch = "proofs/decision-controls/net.shm-create-tempfile.patch"
 control_test = "crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory"
-novel = "crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory"
+novel = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
 control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/net.shm-create-tempfile.scope.patch"
+control_extra_test = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
+control_extra_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "net.permissions-unknown-key"
