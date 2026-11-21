@@ -18,4 +18,7 @@ jobs:
         with:
           shared-key: linux-release-1.97.0
       - name: Warnings of almide-wasm
-        run: cargo clippy -p almide-wasm --message-format=short 2>&1 | grep -E '^crates/almide-wasm/.*(warning|error)' | sort | uniq | tee /tmp/w.txt | head -200; echo "count: $(wc -l < /tmp/w.txt)"
+        run: |
+          cargo clippy -p almide-wasm --message-format=short 2>&1 | grep -E '^crates/almide-wasm/.*(warning|error)' | sort | uniq > /tmp/w.txt || true
+          head -200 /tmp/w.txt
+          echo "count $(wc -l < /tmp/w.txt)"
