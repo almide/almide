@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::OnceLock;
 
 /// The floor's host ops: every `prim` fn declared `@prim_op(host)`.
-pub fn prim_host_ops() -> &'static BTreeSet<String> {
+pub(crate) fn prim_host_ops() -> &'static BTreeSet<String> {
     static OPS: OnceLock<BTreeSet<String>> = OnceLock::new();
     OPS.get_or_init(|| {
         almide_lang::stdlib_info::bundled_source("prim")
@@ -23,7 +23,7 @@ pub fn prim_host_ops() -> &'static BTreeSet<String> {
 }
 
 /// The fns of `prog` whose `@prim_op` names `host` as its kind.
-pub fn host_ops_declared_in(prog: &Program) -> BTreeSet<String> {
+fn host_ops_declared_in(prog: &Program) -> BTreeSet<String> {
     prog.decls
         .iter()
         .filter_map(|d| match d {
@@ -65,7 +65,7 @@ pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
 /// Does fn `name` of `prog`, a source of stdlib `module`, reach a floor host
 /// op, directly or through a fn of the same source or a stdlib call it
 /// names? A name it spells that resolves to nothing contributes nothing.
-pub fn fn_reaches_host(prog: &Program, module: &str, name: &str) -> bool {
+pub(crate) fn fn_reaches_host(prog: &Program, module: &str, name: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_in(prog, module, name, &mut seen)
 }
@@ -119,7 +119,7 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
 }
 
 /// Is `decl` a host op of the floor (`@prim_op(host)`)?
-pub fn is_host_op(decl: &Decl) -> bool {
+pub(crate) fn is_host_op(decl: &Decl) -> bool {
     let Decl::Fn { attrs, .. } = decl else { return false };
     attrs.iter().any(|a| {
         a.name.as_str() == "prim_op"
