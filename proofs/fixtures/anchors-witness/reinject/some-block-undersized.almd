@@ -1,0 +1,8 @@
+// Drill: a some block is allocated 4 bytes short of its slot while the fields
+// witness still records the construction site — the fields checker accepts,
+// the bytes allocate less than the slot the store writes.
+fn mk(n: Int) -> Int? = some(n)
+
+effect fn main() -> Unit = {
+  println(int.to_string(mk(3) ?? 0))
+}
