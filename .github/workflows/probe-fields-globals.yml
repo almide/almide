@@ -18,7 +18,7 @@ jobs:
         with:
           toolchain: "1.97.0"
       - name: The field cases
-        run: cargo test -p almide-anchor-check --test fields --no-fail-fast -- --nocapture --test-threads=1
+        run: cargo test -p almide-anchor-check --test fields --test rc --test guard_soundness --no-fail-fast -- --nocapture --test-threads=1
       - name: The rest of the checker's tests
         if: always()
         run: cargo test -p almide-anchor-check --no-fail-fast
