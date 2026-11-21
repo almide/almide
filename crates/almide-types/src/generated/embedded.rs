@@ -41694,6 +41694,7 @@ effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String
 effect fn __os_close(fd: Int) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_create")
+@fs_shm_dir
 effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_resize")

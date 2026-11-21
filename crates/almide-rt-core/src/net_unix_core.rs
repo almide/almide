@@ -286,6 +286,9 @@ impl AlmideUnixTables {
     /// A new shared-memory file of `size` bytes, zero-filled, with no name
     /// left in any directory: its descriptor, to write into and pass on.
     pub fn shm_create(&mut self, size: i64) -> Result<i64, String> {
+        // C-393: judged by the directory its file is made in, before anything
+        // is made (natively the `@fs_shm_dir` guard wraps the call first).
+        almide_unix_path_admitted(&almide_shm_dir().to_string_lossy())?;
         if size < 0 {
             return Err(format!("shm_create: negative size {size}"));
         }
@@ -350,10 +353,16 @@ impl AlmideUnixTables {
 /// the file made in it, both unlinked at once.
 #[cfg(unix)]
 fn almide_shm_open() -> std::io::Result<std::fs::File> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
+    almide_shm_open_in(&almide_shm_dir())
+}
+
+/// The directory a shared-memory region's file is made in: the session's
+/// runtime directory when `$XDG_RUNTIME_DIR` names one, else the temp dir.
+/// `[permissions] fs` judges `unix.shm_create` by it (C-393).
+pub fn almide_shm_dir() -> std::path::PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
         .filter(|d| d.is_dir())
-        .unwrap_or_else(std::env::temp_dir);
-    almide_shm_open_in(&dir)
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 #[cfg(target_os = "linux")]
