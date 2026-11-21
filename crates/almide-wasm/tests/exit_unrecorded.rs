@@ -25,6 +25,6 @@ fn novel_an_exit_no_plan_records_is_refused() {
         panic!("an exit no plan records must be an E083 defect, got {res:?}");
     };
     let text = d.to_string();
-    assert!(text.contains("an emitted exit has no ExitPlan"), "{text}");
+    assert!(text.starts_with("error[E083]: an exit in the function's bytes has no exit plan"), "{text}");
     assert!(text.contains(&f), "{text}");
 }

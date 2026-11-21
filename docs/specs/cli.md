@@ -1286,7 +1286,7 @@ almide clean
 
 ### `almide verify`
 
-`almide build --target wasm` が出荷する wasm モジュールの証明書（ownership / call-modes / bounds / names / caps / caps-transitive の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152, #4011)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
+`almide build --target wasm` が出荷する wasm モジュールの証明書（ownership / call-modes / bounds / init / fields / names / caps / caps-transitive の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152, #4011)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
 
 ```bash
 almide build app.almd --target wasm               # app.wasm を書く
