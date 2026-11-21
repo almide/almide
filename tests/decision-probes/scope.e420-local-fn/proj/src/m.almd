@@ -1,0 +1,3 @@
+local fn secret(x: Int) -> Int = x + 1
+
+fn visible(x: Int) -> Int = secret(x)
