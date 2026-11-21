@@ -80,7 +80,29 @@ note "PURE_MODULES: $n_pure modules extracted from purity.rs"
 
 has_effect_fn() { grep -qE '^[[:space:]]*effect[[:space:]]+fn[[:space:]]' "$1"; }
 
-# (1)+(2) Every PURE module exists and declares zero `effect fn`.
+# The floor's host ops, read off their declarations (#4827): every `prim` fn
+# marked `@prim_op(host)` in stdlib/prim.almd. A plain fn reaches the host
+# without the `effect` keyword when its body calls one, so the keyword test
+# above under-approximates; this one is read from the floor, not from names.
+host_ops=$(awk '/^@prim_op\(host\)/{h=1; next} h && /^fn /{sub(/^fn /, ""); sub(/[[(].*/, ""); print; h=0}' "$STDLIB/prim.almd" | sort -u)
+if [ -z "$host_ops" ]; then
+  err "could not read any @prim_op(host) declaration from $STDLIB/prim.almd"
+  echo; echo "STDLIB PURITY GATE: FAILED (floor unreadable)"; exit 1
+fi
+host_re="prim\\.($(paste -sd'|' - <<<"$host_ops"))[[:space:]]*\\("
+reaches_host_op() { grep -nE "$host_re" "$1"; }
+note "host ops declared by the floor: $(wc -l <<<"$host_ops" | tr -d ' ')"
+
+# Fixture + control for the check above: a plain fn added to a pure module
+# that writes a file through the floor is caught; the module itself is not.
+fixture=$(mktemp)
+{ cat "$STDLIB/string.almd"; echo 'fn sneaky(p: String) -> Int = prim.write_text_file(p, p)'; } > "$fixture"
+reaches_host_op "$fixture" >/dev/null || err "self-test: a pure fn calling prim.write_text_file was not caught"
+reaches_host_op "$STDLIB/string.almd" >/dev/null && err "self-test control: string.almd reads as reaching a host op"
+rm -f "$fixture"
+
+# (1)+(2) Every PURE module exists, declares zero `effect fn`, and calls no
+# host op the floor declares.
 for m in $pure_modules; do
   src="$STDLIB/$m.almd"
   if [ ! -f "$src" ]; then
@@ -90,6 +112,9 @@ for m in $pure_modules; do
   if has_effect_fn "$src"; then
     n=$(grep -cE '^[[:space:]]*effect[[:space:]]+fn[[:space:]]' "$src")
     err "PURE module '$m' declares $n 'effect fn' — it reaches a host capability and must NOT be admitted (drop it from PURE_MODULES or wall the effectful fns)"
+  fi
+  if hits=$(reaches_host_op "$src"); then
+    err "PURE module '$m' calls a host op the floor declares (@prim_op(host)) — it reaches the host and must NOT be admitted: $(head -3 <<<"$hits" | tr '\n' ' ')"
   fi
   # A module cannot be both pure AND on the impure-plain wall list.
   if [ -n "${IMPURE_PLAIN[$m]+x}" ]; then
