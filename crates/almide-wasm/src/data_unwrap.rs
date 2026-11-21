@@ -141,7 +141,7 @@ impl Emitter<'_> {
                                 .local_get(self.scr_i32_local);
                             self.witness_unwrap_exit(wc, Leaves::Nothing);
                             self.witness_unwrap_close();
-                            self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                            self.load_opt_slot(et);
                             self.release_ok_carrier(e, owned_carrier);
                             self.witness_unwrap_ok(wc, owned_carrier);
                             return Ok(et);
@@ -194,7 +194,7 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.witness_unwrap_close();
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        self.load_opt_slot(et);
                         self.release_ok_carrier(e, owned_carrier);
                         self.witness_unwrap_ok(wc, owned_carrier);
                         et
@@ -215,6 +215,7 @@ impl Emitter<'_> {
                             .i32_const(0)
                             .i32_ne()
                             .if_(BlockType::Empty);
+                        self.fw_res_tag_back(5);
                         let wc = self.witness_unwrap_open(expr, owned_carrier, true);
                         if in_effect && fn_err == Some(STR) && ert != STR && !self.is_str_list(ert) {
                             // ADR-0021 D2 / #2725: a typed error `!`-ed into a
@@ -250,14 +251,14 @@ impl Emitter<'_> {
                             let scr = self.scr_i32_local;
                             let fresh = self.emit_abort_message(ert, err_ir.as_ref(), |s| {
                                 s.f.instructions().local_get(scr);
-                                s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+                                s.load_res_slot(ert);
                             })?;
                             self.witness_abort_built(fresh);
                             self.abort_frame();
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.witness_unwrap_close();
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        self.load_res_slot(et);
                         self.release_ok_carrier(e, owned_carrier);
                         self.witness_unwrap_ok(wc, owned_carrier);
                         et
