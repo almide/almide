@@ -1161,6 +1161,8 @@ fn section_tables<'a, 'i>(spans: &'a toml::de::DeTable<'i>, at: SectionAt) -> Ve
 /// keys its section declares and the one a single edit away.
 fn refuse_unknown_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> Result<(), String> {
     let mut found: Vec<(usize, String)> = Vec::new();
+    // One scan for every refusal's line (#4194: a rescan per key is O(N²)).
+    let lines = LineStarts::new(content);
     for section in MANIFEST_SCHEMA {
         let what = if section.at == SectionAt::Root { "table" } else { "key" };
         let declared: Vec<&str> = section.keys.iter().chain(section.inert).copied().collect();
@@ -1177,7 +1179,8 @@ fn refuse_unknown_keys(path: &Path, content: &str, manifest: &Manifest<'_>) -> R
                     None => format!("delete it, or write one of the {what}s {site} declares: {list}"),
                 };
                 let message = format!("unknown {what} `{}` in {site} is refused — almide.toml accepts only the {what}s its sections declare\n  hint: {hint}", shown(key));
-                found.push((k.span().start, located(path, content, k.span().start, &message)));
+                let at = k.span().start;
+                found.push((at, format!("{}:{}: {message}", path.display(), lines.line(at))));
             }
         }
     }
