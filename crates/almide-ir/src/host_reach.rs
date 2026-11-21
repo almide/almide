@@ -5,9 +5,11 @@
 //! a body that serves it calls one, directly or through a function it names:
 //! its declaration in the module's source, or a self-host registry body that
 //! serves its call name. The answer is read from those declarations and
-//! bodies, never from a module or function name. A method dispatched on a
-//! parameter whose type is a protocol-bounded generic runs the conformer the
-//! caller passes, which no body here shows: that dispatch reaches the host.
+//! bodies, never from a module or function name. A method an `effect fn`
+//! dispatches on a parameter whose type is a protocol-bounded generic runs
+//! the conformer the caller passes, which no body here shows: that dispatch
+//! reaches the host. A plain `fn` cannot call an effect requirement (`Read`'s
+//! read), so its dispatches stay judged by what it names.
 
 use almide_lang::ast::{Decl, Expr, ExprKind, Program, TypeExpr};
 use std::collections::HashSet;
@@ -98,9 +100,9 @@ fn has_body(decl: &Decl) -> bool {
 /// its own declaration. A bodyless declaration (`= _`, served by the runtime)
 /// shows no body to follow, so it is judged by what it declares: a non-empty
 /// `@category` reaches the host, an empty one does not, and with neither it
-/// reaches the host unless its module is classified `Pure`. A body that
-/// dispatches a method on a protocol-bounded generic parameter reaches it too
-/// ([`dispatches_on_a_bounded_param`]).
+/// reaches the host unless its module is classified `Pure`. An `effect fn`
+/// body that dispatches a method on a protocol-bounded generic parameter
+/// reaches it too ([`dispatches_on_a_bounded_param`]).
 fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool {
     if !seen.insert((prog as *const Program as usize, name.to_string())) {
         return false;
@@ -131,14 +133,15 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
     })
 }
 
-/// Does `decl`'s body call a method on a parameter typed by one of its own
-/// generics that carries a protocol bound (`[H: Read](h: H)` calling
+/// Does `decl`, an `effect fn`, call a method on a parameter typed by one of
+/// its own generics that carries a protocol bound (`[H: Read](h: H)` calling
 /// `h.__self_read(..)`)? The method run is the conformer's that the caller
 /// supplies; the declaration shows none, so its reach is unknown and taken as
-/// the host's. Read from the declaration's shape, never from a protocol or
-/// method name.
+/// the host's. Only an `effect fn` can call a requirement that acts on the
+/// host; a plain `fn`'s dispatch (a `Body`'s bytes) cannot. Read from the
+/// declaration's shape, never from a protocol or method name.
 fn dispatches_on_a_bounded_param(decl: &Decl) -> bool {
-    let Decl::Fn { generics, params, .. } = decl else { return false };
+    let Decl::Fn { effect: Some(true), generics, params, .. } = decl else { return false };
     let bounded: HashSet<&str> = generics
         .iter()
         .flatten()
@@ -250,23 +253,28 @@ mod tests {
         assert!(!fn_reaches_host(prog, "io", "take_plain"));
     }
 
-    /// The rule is the declaration's shape, not the `Read` protocol: a
-    /// generic over a user protocol dispatching its method reaches the host;
-    /// the same call over a concrete type, and a bounded generic that only
-    /// passes its param on as data, do not.
+    /// The rule is the declaration's shape, not the `Read` protocol: an
+    /// `effect fn` generic over a user protocol dispatching its method
+    /// reaches the host. The controls do not: the same call over a concrete
+    /// type, a plain `fn` dispatching on the same bound (it cannot call an
+    /// effect requirement), and a bounded `effect fn` that only passes its
+    /// param on as data.
     #[test]
     fn a_method_on_any_protocol_bounded_param_reaches_the_host() {
         let prog = leak_parse(
-            "protocol Shape {\n  fn area(self) -> Int\n}\n\
-             type Sq: Shape = { side: Int }\n\
-             fn Sq.area(self) -> Int = self.side * self.side\n\
-             fn total[S: Shape](s: S) -> Int = s.area()\n\
-             fn total_sq(s: Sq) -> Int = s.area()\n\
-             fn keep[S: Shape](s: S) -> List[S] = [s]\n"
+            "protocol Sink {\n  effect fn put(self, n: Int) -> Unit\n  fn size(self) -> Int\n}\n\
+             type Box: Sink = { n: Int }\n\
+             effect fn Box.put(self, n: Int) -> Unit = ()\n\
+             fn Box.size(self) -> Int = self.n\n\
+             effect fn fill[S: Sink](s: S) -> Unit = s.put(1)\n\
+             effect fn fill_box(s: Box) -> Unit = s.put(1)\n\
+             fn measure[S: Sink](s: S) -> Int = s.size()\n\
+             effect fn keep[S: Sink](s: S) -> List[S] = [s]\n"
                 .to_string(),
         );
-        assert!(fn_reaches_host(prog, "geom", "total"));
-        assert!(!fn_reaches_host(prog, "geom", "total_sq"));
+        assert!(fn_reaches_host(prog, "geom", "fill"));
+        assert!(!fn_reaches_host(prog, "geom", "fill_box"));
+        assert!(!fn_reaches_host(prog, "geom", "measure"));
         assert!(!fn_reaches_host(prog, "geom", "keep"));
     }
 
