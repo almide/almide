@@ -52,21 +52,23 @@ Proof.
   lia.
 Qed.
 
-Theorem guarded_access_in_payload : forall B u len S W,
+Theorem guarded_access_in_payload : forall B u len S W a,
   0 < S -> 0 < W -> W <= S ->
   0 <= B -> 0 <= len -> B + PAYLOAD + len <= M32 ->
   0 <= u -> u < len / S ->
-  let a := wrap32 (B + wrap32 u * S) in
+  a = wrap32 (B + wrap32 u * S) ->
   a = B + u * S /\
   B + PAYLOAD <= a + PAYLOAD /\
   a + PAYLOAD + W <= B + PAYLOAD + len.
 Proof.
-  unfold PAYLOAD, M32, wrap32. intros B u len S W HS HW HWS HB Hlen Hfit Hu Hlt a.
+  intros B u len S W a HS HW HWS HB Hlen Hfit Hu Hlt Ha0.
+  unfold PAYLOAD, M32 in *. unfold wrap32, M32 in Ha0.
   pose proof (slot_below_len u len S HS Hu Hlt) as Hs.
   assert (Hus : u <= S * u) by nia.
   assert (Hu32 : u mod 4294967296 = u) by (apply Z.mod_small; lia).
+  rewrite Hu32 in Ha0.
   assert (Ha : a = B + u * S).
-  { subst a. unfold M32. rewrite Hu32. apply Z.mod_small. nia. }
+  { rewrite Ha0. apply Z.mod_small. nia. }
   rewrite Ha. repeat split; nia.
 Qed.
 

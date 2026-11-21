@@ -22,7 +22,7 @@ jobs:
       # first run here builds the toolchain once (about an hour) and saves it.
       - name: Restore opam root (OCaml + Rocq)
         id: opam-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
@@ -33,6 +33,13 @@ jobs:
           opam switch create "${OCAML_VERSION}" -y
           eval "$(opam env)"
           opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
+      # Saved before the compile, so a proof that fails does not throw the toolchain away.
+      - name: Save opam root
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
       - name: Compile
         working-directory: proofs
         run: |
