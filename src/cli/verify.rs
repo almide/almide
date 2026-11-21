@@ -300,43 +300,48 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// `--mir`: the MIR lowering's witnesses (format version 1). No shipped
-/// wasm byte comes from MIR lowering since #2761, so this certifies the MIR,
-/// not a build; it stays because proofs/coverage.sh drives the MIR
-/// certificate producers (`certificate*.rs`, `pipeline_witnesses.rs`)
-/// through it, and their coverage floor is a ratchet.
+/// `--mir`: the certificates of the MIR the native route ships (#4909), in
+/// that route's own family. The program goes through the same frontend and
+/// the same v1 render `almide build` takes (`try_compile_pending`,
+/// `render_v1_native_certified`), and the bundle holds what that render
+/// returns for the functions it renders from (native-calls with its runtime
+/// blocks, the bounds witnesses). No wasm byte comes from MIR since #2761;
+/// the wasm route's structural leg is certified by plain `almide verify`. A
+/// program the native render walls is uncertified: the bundle names the wall
+/// and holds no witness, and nothing falls back to another producer.
 fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
-    let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
-    let modules: Vec<(String, almide_lang::ast::Program, bool)> =
-        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
-    let allow = manifest_allow(file);
-    let w = almide_mir::pipeline::program_witnesses(&source_text, &modules, allow.as_deref()).map_err(|e| {
-        err(&format!("error: {file} cannot be certified — it does not lower as a whole program: {e}"));
-        1
-    })?;
+    let opts = crate::codegen::CodegenOptions { repr_c: false, allow_unverified: false, trace: false, meter_in_codegen: false };
+    let (mut pending, _metered, _outside) = crate::try_compile_pending(file, false, &opts).map_err(|_| 1)?;
+    let (_callbacks, _source, rendered) = super::render_v1_native_certified(&mut pending);
     let mut text = format!(
-        "almide-certificate-bundle 1\nproducer almide {} (MIR witnesses)\nsource {}\n",
+        "almide-certificate-bundle 1\nproducer almide {} (native MIR certificates)\nsource {}\n",
         one_line(env!("ALMIDE_VERSION_LINE")),
         one_line(file)
     );
-    let mut record = |property: &str, function: &str, bytes: &str| {
-        text.push_str(&format!("witness {property} {} {}\n{bytes}\n", bytes.len(), one_line(function)));
+    let wall = match rendered {
+        Ok((_, certs)) => {
+            for (property, function, bytes) in certs {
+                text.push_str(&format!("witness {property} {} {}\n{bytes}\n", bytes.len(), one_line(&function)));
+            }
+            None
+        }
+        Err(e) => {
+            let wall = one_line(&e.to_string());
+            text.push_str(&format!("uncertified (program) {wall}\n"));
+            Some(wall)
+        }
     };
-    for f in &w.functions {
-        record("ownership", &f.name, &f.ownership);
-        record("names", &f.name, &f.names);
-        record("caps", &f.name, &f.caps);
-    }
-    if let Some(modes) = &w.call_modes {
-        record("call-modes", "(program)", modes);
-    }
-    for (function, reason) in &w.walled {
-        text.push_str(&format!("uncertified {} {}\n", one_line(function), one_line(reason)));
-    }
     std::fs::write(out, text).map_err(|e| {
         err(&format!("error: cannot write the certificate bundle {}: {e}", out.display()));
         1
-    })
+    })?;
+    match wall {
+        Some(wall) => {
+            err(&format!("error: {file} is uncertified — the native route walls it: {wall}"));
+            Err(1)
+        }
+        None => Ok(()),
+    }
 }
 
 /// The `<file.almd>` form's options; `None` when the arguments are not that
