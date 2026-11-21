@@ -286,10 +286,19 @@ impl<T> AlmideList<T> {
         self.truncate(0);
     }
 
+    /// Appends clones of `xs`. The length is counted in a local and written back once (and on a panicking `clone`,
+    /// for the elements written so far), so the copy loop does not reload the header per element.
     pub fn extend_from_slice(&mut self, xs: &[T]) where T: Clone {
+        if xs.is_empty() {
+            return;
+        }
         self.reserve_unique(xs.len());
+        let data = self.data();
+        let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
         for x in xs {
-            self.push(x.clone());
+            // SAFETY: the block is unique with room for `xs.len()` more elements; slot `set.len` is uninitialised.
+            unsafe { data.add(set.len).write(x.clone()) };
+            set.len += 1;
         }
     }
 
@@ -667,10 +676,40 @@ impl<T: Clone> Drop for AlmideListIntoIter<T> {
     }
 }
 
+/// The length of a unique heap block being filled, counted in a local and written back when dropped (also when a
+/// `clone` or an iterator panics, for the elements written so far).
+struct AlmideListSetLen {
+    block: NonNull<AlmideListHeader>,
+    len: usize,
+}
+
+impl Drop for AlmideListSetLen {
+    fn drop(&mut self) {
+        // SAFETY: the block is the unique heap block being filled; `len` counts its initialised elements.
+        unsafe { (*self.block.as_ptr()).len = self.len };
+    }
+}
+
 impl<T: Clone> Extend<T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, it: I) {
-        let it = it.into_iter();
-        self.reserve_unique(it.size_hint().0);
+        let mut it = it.into_iter();
+        let hint = it.size_hint().0;
+        // The reserved room fills with the length in a local; anything past it goes through `push`.
+        if hint > 0 {
+            self.reserve_unique(hint);
+            let data = self.data();
+            let cap = self.capacity();
+            let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
+            while set.len < cap {
+                let x = match it.next() {
+                    Some(x) => x,
+                    None => return,
+                };
+                // SAFETY: the block is unique (after `reserve_unique`) and slot `set.len < cap` is uninitialised.
+                unsafe { data.add(set.len).write(x) };
+                set.len += 1;
+            }
+        }
         for x in it {
             self.push(x);
         }
@@ -679,9 +718,7 @@ impl<T: Clone> Extend<T> for AlmideList<T> {
 
 impl<'a, T: Clone + 'a> Extend<&'a T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, it: I) {
-        for x in it {
-            self.push(x.clone());
-        }
+        self.extend(it.into_iter().cloned());
     }
 }
 
@@ -758,9 +795,7 @@ impl<T: Clone> std::iter::FromIterator<T> for AlmideList<T> {
     fn from_iter<I: IntoIterator<Item = T>>(it: I) -> Self {
         let it = it.into_iter();
         let mut out = AlmideList::with_capacity(it.size_hint().0);
-        for x in it {
-            out.push(x);
-        }
+        out.extend(it);
         out
     }
 }

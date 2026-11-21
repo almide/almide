@@ -533,3 +533,44 @@ fn a_map_over_a_unique_block_rewrites_it_in_place_and_unwinds_cleanly() {
     }));
     assert!(r.is_err());
 }
+
+/// `extend` and `extend_from_slice` count the length in a local; a panicking iterator or `clone` must still leave the
+/// list holding exactly the elements written before it (each dropped once, nothing leaked).
+#[test]
+fn a_panic_while_extending_keeps_the_elements_written_so_far() {
+    #[derive(Debug)]
+    struct Bomb(Rc<Cell<usize>>, bool);
+    impl Clone for Bomb {
+        fn clone(&self) -> Self {
+            if self.1 {
+                panic!("clone");
+            }
+            Bomb(self.0.clone(), false)
+        }
+    }
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let drops = Rc::new(Cell::new(0));
+    let src = vec![Bomb(drops.clone(), false), Bomb(drops.clone(), false), Bomb(drops.clone(), true)];
+    let mut a: AlmideList<Bomb> = AlmideList::new();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.extend_from_slice(&src)));
+    assert!(r.is_err());
+    assert_eq!(a.len(), 2);
+    drop(a);
+    assert_eq!(drops.get(), 2);
+
+    let mut b: AlmideList<i64> = AlmideList::with_capacity(8);
+    b.push(1);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        b.extend((2..10).map(|x| if x == 5 { panic!("iter") } else { x }));
+    }));
+    assert!(r.is_err());
+    assert_eq!(&b[..], &[1, 2, 3, 4]);
+    b.extend(5..12);
+    assert_eq!(&b[..], &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    let c: AlmideList<i64> = (0..3).collect();
+    assert_eq!(&c[..], &[0, 1, 2]);
+}
