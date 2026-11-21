@@ -1,0 +1,11 @@
+// Drill: a Result payload read loads 8 bytes past its slot while the fields
+// witness still records the slot — the fields checker accepts, the bytes
+// read outside the 16-byte Result block.
+fn pick(r: Result[Int, String]) -> Int = match r {
+  ok(v) => v,
+  err(_) => 0,
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(pick(ok(3))))
+}
