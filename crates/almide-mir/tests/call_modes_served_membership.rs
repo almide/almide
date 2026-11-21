@@ -1,9 +1,10 @@
 //! #4828: the call-modes witness `almide verify --mir` emits admits an
 //! out-of-program callee (no row) only by membership in what the render
 //! serves. A name the lowering minted that no render serves — here the
-//! unlinked `result.to_string_x` wall a `Result` interpolation lowers to —
-//! gets the out-of-range index the checker rejects, although its spelling
-//! (a `.`) used to admit it. The control interpolates an `Int`, whose callee
+//! `__repr_<Type>` routine a derived `Repr` lowers to, which no product path
+//! generates since the incumbent generators were deleted — gets the
+//! out-of-range index the checker rejects, although its spelling (a leading
+//! `__`) used to admit it. The control interpolates an `Int`, whose callee
 //! the render serves, and gets no out-of-range row.
 
 /// The callee indices of the witness's site rows (`sigs|site;site;...`,
@@ -32,8 +33,9 @@ fn out_of_range_rows(src: &str) -> (usize, String) {
 #[test]
 fn an_unserved_wall_callee_is_rejected_by_the_call_modes_witness() {
     let (rows, modes) = out_of_range_rows(
-        "fn show(r: Result[Int, String]) -> String = \"${r}\"\n\
-         effect fn main() -> Unit = println(show(ok(1)))\n",
+        "type Kind: Eq, Repr = | Hot | Cold\n\
+         fn show(k: Kind) -> String = k.repr()\n\
+         effect fn main() -> Unit = println(show(Hot))\n",
     );
     assert!(rows > 0, "the unserved wall callee must get the out-of-range row: `{modes}`");
 }
