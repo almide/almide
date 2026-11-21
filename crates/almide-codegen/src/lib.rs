@@ -855,6 +855,12 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             // (#1829): union in the modules the user code's IDENTIFIERS name,
             // never its literals (#3486) — `rust_idents::referenced_runtime_modules`.
             needed.extend(rust_idents::referenced_runtime_modules(&user_code));
+            // A call a `[permissions] fs` guard wraps (a unix socket path, a
+            // region's directory) needs the scope's items, which live in the
+            // fs runtime: without it a scoped build does not compile.
+            if crate::fs_scope::FsScope::applies_to(&user_code) {
+                needed.insert("fs");
+            }
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
