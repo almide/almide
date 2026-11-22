@@ -337,16 +337,49 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// The number right after `key` in `line`.
+fn number_after(line: &str, key: &str) -> u128 {
+    let at = line.find(key).unwrap_or_else(|| panic!("no `{key}` in {line}")) + key.len();
+    line[at..].split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse().ok()).unwrap_or_else(|| panic!("no number after `{key}` in {line}"))
+}
+
+/// The break-even estimate for an 8-element offer (crates/almide-wasm-run
+/// host_fan.rs `decide`, whose unit tests pin the verdict on fixed costs):
+/// at or below it, no worker count saves more than the offer costs.
+const EIGHT_ELEMENT_BREAK_EVEN_NS: u128 = 8_333;
+
 #[test]
 fn the_cost_model_keeps_a_cheap_chunk_map_sequential() {
-    // ~10 iterations per element: far below the measured break-even. The
-    // site's first offer goes parallel (no measurement yet); the next two
-    // know better.
+    // ~10 iterations per element: far below the break-even. The site's
+    // first offer goes parallel (no measurement yet); each later offer is
+    // planned from what the one before it MEASURED. What a runner measures
+    // depends on the runner (a cold worker on a loaded shared runner read
+    // 14_133 ns per element, #XXXX), so the verdict is checked against the
+    // estimate the host actually planned from, never against a speed.
     let route = route_by_cost_model(COST_SRC, &["10"]);
-    let lines: Vec<&str> = route.lines().filter(|l| l.contains("__fan_site_0: served")).collect();
-    assert_eq!(lines.len(), 3, "{route}");
-    assert!(lines[0].contains("separate instances (8 elements"), "{route}");
-    assert!(lines[1..].iter().all(|l| l.contains("the cost model kept it sequential (8 elements)")), "{route}");
+    let site: Vec<&str> = route.lines().filter(|l| l.contains("__fan_site_0: ")).collect();
+    let planned: Vec<&str> = site.iter().copied().filter(|l| l.contains(": planned ")).collect();
+    let measured: Vec<u128> = site.iter().filter(|l| l.contains(" measured ")).map(|l| number_after(l, " measured ")).collect();
+    let served: Vec<&str> = site.iter().copied().filter(|l| l.contains(": served")).collect();
+    assert_eq!((planned.len(), measured.len(), served.len()), (3, 3, 3), "{route}");
+    assert!(planned[0].contains("with no estimate"), "{route}");
+    assert!(served[0].contains("separate instances (8 elements"), "{route}");
+    for k in 1..3 {
+        // the history: offer k is planned from offer k-1's measurement
+        let estimate = number_after(planned[k], " from an estimate of ");
+        assert_eq!(estimate, measured[k - 1], "offer {k}\n{route}");
+        // the route taken is the route planned
+        let workers = number_after(planned[k], ": planned ");
+        if workers < 2 {
+            assert!(served[k].contains("the cost model kept it sequential (8 elements)"), "offer {k}\n{route}");
+        } else {
+            assert!(served[k].contains(&format!("separate instances (8 elements, {workers} workers)")), "offer {k}\n{route}");
+        }
+        // a cheap estimate keeps the offer sequential, whatever the runner
+        if estimate <= EIGHT_ELEMENT_BREAK_EVEN_NS {
+            assert_eq!(workers, 1, "offer {k}: estimate {estimate} ns is below the break-even\n{route}");
+        }
+    }
 }
 
 #[test]
