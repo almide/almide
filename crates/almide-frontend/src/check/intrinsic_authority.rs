@@ -40,6 +40,8 @@
 //! already controls the build, and a dependency cannot pass flags.
 use super::{Checker, err};
 
+const HINT_INTRINSIC: &str = "intrinsics live in the stdlib; wrap in an effect fn: call the stdlib module that owns the operation (fs, http, process, ...) from an `effect fn` of your own, so `--profile critical` sees the capability";
+
 static STDLIB_AUTHORITY_DIRS: std::sync::RwLock<Vec<std::path::PathBuf>> = std::sync::RwLock::new(Vec::new());
 
 /// Grant stdlib authority to every source under `dir` for the rest of this
@@ -157,7 +159,7 @@ impl Checker {
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
         let Some(attr) = attrs
             .iter()
-            .find(|a| matches!(a.name.as_str(), "intrinsic" | "wasm_intrinsic" | "prim_op"))
+            .find(|a| matches!(a.name.as_str(), "intrinsic" | "wasm_intrinsic" | "prim_op" | "sized_by"))
         else {
             return;
         };
@@ -166,7 +168,14 @@ impl Checker {
         }
         let mut diagnostic = err(
             format!("@{} on fn '{}' outside the stdlib", attr.name, fn_name),
-            "intrinsics live in the stdlib; wrap in an effect fn: call the stdlib module that owns the operation (fs, http, process, ...) from an `effect fn` of your own, so `--profile critical` sees the capability",
+            if attr.name.as_str() == "sized_by" {
+                "`@sized_by` is the stdlib's declaration of which parameters bound a result's size, read by the \
+                 @bounded shape rule (E075); a declaration of your own would be an unchecked claim. Remove it: a \
+                 @bounded fn may call yours only when yours is @bounded too, and its body is then held to the same rules"
+                    .to_string()
+            } else {
+                HINT_INTRINSIC.to_string()
+            },
             format!("fn {fn_name}"),
         )
         .with_code("E085");

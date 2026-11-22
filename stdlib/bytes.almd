@@ -136,6 +136,7 @@ fn index_of(b: Bytes, needle: Bytes) -> Int? = _
 
 /// Copy with x's low byte at i, clamped to 0..len.
 @intrinsic("almide_rt_bytes_insert")
+@sized_by(b)
 fn insert(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// True when b holds no bytes.
@@ -160,10 +161,12 @@ fn zeros(n: Int) -> Bytes = _
 
 /// Left-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_left")
+@sized_by(b, n)
 fn pad_start(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
 /// Right-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_right")
+@sized_by(b, n)
 fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
 /// Appends x's low 8 bits in place.
@@ -368,10 +371,12 @@ fn __read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// Copy without the byte at pos; as-is if out of range.
 @intrinsic("almide_rt_bytes_remove_at")
+@sized_by(b)
 fn remove_at(b: Bytes, i: Int) -> Bytes = _
 
 /// b concatenated n times; empty if n <= 0.
 @intrinsic("almide_rt_bytes_repeat")
+@sized_by(b, n)
 fn repeat(b: Bytes, n: Int) -> Bytes = _
 
 /// Copy with the byte order reversed.
@@ -381,6 +386,7 @@ fn reverse(b: Bytes) -> Bytes = _
 /// Copy with byte i set to x; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
 @reuse(b)
+@sized_by(b)
 fn set(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.
@@ -449,6 +455,7 @@ fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
 /// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
+@sized_by(b)
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
 /// Pieces between sep matches; [b] for an empty sep.
@@ -585,6 +592,7 @@ fn next_u16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_le(b, pos) {
 }
 
 /// count u16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_u16_le_array(b, pos, count))
   else none
@@ -606,6 +614,7 @@ fn next_u16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_be(b, pos) {
 }
 
 /// count u16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_u16_be_array(b, pos, count))
   else none
@@ -627,6 +636,7 @@ fn next_i16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_le(b, pos) {
 }
 
 /// count i16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_i16_le_array(b, pos, count))
   else none
@@ -648,6 +658,7 @@ fn next_i16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_be(b, pos) {
 }
 
 /// count i16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_i16_be_array(b, pos, count))
   else none
@@ -669,6 +680,7 @@ fn next_u32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_le(b, pos) {
 }
 
 /// count u32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_u32_le_array(b, pos, count))
   else none
@@ -690,6 +702,7 @@ fn next_u32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_be(b, pos) {
 }
 
 /// count u32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_u32_be_array(b, pos, count))
   else none
@@ -711,6 +724,7 @@ fn next_i32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_le(b, pos) {
 }
 
 /// count i32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_i32_le_array(b, pos, count))
   else none
@@ -732,6 +746,7 @@ fn next_i32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_be(b, pos) {
 }
 
 /// count i32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_i32_be_array(b, pos, count))
   else none
@@ -753,6 +768,7 @@ fn next_i64_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_le(b, pos) {
 }
 
 /// count i64 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_i64_le_array(b, pos, count))
   else none
@@ -774,6 +790,7 @@ fn next_i64_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_be(b, pos) {
 }
 
 /// count i64 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_i64_be_array(b, pos, count))
   else none
@@ -795,6 +812,7 @@ fn next_f32_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_le(b, pos) {
 }
 
 /// count f32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_f32_le_array(b, pos, count))
   else none
@@ -816,6 +834,7 @@ fn next_f32_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_be(b, pos) {
 }
 
 /// count f32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_f32_be_array(b, pos, count))
   else none
@@ -837,6 +856,7 @@ fn next_f64_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_le(b, pos) {
 }
 
 /// count f64 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_f64_le_array(b, pos, count))
   else none
@@ -858,6 +878,7 @@ fn next_f64_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_be(b, pos) {
 }
 
 /// count f64 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_f64_be_array(b, pos, count))
   else none
@@ -915,6 +936,7 @@ fn next_f16_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_le(b, pos) {
 }
 
 /// count f16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_f16_le_array(b, pos, count))
   else none
@@ -930,6 +952,7 @@ fn next_f16_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_be(b, pos) {
 }
 
 /// count f16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 2) then some(list.range(0, count) |> list.map((i) => f16_be_at(b, pos + 2 * i)))
   else none
@@ -952,6 +975,7 @@ fn append_f16_be(mut b: Bytes, x: Float) -> Unit = bytes.append_u16_be(b, __f16_
 
 // ── Cursor, buffer and sequence additions (R-bytes-05/08/13/20/22/28) ──
 /// (the n bytes at pos, pos + n); (none, pos) unless they fit or if n < 0.
+@sized_by(b)
 fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
   let (next, v) = bytes.__take_at(b, pos, n)
   (v, next)
@@ -966,6 +990,7 @@ fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
 fn new() -> Bytes = bytes.zeros(0)
 
 /// n-byte pieces in order, the last may be short; n <= 0 aborts.
+@sized_by(b)
 fn chunk(b: Bytes, n: Int) -> List[Bytes] = if n <= 0 then panic("chunk size must be positive")
 else bytes.__chunks(b, n)
 
@@ -982,12 +1007,15 @@ fn pop(mut b: Bytes) -> Int? = {
 // A negative count is 0 (#4147), as in list.take / string.take: these used to
 // abort on n < 0 while the list and string spellings answered.
 /// The first n bytes; all of b past its length; empty if n < 0.
+@sized_by(b)
 fn take(b: Bytes, n: Int) -> Bytes = bytes.slice(b, 0, int.max(n, 0))
 
 /// b without its first n bytes; empty past its length; all of b if n < 0.
+@sized_by(b)
 fn drop(b: Bytes, n: Int) -> Bytes = bytes.slice(b, int.max(n, 0), bytes.len(b))
 
 /// The last n bytes; all of b past its length; empty if n < 0.
+@sized_by(b)
 fn take_end(b: Bytes, n: Int) -> Bytes = {
   let k = int.min(int.max(n, 0), bytes.len(b))
   bytes.slice(b, bytes.len(b) - k, bytes.len(b))
@@ -996,9 +1024,11 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 /// b without its last n bytes; empty past its length; all of b if n < 0.
 @intrinsic("almide_rt_bytes_drop_end")
 @reuse(b)
+@sized_by(b)
 fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+@sized_by(b)
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
   let k = int.max(n, 0)
   (bytes.slice(b, 0, k), bytes.slice(b, k, bytes.len(b)))
@@ -1175,6 +1205,7 @@ fn take_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.take_w
 fn drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.drop_while(bytes.to_list(b), f))
 
 /// Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+@sized_by(b, n)
 fn window(b: Bytes, n: Int) -> List[Bytes] =
   if n <= 0 then panic("bytes.window: size must be positive, got ${n}")
   else list.window(bytes.to_list(b), n) |> list.map((xs) => bytes.from_list(xs))
@@ -1183,6 +1214,7 @@ fn window(b: Bytes, n: Int) -> List[Bytes] =
 fn dedup(b: Bytes) -> Bytes = bytes.from_list(list.dedup(bytes.to_list(b)))
 
 /// The bytes of b with sep between each pair.
+@sized_by(b)
 fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(bytes.to_list(b), sep))
 
 /// The first occurrence of each byte value, in order.

@@ -385,6 +385,7 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 
 /// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
 /// err on junk or overflow; radix outside 2..36 aborts.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)

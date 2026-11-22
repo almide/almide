@@ -405,6 +405,7 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
 /// err on junk, and on more than 4300 digits in a radix that is not a power of two;
 /// radix outside 2..36 aborts.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
   let codes = bytes.to_list(bytes.from_string(string.trim(s)))
@@ -421,6 +422,7 @@ fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
 /// a radix that is not a power of two when the text would pass 4300 digits.
+@sized_by(x)
 fn to_string_radix(x: BigInt, radix: Int) -> String = {
   check_radix(radix)
   let k = chunk_width(radix, 1, radix)
@@ -504,6 +506,7 @@ fn modulo(a: BigInt, b: BigInt) -> BigInt = {
 }
 
 /// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
+@sized_by(base, exp)
 fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
 else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
 else power(base, exp, small(1))
@@ -532,10 +535,12 @@ fn bxor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg != b.neg, (x, y) =
 fn bnot(x: BigInt) -> BigInt = add(negate(x), small(-1))
 
 /// a shifted left by n bits (a * 2^n); n < 0 aborts.
+@sized_by(a, n)
 fn bshl(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
 else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0, []))
 
 /// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+@sized_by(a)
 fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
 else if a.neg then bnot(shr_magnitude(bnot(a), n))
 else shr_magnitude(a, n)
@@ -1117,6 +1122,7 @@ fn index_of(b: Bytes, needle: Bytes) -> Int? = _
 
 /// Copy with x's low byte at i, clamped to 0..len.
 @intrinsic("almide_rt_bytes_insert")
+@sized_by(b)
 fn insert(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// True when b holds no bytes.
@@ -1141,10 +1147,12 @@ fn zeros(n: Int) -> Bytes = _
 
 /// Left-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_left")
+@sized_by(b, n)
 fn pad_start(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
 /// Right-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_right")
+@sized_by(b, n)
 fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
 /// Appends x's low 8 bits in place.
@@ -1349,10 +1357,12 @@ fn __read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// Copy without the byte at pos; as-is if out of range.
 @intrinsic("almide_rt_bytes_remove_at")
+@sized_by(b)
 fn remove_at(b: Bytes, i: Int) -> Bytes = _
 
 /// b concatenated n times; empty if n <= 0.
 @intrinsic("almide_rt_bytes_repeat")
+@sized_by(b, n)
 fn repeat(b: Bytes, n: Int) -> Bytes = _
 
 /// Copy with the byte order reversed.
@@ -1362,6 +1372,7 @@ fn reverse(b: Bytes) -> Bytes = _
 /// Copy with byte i set to x; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
 @reuse(b)
+@sized_by(b)
 fn set(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.
@@ -1430,6 +1441,7 @@ fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
 /// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
+@sized_by(b)
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
 /// Pieces between sep matches; [b] for an empty sep.
@@ -1566,6 +1578,7 @@ fn next_u16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_le(b, pos) {
 }
 
 /// count u16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_u16_le_array(b, pos, count))
   else none
@@ -1587,6 +1600,7 @@ fn next_u16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_be(b, pos) {
 }
 
 /// count u16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_u16_be_array(b, pos, count))
   else none
@@ -1608,6 +1622,7 @@ fn next_i16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_le(b, pos) {
 }
 
 /// count i16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_i16_le_array(b, pos, count))
   else none
@@ -1629,6 +1644,7 @@ fn next_i16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_be(b, pos) {
 }
 
 /// count i16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_i16_be_array(b, pos, count))
   else none
@@ -1650,6 +1666,7 @@ fn next_u32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_le(b, pos) {
 }
 
 /// count u32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_u32_le_array(b, pos, count))
   else none
@@ -1671,6 +1688,7 @@ fn next_u32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_be(b, pos) {
 }
 
 /// count u32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_u32_be_array(b, pos, count))
   else none
@@ -1692,6 +1710,7 @@ fn next_i32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_le(b, pos) {
 }
 
 /// count i32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_i32_le_array(b, pos, count))
   else none
@@ -1713,6 +1732,7 @@ fn next_i32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_be(b, pos) {
 }
 
 /// count i32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_i32_be_array(b, pos, count))
   else none
@@ -1734,6 +1754,7 @@ fn next_i64_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_le(b, pos) {
 }
 
 /// count i64 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_i64_le_array(b, pos, count))
   else none
@@ -1755,6 +1776,7 @@ fn next_i64_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_be(b, pos) {
 }
 
 /// count i64 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_i64_be_array(b, pos, count))
   else none
@@ -1776,6 +1798,7 @@ fn next_f32_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_le(b, pos) {
 }
 
 /// count f32 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_f32_le_array(b, pos, count))
   else none
@@ -1797,6 +1820,7 @@ fn next_f32_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_be(b, pos) {
 }
 
 /// count f32 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 4) then some(bytes.__read_f32_be_array(b, pos, count))
   else none
@@ -1818,6 +1842,7 @@ fn next_f64_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_le(b, pos) {
 }
 
 /// count f64 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_f64_le_array(b, pos, count))
   else none
@@ -1839,6 +1864,7 @@ fn next_f64_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_be(b, pos) {
 }
 
 /// count f64 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 8) then some(bytes.__read_f64_be_array(b, pos, count))
   else none
@@ -1896,6 +1922,7 @@ fn next_f16_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_le(b, pos) {
 }
 
 /// count f16 LE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 2) then some(bytes.__read_f16_le_array(b, pos, count))
   else none
@@ -1911,6 +1938,7 @@ fn next_f16_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_be(b, pos) {
 }
 
 /// count f16 BE from pos; none unless all fit or if count < 0.
+@sized_by(b)
 fn get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
   if array_fits(b, pos, count, 2) then some(list.range(0, count) |> list.map((i) => f16_be_at(b, pos + 2 * i)))
   else none
@@ -1933,6 +1961,7 @@ fn append_f16_be(mut b: Bytes, x: Float) -> Unit = bytes.append_u16_be(b, __f16_
 
 
 /// (the n bytes at pos, pos + n); (none, pos) unless they fit or if n < 0.
+@sized_by(b)
 fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
   let (next, v) = bytes.__take_at(b, pos, n)
   (v, next)
@@ -1947,6 +1976,7 @@ fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
 fn new() -> Bytes = bytes.zeros(0)
 
 /// n-byte pieces in order, the last may be short; n <= 0 aborts.
+@sized_by(b)
 fn chunk(b: Bytes, n: Int) -> List[Bytes] = if n <= 0 then panic("chunk size must be positive")
 else bytes.__chunks(b, n)
 
@@ -1963,12 +1993,15 @@ fn pop(mut b: Bytes) -> Int? = {
 
 
 /// The first n bytes; all of b past its length; empty if n < 0.
+@sized_by(b)
 fn take(b: Bytes, n: Int) -> Bytes = bytes.slice(b, 0, int.max(n, 0))
 
 /// b without its first n bytes; empty past its length; all of b if n < 0.
+@sized_by(b)
 fn drop(b: Bytes, n: Int) -> Bytes = bytes.slice(b, int.max(n, 0), bytes.len(b))
 
 /// The last n bytes; all of b past its length; empty if n < 0.
+@sized_by(b)
 fn take_end(b: Bytes, n: Int) -> Bytes = {
   let k = int.min(int.max(n, 0), bytes.len(b))
   bytes.slice(b, bytes.len(b) - k, bytes.len(b))
@@ -1977,9 +2010,11 @@ fn take_end(b: Bytes, n: Int) -> Bytes = {
 /// b without its last n bytes; empty past its length; all of b if n < 0.
 @intrinsic("almide_rt_bytes_drop_end")
 @reuse(b)
+@sized_by(b)
 fn drop_end(b: Bytes, n: Int) -> Bytes = _
 
 /// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+@sized_by(b)
 fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
   let k = int.max(n, 0)
   (bytes.slice(b, 0, k), bytes.slice(b, k, bytes.len(b)))
@@ -2156,6 +2191,7 @@ fn take_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.take_w
 fn drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.drop_while(bytes.to_list(b), f))
 
 /// Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+@sized_by(b, n)
 fn window(b: Bytes, n: Int) -> List[Bytes] =
   if n <= 0 then panic("bytes.window: size must be positive, got ${n}")
   else list.window(bytes.to_list(b), n) |> list.map((xs) => bytes.from_list(xs))
@@ -2164,6 +2200,7 @@ fn window(b: Bytes, n: Int) -> List[Bytes] =
 fn dedup(b: Bytes) -> Bytes = bytes.from_list(list.dedup(bytes.to_list(b)))
 
 /// The bytes of b with sep between each pair.
+@sized_by(b)
 fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(bytes.to_list(b), sep))
 
 /// The first occurrence of each byte value, in order.
@@ -4564,6 +4601,7 @@ fn day(ts: Int) -> Int = _
 
 /// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 @intrinsic("almide_rt_datetime_format")
+@sized_by(pattern)
 fn format(ts: Int, pattern: String) -> String = _
 
 /// UTC epoch secs; a field out of range is err, as in parse_iso.
@@ -5086,6 +5124,7 @@ fn last[A](d: Deque[A]) -> A? = match list.last(d.back) {
 }
 
 /// Element at index i from the front, or none when out of range.
+@sized_by(d)
 fn get[A](d: Deque[A], i: Int) -> A? = {
   let nf = list.len(d.front)
   if i < 0 then none
@@ -5131,9 +5170,11 @@ fn find[A](d: Deque[A], f: (A) -> Bool) -> A? = list.find(to_list(d), f)
 fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 
 /// First n elements, as list.take.
+@sized_by(d)
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
+@sized_by(d)
 fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
 
 
@@ -5149,9 +5190,11 @@ fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
 }
 
 /// Last n elements, as list.take_end.
+@sized_by(d)
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
+@sized_by(d)
 fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
   let k = int.max(n, 0)
   let b = list.len(d.back)
@@ -5164,9 +5207,11 @@ fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
 }
 
 /// Indices start..<end, as list.slice.
+@sized_by(d)
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
+@sized_by(d, x)
 fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
 
 
@@ -5181,9 +5226,11 @@ fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.s
 fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
+@sized_by(d, x)
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
 
 /// Copy without slot i, as list.remove_at.
+@sized_by(d)
 fn remove_at[A](d: Deque[A], i: Int) -> Deque[A] = from_list(list.remove_at(to_list(d), i))
 
 
@@ -5262,12 +5309,15 @@ fn take_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.take_
 fn drop_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.drop_while(to_list(d), f))
 
 /// Runs of n from the front, as list.chunk.
+@sized_by(d)
 fn chunk[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.chunk(to_list(d), n) |> list.map((xs) => from_list(xs))
 
 /// All n-long runs, as list.window.
+@sized_by(d, n)
 fn window[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.window(to_list(d), n) |> list.map((xs) => from_list(xs))
 
 /// (first n, the rest), as list.split_at.
+@sized_by(d)
 fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
   let xs = to_list(d)
   (from_list(list.take(xs, n)), from_list(list.drop(xs, n)))
@@ -5844,6 +5894,7 @@ fn is_writable(r: Region) -> Bool = r.writable
 
 /// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
 @memory_unsafe
+@sized_by(r)
 effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("ffi.read: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
@@ -5851,6 +5902,7 @@ effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
 
 /// Writes b at off; err if the region is read-only or b does not fit.
 @memory_unsafe
+@sized_by(r, b)
 effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
   if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
   else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
@@ -5865,6 +5917,7 @@ effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off
 
 /// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 @memory_unsafe
+@sized_by(r)
 fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
   if n < 0 then err("ffi.slice: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
@@ -7785,6 +7838,7 @@ effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, Str
 /// Folds lines starting in bytes [start, end).
 @intrinsic("almide_rt_fs_fold_lines_range")
 @fs_path(path)
+@sized_by(path, init)
 effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 
@@ -7797,6 +7851,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 @fs_path(path)
+@sized_by(path, workers, init)
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
 
@@ -10339,6 +10394,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+@sized_by(body)
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
   status,
   body.__self_to_bytes(),
@@ -10347,10 +10403,12 @@ fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_respons
 
 /// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
+@sized_by(body)
 fn json(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
 @header_write(headers, owned="__http_response_body_headers")
+@sized_by(body, headers)
 fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
   for h in headers {
     __http_response_owned_refusal("http.with_headers", h.0)
@@ -10405,6 +10463,7 @@ fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
 /// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
+@sized_by(resp)
 fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
 /// HTTP status code; 0 if the status line was bad.
@@ -12220,6 +12279,7 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 
 /// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
 /// err on junk or overflow; radix outside 2..36 aborts.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
@@ -12493,6 +12553,7 @@ fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
 fn to_string_radix(x: Int16, radix: Int) -> String = int.to_string_radix(int.__from_int16(x), radix)
 
 /// Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -32768 then err("number too small to fit in target type")
   else if n > 32767 then err("number too large to fit in target type")
@@ -12709,6 +12770,7 @@ fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
 fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.__from_int32(x), radix)
 
 /// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
@@ -12922,6 +12984,7 @@ fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
 fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.__from_int64(x), radix)
 
 /// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
   ok(n) => ok(int.__to_int64(n)),
   err(e) => err(e),
@@ -13124,6 +13187,7 @@ fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
 fn to_string_radix(x: Int8, radix: Int) -> String = int.to_string_radix(int.__from_int8(x), radix)
 
 /// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
@@ -13761,12 +13825,14 @@ effect fn stderr() -> Stderr = Stderr(2)
 /// Up to max bytes from h; empty once h has ended; err if max < 0.
 @ordered
 @category
+@sized_by(h, max)
 effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
   if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
 
 /// Exactly n bytes from h; err if h ends first, naming how many arrived.
 @ordered
 @category
+@sized_by(h, n)
 effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("io.read_exact: negative length ${n}")
   else __read_exact_from(h, n, 0, [])
@@ -15372,16 +15438,19 @@ fn length[A](xs: List[A]) -> Int = _
 
 /// Element at index i, or none when out of range.
 @intrinsic("almide_rt_list_get")
+@sized_by(xs)
 fn get[A](xs: List[A], i: Int) -> A? = _
 
 /// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
+@sized_by(xs, x)
 fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
 @reuse(xs)
+@sized_by(xs)
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
 /// Ascending copy; Floats in IEEE totalOrder.
@@ -15423,11 +15492,13 @@ fn flatten[A](xs: List[List[A]]) -> List[A] = _
 /// First n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take")
 @reuse(xs)
+@sized_by(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
+@sized_by(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Duplicates removed; first occurrences kept.
@@ -15444,6 +15515,7 @@ fn last[A](xs: List[A]) -> A? = _
 
 /// Runs of n, last may be short; n <= 0 aborts.
 @intrinsic("almide_rt_list_chunk")
+@sized_by(xs)
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
@@ -15642,6 +15714,7 @@ fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 @intrinsic("almide_rt_list_update")
 @reuse(xs)
 @consume(xs)
+@sized_by(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
 /// Running fold values, init excluded.
@@ -15667,20 +15740,24 @@ fn range(start: Int, end: Int) -> List[Int] = _
 /// Indices start..<end, each clamped to 0..len; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @reuse(xs)
+@sized_by(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
+@sized_by(xs, x)
 fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
+@sized_by(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
 /// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
+@sized_by(x, n)
 fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
@@ -15695,15 +15772,18 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 /// Last n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take_end")
 @reuse(xs)
+@sized_by(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
+@sized_by(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
+@sized_by(xs, n)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Index of target in xs sorted ascending (list.sort's order), or none.
@@ -15733,6 +15813,7 @@ fn clear[A](mut xs: List[A]) -> Unit = _
 
 
 /// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+@sized_by(xs)
 fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 
@@ -15750,6 +15831,7 @@ fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), l
 
 
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
+@sized_by(seed, n)
 fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
   var out: List[A] = []
   var x = seed
@@ -27781,6 +27863,7 @@ fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 /// f32 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
+@sized_by(b, rows)
 fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
@@ -27797,10 +27880,12 @@ fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
 /// f16 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
+@sized_by(b, rows)
 fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// f64 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
+@sized_by(b, rows)
 fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 
@@ -27810,6 +27895,7 @@ fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 
 /// n slices cols/n wide, remainder dropped; [] if n = 0.
 @intrinsic("almide_rt_matrix_split_cols_even")
+@sized_by(m, n)
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
@@ -27823,6 +27909,7 @@ fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
 /// Rows [start, end), each bound clamped to 0..row count.
 @intrinsic("almide_rt_matrix_slice_rows")
+@sized_by(m)
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
 
 /// Rows at indices; out of range is a zero row.
@@ -29092,6 +29179,7 @@ type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 
 /// A stream connected to host:port; err if refused.
 @category("Net.fetch")
+@sized_by(host)
 effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
 /// False after io.close; a peer close is not seen.
@@ -29115,6 +29203,7 @@ effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp
 
 /// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
+@sized_by(host)
 effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
@@ -29127,12 +29216,14 @@ effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(Tc
 
 
 /// A UDP socket bound to host:port; port 0 lets the OS choose.
+@sized_by(host)
 effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
 
 /// The port sock is bound to.
 effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
 
 /// Sends data as one datagram to host:port.
+@sized_by(data, host)
 effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
   __udp(sock),
   data,
@@ -37789,15 +37880,18 @@ fn ends_with(s: String, suffix: String) -> Bool = _
 
 /// Codepoints [start, end), clamped to s.
 @intrinsic("almide_rt_string_slice")
+@sized_by(s)
 fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 
 
 /// Byte range [start, end); none if bad or mid-char.
 @intrinsic("almide_rt_string_byte_slice")
+@sized_by(s)
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
 /// Left-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_left")
+@sized_by(s, n, fill)
 fn pad_start(s: String, n: Int, fill: String) -> String = _
 
 /// First char uppercased as to_upper does, rest untouched.
@@ -37820,6 +37914,7 @@ fn replace(s: String, from: String, to: String) -> String = _
 
 /// Codepoint at i, or none if out of range.
 @intrinsic("almide_rt_string_char_at")
+@sized_by(s)
 fn get(s: String, i: Int) -> String? = _
 
 /// Split on \n or \r\n; endings dropped.
@@ -37836,6 +37931,7 @@ fn index_of(s: String, needle: String) -> Int? = _
 
 /// s repeated n times; empty for n <= 0.
 @intrinsic("almide_rt_string_repeat")
+@sized_by(s, n)
 fn repeat(s: String, n: Int) -> String = _
 
 /// All ASCII 0-9; false for empty s.
@@ -37877,6 +37973,7 @@ fn __from_codepoint(n: Int) -> String = _
 
 /// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
+@sized_by(s, n, fill)
 fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
@@ -37930,19 +38027,23 @@ fn last(s: String) -> String? = _
 
 /// First n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take")
+@sized_by(s)
 fn take(s: String, n: Int) -> String = _
 
 /// Last n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take_end")
+@sized_by(s)
 fn take_end(s: String, n: Int) -> String = _
 
 /// s minus first n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop")
+@sized_by(s)
 fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
 @reuse(s)
+@sized_by(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 
@@ -38030,6 +38131,7 @@ fn filter(s: String, f: (String) -> Bool) -> String = list.join(
 fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
 
 /// s with x inserted before character i; i outside 0..=len aborts.
+@sized_by(s, x)
 fn insert(s: String, i: Int, x: String) -> String = {
   let n = string.len(s)
   if i < 0 or i > n then panic("string.insert: index ${i} out of range 0..=${n}")
@@ -38037,6 +38139,7 @@ fn insert(s: String, i: Int, x: String) -> String = {
 }
 
 /// s without character i; i outside 0..len aborts.
+@sized_by(s)
 fn remove_at(s: String, i: Int) -> String = {
   let n = string.len(s)
   if i < 0 or i >= n then panic("string.remove_at: index ${i} out of range 0..${n}")
@@ -38203,16 +38306,19 @@ fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(
 )
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
+@sized_by(s)
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
   else list.chunk(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+@sized_by(s, n)
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
   else list.window(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+@sized_by(s)
 fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
@@ -40951,6 +41057,7 @@ fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(
 )
 
 /// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
@@ -41146,6 +41253,7 @@ fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(
 )
 
 /// UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
@@ -41392,6 +41500,7 @@ fn to_string_radix(x: UInt64, radix: Int) -> String =
   }
 
 /// UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
   let parsed = int.parse_radix(s, radix)
   let t = string.trim(s)
@@ -41665,6 +41774,7 @@ fn parse(s: String) -> Result[UInt8, String] =
 fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.__from_uint8(x), radix)
 
 /// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
@@ -41776,6 +41886,7 @@ effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String
 effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+@sized_by(xs)
 effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
   let raw = xs |> list.map((f) => __raw(f))
   let ready = unix.__os_wait(raw, timeout_ms)!
@@ -41795,6 +41906,7 @@ effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
 @ordered
+@sized_by(data)
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
   __raw(fd),
   offset,
@@ -42811,6 +42923,7 @@ fn key(p: Path, name: String) -> Path = match p {
 }
 
 /// p extended by the array index i; a negative i is out of range.
+@sized_by(p)
 fn index(p: Path, i: Int) -> Path = match p {
   Path(steps) => Path(steps + [(false, "", i)])
 }
@@ -44774,6 +44887,7 @@ effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
+@sized_by(b)
 effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
@@ -44782,6 +44896,7 @@ fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
+@sized_by(b)
 fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
@@ -44791,6 +44906,7 @@ effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
+@sized_by(b)
 effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
@@ -44799,6 +44915,7 @@ fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
+@sized_by(b)
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
@@ -44819,6 +44936,7 @@ fn gunzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
+@sized_by(b)
 fn gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 "#;
 pub const SRC_ZLIB_DEFLATE: &str = r#"

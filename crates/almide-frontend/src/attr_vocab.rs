@@ -30,6 +30,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "inline_rust",
     // The bounded profile (ALS §B, E070–E078)
     "bounded",
+    // The parameters a stdlib fn's result size is bounded by: a named Int is
+    // an amplifier, refused under @bounded when it is not a compile-time
+    // constant (E075, check/bounded.rs `stdlib_sized_by`); stdlib-only (E085)
+    "sized_by",
     // Ownership / calling convention
     "mutating",
     "consume",

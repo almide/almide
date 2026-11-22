@@ -78,6 +78,7 @@ fn last[A](d: Deque[A]) -> A? = match list.last(d.back) {
 }
 
 /// Element at index i from the front, or none when out of range.
+@sized_by(d)
 fn get[A](d: Deque[A], i: Int) -> A? = {
   let nf = list.len(d.front)
   if i < 0 then none
@@ -123,9 +124,11 @@ fn find[A](d: Deque[A], f: (A) -> Bool) -> A? = list.find(to_list(d), f)
 fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
 
 /// First n elements, as list.take.
+@sized_by(d)
 fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
 
 /// All but the first n, as list.drop.
+@sized_by(d)
 fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
   // Trimmed on the deque's own lists (#4773): a round trip through a List
   // copied the whole deque, even for a sole owner's rebind. Past the front
@@ -141,9 +144,11 @@ fn drop[A](d: Deque[A], n: Int) -> Deque[A] = {
 }
 
 /// Last n elements, as list.take_end.
+@sized_by(d)
 fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
 
 /// All but the last n, as list.drop_end.
+@sized_by(d)
 fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
   let k = int.max(n, 0)
   let b = list.len(d.back)
@@ -156,9 +161,11 @@ fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = {
 }
 
 /// Indices start..<end, as list.slice.
+@sized_by(d)
 fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
 
 /// Copy with slot i = x, as list.set.
+@sized_by(d, x)
 fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = {
   // Slot i of the front list counts from its end (the front is stored
   // reversed); a negative i lands past it, out of range, as list.set's.
@@ -173,9 +180,11 @@ fn __set_front[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, front: list.s
 fn __set_back[A](d: Deque[A], j: Int, x: A) -> Deque[A] = { ...d, back: list.set(d.back, j, x) }
 
 /// Copy with x at i, as list.insert.
+@sized_by(d, x)
 fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
 
 /// Copy without slot i, as list.remove_at.
+@sized_by(d)
 fn remove_at[A](d: Deque[A], i: Int) -> Deque[A] = from_list(list.remove_at(to_list(d), i))
 
 // ── the sequence algorithms (R-L0-42), front to back ──
@@ -254,12 +263,15 @@ fn take_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.take_
 fn drop_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.drop_while(to_list(d), f))
 
 /// Runs of n from the front, as list.chunk.
+@sized_by(d)
 fn chunk[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.chunk(to_list(d), n) |> list.map((xs) => from_list(xs))
 
 /// All n-long runs, as list.window.
+@sized_by(d, n)
 fn window[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.window(to_list(d), n) |> list.map((xs) => from_list(xs))
 
 /// (first n, the rest), as list.split_at.
+@sized_by(d)
 fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
   let xs = to_list(d)
   (from_list(list.take(xs, n)), from_list(list.drop(xs, n)))

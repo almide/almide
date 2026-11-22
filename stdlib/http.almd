@@ -43,6 +43,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 // no way in but its safe module's type; `typed` takes any other one, as a
 // literal (E117), and refuses a type a safe module owns (`@media_owns`).
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
+@sized_by(body)
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
   status,
   body.__self_to_bytes(),
@@ -51,10 +52,12 @@ fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_respons
 
 /// Reply with Content-Type application/json; body is JSON text.
 @intrinsic("almide_rt_http_json")
+@sized_by(body)
 fn json(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
 @header_write(headers, owned="__http_response_body_headers")
+@sized_by(body, headers)
 fn with_headers[B: Body](status: Int, body: B, headers: List[(String, String)]) -> HttpResponse = {
   for h in headers {
     __http_response_owned_refusal("http.with_headers", h.0)
@@ -109,6 +112,7 @@ fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
 /// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
+@sized_by(resp)
 fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
 /// HTTP status code; 0 if the status line was bad.
