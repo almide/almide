@@ -63,15 +63,62 @@ pub(crate) const UNCLASSIFIED_PROPOSALS: WasmFeatures =
 
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
-    let mut v = Validator::new_with_features(WasmFeatures::all().difference(UNCLASSIFIED_PROPOSALS));
+    // Every proposal but the unclassified ones (#4854) and the threads ones:
+    // no check follows an atomic access (a store of a block's count word
+    // among them), so a module that holds one does not validate here and is
+    // not judged.
+    let followed = WasmFeatures::all()
+        - UNCLASSIFIED_PROPOSALS
+        - WasmFeatures::THREADS
+        - WasmFeatures::SHARED_EVERYTHING_THREADS;
+    let mut v = Validator::new_with_features(followed);
     let mut out = Vec::new();
+    let mut memories = 0u32;
     for payload in Parser::new(0).parse_all(bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
+        one_plain_memory(&payload, &mut memories)?;
         if let ValidPayload::Func(func, body) = v.payload(&payload).map_err(|e| e.to_string())? {
             out.push(decode_body(func, body)?);
         }
     }
     Ok(out)
+}
+
+/// The memories `payload` declares or imports, held to one in the module
+/// that is unshared and 32-bit. No check looks at which memory an instruction
+/// names: a count read from one memory bounds nothing in another, and a
+/// shared memory may be written by another thread between a check and its
+/// access. Such a module is not judged.
+fn one_plain_memory(payload: &wasmparser::Payload<'_>, seen: &mut u32) -> Result<(), String> {
+    let mut found = Vec::new();
+    match payload {
+        wasmparser::Payload::MemorySection(r) => {
+            for m in r.clone() {
+                found.push(m.map_err(|e| e.to_string())?);
+            }
+        }
+        wasmparser::Payload::ImportSection(r) => {
+            for i in r.clone().into_imports() {
+                if let wasmparser::TypeRef::Memory(m) = i.map_err(|e| e.to_string())?.ty {
+                    found.push(m);
+                }
+            }
+        }
+        _ => {}
+    }
+    for m in found {
+        *seen += 1;
+        if *seen > 1 {
+            return Err("the module has more than one memory: the checks do not follow which memory an instruction names".into());
+        }
+        if m.shared {
+            return Err("the module's memory is shared: another thread may write it between a check and its access".into());
+        }
+        if m.memory64 {
+            return Err("the module's memory is 64-bit: the checks read 32-bit addresses".into());
+        }
+    }
+    Ok(())
 }
 
 /// One defined function's body, validated, with its depths and provenance.
@@ -88,6 +135,13 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         let i = ops.len();
         if control(&op) == Control::Refused {
             return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
+        }
+        // A loop typed by a function type may take parameters, and a branch to
+        // it then carries values across its back edge on the operand stack.
+        // The checks follow a value across a back edge only through a local,
+        // a global or memory, so such a loop is not judged.
+        if matches!(op, Op::Loop { blockty: wasmparser::BlockType::FuncType(_) }) {
+            return Err(format!("instruction {i} ({op:?}) is a loop typed by a function type: it may take parameters across its back edge"));
         }
         let pre = fv.operand_stack_height() as usize;
         // No instruction of a frame reaches below the frame's own height: past

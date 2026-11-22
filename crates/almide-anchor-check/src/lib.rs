@@ -50,10 +50,12 @@
 //! in between (a recorded copy-on-write judge keeps the count). The anchor
 //! file's optional `judges` line locates those judge calls.
 //!
-//! TRUSTED: that `alloc <index>` names `$alloc`, that a recorded judge site
-//! calls a copy-on-write judge, that a recorded loop hold calls rc_inc
-//! (#4280), and the representation R (init); the rest of
-//! operands.rs's TRUSTED list.
+//! NAMED ROUTINES (routines.rs): the function a `judges` site calls is held
+//! to the copy-on-write judge's body and the one a `holds` site calls to
+//! `$inc`'s, before any check reads a site as one.
+//!
+//! TRUSTED: that `alloc <index>` names `$alloc`, and the representation R
+//! (init); the rest of operands.rs's and routines.rs's TRUSTED lists.
 
 
 use wasmparser::Operator as Op;
@@ -67,10 +69,12 @@ mod init;
 pub mod lin;
 mod operands;
 pub mod rc;
+mod routines;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
+pub use routines::check_named_routines;
 use anchors::helper_sigs;
 pub use decode::{branch_target, decode, function_imports, store_width, Body};
 pub use fields::check_fields;
@@ -258,6 +262,9 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
+    // The routines the `judges` and `holds` lines name, before any check
+    // reads a site as one (routines.rs).
+    check_named_routines(&bodies, function_imports(wasm), alloc, &judges, &holds)?;
     check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds, imports: function_imports(wasm) }, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {

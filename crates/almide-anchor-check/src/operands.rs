@@ -59,8 +59,11 @@
 //! shared block is never written or resized in place. A write of the list's
 //! variable and a store of its count word still reject.
 //!
-//! TRUSTED: that a recorded judge site calls a copy-on-write judge; that a
-//! recorded hold calls rc_inc and the routines honour the copy-on-write
+//! A recorded judge site and a recorded hold are held to the routines'
+//! bodies by `check` (routines.rs); the checks in this file take them as
+//! given.
+//!
+//! TRUSTED: that the routines honour the copy-on-write
 //! contract (a block with a second holder is never resized in place); that a
 //! call changes a block's count only when it is handed the block (a block
 //! another local aliases is shared, so no routine shrinks it in place); the
@@ -750,17 +753,26 @@ impl<'b, 'a> Flow<'b, 'a> {
         (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x))
     }
 
-    /// Instruction `k` stores the count word of the block `x`.
+    /// Instruction `k` writes memory from an address that reads as the block
+    /// `x` plus a constant, over bytes that include its count word. A store's
+    /// bytes are its width from its static offset; a bulk fill, copy or
+    /// segment init has no static extent, so it is taken to run on from
+    /// where it starts. (An atomic access is not judged at all: decode.rs.)
     fn writes_count_word(&self, k: usize, x: &T) -> bool {
-        let Some((4, off)) = store_width(&self.b.ops[k]) else { return false };
-        // The effective address `base + constant`: the count word is
-        // the block's own address plus LEN, whatever the split.
-        let addr = self.arg(k, 0, FUEL);
-        let (base, eff) = match op(&addr, "i32.add") {
-            Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
-            _ => (&addr, off as i64),
+        let (off, width) = match (store_width(&self.b.ops[k]), &self.b.ops[k]) {
+            (Some((w, off)), _) => (off as i64, Some(i64::from(w))),
+            (None, Op::MemoryFill { .. } | Op::MemoryCopy { .. } | Op::MemoryInit { .. }) => (0, None),
+            _ => return false,
         };
-        eff == LEN_OFF as i64 && !matches!(pl(base), T::Op(..)) && self.mentions(base, x)
+        // The effective address `base + constant`, whatever the split.
+        let addr = self.arg(k, 0, FUEL);
+        let (base, start) = match op(&addr, "i32.add") {
+            Some([b, c]) if cst(c).is_some() => (b, off + cst(c).unwrap_or(0)),
+            _ => (&addr, off),
+        };
+        let word = LEN_OFF as i64;
+        let reaches = start < word + 4 && width.is_none_or(|w| start + w > word);
+        reaches && !matches!(pl(base), T::Op(..)) && self.mentions(base, x)
     }
 }
 

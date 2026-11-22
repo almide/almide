@@ -28,6 +28,8 @@
 //!   the two loads that may write memory — a store, a bulk or atomic op, or
 //!   a call of anything but a function whose own body writes no memory
 //!   (operands.rs `same_since`, `readonly_calls`).
+//!   A variable that is a global is also written by a call of any function
+//!   that may set it (operands/globals.rs).
 //! - a tag read `t R` is `i32.load offset=12`.
 //!
 //! TRUSTED (TRUSTED_BASE.md): that a block's static type is its layout (the
@@ -74,6 +76,9 @@ struct Fx<'b, 'a> {
     bodies: &'b [Body<'a>],
     alloc: u32,
     ro: std::collections::HashSet<u32>,
+    /// The globals each function's call may set: a block held in a global is
+    /// another block after a call that rebinds it (operands/globals.rs).
+    sets: operands::GlobalSets,
     layouts: BTreeMap<(u64, u64), Layout>,
 }
 
@@ -195,7 +200,7 @@ impl<'b, 'a> Fx<'b, 'a> {
         if !(is_variant(r) && n > 1 && i >= 1) {
             return Ok(false);
         }
-        let flow = flows.entry(at.func).or_insert_with(|| Flow::new(b, Default::default()).with_readonly(self.ro.clone()));
+        let flow = flows.entry(at.func).or_insert_with(|| Flow::new(b, Default::default()).with_readonly(self.ro.clone()).with_global_sets(self.sets.clone()));
         operands::case_guarded(flow, at.op, c).map_err(|e| format!("a: the case-{c} field read is not under its tag test: {e}"))?;
         Ok(true)
     }
@@ -257,7 +262,7 @@ pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str,
     if items.len() != groups.len() {
         return Err(format!("fields: {} items, {} anchor groups", items.len(), groups.len()));
     }
-    let fx = Fx { bodies, alloc, ro: operands::readonly_calls(bodies, imports), layouts: read_layouts(&items)? };
+    let fx = Fx { bodies, alloc, ro: operands::readonly_calls(bodies, imports), sets: operands::global_sets(bodies, imports), layouts: read_layouts(&items)? };
     let mut flows: Flows<'_, '_> = std::collections::HashMap::new();
     for (k, (item, group)) in items.iter().zip(&groups).enumerate() {
         let t: Vec<&str> = item.split_whitespace().collect();
