@@ -1100,6 +1100,18 @@ mod resource_class_tests {
             resource_limit(Leg::Native, &leg("", WASM_OOM, Some(1))),
             Some(ResourceLimit::Memory)
         );
+        // Control: the same exit with any OTHER `Error:` line is the
+        // program's own failure, so the pair is still reported.
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", "Error: index out of bounds\n", Some(1))),
+            None
+        );
+        assert!(resource_class(
+            &leg("", "Error: index out of bounds\n", Some(1)),
+            &leg("a\n", "", Some(0))
+        )
+        .is_none());
+        assert!(resource_class(&leg("", WASM_OOM, Some(1)), &leg("a\n", "", Some(0))).is_some());
         assert_eq!(
             resource_limit(Leg::Native, &leg("", WASM_STACK, Some(134))),
             None
