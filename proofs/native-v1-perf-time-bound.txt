@@ -15,3 +15,4 @@
 # the declaration no longer describes the program.
 #
 # program<TAB>syscall<TAB>reads per pass<TAB>why it is time-bound
+spec/wasm_cross/datetime_monotonic_ns.almd	clock_gettime	2	its spin runs until datetime.monotonic_ns has advanced 20 ms (bounded by a 5 s datetime.now_ms escape); each pass reads both clocks once
