@@ -18,7 +18,7 @@ env:
   SHARDS: "16"
   # Empty for the whole sample; a comma-separated list of the sample's ids
   # restricts the run to those mutants (a trial of the harness).
-  ONLY_IDS: "m0015,m0026,m0153,m0389,m0398,m0407,m0463,m0000,m0016,m0460,m0458,m0411,m0450,m0177,m0243,m0001"
+  ONLY_IDS: ""
 
 jobs:
   list:
