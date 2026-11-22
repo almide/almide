@@ -833,6 +833,9 @@ enum ResourceLimit {
     Stack,
     /// Address space / linear memory.
     Memory,
+    /// The HOST ran out of memory and its out-of-memory killer took the
+    /// leg ([`super::runner::killed_by_host_oom`], #4587).
+    HostOom,
 }
 
 impl ResourceLimit {
@@ -845,6 +848,12 @@ impl ResourceLimit {
             }
             (Leg::Wasm, ResourceLimit::Memory) => {
                 "wasm32 exhausted its linear memory (the defined out-of-memory abort)"
+            }
+            (Leg::Native, ResourceLimit::HostOom) => {
+                "native was SIGKILLed by the host's out-of-memory killer (oom_kill advanced)"
+            }
+            (Leg::Wasm, ResourceLimit::HostOom) => {
+                "the wasm runtime was SIGKILLed by the host's out-of-memory killer (oom_kill advanced)"
             }
         }
     }
@@ -861,6 +870,7 @@ impl ResourceLimit {
 /// | native | memory | `memory allocation of ` … ` bytes failed` (std's alloc-error handler) | SIGABRT → `None` |
 /// | wasm | stack | `call stack exhausted` (the stock wasmtime trap this oracle runs — C-196's declared residual) | 134 |
 /// | wasm | memory | `Error: out of memory` (the `$oom` primitive, C-197 — never a raw OOB trap) | 1 |
+/// | either | host memory | none — SIGKILL from the wait status while the host's `oom_kill` counter advanced ([`super::runner::killed_by_host_oom`], #4587) | SIGKILL → `None` |
 ///
 /// The exit code is NOT part of the decision: it differs by host and by
 /// whether the abort was a signal, so the marker is the signal and the
@@ -871,6 +881,11 @@ impl ResourceLimit {
 fn resource_limit(leg: Leg, r: &super::runner::ProcResult) -> Option<ResourceLimit> {
     if r.success() || r.timed_out || r.spawn_failed {
         return None;
+    }
+    // The host's out-of-memory kill leaves no stderr marker, so it is the
+    // one row decided from the wait status and the kernel counter instead.
+    if super::runner::killed_by_host_oom(r) {
+        return Some(ResourceLimit::HostOom);
     }
     let stderr = String::from_utf8_lossy(&r.stderr);
     match leg {
@@ -969,7 +984,7 @@ fn resource_class(
 fn contract_of(limit: ResourceLimit) -> &'static str {
     match limit {
         ResourceLimit::Stack => "C-196",
-        ResourceLimit::Memory => "C-197",
+        ResourceLimit::Memory | ResourceLimit::HostOom => "C-197",
     }
 }
 
@@ -1003,6 +1018,8 @@ mod resource_class_tests {
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
             tree: None,
+            signal: None,
+            host_oom_kills: None,
         }
     }
 
@@ -1124,6 +1141,45 @@ mod resource_class_tests {
         assert!(resource_class(&leg("", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_some());
         // The reverse memory direction, now that native's std signature is named.
         assert!(resource_class(&leg("", NATIVE_OOM, None), &leg("a\n", "", Some(0))).is_some());
+    }
+
+    /// A native leg the host's OOM killer took: SIGKILL, no stderr, the
+    /// kernel's oom_kill counter advanced (#4587's 2 GB-cgroup reproduction).
+    fn host_oom_killed(stdout: &str, signal: i32, oom: Option<u64>) -> ProcResult {
+        let mut r = leg(stdout, "", None);
+        r.signal = Some(signal);
+        r.host_oom_kills = oom;
+        r
+    }
+
+    #[test]
+    fn a_host_oom_kill_beside_a_completed_sibling_is_a_skip() {
+        // #4587: wasm completed the C-169 boundary program; native was killed
+        // by the runner's OOM killer before printing. A host resource event.
+        let r = resource_class(&host_oom_killed("", 9, Some(1)), &leg("ok\n", "", Some(0)));
+        assert!(
+            r.as_deref()
+                .is_some_and(|s| s.contains("C-197") && s.contains("out-of-memory killer")),
+            "{r:?}"
+        );
+        // Killed after printing an agreeing prefix: still nothing contradicts.
+        assert!(resource_class(
+            &host_oom_killed("a\n", 9, Some(3)),
+            &leg("a\nb\n", "", Some(0))
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn a_kill_without_oom_evidence_or_a_crash_stays_a_finding() {
+        let done = leg("a\n", "", Some(0));
+        // Controls: the same SIGKILL with the counter unchanged / unreadable.
+        assert!(resource_class(&host_oom_killed("", 9, Some(0)), &done).is_none());
+        assert!(resource_class(&host_oom_killed("", 9, None), &done).is_none());
+        // A real native crash under the same memory pressure.
+        assert!(resource_class(&host_oom_killed("", libc::SIGSEGV, Some(1)), &done).is_none());
+        // An OOM kill that cut an ALREADY-diverged output short.
+        assert!(resource_class(&host_oom_killed("X\n", 9, Some(1)), &done).is_none());
     }
 
     #[test]
@@ -1266,6 +1322,8 @@ mod compare_runs_tests {
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
             tree: None,
+            signal: None,
+            host_oom_kills: None,
         }
     }
 
