@@ -75,7 +75,8 @@ fn novel_every_memory_shape_is_judged_only_when_it_is_one_plain_memory() {
             (r, w) => panic!("{text}: expected {w:?}, got {:?}", r.map(|b| b.len())),
         }
     }
-    assert_eq!((judged, refused), (1, shapes.len() - 1));
+    // One plain memory, declared or imported.
+    assert_eq!((judged, refused), (2, shapes.len() - 2));
 }
 
 /// The `xs[i]` read of check.rs with `write` (of `n` instructions) between

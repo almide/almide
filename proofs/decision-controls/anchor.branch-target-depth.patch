@@ -1,10 +1,9 @@
 # Negative control of anchor.branch-target-depth (proofs/decision-sites.toml): the control table no longer refuses the operators it does not follow, so try_table, throw, br_on_null and call_ref decode as if they did not branch.
 # control_test: crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused
 diff --git a/crates/almide-anchor-check/src/decode.rs b/crates/almide-anchor-check/src/decode.rs
-index 0dae45bb52..06f0a81a45 100644
 --- a/crates/almide-anchor-check/src/decode.rs
 +++ b/crates/almide-anchor-check/src/decode.rs
-@@ -86,7 +86,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
+@@ -133,7 +133,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
          let off = r.original_position();
          let op = r.read().map_err(|e| e.to_string())?;
          let i = ops.len();
@@ -12,4 +11,4 @@ index 0dae45bb52..06f0a81a45 100644
 +        if control(&op) == Control::Refused && false {
              return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
          }
-         let pre = fv.operand_stack_height() as usize;
+         // A loop typed by a function type may take parameters, and a branch to
