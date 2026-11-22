@@ -485,7 +485,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) 
         match wasi_route_refusals(file, super::wasm_compile::wasi_rustc_refusals) {
             Some(rows) => {
                 for (code, text) in &rows {
-                    out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target wasi"))));
+                    out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, *code, text, "--target wasi"))));
                 }
                 clean = rows.is_empty();
             }
@@ -497,7 +497,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) 
             super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false)
         });
         for (code, text) in &refusals {
-            out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target wasm"))));
+            out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, *code, text, "--target wasm"))));
         }
         clean = built.is_ok();
     }
@@ -517,7 +517,7 @@ pub enum CheckTarget {
 
 /// A route refusal's text (`error[EXXX]: message` then its indented lines)
 /// as a JSON-reportable diagnostic.
-fn route_refusal_diagnostic(file: &str, code: &str, text: &str, route: &str) -> diagnostic::Diagnostic {
+fn route_refusal_diagnostic(file: &str, code: &'static str, text: &str, route: &str) -> diagnostic::Diagnostic {
     let mut lines = text.lines();
     let head = lines.next().unwrap_or("").to_string();
     let message = head.split_once("]: ").map_or(head.as_str(), |(_, m)| m).to_string();
