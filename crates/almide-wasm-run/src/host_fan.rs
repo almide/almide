@@ -92,11 +92,20 @@ fn cpu_ns() -> u64 {
 }
 
 /// The worker count for an offer of `n` elements whose site last measured
-/// `per_elem` ns per element (`None` = its first offer): >= 2 = parallel on
-/// that many workers, 1 = stay sequential.
-fn plan(n: usize, per_elem: Option<u128>) -> usize {
+/// `measured` ns per element (`None` = its first offer): >= 2 = parallel on
+/// that many workers, 1 = stay sequential — and the estimate it was planned
+/// from.
+///
+/// `ALMIDE_DBG_FAN_ESTIMATE_NS` (a test hook, read as unset by a locked
+/// release binary) stands in for a site's measurement once it has one, so a
+/// test can pin the verdict on a known cost instead of on how fast its
+/// machine ran the previous offer (#4910). It only replaces the estimate
+/// handed to [`decide`]; the first offer still has none.
+fn plan(n: usize, measured: Option<u128>) -> (usize, Option<u128>) {
     let off = almide_base::env::flag("ALMIDE_FAN_COST_OFF");
-    decide(n, per_elem.filter(|_| !off), worker_count(n))
+    let injected = almide_base::env::var("ALMIDE_DBG_FAN_ESTIMATE_NS").and_then(|v| v.trim().replace('_', "").parse::<u128>().ok());
+    let estimate = measured.map(|m| injected.unwrap_or(m));
+    (decide(n, estimate.filter(|_| !off), worker_count(n)), estimate)
 }
 
 /// The cost model's verdict alone: `per_elem` the estimate (`None` = no
@@ -376,8 +385,8 @@ fn run_all(ctx: &Arc<ParCtx>, req: Request) -> Option<(Vec<i64>, usize)> {
     if n == 0 {
         return Some((out, 0));
     }
-    let estimate = ctx.history.lock().ok().and_then(|h| h.get(&req.site).copied());
-    let workers = plan(n, estimate);
+    let measured = ctx.history.lock().ok().and_then(|h| h.get(&req.site).copied());
+    let (workers, estimate) = plan(n, measured);
     if almide_base::env::flag("ALMIDE_DBG_FAN") {
         match estimate {
             Some(t) => eprintln!("[fan-dbg] {}: planned {workers} workers from an estimate of {t} ns per element", req.site),
