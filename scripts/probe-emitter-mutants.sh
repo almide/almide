@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 OUT="${1:?usage: scripts/probe-emitter-mutants.sh <out-dir> <mutants-dir>}"
 MUT="${2:?}"
-mkdir -p "$OUT/base" "$OUT/run" "$OUT/bin" "$OUT/detail"
+mkdir -p "$OUT/base" "$OUT/work" "$OUT/again" "$OUT/bin" "$OUT/detail"
 OUT="$(cd "$OUT" && pwd)"
 MUT="$(cd "$MUT" && pwd)"
 LIST="$OUT/fixtures.txt"
@@ -88,18 +88,35 @@ no_verifier() {
 no_verifier || exit 1
 echo "verifier beside the compiler or on PATH: none"
 t0=$(date +%s)
-emit_all "$OUT/base" "$LIST"
-behave_all "$OUT/base" "$LIST"
-zero=$(cat "$OUT"/base/*.out | grep -c '^EXIT 0$')
-echo "baseline behaviour: $zero program(s) exit 0, $(cat "$OUT"/base/*.out | grep '^EXIT ' | grep -vc '^EXIT 0$') exit non-zero"
+# A bundle names its artifact by path, so the unmutated compiler and every
+# mutant emit into the same directory (work/); base/ is a copy of what the
+# unmutated compiler left there. Emitting anywhere else makes every bundle
+# differ from the baseline by that path alone.
+emit_all "$OUT/work" "$LIST"
+behave_all "$OUT/work" "$LIST"
+zero=$(cat "$OUT"/work/*.out | grep -c '^EXIT 0$')
+echo "baseline behaviour: $zero program(s) exit 0, $(cat "$OUT"/work/*.out | grep '^EXIT ' | grep -vc '^EXIT 0$') exit non-zero"
 [ "$zero" -ge 800 ] || { echo "too few programs run to completion under the unmutated compiler; the comparison would be empty"; exit 1; }
 bad=0
 while IFS= read -r f; do
   n="$(name_of "$f")"
-  [ "$(cat "$OUT/base/$n.rc")" = 0 ] || { bad=$((bad + 1)); echo "baseline does not emit: $f"; continue; }
-  "$VERIFY" bundle "$OUT/base/$n.bundle" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: proven checkers reject $f"; }
-  "$ANCHORCHECK" "$OUT/base/$n.wasm" "$OUT/base/$n.bundle" "$OUT/base/$n.anchors" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: byte-level check rejects $f"; }
+  [ "$(cat "$OUT/work/$n.rc")" = 0 ] || { bad=$((bad + 1)); echo "baseline does not emit: $f"; continue; }
+  "$VERIFY" bundle "$OUT/work/$n.bundle" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: proven checkers reject $f"; }
+  "$ANCHORCHECK" "$OUT/work/$n.wasm" "$OUT/work/$n.bundle" "$OUT/work/$n.anchors" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: byte-level check rejects $f"; }
 done < "$LIST"
+cp -a "$OUT/work/." "$OUT/base/"
+# The comparison below reads "differs from the baseline" as "the mutant
+# changed it", which holds only if emitting twice gives the same bytes: emit
+# a slice again with the unmutated compiler and require it to be identical.
+head -60 "$LIST" > "$OUT/slice.txt"
+emit_all "$OUT/work" "$OUT/slice.txt"
+same=0
+while IFS= read -r f; do
+  n="$(name_of "$f")"
+  if cmp -s "$OUT/base/$n.wasm" "$OUT/work/$n.wasm" && cmp -s "$OUT/base/$n.bundle" "$OUT/work/$n.bundle" && cmp -s "$OUT/base/$n.anchors" "$OUT/work/$n.anchors"; then same=$((same + 1)); else echo "not reproducible: $f"; fi
+done < "$OUT/slice.txt"
+echo "emission reproducible on $same of $(wc -l < "$OUT/slice.txt") program(s)"
+[ "$same" -eq "$(wc -l < "$OUT/slice.txt")" ] || { echo "the unmutated compiler does not emit the same bytes twice; a difference would not mean a mutant caused it"; exit 1; }
 echo "baseline: $(wc -l < "$LIST") programs in $(( $(date +%s) - t0 )) s, $bad problem(s)"
 [ "$bad" -eq 0 ] || { echo "the unmutated compiler does not pass its own corpus here; stopping"; exit 1; }
 
@@ -109,7 +126,7 @@ printf 'id\tfile\tline\tgenre\tstatus\tprograms\tcompile_fail\twasm_diff\trecord
 
 one_mutant() {
   local id="$1" file="$2" line="$3" genre="$4" name="$5"
-  local d="$OUT/run" t0 status=ok
+  local d="$OUT/work" t0 status=ok
   t0=$(date +%s)
   row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$file" "$line" "$genre" "$@" "$name" >> "$RES"; }
   if ! git apply "$MUT/$id.diff" 2> "$OUT/apply.err"; then
@@ -158,7 +175,7 @@ one_mutant() {
     if [ "$w" -eq 1 ]; then wdiff=$((wdiff + 1)); echo "$f" >> "$OUT/changed.txt"; else rdiff=$((rdiff + 1)); fi
     if ! "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1; then
       prej=$((prej + 1))
-      [ "$fp" != "-" ] || fp="$f: $(grep -m1 -E 'REJECT|rejected|error' "$d/$n.verify" | cut -c1-200 | tr '\t' ' ')"
+      [ "$fp" != "-" ] || fp="$f: $(grep -m1 -E '^REJECT|REJECTED|rejected' "$d/$n.verify" | cut -c1-200 | tr '\t' ' ')"
     fi
     if ! "$ANCHORCHECK" "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1; then
       brej=$((brej + 1))

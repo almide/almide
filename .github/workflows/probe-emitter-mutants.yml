@@ -13,9 +13,9 @@ permissions:
 env:
   # How many mutants are drawn from the tool's listing, by which seed, and
   # over how many shards (the matrix below lists the same shards).
-  SAMPLE_N: "16"
+  SAMPLE_N: "480"
   SAMPLE_SEED: "20261122"
-  SHARDS: "4"
+  SHARDS: "16"
 
 jobs:
   list:
@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
