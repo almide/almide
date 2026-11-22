@@ -426,7 +426,9 @@ pub(crate) enum Commands {
         allow: Vec<String>,
         /// Also decide the wasm build route (#1922): after a clean check, run
         /// the same two-leg routing `build --target wasm` uses and report
-        /// E081 / E082 at check time instead of at build time. Only `wasm`.
+        /// E081 / E082 at check time instead of at build time. `wasi` judges
+        /// the rustc wasm32-wasip1 route `build --target wasi` takes (E081,
+        /// #4913). Only `wasm` or `wasi`.
         #[arg(long)]
         target: Option<String>,
     },

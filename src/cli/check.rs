@@ -211,8 +211,8 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
     ));
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
-    check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, target: CheckTarget) {
+    check_one(file, deny_warnings, timings, stamp, critical, target);
     err(&format!("No errors found"));
 }
 
@@ -227,15 +227,15 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, cr
 /// A failure in any file exits through the same path a single-file check
 /// does, after printing its diagnostics — the files before it have already
 /// reported `ok`, so the reader sees how far the check got.
-pub fn cmd_check_package(files: &[String], deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+pub fn cmd_check_package(files: &[String], deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, target: CheckTarget) {
     for file in files {
-        check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+        check_one(file, deny_warnings, timings, stamp, critical, target);
         err(&format!("{file}: ok"));
     }
     err(&format!("Checked {} files — No errors found", files.len()));
 }
 
-fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, target: CheckTarget) {
     // Arm the accounting BEFORE the first source is read; a phase counter that
     // starts mid-pipeline reports a front end with no lexer.
     if timings {
@@ -309,8 +309,23 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // structural leg, the stock-p1 host-op audit) minus the write: a fn
     // wall is E081, a shape the leg declines is E082, each with its reason. Measured, never
     // declared, so it cannot drift from what the build does.
-    if wasm_target && super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false).is_err() {
+    if target == CheckTarget::Wasm && super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false).is_err() {
         std::process::exit(1);
+    }
+    // #4913: `--target wasi` — the rustc wasm32-wasip1 route's verdict, on
+    // the same checked and linked program `build --target wasi` judges.
+    // The refusals print as they are found; any refusal, or a driver that
+    // refused the program, fails the check.
+    if target == CheckTarget::Wasi {
+        let verdict = wasi_route_refusals(file, |ir, package| {
+            match super::wasm_compile::check_wasi_rustc_availability(ir, package) {
+                Ok(()) => Vec::new(),
+                Err(()) => vec![("E081", String::new())],
+            }
+        });
+        if !verdict.is_some_and(|rows| rows.is_empty()) {
+            std::process::exit(1);
+        }
     }
 
     // After the last front-end work, before the verdict line. Only on the clean
@@ -379,8 +394,8 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
     (program, input, errors)
 }
 
-pub fn cmd_check_json(file: &str, critical: Option<&[String]>, wasm_target: bool) {
-    if !check_json_one(file, critical, wasm_target) {
+pub fn cmd_check_json(file: &str, critical: Option<&[String]>, target: CheckTarget) {
+    if !check_json_one(file, critical, target) {
         // 1 = this file did not check clean, which is what `almide check`
         // without `--json` exits on for the same program. A harness that gates
         // on the status must not get a different answer for asking that the
@@ -394,12 +409,12 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>, wasm_target: bool
 /// diagnostic — each row names its `file`. The exit code is the single-file
 /// form's, aggregated: `1` iff some entry did not check clean, and every
 /// remaining entry is still judged so one bad file does not hide the rest.
-pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>, wasm_target: bool) {
+pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>, target: CheckTarget) {
     let mut all_clean = true;
     for file in files {
         // NOT `&&`: short-circuiting would stop judging at the first bad entry
         // and the package report would lose every diagnostic after it.
-        all_clean &= check_json_one(file, critical, wasm_target);
+        all_clean &= check_json_one(file, critical, target);
     }
     if !all_clean {
         std::process::exit(1);
@@ -416,7 +431,7 @@ pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>, was
 /// consumer this mode exists for — an editor, a CI step, a model's harness —
 /// does the normal thing and gates on the status, so every rejected program
 /// read as accepted while the reason sat unread on stdout.
-fn check_json_one(file: &str, critical: Option<&[String]>, wasm_target: bool) -> bool {
+fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) -> bool {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
         for d in &parse_errors {
@@ -466,24 +481,62 @@ fn check_json_one(file: &str, critical: Option<&[String]>, wasm_target: bool) ->
     }
     // #4857: `--target wasm` — the wasm route's verdict (E081 / E082 / E083),
     // the same pipeline `check --target wasm` runs, reported as JSON rows.
-    if clean && wasm_target {
+    if clean && target == CheckTarget::Wasi {
+        match wasi_route_refusals(file, super::wasm_compile::wasi_rustc_refusals) {
+            Some(rows) => {
+                for (code, text) in &rows {
+                    out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target wasi"))));
+                }
+                clean = rows.is_empty();
+            }
+            None => clean = false,
+        }
+    }
+    if clean && target == CheckTarget::Wasm {
         let (built, refusals) = super::wasm_compile::capturing_route_refusals(|| {
             super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false)
         });
         for (code, text) in &refusals {
-            let mut lines = text.lines();
-            let head = lines.next().unwrap_or("").to_string();
-            let message = head.split_once("]: ").map_or(head.as_str(), |(_, m)| m).to_string();
-            let hint = lines.map(str::trim).collect::<Vec<_>>().join("\n");
-            let mut d = diagnostic::Diagnostic::error(message, hint, "--target wasm".to_string()).with_code(code);
-            d.file = Some(file.to_string());
-            out(&format!("{}", crate::diagnostic_render::to_json(&d)));
+            out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target wasm"))));
         }
         clean = built.is_ok();
     }
     // The same predicate that gates the unused-variable pass IS the verdict:
     // one expression, so the status cannot drift from what was emitted.
     clean
+}
+
+/// The compile target `almide check --target` judges besides the native
+/// one: `wasm` (#1922) or `wasi` (#4913).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CheckTarget {
+    Native,
+    Wasm,
+    Wasi,
+}
+
+/// A route refusal's text (`error[EXXX]: message` then its indented lines)
+/// as a JSON-reportable diagnostic.
+fn route_refusal_diagnostic(file: &str, code: &str, text: &str, route: &str) -> diagnostic::Diagnostic {
+    let mut lines = text.lines();
+    let head = lines.next().unwrap_or("").to_string();
+    let message = head.split_once("]: ").map_or(head.as_str(), |(_, m)| m).to_string();
+    let hint = lines.map(str::trim).collect::<Vec<_>>().join("\n");
+    let mut d = diagnostic::Diagnostic::error(message, hint, route.to_string()).with_code(code);
+    d.file = Some(file.to_string());
+    d
+}
+
+/// #4913: the program `build --target wasi` compiles (checked, lowered and
+/// linked by the native driver), handed to `judge` with the package's own
+/// modules. `None` when the driver refused the program (it printed why).
+fn wasi_route_refusals(
+    file: &str,
+    judge: impl FnOnce(&almide::ir::IrProgram, &std::collections::HashSet<String>) -> Vec<(&'static str, String)>,
+) -> Option<Vec<(&'static str, String)>> {
+    let opts = crate::codegen::CodegenOptions { repr_c: false, allow_unverified: false, trace: false, meter_in_codegen: false };
+    let (pending, _, _) = crate::try_compile_pending(file, false, &opts).ok()?;
+    Some(judge(pending.ir(), &pending.package))
 }
 
 /// `cmd_check_effects`'s `[permissions].allow` enforcement block. Extracted

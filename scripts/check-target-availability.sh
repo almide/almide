@@ -15,7 +15,8 @@
 #   class missing / unknown         → FAIL (schema 3: every row names its
 #                                     closure class — pending-self-host,
 #                                     pending-port, native-only-forever,
-#                                     host-capability)
+#                                     host-capability; a `class-<leg>`
+#                                     override likewise, on a declared leg)
 #   pending-self-host row count     → shrink-only ratchet vs the ceiling
 #   pending-port row count          → shrink-only ratchet vs its ceiling
 #   native-only-forever /
@@ -36,7 +37,9 @@
 #                                     way — never allowed to grow silently)
 #
 # Legs swept here: structural, stock-p1, embedded. The p3-component leg
-# joins with the wasi:http@0.3 port (#1710) — no sweep, no rows yet.
+# joins with the wasi:http@0.3 port (#1710) — no sweep, no rows yet. The
+# rustc-wasip1 leg (`--target wasi`, #4913) has rows but no sweep: each is
+# pinned by tests/wasi_rustc_availability_test.rs.
 # The EMBEDDED sweep EXECUTES probes (slower); CI-only by default is
 # deliberate: locally set AVAIL_EMBEDDED=1 to include it, or =0 in CI to
 # skip it while iterating.
@@ -130,7 +133,16 @@ for block in re.findall(r"\[\[unavailable\]\]\n(?:[a-z0-9_-]+ = .*\n)+", toml):
         print(f"::error::row {fn}: {cls} without an `issue` — a pending row names where it closes")
         fail = 1
     row_legs = re.findall(r'"([a-z0-9-]+)"', re.search(r"legs = \[(.*)\]", block).group(1))
-    shared = re.search(r'^reason = "([^"]*)"$', block, re.M)
+    # #4913: `class-<leg>` overrides `class` on one leg; it names a class of
+    # the vocabulary and a leg the row declares.
+    for leg_name, leg_cls in re.findall(r'^class-([a-z0-9-]+) = "([^"]*)"$', block, re.M):
+        if leg_cls not in CLASSES:
+            print(f"::error::row {fn}: class-{leg_name} {leg_cls!r} is not one of {'/'.join(CLASSES)}")
+            fail = 1
+        if leg_name not in row_legs:
+            print(f"::error::row {fn}: class-{leg_name} names a leg the row does not declare")
+            fail = 1
+    shared =re.search(r'^reason = "([^"]*)"$', block, re.M)
     for leg in row_legs:
         per = re.search(rf'^reason-{leg} = "([^"]*)"$', block, re.M)
         reasons[(fn, leg)] = (per or shared).group(1) if (per or shared) else ""

@@ -41,6 +41,16 @@
 #                 flag (step 1); a udp program needs the network grant
 #                 (`-S inherit-network`, `-S allow-ip-name-lookup` for a
 #                 name).
+#   rustc-wasip1  `almide build --target wasi` (and `wasm32`): the program
+#                 rendered to Rust and compiled by rustc for wasm32-wasip1,
+#                 the native runtime carried whole (#4913). A runtime fn
+#                 std has no wasip1 implementation for aborts there at run
+#                 time, so a declared leg is refused at check time
+#                 (`almide check --target wasi`) and at build time with
+#                 E081. NOT swept yet: its rows are measured by hand (build
+#                 + `wasmtime run`; every process.* and env.* fn was run on
+#                 2026-11-23 and only process.pid aborts) and
+#                 tests/wasi_rustc_availability_test.rs pins each one.
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
@@ -90,6 +100,11 @@
 #                        carries a `justification` sentence; no ceiling, and
 #                        a leg that starts serving is STALE as for every
 #                        class.
+# A row whose legs end differently names the exception per leg:
+# `class-<leg> = "<class>"` overrides `class` on that leg (#4913:
+# process.pid is host-capability on stock-p1 and native-only-forever on
+# rustc-wasip1), and `alt-<leg>` overrides `alt` the way `reason-<leg>`
+# overrides `reason`.
 # A pending row needs an `issue`; a row that says `reason = "pending-self-
 # host"` must be class pending-self-host (the reason tag and the class
 # cannot disagree); a missing or unknown class fails the gate. Moving a
@@ -483,10 +498,13 @@ issue = "#2589"
 
 [[unavailable]]
 fn = "process.pid"
-legs = ["stock-p1"]
+legs = ["stock-p1", "rustc-wasip1"]
 class = "host-capability"
 justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
 reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+class-rustc-wasip1 = "native-only-forever"
+reason-rustc-wasip1 = "a wasm32-wasip1 module has no process id: WASI defines no getpid, so the native runtime's std::process::id aborts the program there (no pids on this platform)"
+alt-rustc-wasip1 = "run it natively (`almide build` / `almide run`), or with `almide run --target wasm`, whose embedded host answers it; drop the call from a program meant for a wasip1 runtime"
 issue = "#2589"
 
 [[unavailable]]
