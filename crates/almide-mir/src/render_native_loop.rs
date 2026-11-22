@@ -565,11 +565,13 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
         {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
+            crate::render_native_addr::alias_field(*dst, *src);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
         Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
+            crate::render_native_addr::alias_field(*dst, *src);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
         // A copy no op reads, only releases (`let snap = b.m` read through
