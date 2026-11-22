@@ -306,6 +306,17 @@ pub(crate) fn field_of(v: ValueId) -> Option<(ValueId, String)> {
     STR_FIELDS.with(|m| m.borrow().get(&v).cloned())
 }
 
+/// `dst` renders as the same reference as the borrowed read `src` (a copy
+/// that stays a reference, `render_native_borrow_read::ref_dups`): it reads
+/// the same field place, so a later take of the field sees it (#4902 — a
+/// push on a field of a `mut` parameter grows the field's own list instead
+/// of copying it whole).
+pub(crate) fn alias_field(dst: ValueId, src: ValueId) {
+    if let Some((base, place)) = field_of(src) {
+        note_field(dst, base, place);
+    }
+}
+
 /// Every borrowed read taken from `place` so far.
 pub(crate) fn reads_of_place(place: &str) -> Vec<ValueId> {
     STR_FIELDS.with(|m| m.borrow().iter().filter(|(_, p)| p.1 == place).map(|(v, _)| *v).collect())
