@@ -31,6 +31,7 @@ use crate::oracle::sandbox::{self, World};
 
 mod aborts;
 mod serve;
+mod sink;
 
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
@@ -100,6 +101,11 @@ pub fn cmd_inspect(args: &[String]) {
     if serve::SERVED.contains(&name.as_str()) {
         return serve::inspect(&mut ctx, &engine, &name, args);
     }
+    // An `@input_sink` takes a user-declared input type the catalogue does
+    // not hold: its probes declare one (`inspect/sink.rs`).
+    if sink::SINKS.contains(&name.as_str()) {
+        return sink::inspect(&mut ctx, &name, args);
+    }
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
@@ -161,6 +167,15 @@ pub fn cmd_inspect(args: &[String]) {
     verdicts.push(("parity", parity(&ctx, &name, args)));
     let per_inst = |f: &dyn Fn(&Target) -> String| -> String {
         match &heap {
+            // Every variable pinned: the one instantiation, labelled with its
+            // bindings (String for a Map key).
+            None if !target.pinned.is_empty() => {
+                let v = f(&target);
+                match v.split_once(": ") {
+                    Some((verdict, body)) => format!("{verdict}: [vars={}] {body}", target.pinned),
+                    None => v,
+                }
+            }
             None => f(&target),
             Some(Ok(h)) => both_labelled(&target.vars, &f(&target), &h.vars, &f(h)),
             Some(Err(e)) => {
@@ -708,12 +723,27 @@ fn wait_capped(
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
     );
-    let err_t = drain(
-        child
-            .stderr
-            .take()
-            .map(|p| Box::new(p) as Box<dyn Read + Send>),
-    );
+    // stderr is read only for a failure's first lines: keep its first MiB and
+    // discard the rest as it streams (io.eprint's probe writes k·16n bytes to
+    // it, and holding them all ran the harness itself out of memory at 30 GB).
+    let err_t = {
+        let pipe = child.stderr.take();
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let mut chunk = [0u8; 65536];
+                while let Ok(got) = p.read(&mut chunk) {
+                    if got == 0 {
+                        break;
+                    }
+                    if buf.len() < (1 << 20) {
+                        buf.extend_from_slice(&chunk[..got]);
+                    }
+                }
+            }
+            buf
+        })
+    };
     let start = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
@@ -919,9 +949,10 @@ fn run_diamond(
     entry: &Path,
     wasm: bool,
 ) -> std::io::Result<std::process::Output> {
-    let world = World::for_program(
+    let world = World::for_program_named(
         &ctx.dir,
         &std::fs::read_to_string(entry).unwrap_or_default(),
+        "diamond-world",
     )
     .map_err(std::io::Error::other)?;
     let mut c = Command::new(&ctx.almide);
@@ -1053,7 +1084,21 @@ fn judge_counted(
         (Leg::Native, calibrate(Leg::Native)?),
         (Leg::Wasm, calibrate(Leg::Wasm)?),
     ];
-    let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
+    // XF_SIZE_STEPS (doublings, default 5) and XF_REPS (median of R runs per
+    // size, default 1) widen a series whose single run fits no class within
+    // the tolerance (coordinator ruling 2026-11-16, fs.glob / fs.walk). The
+    // defaults reproduce the stamped evidence exactly; the tolerance and the
+    // order comparison are unchanged, and the line records both settings.
+    let env_u = |k: &str, d: u64| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|v| *v >= 1)
+            .unwrap_or(d)
+    };
+    let steps = env_u("XF_SIZE_STEPS", 5).max(5);
+    let reps = env_u("XF_REPS", 1);
+    let sizes: Vec<u64> = (0..steps).map(|i| n << i).collect();
     let k_both = ks[0].1.min(ks[1].1);
     for &m in &sizes {
         legs_agree(ctx, &programs(m, k_both).0)
@@ -1061,8 +1106,11 @@ fn judge_counted(
     }
     let mut line = format!(
         "{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}",
-        n << 4
+        n << (steps - 1)
     );
+    if steps != 5 || reps != 1 {
+        line.push_str(&format!(" sizes={steps} median-of={reps}"));
+    }
     let mut worst = 0usize;
     let mut unexplained = false;
     for (leg, k) in ks {
@@ -1073,11 +1121,53 @@ fn judge_counted(
             let (p, b) = marginal(m, k);
             // Which leg, k and size failed is the first thing a timeout's
             // diagnosis needs (value.as_array timed out with none of it).
-            let d = counted_delta(ctx, &p, &b, leg)
-                .map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
-            ys.push(d.instructions);
-            bs.push(d.moved);
-            ts.push(d.wall);
+            let mut runs = Vec::new();
+            for _ in 0..reps {
+                runs.push(
+                    counted_delta(ctx, &p, &b, leg)
+                        .map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?,
+                );
+            }
+            let median = |f: &dyn Fn(&Delta) -> f64| {
+                let mut v: Vec<f64> = runs.iter().map(f).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                v[v.len() / 2]
+            };
+            ys.push(median(&|d| d.instructions));
+            bs.push(median(&|d| d.moved));
+            let mut walls: Vec<_> = runs.iter().map(|d| d.wall).collect();
+            walls.sort();
+            ts.push(walls[walls.len() / 2]);
+        }
+        // XF_SUBTRACT_FIXED=1 (coordinator ruling 2026-11-16): a call whose
+        // cost is one fixed setup (a child's spawn, a first buffer) plus its
+        // order is measured once more at size 0 — the same call, empty
+        // operand, the same k and median — and that constant is taken off
+        // every point before the unchanged fitter and tolerance judge the
+        // marginal. The line records the baseline.
+        if std::env::var("XF_SUBTRACT_FIXED").as_deref() == Ok("1") {
+            let (p, b) = marginal(0, k);
+            let mut runs = Vec::new();
+            for _ in 0..reps {
+                runs.push(
+                    counted_delta(ctx, &p, &b, leg)
+                        .map_err(|e| format!("{label} {} k={k} n=0 (fixed cost): {e}", leg_tag(leg)))?,
+                );
+            }
+            let median = |f: &dyn Fn(&Delta) -> f64| {
+                let mut v: Vec<f64> = runs.iter().map(f).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                v[v.len() / 2]
+            };
+            let (y0, b0) = (median(&|d| d.instructions), median(&|d| d.moved));
+            line.push_str(&format!(
+                " {} fixed(n=0) {:.3e} instr {:.3e}B subtracted;",
+                leg_tag(leg),
+                y0,
+                b0
+            ));
+            ys.iter_mut().for_each(|y| *y -= y0);
+            bs.iter_mut().for_each(|y| *y -= b0);
         }
         let (class, rms) = fit_series(&sizes, &ys, k);
         let (bclass, brms) = fit_series(&sizes, &bs, k);
