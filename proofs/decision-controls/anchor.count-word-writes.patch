@@ -1,0 +1,14 @@
+# Negative control of anchor.count-word-writes (proofs/decision-sites.toml): writes_count_word answers no, so a store, fill or copy over a list's count word between its check and its access is accepted
+# control_test: crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_write_meeting_the_count_word_is_refused_and_no_other
+diff --git a/crates/almide-anchor-check/src/operands.rs b/crates/almide-anchor-check/src/operands.rs
+--- a/crates/almide-anchor-check/src/operands.rs
++++ b/crates/almide-anchor-check/src/operands.rs
+@@ -771,7 +771,7 @@ impl<'b, 'a> Flow<'b, 'a> {
+             _ => (&addr, off),
+         };
+         let word = LEN_OFF as i64;
+-        let reaches = start < word + 4 && width.is_none_or(|w| start + w > word);
++        let reaches = false && start < word + 4 && width.is_none_or(|w| start + w > word);
+         reaches && !matches!(pl(base), T::Op(..)) && self.mentions(base, x)
+     }
+ }
