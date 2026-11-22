@@ -2,16 +2,31 @@ name: Probe — replayed memory bugs against the static checkers
 # A one-off measurement on its own branch. Not a gate.
 on:
   push:
-    branches: [probe/replay-history]
+    branches: [probe/replay-history, probe/replay-both]
 
 permissions:
   contents: read
 
 jobs:
   replay:
-    name: Replay
+    name: Replay ${{ matrix.variant }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - 2133-variant-case-payload-without-share
+          - 2133-variant-case-payload-without-share.record-dropped
+          - 2133-variant-case-payload-without-share.record-moved
+          - 2397-fused-fold-borrowed-result
+          - 2397-fused-fold-borrowed-result.record-dropped
+          - 2397-fused-fold-borrowed-result.record-owned
+          - 2398-list-update-borrowed-result
+          - 2398-list-update-borrowed-result.record-dropped
+          - 2398-list-update-borrowed-result.record-owned
+          - 3538-payload-copy-without-credit
+          - 3538-payload-copy-without-credit.record-kept
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -25,11 +40,12 @@ jobs:
           prefix-key: "trust-spine"
       - name: Replay
         env:
-          ONLY: "2398-list-update-borrowed-result"
+          ONLY: ${{ matrix.variant }}
+          NO_RESTORE: "1"
         run: bash scripts/probe-replay-history.sh "$RUNNER_TEMP/replay"
       - name: Upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: replay-history
+          name: replay-${{ matrix.variant }}
           path: ${{ runner.temp }}/replay

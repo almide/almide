@@ -3,7 +3,13 @@
 # every static checker for its verdict on the module the buggy compiler
 # emits for the bug's own reproduction. Not a gate.
 #
-#   scripts/probe-replay-history.sh <out-dir>
+# A bug is replayed in more than one FORM, one patch each: the share's
+# instruction removed with its record kept, with its record dropped too, or
+# with its record rewritten as the emitter that made the mistake would have
+# written it. A patch `<issue>-<name>[.<form>].patch` runs the reproduction
+# `proofs/fixtures/heap-check/reinject/<issue>-*.almd`.
+#
+#   scripts/probe-replay-history.sh <out-dir>      (ONLY="<patch name> ..." to select)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -22,9 +28,10 @@ verdicts() {
   local f="$1" W="$2"
   mkdir -p "$W"
   if "$T/examples/emit_structural_bundle" "$f" --anchors "$W/a.anchors" > "$W/a.bundle" 2> "$W/producer.err"; then
-    echo "   producer: emitted"
+    echo "   producer: emitted ; wasm sha $(sha256sum < "$W/a.anchors.wasm" | cut -c1-12) ; bundle sha $(sha256sum < "$W/a.bundle" | cut -c1-12) ; anchors sha $(sha256sum < "$W/a.anchors" | cut -c1-12)"
     "$T/almide-verify" bundle "$W/a.bundle" > "$W/verify.out" 2>&1
-    echo "   almide-verify: exit $? ; $(grep -cE '^REJECT' "$W/verify.out") REJECT line(s) ; $(grep -m3 -E '^REJECT' "$W/verify.out" | cut -c1-220 | tr '\n' '|')"
+    echo "   almide-verify: exit $? ; $(grep -cE '^REJECT' "$W/verify.out") REJECT line(s)"
+    grep -m6 -E '^REJECT' "$W/verify.out" | cut -c1-260 | sed 's/^/      /'
     tail -2 "$W/verify.out" | cut -c1-220 | sed 's/^/      /'
     "$T/almide-anchor-check" "$W/a.anchors.wasm" "$W/a.bundle" "$W/a.anchors" > "$W/anchor.out" 2>&1
     echo "   anchor check: exit $? ; $(head -c 400 "$W/anchor.out" | tr '\n' ' ')"
@@ -38,13 +45,14 @@ build || { echo "the unpatched tree does not build"; exit 1; }
 for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-replay/*.patch; do
   name="$(basename "$p" .patch)"
   case " ${ONLY:-$name} " in *" $name "*) ;; *) continue ;; esac
-  repro="proofs/fixtures/heap-check/reinject/$name.almd"
+  issue="${name%%-*}"
+  repro="$(ls proofs/fixtures/heap-check/reinject/"$issue"-*.almd 2>/dev/null | head -1)"
   [ -f "$repro" ] || { echo "== $name: no reproduction"; continue; }
   if ! git apply --check "$p" 2>/dev/null; then
     echo "== $name ($p): the patch no longer applies"
     continue
   fi
-  echo "== $name ($p)"
+  echo "== $name ($p) on $repro"
   echo "  unpatched:"
   verdicts "$repro" "$OUT/$name.base"
   git apply "$p"
@@ -52,9 +60,11 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
     echo "  bug replayed:"
     verdicts "$repro" "$OUT/$name.bug"
     if cmp -s "$OUT/$name.base/run.out" "$OUT/$name.bug/run.out"; then echo "   behaviour: same stdout as unpatched"; else echo "   behaviour: stdout DIFFERS from unpatched"; fi
+    if cmp -s "$OUT/$name.base/a.anchors.wasm" "$OUT/$name.bug/a.anchors.wasm"; then echo "   module: same bytes as unpatched"; else echo "   module: bytes DIFFER from unpatched"; fi
+    if cmp -s "$OUT/$name.base/a.bundle" "$OUT/$name.bug/a.bundle"; then echo "   witness bundle: same as unpatched"; else echo "   witness bundle: DIFFERS from unpatched"; fi
   else
-    echo "  bug replayed: does not build ; $(head -3 "$OUT/$name.build.err" | cut -c1-300 | tr '\n' ' ')"
+    echo "  bug replayed: does not build ; $(grep -m3 -E '^error' "$OUT/$name.build.err" | cut -c1-300 | tr '\n' ' ')"
   fi
   git apply -R "$p"
-  build
+  [ -n "${NO_RESTORE:-}" ] || build
 done

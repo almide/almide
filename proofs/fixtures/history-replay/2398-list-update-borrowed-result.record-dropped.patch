@@ -1,0 +1,15 @@
+diff --git a/crates/almide-wasm/src/list_edit.rs b/crates/almide-wasm/src/list_edit.rs
+index 07b1ea1f4f..867092e3c0 100644
+--- a/crates/almide-wasm/src/list_edit.rs
++++ b/crates/almide-wasm/src/list_edit.rs
+@@ -527,10 +527,6 @@ impl Emitter<'_> {
+         // A fresh body already carries its credit; over-inc would be a leak,
+         // never a dangle. The sibling callback-then-store lowerings take the
+         // same guard (`list_flat.rs`, `collections_set.rs`, `collections_hof.rs`).
+-        if self.rc_droppable(et) && !self.rc_owned_result(body) {
+-            self.rc_inc_top();
+-        }
+-        self.witness_guarded(body, et);
+         self.witness_once_arm();
+         self.witness_once_close();
+         let hv = self.hold_val(et)?;
