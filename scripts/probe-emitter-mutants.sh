@@ -13,6 +13,10 @@
 # The two checkers are built once, before any mutant, and never rebuilt: they
 # are separate crates, and a mutant must not reach its own judges.
 #
+# Per mutant, detail/<id>.rows.tsv holds one row per program the mutant
+# refused or changed (probe-emitter-mutants-rows.py names the columns), and
+# detail/<id>.behave.tsv the programs that were run.
+#
 #   scripts/probe-emitter-mutants.sh <out-dir> <mutants-dir>
 # <mutants-dir> holds index.tsv (id, file, line, genre, name) and <id>.diff.
 set -uo pipefail
@@ -21,21 +25,28 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 OUT="${1:?usage: scripts/probe-emitter-mutants.sh <out-dir> <mutants-dir>}"
 MUT="${2:?}"
-mkdir -p "$OUT/base" "$OUT/work" "$OUT/again" "$OUT/bin" "$OUT/detail"
+mkdir -p "$OUT/base" "$OUT/work" "$OUT/bin" "$OUT/detail"
 OUT="$(cd "$OUT" && pwd)"
 MUT="$(cd "$MUT" && pwd)"
 LIST="$OUT/fixtures.txt"
 grep -v -E '^(#|$)' crates/almide-wasm/tests/golden/witness-fixtures.txt > "$LIST"
 TD="${CARGO_TARGET_DIR:-$ROOT/target}"
+ROWS="$ROOT/scripts/probe-emitter-mutants-rows.py"
 export ALMIDE="$TD/release/almide"
 export PRODUCER="$TD/release/examples/emit_structural_bundle"
 export VERIFY="$OUT/bin/almide-verify"
 export ANCHORCHECK="$OUT/bin/almide-anchor-check"
-# Seconds one compile, one witness emission or one program run may take.
+export BASE="$OUT/base"
+# Seconds one compile, one witness emission, one checker or one program run
+# may take.
 export T_EMIT="${T_EMIT:-60}"
+export T_CHECK="${T_CHECK:-60}"
 export T_RUN="${T_RUN:-30}"
 # Seconds one mutant may take in all, after its build.
 T_MUTANT="${T_MUTANT:-1500}"
+# Of the first 40 programs, how many may time out in the compiler before the
+# mutant is recorded as one that hangs it.
+HANG_OF_40="${HANG_OF_40:-4}"
 
 build() {
   cargo build -q --release --bin almide \
@@ -59,6 +70,35 @@ emit() {
 }
 export -f emit
 
+# ask <almd> <dir>: both checkers on what was emitted there, each one's whole
+# output and exit code kept. The byte-level check also prints its census, so
+# that an acceptance can be read for how much it located.
+ask() {
+  local f="$1" d="$2" n
+  n="$(name_of "$f")"
+  timeout "$T_CHECK" "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1 < /dev/null
+  echo $? > "$d/$n.vrc"
+  timeout "$T_CHECK" "$ANCHORCHECK" --census "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1 < /dev/null
+  echo $? > "$d/$n.arc"
+}
+export -f ask
+
+# judge <almd> <dir>: what a mutant changed for this program (module, bundle
+# without the line naming the module's hash, anchor file), and both checkers'
+# answers where anything changed.
+judge() {
+  local f="$1" d="$2" n w=0 b=0 a=0
+  n="$(name_of "$f")"
+  [ "$(cat "$d/$n.rc" 2>/dev/null)" = 0 ] || return 0
+  cmp -s "$BASE/$n.wasm" "$d/$n.wasm" || w=1
+  cmp -s <(grep -v '^artifact ' "$BASE/$n.bundle") <(grep -v '^artifact ' "$d/$n.bundle") || b=1
+  cmp -s "$BASE/$n.anchors" "$d/$n.anchors" || a=1
+  echo "$w $b $a" > "$d/$n.cmp"
+  [ "$w$b$a" != 000 ] || return 0
+  ask "$f" "$d"
+}
+export -f judge
+
 # behave <almd> <dir>: stdout and exit code of the program on the wasm target.
 # No address-space limit here: the embedded runtime reserves far more than it
 # touches.
@@ -71,6 +111,8 @@ behave() {
 export -f behave
 
 emit_all() { xargs -P 4 -I{} bash -c 'emit "$1" "$2"' _ {} "$1" < "$2"; }
+ask_all() { xargs -P 4 -I{} bash -c 'ask "$1" "$2"' _ {} "$1" < "$2"; }
+judge_all() { xargs -P 4 -I{} bash -c 'judge "$1" "$2"' _ {} "$1" < "$2"; }
 behave_all() { xargs -P 4 -I{} bash -c 'behave "$1" "$2"' _ {} "$1" < "$2"; }
 
 # ---------------------------------------------------------------- baseline
@@ -94,17 +136,21 @@ t0=$(date +%s)
 # differ from the baseline by that path alone.
 emit_all "$OUT/work" "$LIST"
 behave_all "$OUT/work" "$LIST"
-zero=$(cat "$OUT"/work/*.out | grep -c '^EXIT 0$')
-echo "baseline behaviour: $zero program(s) exit 0, $(cat "$OUT"/work/*.out | grep '^EXIT ' | grep -vc '^EXIT 0$') exit non-zero"
+# A program whose output does not end in a newline has its exit line joined
+# to the last output line, so match the line's end, not the whole line.
+zero=$(cat "$OUT"/work/*.out | grep -c 'EXIT 0$')
+echo "baseline behaviour: $zero program(s) exit 0, $(cat "$OUT"/work/*.out | grep -E 'EXIT [0-9]+$' | grep -vc 'EXIT 0$') exit non-zero"
 [ "$zero" -ge 800 ] || { echo "too few programs run to completion under the unmutated compiler; the comparison would be empty"; exit 1; }
+ask_all "$OUT/work" "$LIST"
 bad=0
 while IFS= read -r f; do
   n="$(name_of "$f")"
   [ "$(cat "$OUT/work/$n.rc")" = 0 ] || { bad=$((bad + 1)); echo "baseline does not emit: $f"; continue; }
-  "$VERIFY" bundle "$OUT/work/$n.bundle" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: proven checkers reject $f"; }
-  "$ANCHORCHECK" "$OUT/work/$n.wasm" "$OUT/work/$n.bundle" "$OUT/work/$n.anchors" > /dev/null 2>&1 || { bad=$((bad + 1)); echo "baseline: byte-level check rejects $f"; }
+  [ "$(cat "$OUT/work/$n.vrc")" = 0 ] || { bad=$((bad + 1)); echo "baseline: proven checkers do not certify $f (exit $(cat "$OUT/work/$n.vrc"))"; }
+  [ "$(cat "$OUT/work/$n.arc")" = 0 ] || { bad=$((bad + 1)); echo "baseline: byte-level check does not accept $f (exit $(cat "$OUT/work/$n.arc"))"; }
 done < "$LIST"
 cp -a "$OUT/work/." "$OUT/base/"
+python3 -I "$ROWS" --baseline "$OUT" "$LIST" "$OUT/detail/_baseline.rows.tsv" || { echo "baseline rows could not be written"; exit 1; }
 # The comparison below reads "differs from the baseline" as "the mutant
 # changed it", which holds only if emitting twice gives the same bytes: emit
 # a slice again with the unmutated compiler and require it to be identical.
@@ -122,69 +168,54 @@ echo "baseline: $(wc -l < "$LIST") programs in $(( $(date +%s) - t0 )) s, $bad p
 
 # ---------------------------------------------------------------- mutants
 RES="$OUT/results.tsv"
-printf 'id\tfile\tline\tgenre\tstatus\tprograms\tcompile_fail\twasm_diff\trecord_only_diff\tproven_reject\tbyte_reject\tbehaviour_diff\tbehaviour_run\tseconds\tfirst_compile_fail\tfirst_proven\tfirst_byte\tfirst_behaviour\tname\n' > "$RES"
+printf 'id\tfile\tline\tgenre\tstatus\tprograms\tc_timeout\tc_compiler\tc_producer\twasm_diff\tbundle_only\tanchors_only\tp_reject\tp_incomplete\tp_other\tb_reject\tb_other\tfirst_compile_fail\tfirst_proven\tfirst_byte\tbehaviour_diff\tbehaviour_run\tseconds\tfirst_behaviour\tname\n' > "$RES"
+# What counts.tsv holds for a mutant that was judged: twelve counts, then the
+# first message of the compiler, the proven checkers and the byte-level check.
+NOTHING=$'0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t-\t-\t-'
 
 one_mutant() {
   local id="$1" file="$2" line="$3" genre="$4" name="$5"
   local d="$OUT/work" t0 status=ok
   t0=$(date +%s)
-  row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$file" "$line" "$genre" "$@" "$name" >> "$RES"; }
+  # row <status> <counts and first messages> <behaviour differs> <behaviour run> <first behaviour>
+  row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$file" "$line" "$genre" "$1" "$2" "$3" "$4" "$(( $(date +%s) - t0 ))" "$5" "$name" >> "$RES"; }
   if ! git apply "$MUT/$id.diff" 2> "$OUT/apply.err"; then
-    row no-apply 0 0 0 0 0 0 0 0 0 - - - -
+    row no-apply "$NOTHING" 0 0 -
     return
   fi
   if ! build 2> "$OUT/build.err"; then
     cp "$OUT/build.err" "$OUT/detail/$id.build.err"
-    row no-build 0 0 0 0 0 0 0 0 "$(( $(date +%s) - t0 ))" - - - -
+    row no-build "$NOTHING" 0 0 -
     git apply -R "$MUT/$id.diff"
     return
   fi
-  no_verifier || { row verifier-present 0 0 0 0 0 0 0 0 0 - - - -; git apply -R "$MUT/$id.diff"; return; }
+  no_verifier || { row verifier-present "$NOTHING" 0 0 -; git apply -R "$MUT/$id.diff"; return; }
   rm -rf "$d"; mkdir -p "$d"
   local deadline=$(( $(date +%s) + T_MUTANT ))
   # A mutant that hangs the compiler would take an hour to say so: emit a
-  # first slice, and stop if most of it timed out.
+  # first slice, and stop if enough of it timed out.
   head -40 "$LIST" > "$OUT/slice.txt"
   tail -n +41 "$LIST" > "$OUT/rest.txt"
   emit_all "$d" "$OUT/slice.txt"
   local hung
   hung=$(cat "$d"/*.rc | grep -c -E '^(124|1124)$' || true)
-  if [ "$hung" -ge 20 ]; then
-    row hang 40 "$hung" 0 0 0 0 0 0 "$(( $(date +%s) - t0 ))" - - - -
+  if [ "$hung" -ge "$HANG_OF_40" ]; then
+    row hang $'40\t'"$hung"$'\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t-\t-\t-' 0 0 -
     git apply -R "$MUT/$id.diff"
     return
   fi
   emit_all "$d" "$OUT/rest.txt"
-  local programs=0 cfail=0 wdiff=0 rdiff=0 prej=0 brej=0 bdiff=0 brun=0
-  local fc="-" fp="-" fb="-" ft="-"
-  : > "$OUT/changed.txt"
-  while IFS= read -r f; do
-    local n; n="$(name_of "$f")"
-    programs=$((programs + 1))
-    local rc; rc="$(cat "$d/$n.rc" 2>/dev/null || echo 999)"
-    if [ "$rc" != 0 ]; then
-      cfail=$((cfail + 1))
-      [ "$fc" != "-" ] || fc="$f: rc $rc: $(grep -m1 . "$d/$n.cerr" "$d/$n.perr" 2>/dev/null | head -1 | cut -c1-200 | tr '\t' ' ')"
-      continue
-    fi
-    local w=0 r=0
-    cmp -s "$OUT/base/$n.wasm" "$d/$n.wasm" || w=1
-    cmp -s "$OUT/base/$n.bundle" "$d/$n.bundle" || r=1
-    cmp -s "$OUT/base/$n.anchors" "$d/$n.anchors" || r=1
-    [ "$w" -eq 1 ] || [ "$r" -eq 1 ] || continue
-    if [ "$w" -eq 1 ]; then wdiff=$((wdiff + 1)); echo "$f" >> "$OUT/changed.txt"; else rdiff=$((rdiff + 1)); fi
-    if ! "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1; then
-      prej=$((prej + 1))
-      [ "$fp" != "-" ] || fp="$f: $(grep -m1 -E '^REJECT|REJECTED|rejected' "$d/$n.verify" | cut -c1-200 | tr '\t' ' ')"
-    fi
-    if ! "$ANCHORCHECK" "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1; then
-      brej=$((brej + 1))
-      [ "$fb" != "-" ] || fb="$f: $(grep -m1 -E 'REJECT|error' "$d/$n.anchor" | cut -c1-200 | tr '\t' ' ')"
-    fi
-  done < "$LIST"
+  judge_all "$d" "$LIST"
+  if ! python3 -I "$ROWS" "$OUT" "$LIST" "$OUT/rows.tsv"; then
+    row no-rows "$NOTHING" 0 0 -
+    git apply -R "$MUT/$id.diff"
+    return
+  fi
+  local bdiff=0 brun=0 ft="-" tail_of
   # Behaviour, for the programs whose module changed. Stop counting once
   # three differ: a mutant that hangs every program would otherwise cost
   # T_RUN for each of them.
+  : > "$OUT/behave.tsv"
   if [ -s "$OUT/changed.txt" ]; then
     while [ -s "$OUT/changed.txt" ] && [ "$bdiff" -lt 3 ] && [ "$(date +%s)" -lt "$deadline" ]; do
       head -24 "$OUT/changed.txt" > "$OUT/batch.txt"
@@ -193,17 +224,23 @@ one_mutant() {
       while IFS= read -r f; do
         local n; n="$(name_of "$f")"
         brun=$((brun + 1))
-        if ! cmp -s "$OUT/base/$n.out" "$d/$n.out"; then
+        if cmp -s "$OUT/base/$n.out" "$d/$n.out"; then
+          printf '%s\tsame\t-\n' "$f" >> "$OUT/behave.tsv"
+        else
           bdiff=$((bdiff + 1))
-          [ "$ft" != "-" ] || ft="$f: $(tail -1 "$d/$n.out") | $(head -1 "$d/$n.err" | cut -c1-160 | tr '\t' ' ')"
+          tail_of="$(tail -c 60 "$d/$n.out" | tr '\t\n' '  ') | $(head -1 "$d/$n.err" | cut -c1-160 | tr '\t' ' ')"
+          printf '%s\tdiffers\t%s\n' "$f" "$tail_of" >> "$OUT/behave.tsv"
+          [ "$ft" != "-" ] || ft="$f: $tail_of"
         fi
       done < "$OUT/batch.txt"
     done
     [ ! -s "$OUT/changed.txt" ] || [ "$bdiff" -ge 3 ] || status=behaviour-unfinished
   fi
-  row "$status" "$programs" "$cfail" "$wdiff" "$rdiff" "$prej" "$brej" "$bdiff" "$brun" "$(( $(date +%s) - t0 ))" "$fc" "$fp" "$fb" "$ft"
-  if [ "$wdiff" -gt 0 ] || [ "$rdiff" -gt 0 ] || [ "$cfail" -gt 0 ]; then
-    { echo "== $id $file:$line $genre"; echo "$name"; cat "$MUT/$id.diff"; echo "-- compile: $fc"; echo "-- proven: $fp"; echo "-- byte: $fb"; echo "-- behaviour: $ft"; } > "$OUT/detail/$id.txt"
+  row "$status" "$(cat "$OUT/counts.tsv")" "$bdiff" "$brun" "$ft"
+  if [ "$(wc -l < "$OUT/rows.tsv")" -gt 1 ]; then
+    cp "$OUT/rows.tsv" "$OUT/detail/$id.rows.tsv"
+    [ ! -s "$OUT/behave.tsv" ] || cp "$OUT/behave.tsv" "$OUT/detail/$id.behave.tsv"
+    { echo "== $id $file:$line $genre"; echo "$name"; cat "$MUT/$id.diff"; } > "$OUT/detail/$id.txt"
   fi
   git apply -R "$MUT/$id.diff"
 }
@@ -215,7 +252,7 @@ while IFS=$'\t' read -r id file line genre name; do
     echo "tree not clean after mutant $id; restoring"
     git checkout -q -- crates
   fi
-  tail -1 "$RES" | cut -f1-14
+  tail -1 "$RES" | cut -f1-17
 done < "$MUT/index.tsv"
 echo "== done: $(($(wc -l < "$RES") - 1)) mutant(s)"
 cut -f5 "$RES" | tail -n +2 | sort | uniq -c

@@ -16,6 +16,9 @@ env:
   SAMPLE_N: "480"
   SAMPLE_SEED: "20261122"
   SHARDS: "16"
+  # Empty for the whole sample; a comma-separated list of the sample's ids
+  # restricts the run to those mutants (a trial of the harness).
+  ONLY_IDS: "m0015,m0026,m0153,m0389,m0398,m0407,m0463,m0000,m0016,m0460,m0458,m0411,m0450,m0177,m0243,m0001"
 
 jobs:
   list:
@@ -69,7 +72,7 @@ jobs:
           name: emitter-mutants-list
           path: ${{ runner.temp }}/list
       - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS"
+        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$ONLY_IDS"
       - name: Measure
         run: bash scripts/probe-emitter-mutants.sh "$RUNNER_TEMP/emut" "$RUNNER_TEMP/pick"
       - name: Upload results
