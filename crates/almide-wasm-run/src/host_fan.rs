@@ -96,9 +96,18 @@ fn cpu_ns() -> u64 {
 /// that many workers, 1 = stay sequential.
 fn plan(n: usize, per_elem: Option<u128>) -> usize {
     let off = almide_base::env::flag("ALMIDE_FAN_COST_OFF");
-    let Some(t) = per_elem.filter(|_| !off) else { return worker_count(n) };
+    decide(n, per_elem.filter(|_| !off), worker_count(n))
+}
+
+/// The cost model's verdict alone: `per_elem` the estimate (`None` = no
+/// estimate: every worker), `max` the most workers the offer may use. It
+/// reads no clock and no environment, so its verdict on a given cost is the
+/// same on every machine (tests/wasm_fan_par_test.rs pins the measuring
+/// half; the tests below pin this half).
+fn decide(n: usize, per_elem: Option<u128>, max: usize) -> usize {
+    let Some(t) = per_elem else { return max };
     let mut best = (1usize, 0u128);
-    for w in 2..=worker_count(n) {
+    for w in 2..=max {
         let saved = t.saturating_mul((n - n.div_ceil(w)) as u128);
         let cost = FAN_OFFER_NS + FAN_WORKER_NS * w as u128;
         if saved > cost && saved - cost > best.1 {
@@ -369,6 +378,12 @@ fn run_all(ctx: &Arc<ParCtx>, req: Request) -> Option<(Vec<i64>, usize)> {
     }
     let estimate = ctx.history.lock().ok().and_then(|h| h.get(&req.site).copied());
     let workers = plan(n, estimate);
+    if almide_base::env::flag("ALMIDE_DBG_FAN") {
+        match estimate {
+            Some(t) => eprintln!("[fan-dbg] {}: planned {workers} workers from an estimate of {t} ns per element", req.site),
+            None => eprintln!("[fan-dbg] {}: planned {workers} workers with no estimate", req.site),
+        }
+    }
     // a few blocks per worker, so a worker slowed by a busy core does less
     let block = if workers < 2 { n } else { n.div_ceil(workers * 4).max(1) };
     let deal = Arc::new(Deal {
@@ -660,6 +675,38 @@ mod tests {
 
     fn slots(v: &[i64]) -> Vec<u8> {
         v.iter().flat_map(|x| x.to_le_bytes()).collect()
+    }
+
+    /// #3341 on a FIXED cost: the verdict the cost model reaches from an
+    /// estimate, independent of what the machine running the test measures.
+    /// For 8 elements the break-even is 8_334 ns per element (4 workers:
+    /// 6·t > OFFER + 4·WORKER = 50_000).
+    #[test]
+    fn a_cheap_estimate_keeps_the_offer_sequential_at_every_worker_count() {
+        // the ~10-iteration chunk of tests/wasm_fan_par_test.rs measures
+        // ~2 µs per warm element on a CI runner
+        for max in 1..=64 {
+            for t in [0, 1, 500, 1_803, 2_350, 8_333] {
+                assert_eq!(decide(8, Some(t), max), 1, "t={t} max={max}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_estimate_past_the_break_even_goes_parallel() {
+        assert_eq!(decide(8, Some(8_334), 4), 4);
+        assert_eq!(decide(8, Some(8_334), 2), 1, "2 workers break even only above 10_000");
+        assert_eq!(decide(8, Some(10_001), 2), 2);
+        // a millisecond per element: every worker the offer may use
+        assert_eq!(decide(8, Some(3_000_000), 8), 8);
+        assert_eq!(decide(8, Some(3_000_000), 1), 1, "one worker is sequential");
+    }
+
+    #[test]
+    fn no_estimate_offers_every_worker() {
+        for max in 1..=16 {
+            assert_eq!(decide(8, None, max), max);
+        }
     }
 
     /// A block-form request over Int elements with a Float result:
