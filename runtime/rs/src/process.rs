@@ -156,11 +156,16 @@ pub fn almide_rt_process___os_output(cmd: &str, args: &[AlmideString], dir: &str
 
 /// The core's signal syscall (#4125): kill(2) itself (sys.rs), never a `kill`
 /// looked up on PATH; Windows has none and uses the core's System32 tools.
+/// Any other target (wasm32-wasip1, #4907) has no signals at all: the call
+/// fails with ENOSYS as WASI numbers it (52) instead of leaving the function
+/// without a body for that target.
 fn almide_process_signal(pid: i32, sig: i32) -> Result<(), i32> {
     #[cfg(unix)]
     { return almide_rt_sys_ffi::send_signal(pid, sig); }
     #[cfg(windows)]
     { return almide_proc_signal_windows(pid, sig); }
+    #[cfg(not(any(unix, windows)))]
+    { let _ = (pid, sig); return Err(52); }
 }
 
 /// `process.run` (R-process-07): attached to this terminal.
