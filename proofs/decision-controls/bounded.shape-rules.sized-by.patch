@@ -1,0 +1,19 @@
+# Negative control of bounded.shape-rules (proofs/decision-sites.toml), the @sized_by half (owner ruling 2026-11-22): a declared amplifier is read as bounded and an undeclared heap-returning stdlib call with a heap and a run-time Int input is admitted, so string.window / list.window / bytes.pad_start with a run-time Int pass @bounded
+# control_test: tests/decision_sized_by_novel_test.rs::novel_a_declared_amplifier_is_refused_with_a_run_time_int_and_admitted_with_a_constant
+diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
+--- a/crates/almide-frontend/src/check/bounded.rs
++++ b/crates/almide-frontend/src/check/bounded.rs
+@@ -1350,9 +1350,11 @@ impl BoundedCx<'_, '_> {
+             declared_int(i) && args.get(i).is_some_and(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a))
+         };
+         if let Some(named) = stdlib_sized_by().0.get(m).and_then(|t| t.get(f)) {
+-            return named.iter().any(|&i| runtime_int(i));
++            let _ = named;
++            return false;
+         }
+-        if sig.is_some()
++        if false
++            && sig.is_some()
+             && self.call_ty(call).is_none_or(almide_lang::types::is_heap_ty)
+             && args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty))
+             && (0..args.len()).any(runtime_int)

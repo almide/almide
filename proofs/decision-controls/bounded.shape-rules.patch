@@ -3,7 +3,7 @@
 diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-frontend/src/check/bounded.rs
 --- a/crates/almide-frontend/src/check/bounded.rs
 +++ b/crates/almide-frontend/src/check/bounded.rs
-@@ -260,7 +260,7 @@
+@@ -260,7 +260,7 @@ fn ty_allocates(t: &Ty) -> bool {
  /// native text is still built as a String) and the Floats (the wasm float
  /// printer still returns a String block).
  pub(crate) fn ty_has_sink_writer(t: &Ty) -> bool {
@@ -12,7 +12,7 @@ diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-fronten
          t,
          Ty::Int
              | Ty::Int8
-@@ -950,7 +950,7 @@
+@@ -1027,7 +1027,7 @@ impl BoundedCx<'_, '_> {
              // ALS-B4 / E071 (#4871): a call allocates when the callee's body
              // does, by reach — decided from what the callee's body contains,
              // under the same rules as a loop body, never from its name.
@@ -21,7 +21,7 @@ diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-fronten
                  self.err(
                      "calling a function that allocates inside a counted loop is not admissible in a @bounded function",
                      "allocate outside the loop and keep the loop body allocation-free",
-@@ -1209,11 +1209,12 @@
+@@ -1286,11 +1286,12 @@ impl BoundedCx<'_, '_> {
      /// heap value `mut` (grows it in place). An unknown result type or an
      /// unknown signature is read as allocating.
      fn call_allocates(&self, call: &ast::Expr, m: &str, f: &str) -> bool {
@@ -36,7 +36,7 @@ diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-fronten
      }
  
      /// #4855 (E075, from the types): a call that returns a collection (a
-@@ -1235,7 +1236,8 @@
+@@ -1312,7 +1313,8 @@ impl BoundedCx<'_, '_> {
          let arg_ty = |a: &ast::Expr| self.checker.type_map.get(&a.id);
          let bounded_by_input = args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty));
          let runtime_int = args.iter().any(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a));
@@ -46,7 +46,7 @@ diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-fronten
      }
  
      /// #4855 (E077, from the types): a call whose result carries a Float
-@@ -1250,7 +1252,8 @@
+@@ -1327,7 +1329,8 @@ impl BoundedCx<'_, '_> {
                  _ => false,
              }
          }
@@ -55,4 +55,4 @@ diff --git a/crates/almide-frontend/src/check/bounded.rs b/crates/almide-fronten
 +        false && has_float(&Ty::Unit)
      }
  
-     /// A sized constructor (`list.repeat`-like) given a size slot that is not
+     /// ALS-B8 / E075: a call whose result's length is set at run time.
