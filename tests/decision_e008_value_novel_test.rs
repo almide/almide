@@ -123,3 +123,23 @@ fn novel_control_a_fn_without_a_concurrent_slot_is_a_value_as_before() {
     let o = almide(&["check"], &src);
     assert!(o.status.success(), "a fn with no concurrent slot is an ordinary value:\n{src}\n{}", text(&o));
 }
+
+/// The refusal is actionable: it shows the rewrite — call the fn where its
+/// argument is known (`w(f)`), or, for an anonymous lambda that hands its
+/// parameter on, call the parameter instead — as a `try:` line.
+#[test]
+fn novel_the_value_use_refusal_shows_the_rewrite() {
+    let n = names();
+    let w = &n.w;
+    let cb = &n.cb;
+    for src in [
+        program(&n, &format!("  let hs = [{w}]\n  println(\"${{list.len(hs)}}\")")),
+        program(&n, &format!("  let r = apply({w}, {cb})!\n  println(\"${{r}}\")")),
+    ] {
+        let t = text(&almide(&["check"], &src));
+        assert!(t.contains("E008") && t.contains("try:") && t.contains(&format!("{w}(f)")), "expected the `{w}(f)` rewrite:\n{src}\n{t}");
+    }
+    let src = program(&n, &format!("  let r = apply((f: (Int) -> Result[Int, String]) => fan.map([1, 2, 3], f), {cb})!\n  println(\"${{r}}\")"));
+    let t = text(&almide(&["check"], &src));
+    assert!(t.contains("E008") && t.contains("try:") && t.contains("(next) => (x) => next(x)!"), "expected the call-the-parameter rewrite:\n{src}\n{t}");
+}
