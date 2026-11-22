@@ -3,12 +3,11 @@
 diff --git a/crates/almide-anchor-check/src/decode.rs b/crates/almide-anchor-check/src/decode.rs
 --- a/crates/almide-anchor-check/src/decode.rs
 +++ b/crates/almide-anchor-check/src/decode.rs
-@@ -27,7 +27,7 @@
- 
- /// Every defined function of `bytes`, validated, in position order.
- pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
--    let mut v = Validator::new_with_features(WasmFeatures::all().difference(UNCLASSIFIED_PROPOSALS));
-+    let mut v = Validator::new_with_features(WasmFeatures::all().union(UNCLASSIFIED_PROPOSALS));
-     let mut out = Vec::new();
-     for payload in Parser::new(0).parse_all(bytes) {
-         let payload = payload.map_err(|e| e.to_string())?;
+@@ -65,7 +65,6 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
+     // among them), so a module that holds one does not validate here and is
+     // not judged.
+     let followed = WasmFeatures::all()
+-        - UNCLASSIFIED_PROPOSALS
+         - WasmFeatures::THREADS
+         - WasmFeatures::SHARED_EVERYTHING_THREADS;
+     let mut v = Validator::new_with_features(followed);

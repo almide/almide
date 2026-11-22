@@ -35,8 +35,9 @@
 //!
 //! Module-granularity (not per-function) is sound BECAUSE the impure-plain modules
 //! are walled in full: every function in an admitted module is genuinely pure, so
-//! `is_pure(module)` needs no per-function table. (Per-function admission — e.g.
-//! the pure `datetime.add_days` inside a walled module — is a later refinement.)
+//! `is_pure(module)` needs no per-function table. A function of any other module
+//! is admitted one at a time from its declarations (`is_pure_fn_in_impure_module`,
+//! #4827): no host category, and no serving body reaching a declared host op.
 //!
 //! EFFECTFUL calls are admitted only through [`crate::host_ops`] (#2739, #3302):
 //! one table, audited as a matrix over every capability module's intrinsics.
@@ -298,9 +299,8 @@ pub const PURE_MODULES: &[&str] = &[
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?
-/// `func` is accepted for a future per-function refinement but unused today —
-/// admission is module-granular because the impure-plain modules are walled in
-/// full (see the module doc).
+/// A module in `PURE_MODULES` is admitted whole; any other module's `func` is
+/// admitted when its declarations derive it host-free (see the module doc).
 pub fn is_pure(module: &str, func: &str) -> bool {
     PURE_MODULES.contains(&module)
         || is_pure_fn_in_impure_module(module, func)
@@ -310,143 +310,21 @@ pub fn is_pure(module: &str, func: &str) -> bool {
         || almide_lang::stdlib_info::is_runtime_backed_eq(module, func)
 }
 
-/// Whether bundled `module` declares a public (non-`local`) fn named `func`,
-/// read from its `.almd` source — the declaration is the one place the
-/// module's surface is written down.
-fn declares_public_fn(module: &str, func: &str) -> bool {
-    let Some(src) = almide_lang::stdlib_info::bundled_source(module) else {
-        return false;
-    };
-    src.lines().any(|line| {
-        let decl = line.strip_prefix("effect ").unwrap_or(line);
-        decl.strip_prefix("fn ").is_some_and(|rest| {
-            rest.strip_prefix(func).is_some_and(|tail| tail.starts_with(['(', '[']))
-        })
-    })
-}
-
-/// A genuinely-PURE function living inside an otherwise impure-plain module. `datetime` is walled
-/// as a whole because `now`/`monotonic_ns` read the wall clock, but its calendar arithmetic over a
-/// plain i64 Unix-seconds timestamp reaches NO host capability — admitting it is the refinement the
-/// module-level under-approximation anticipated. SOUND: every fn listed is scalar arithmetic /
-/// comparison (its self-host body in datetime_arith.almd uses no prim host op, no Stdout); the
-/// effectful `now`/`monotonic_ns` are deliberately NOT listed, so they stay caps-walled.
+/// A host-free function of a module that is not admitted whole (#4827),
+/// derived from the declarations rather than listed: something serves
+/// `module.func` (its declaration in the module's source or a self-host
+/// registry body), its declaration charges no host category (the `effect`
+/// keyword and `@category`, read by `effect::stdlib_call_effect`), and no
+/// body serving it reaches a host op the floor declares (`@prim_op(host)`),
+/// directly or through what it calls. A new fn that reaches the network or a
+/// file is therefore never admitted by its module's name or its prefix. A
+/// row of the host-op matrix (`host_ops::HOST_OPS`) is a host call by that
+/// declaration, whatever its module's row says.
 fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
-    match module {
-        "datetime" => matches!(
-            func,
-            "add_days"
-                | "add_hours"
-                | "add_minutes"
-                | "add_seconds"
-                | "hour"
-                | "minute"
-                | "second"
-                | "year"
-                | "month"
-                | "day"
-                | "weekday"
-                | "from_parts"
-                | "to_iso"
-                | "format"
-                | "parse_iso"
-        ),
-        // The self-hosted assert family: PURE-OR-HALT (a failed assert aborts via
-        // `prim.die` — a halt, not an effect; stdlib/testing_assert.almd). The module
-        // stays impure-plain (`testing.now`-class fns remain walled).
-        "testing" => matches!(
-            func,
-            "assert_gt"
-                | "assert_snapshot"
-                | "assert_lt"
-                | "assert_approx"
-                | "assert_contains"
-                | "assert_some"
-                | "assert_ok"
-                | "assert_none"
-                | "assert_err"
-                | "assert_ok_sc"
-                | "assert_err_sc"
-        ),
-        // The WASM-target env CONSTANTS: v0's emit_wasm folds os() to "wasi" and
-        // temp_dir() to "/tmp" (calls_env.rs) — on this target they reach NO host
-        // capability (the native target's real host reads live in the runtime
-        // intrinsics, which the v1 wasm lowering never emits). The effectful env
-        // fns (args, vars, …) stay walled/admitted-with-caps as before.
-        // `temp_dir` left this list when its self-host started honoring the
-        // host's `$TMPDIR` claim (the Go/Python WASI convention) — an env
-        // read is a capability, admitted the same way env.get is.
-        "env" => matches!(func, "os"),
-        // The whole zlib surface is a DETERMINISTIC data transform of its
-        // input bytes (#1700): the self-host bodies (stdlib/zlib_inflate.almd
-        // / zlib_deflate.almd) reach no host capability, and the `effect fn`
-        // spelling is the Result carrier, not an effect. The bounded decoders
-        // (`inflate_max` / `decompress_max` / `gunzip_max`, #4020) are the same
-        // transforms with a caller-chosen output bound. Admission is read from
-        // the module's own declarations (stdlib/zlib.almd) rather than from a
-        // list of its names here — a list is a second copy of the surface, and
-        // the bounded decoders were missing from it. A name zlib does not
-        // declare stays walled, and a future zlib fn that reaches a real
-        // capability is a host op, which `host_ops::classify` answers before
-        // it asks purity.
-        "zlib" => declares_public_fn("zlib", func),
-        // `ffi` (R-ffi-01, ADR-0031): `region` / `alloc` build a Region, and
-        // `read` / `write` copy through one after its bounds check, inside the
-        // program's own memory (stdlib/ffi_bridge.almd: prim loads and
-        // stores, no host op). The `effect fn` spelling marks memory outside
-        // Almide's values (R-ffi-02), not a host capability; `--profile
-        // critical` refuses the module wholesale (#4008).
-        "ffi" => true,
-        // Pure data on the blanket-impure http module (the network fns stay
-        // walled): the response and request reps (stdlib/http_response.almd,
-        // stdlib/http_request.almd — List[String] data), the HttpMessage
-        // accessors over them and their per-type requirements (R-http-12),
-        // and the router layer (stdlib/http.almd, #2588). The router's
-        // construction and dispatch are pure; a HANDLER's own capabilities
-        // are counted transitively through the closure it holds, exactly
-        // like a list.map callback. `serve` (the listener) stays walled.
-        "http" => {
-            func.starts_with("__http_request_")
-                || func.starts_with("__http_response_")
-                || matches!(
-                    func,
-                    "new_request"
-                        | "__new_request"
-                        | "method"
-                        | "path"
-                        | "query_params"
-                        | "param"
-                        | "query"
-                        | "queries"
-                        | "route"
-                        | "router"
-                        | "mount"
-                        | "wrap"
-                        | "recover"
-                        | "logger"
-                        | "__with_params"
-                        | "__with_path"
-                        | "__flat"
-                        | "__pairs"
-                        | "response"
-                        | "json"
-                        | "redirect"
-                        | "with_headers"
-                        | "__with_headers"
-                        | "set_status"
-                        | "status"
-                        | "header"
-                        | "header_values"
-                        | "headers"
-                        | "body"
-                        | "body_bytes"
-                        | "set_header"
-                        | "set_body"
-                        | "set_body_bytes"
-                )
-        }
-        _ => false,
-    }
+    crate::host_ops::host_op(module, func).is_none()
+        && !almide_ir::host_reach::serving_bodies(module, func).is_empty()
+        && almide_ir::effect::stdlib_call_effect(module, func).is_empty()
+        && !almide_ir::host_reach::stdlib_fn_reaches_host(module, func)
 }
 
 #[cfg(test)]
@@ -477,6 +355,30 @@ mod tests {
         // Impure-plain (host reach without the keyword).
         for m in ["datetime", "testing"] {
             assert!(!is_pure(m, "now"), "{m} must be walled (impure-plain)");
+        }
+    }
+
+    /// #4827: a function of a module not admitted whole is admitted from its
+    /// declarations — never by its module or a name prefix. A served data
+    /// accessor is admitted; a fn whose serving body reads the clock or the
+    /// entropy source is not; a name nothing serves (a future
+    /// `__http_response_*` helper) is not.
+    #[test]
+    fn per_function_admission_is_derived_from_declarations() {
+        assert!(is_pure("datetime", "add_days"));
+        assert!(is_pure("http", "status"));
+        assert!(!is_pure("datetime", "now"));
+        assert!(!is_pure("random", "int"));
+        assert!(!is_pure("http", "__http_response_reaches_net"));
+    }
+
+    /// #4827: holding a handle is the capability, not purity. The generic
+    /// handle fns dispatch to the caller's conformer (`h.__self_read`), so
+    /// they stay refused although they declare `@category()`.
+    #[test]
+    fn the_generic_handle_fns_are_not_pure() {
+        for f in ["read", "read_exact", "read_to_end", "write", "close"] {
+            assert!(!is_pure("io", f), "io.{f} reads or writes a handle");
         }
     }
 

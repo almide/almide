@@ -184,11 +184,13 @@ impl Emitter<'_> {
             .instructions()
             .i32_const(16)
             .call(F_ALLOC)
-            .local_tee(hb)
-            .i32_const(0)
-            .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            .local_tee(hb);
+        let site = self.fw_res_site(raw);
+        self.f.instructions().i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        self.fw_store(site, 0);
         self.f.instructions().local_get(hb).local_get(hv);
         self.store_ty_slot(raw, almide_layout::SUM_FIELD);
+        self.fw_store(site, 1);
         self.f.instructions().local_get(hb);
         self.release_i32();
         self.release_val(raw);

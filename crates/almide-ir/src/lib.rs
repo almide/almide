@@ -27,6 +27,7 @@ pub mod free_vars;
 pub mod result;
 pub mod substitute;
 pub mod effect;
+pub mod host_reach;
 pub mod annotations;
 pub mod mut_param;
 pub mod param_rebind;

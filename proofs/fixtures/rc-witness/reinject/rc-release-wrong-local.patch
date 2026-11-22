@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
-index 33469c12c..adae7334f 100644
+index ca892dcf51..8c8395d945 100644
 --- a/crates/almide-wasm/src/exit_plan.rs
 +++ b/crates/almide-wasm/src/exit_plan.rs
-@@ -152,7 +152,10 @@ impl Emitter<'_> {
+@@ -249,7 +249,10 @@ impl Emitter<'_> {
                  continue;
              }
              let dec = self.dec_fn_of_local(idx);
@@ -14,15 +14,16 @@ index 33469c12c..adae7334f 100644
          }
          match plan.continuation {
              Continuation::ReturnSuccess => {
-@@ -547,7 +550,10 @@ pub(crate) fn validate_exits(
+@@ -734,6 +737,12 @@ pub(crate) fn validate_exits(
      drop_fns: &[u32],
      name_of: impl Fn(u32) -> String,
  ) -> Result<(), EmitError> {
--    if ledger.is_empty() {
 +    // RE-INJECTED (#4277 drill): the producer's own exit validator is part of
 +    // the producer the byte check does not trust — off, as a producer bug would
 +    // leave it.
-+    if ledger.is_empty() || true {
-         return Ok(());
-     }
++    if true {
++        return Ok(());
++    }
      let d = Defects { function };
+     let ops = read_ops(f, &d)?;
+     // Windows may nest (an early exit lowered inside a later-started
