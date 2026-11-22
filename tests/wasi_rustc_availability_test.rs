@@ -32,10 +32,11 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// The call sits in a fn nothing reaches.
+/// The call sits in a fn nothing reaches: module-private, so no export
+/// roots it either (the reachability the wasm legs prune by).
 const PID_UNREACHED: &str = r#"import process
 
-effect fn never_called() -> Int = process.pid()
+local effect fn never_called() -> Int = process.pid()
 
 effect fn main() -> Unit = {
   println("no pid here")
