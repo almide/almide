@@ -1,0 +1,17 @@
+# Time-bound programs of the native perf gates (scripts/check-native-v1-perf.sh).
+# A program listed here runs its loop until a clock has advanced, so it makes
+# as many passes as fit in that wall time: its total instruction count reads
+# how fast the machine ran under valgrind, not what the render costs (the same
+# binary reads 6K to 23K passes from one run to the next). The gate compares
+# such a program's instructions PER PASS of the loop instead of its totals,
+# against the same 1.03 and the same debt ledger, and the small-program gate
+# leaves it to that gate.
+#
+# Each row declares how a run's pass count is read: a syscall that every pass
+# of the loop makes, and how many times per pass. The gate counts that syscall
+# in the run's own valgrind trace (`--trace-syscalls=yes`, the same run that
+# is counted), less the empty program's count on the same leg, over the reads
+# per pass. A row whose run reads fewer than 100 passes fails (MEASURE-FAIL):
+# the declaration no longer describes the program.
+#
+# program<TAB>syscall<TAB>reads per pass<TAB>why it is time-bound

@@ -35,6 +35,17 @@
 # A shape bench that does not render certified is reported as UNCERTIFIED and
 # not compared (both builds would be v0).
 #
+# A time-bound program (proofs/native-v1-perf-time-bound.txt: its loop runs
+# until a clock has advanced, so its pass count is whatever fits in that wall
+# time) is compared PER PASS instead: the instructions inside its `main`
+# (scripts/lib/native-v1-perf-in-main.sh, each leg's empty-`main` glue taken
+# off) over the passes its row declares how to count — a syscall every pass
+# makes, counted in the same run's valgrind trace. The ratio of the two
+# per-pass costs meets the same 1.03 and the same ledger, whatever its size,
+# and is never timed (its wall time is fixed by construction). Negative
+# control: scripts/check-native-v1-perf-time-bound-negative.sh (a pass made
+# 5% dearer reads as a loss; the same binary twice does not).
+#
 # Negative control: ALMIDE_NATIVE_DRILL_NO_MOVES=1 in the environment makes
 # the v1 render keep its pre-#4006 copies (no in-place push, a clone for every
 # last-use Dup/SetLocal); with it the push_swap shape bench must read over the
@@ -75,6 +86,31 @@ programs() {
 }
 source scripts/lib/native-v1-perf-corpus.sh
 
+source scripts/lib/native-v1-perf-in-main.sh
+declare -A tb_sc tb_reads
+while IFS=$'\t' read -r prog sc reads _why; do
+  case "$prog" in ''|'#'*) continue ;; esac
+  tb_sc["$prog"]="$sc"; tb_reads["$prog"]="$reads"
+done < proofs/native-v1-perf-time-bound.txt
+declare -A glue empty_calls
+# The empty program's `main` glue and syscall counts per leg, for the
+# time-bound rows (built once, on the first such row).
+time_bound_glue() {
+  [ -n "${glue[v0]:-}" ] && return 0
+  command -v callgrind_annotate >/dev/null || { echo "native-v1-perf: callgrind_annotate is not installed"; exit 2; }
+  printf 'fn main() -> Unit = ()\n' > "$WORK/empty.almd"
+  if ! l=$(ALMIDE_VERIFIED_DEBUG=1 "$ALMIDE" build "$WORK/empty.almd" -o "$WORK/empty.v1" 2>&1) \
+    || ! grep -q "native: v1 trust-spine render" <<<"$l"; then
+    echo "native-v1-perf: the empty program did not render certified"; exit 2
+  fi
+  ALMIDE_NO_VERIFIED_OK=1 "$ALMIDE" build "$WORK/empty.almd" --no-verified -o "$WORK/empty.v0" >/dev/null 2>&1 \
+    || { echo "native-v1-perf: the empty program did not build on v0"; exit 2; }
+  glue[v0]=$(in_main "$WORK/empty.v0"); glue[v1]=$(in_main "$WORK/empty.v1")
+  if ! [[ "${glue[v0]}" =~ ^[0-9]+$ ]] || ! [[ "${glue[v1]}" =~ ^[0-9]+$ ]]; then
+    echo "native-v1-perf: the entry toggle collected nothing on the empty program (v0=${glue[v0]:-none} v1=${glue[v1]:-none})"; exit 2
+  fi
+}
+
 fail=0; gated=0; warns=(); rows=()
 declare -A listed
 while IFS=$'\t' read -r prog ratio found plan; do
@@ -94,6 +130,33 @@ while read -r f; do
   # built on the trust spine only) has nothing to compare against.
   if ! ALMIDE_NO_VERIFIED_OK=1 timeout 600 "$ALMIDE" build "$f" --no-verified -o "$WORK/$n.v0" >/dev/null 2>&1; then
     rows+=("v1-only $f"); continue
+  fi
+  if [ -n "${tb_sc[$f]:-}" ]; then
+    time_bound_glue
+    sc="${tb_sc[$f]}"; rd="${tb_reads[$f]}"
+    for leg in v0 v1; do
+      [ -n "${empty_calls[$leg.$sc]:-}" ] || empty_calls[$leg.$sc]=$(syscall_calls "$WORK/empty.$leg" "$sc")
+    done
+    read -r a pa _ <<<"$(per_pass_work "$WORK/$n.v0" "${glue[v0]}" "$sc" "$rd" "${empty_calls[v0.$sc]}")"
+    read -r b pb _ <<<"$(per_pass_work "$WORK/$n.v1" "${glue[v1]}" "$sc" "$rd" "${empty_calls[v1.$sc]}")"
+    if [ -z "${a:-}" ] || [ -z "${b:-}" ]; then echo "MEASURE-FAIL $f: \`main\` was never entered (v0=${a:-none} v1=${b:-none})"; fail=1; continue; fi
+    if awk -v x="$pa" -v y="$pb" 'BEGIN { exit !(x < 100 || y < 100) }'; then
+      echo "MEASURE-FAIL $f: $pa / $pb passes of $rd ${sc} read(s) each — the time-bound row no longer describes the program"; fail=1; continue
+    fi
+    gated=$((gated + 1))
+    r=$(awk -v a="$a" -v b="$b" 'BEGIN { printf "%.3f", b / a }')
+    over=$(awk -v r="$r" -v m="$MAX_RATIO" 'BEGIN { print (r > m) ? 1 : 0 }')
+    if [ -n "${listed[$f]:-}" ]; then
+      worse=$(awk -v r="$r" -v m="${listed[$f]}" 'BEGIN { print (r > m + 0.005) ? 1 : 0 }')
+      if [ "$over" = 0 ]; then echo "CLEAN $f reads $r per pass — remove its row from $LEDGER"; fail=1
+      elif [ "$worse" = 1 ]; then echo "WORSE $f reads $r per pass, ledger says ${listed[$f]}"; fail=1
+      else rows+=("debt $f per-pass ratio=$r (ledger ${listed[$f]})"); fi
+    elif [ "$over" = 1 ]; then
+      echo "LOSS $f: v1 $b vs v0 $a instructions per pass (${pb} / ${pa} passes) = ${r}x (> $MAX_RATIO)"; fail=1
+    else
+      rows+=("ok $f time-bound per-pass v0=$a v1=$b (${pa} / ${pb} passes) ratio=$r")
+    fi
+    continue
   fi
   a=$(ir "$WORK/$n.v0"); b=$(ir "$WORK/$n.v1")
   if [ -z "$a" ] || [ -z "$b" ]; then echo "RUN-FAIL $f (v0=${a:-none} v1=${b:-none})"; fail=1; continue; fi
