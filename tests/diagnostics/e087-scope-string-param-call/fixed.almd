@@ -1,0 +1,5 @@
+scoped fn percent(n: Int) -> Int = int.clamp(n, 0, 100)
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  percent(140)
+}))

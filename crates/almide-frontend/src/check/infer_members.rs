@@ -314,6 +314,8 @@ impl Checker {
                 .unwrap_or_else(|| mod_name.to_string());
             let key = format!("{}.{}", resolved_mod_name, field);
             if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
+                // A fn named as a value is reached as much as a call (#4904).
+                self.check_fn_visibility(&resolved_mod_name, field.as_str(), &key);
                 self.record_purity_ref(super::pure_attr::PurityCallee::User(sym(&key)), object.span);
                 self.type_map.insert(object.id, Ty::Unit);
                 self.env.import_table.mark_used(mod_name);

@@ -1,0 +1,14 @@
+# Negative control of manifest.unknown-keys (c2, proofs/decision-sites.toml): every key is accepted, declared or not (the pre-epoch-17 warning without the warning)
+# control_test: tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -1168,7 +1168,7 @@
+         for (site, table) in section_tables(&manifest.spans, section.at) {
+             for (k, _) in table.iter() {
+                 let key = k.get_ref().as_ref();
+-                if declared.contains(&key) {
++                if declared.contains(&key) || true {
+                     continue;
+                 }
+                 let near = declared.iter().find(|d| within_one_edit(&key.to_ascii_lowercase(), d));

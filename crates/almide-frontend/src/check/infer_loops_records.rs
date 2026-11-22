@@ -528,6 +528,24 @@ impl Checker {
         None
     }
 
+    /// [`Self::check_fn_visibility`] for a resolved key whose module is not
+    /// spelled at the use (a method call, #4904): the declaring module is the
+    /// one registration recorded. A restricted fn whose module is not known is
+    /// judged against its key's prefix — a wrong owner refuses, never admits.
+    pub(super) fn check_key_visibility(&mut self, key: &str) {
+        let k = sym(key);
+        if !self.env.fn_visibility.contains_key(&k) {
+            return;
+        }
+        let owner = self.env.fn_decl_spans.get(&k).and_then(|s| s.module).map(|m| m.to_string());
+        let Some(owner) = owner.or_else(|| key.rsplit_once('.').map(|(m, _)| m.to_string())) else {
+            // A bare key is the entry program's own: no other module can name it.
+            return;
+        };
+        let field = key.strip_prefix(&format!("{owner}.")).unwrap_or(key).to_string();
+        self.check_fn_visibility(&owner, &field, key);
+    }
+
     /// Reject cross-module access to `mod fn` / `local fn` functions.
     ///
     /// A function has `Public` visibility by default — we only store entries

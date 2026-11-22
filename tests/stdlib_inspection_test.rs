@@ -720,7 +720,7 @@ impl Sources {
 }
 
 /// The top-level items of an Almide source, name -> declaration block: the
-/// attribute lines directly above (doc lines skipped), then every line to the
+/// attribute lines directly above (doc and `@sized_by` lines skipped), then every line to the
 /// next blank line (stdlib bodies hold no blank line; a gate would notice the
 /// fingerprint shrinking, not growing, if one did).
 fn almide_items(src: &str) -> BTreeMap<String, String> {
@@ -742,7 +742,15 @@ fn almide_items(src: &str) -> BTreeMap<String, String> {
         }
         let end = (at..lines.len()).find(|&i| lines[i].trim().is_empty()).unwrap_or(lines.len());
         // Doc lines are prose: editing one does not change what was inspected.
-        let block = lines[start..end].iter().filter(|l| !l.starts_with("///")).copied().collect::<Vec<_>>().join("\n");
+        // A `@sized_by(p, …)` line is read only by the checker's @bounded
+        // shape rule (owner ruling 2026-11-22): declaring it does not change
+        // what the function computes, so it is not part of the fingerprint.
+        let block = lines[start..end]
+            .iter()
+            .filter(|l| !l.starts_with("///") && !l.starts_with("@sized_by("))
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
         out.entry(name).and_modify(|b| b.push_str(&format!("\n{block}"))).or_insert(block);
     }
     out

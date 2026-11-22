@@ -122,6 +122,7 @@ fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(
 )
 
 /// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")

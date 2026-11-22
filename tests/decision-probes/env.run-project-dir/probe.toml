@@ -1,0 +1,5 @@
+# The probe of env.run-project-dir: ALMIDE_RUN_PROJECT_DIR names the shared
+# temp dir, owned by root and writable by every user; the override is refused
+# before anything is built in it.
+expect = "ALMIDE_RUN_PROJECT_DIR=/tmp: it is owned by uid 0"
+env = { ALMIDE_RUN_PROJECT_DIR = "/tmp" }

@@ -24,6 +24,7 @@ type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 // ── TCP ──
 /// A stream connected to host:port; err if refused.
 @category("Net.fetch")
+@sized_by(host)
 effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
 /// False after io.close; a peer close is not seen.
@@ -47,6 +48,7 @@ effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp
 
 /// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
+@sized_by(host)
 effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
@@ -59,12 +61,14 @@ effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(Tc
 
 // ── UDP (R-net-02) ──
 /// A UDP socket bound to host:port; port 0 lets the OS choose.
+@sized_by(host)
 effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
 
 /// The port sock is bound to.
 effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
 
 /// Sends data as one datagram to host:port.
+@sized_by(data, host)
 effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
   __udp(sock),
   data,

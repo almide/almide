@@ -1,0 +1,8 @@
+# The probe of env.test-wasm-runner: ALMIDE_TEST_WASM_RUNNER=wasmtime runs the
+# wasm test lane on the wasmtime CLI; `[permissions] fs` grants ./data only,
+# and the test reads secret.txt beside it (from inside or outside the
+# project). The lane preopens the grant, not `/`, so the read is refused and
+# the refusal-asserting test passes on the wasm lane.
+expect = "1 via WASM, 0 via native fallback, 0 failed"
+env = { ALMIDE_TEST_WASM_RUNNER = "wasmtime" }
+exit = "any"

@@ -1,0 +1,15 @@
+# Second control of effect.e007-e008-fan-context: a `let` alias of a fn is not followed to the fn it names
+# control_test: tests/decision_e008_value_novel_test.rs::novel_a_let_alias_of_a_fan_wrapper_holds_its_callback_to_e008
+diff --git a/crates/almide-frontend/src/concurrent_reach.rs b/crates/almide-frontend/src/concurrent_reach.rs
+index b1d69d3e8e..461db5c317 100644
+--- a/crates/almide-frontend/src/concurrent_reach.rs
++++ b/crates/almide-frontend/src/concurrent_reach.rs
+@@ -401,7 +401,7 @@ impl<'a> Analyzer<'a> {
+             ExprKind::Ident { name } => {
+                 if let Some(b) = lookup(scope, *name) {
+                     match b {
+-                        Bind::Let { init, .. } => self.resolve_alias(init, scope, depth + 1),
++                        Bind::Let { .. } => Callee::Value,
+                         _ => Callee::Value,
+                     }
+                 } else if self.fns.contains_key(name) {

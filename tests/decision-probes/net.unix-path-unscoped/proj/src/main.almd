@@ -1,0 +1,6 @@
+import unix
+
+effect fn main() -> Unit = match unix.listen("/almide-probe-outside.sock") {
+  ok(_) => println("listen: ok"),
+  err(e) => println("listen: err ${e}"),
+}

@@ -76,8 +76,7 @@ pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
 pub use routines::check_named_routines;
 use anchors::helper_sigs;
-use decode::branch_target;
-pub use decode::{decode, function_imports, store_width, Body};
+pub use decode::{branch_target, decode, function_imports, store_width, Body};
 pub use fields::check_fields;
 pub use init::check_init;
 

@@ -173,6 +173,7 @@ fn to_string_radix(x: UInt64, radix: Int) -> String =
   }
 
 /// UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
   let parsed = int.parse_radix(s, radix)
   let t = string.trim(s)

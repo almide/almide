@@ -500,6 +500,14 @@ fn one_program(ctx: &Ctx, src: &str, i: u64, stock: bool, findings: &Path) -> Ou
             nv.lines().last().unwrap_or(""),
         );
     }
+    // A handler that aborted is answered by the socket host's own 500 (the
+    // same on native and embedded, checked above); on the stock export the
+    // abort is a trap, which answers wasmtime's page and discards the
+    // instance (C-375). That is the trap case under another name: the stock
+    // leg is not compared (coordinator ruling 2026-11-16).
+    if handler_aborted(&nv) {
+        return Outcome::TrappedAlike;
+    }
     if !stock {
         return Outcome::Clean;
     }
@@ -616,6 +624,23 @@ fn failed_verdict(t: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The socket host answered some request with its own handler-abort 500:
+/// `500 [content-type: text/plain; x-content-type-options: nosniff]` and the
+/// body `Internal Server Error (request <8 hex>)`. A handler cannot write the
+/// host's request id, so the exact shape names the host's answer.
+fn handler_aborted(view: &str) -> bool {
+    const HEAD: &str =
+        " -> HTTP/1.1 500 [content-type: text/plain; x-content-type-options: nosniff] body=Internal Server Error (request ";
+    view.lines().any(|l| {
+        l.find(HEAD).is_some_and(|at| {
+            let id = &l[at + HEAD.len()..];
+            id.len() > 9
+                && id[..8].bytes().all(|b| b.is_ascii_hexdigit())
+                && id[8..].starts_with(')')
+        })
+    })
+}
+
 /// What native answered at the first differing request, in the terms a
 /// cause is told apart by: a status outside 100..=599, a response native's
 /// core refused (#2822: a 500 whose body names the refused field), or
@@ -656,6 +681,17 @@ mod tests {
 
     fn t(body: &str) -> String {
         format!("#0 GET / -> HTTP/1.1 200 [] body={body} (status ok, fields ok, date ok, framing ok, connection ok, reason ok)\nexit 0\n")
+    }
+
+    #[test]
+    fn only_the_hosts_own_abort_500_reads_as_a_handler_abort() {
+        let abort = "#0 GET / -> HTTP/1.1 500 [content-type: text/plain; x-content-type-options: nosniff] body=Internal Server Error (request 94979fac) (status ok, fields ok, date ok, framing ok, connection ok, reason ok)\nexit 0\n";
+        assert!(handler_aborted(abort));
+        // A handler's own 500, even with the same words, carries no request id.
+        assert!(!handler_aborted(&t("Internal Server Error")));
+        let own = abort.replace("(request 94979fac)", "(request nothex!)");
+        assert!(!handler_aborted(&own));
+        assert!(!handler_aborted(&t("ok")));
     }
 
     #[test]

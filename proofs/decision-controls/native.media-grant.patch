@@ -1,0 +1,14 @@
+# Negative control of native.media-grant (proofs/decision-sites.toml): an ungranted script-capable owner is not refused by the dependency gate
+# control_test: tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused
+diff --git a/src/media_grant.rs b/src/media_grant.rs
+--- a/src/media_grant.rs
++++ b/src/media_grant.rs
+@@ -137,7 +137,7 @@
+     let mut missing: Vec<(String, String)> = Vec::new();
+     for d in deps {
+         let how = if d.direct { "" } else { " (required by another dependency)" };
+-        for (o, file) in d.owns.iter().filter(|(o, _)| mo::is_script_capable(&o.pattern) && !d.granted.contains(&o.pattern)) {
++        for (o, file) in d.owns.iter().filter(|(o, _)| mo::is_script_capable(&o.pattern) && !d.granted.contains(&o.pattern) && false) {
+             msg.push_str(&format!(
+                 "error[E118]: dependency `{}`{how} ({}) owns `{}`, which runs script in a browser, and {} does not grant it\n  declared at {}\n",
+                 d.name, d.key, o.pattern, manifest.display(), at(file, o)

@@ -1,0 +1,2 @@
+# The probe of manifest.package-name: a [package].name that is a path (`../probe`), not a plain name.
+expect = "is not a plain name"

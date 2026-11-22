@@ -185,6 +185,7 @@ fn key(p: Path, name: String) -> Path = match p {
 }
 
 /// p extended by the array index i; a negative i is out of range.
+@sized_by(p)
 fn index(p: Path, i: Int) -> Path = match p {
   Path(steps) => Path(steps + [(false, "", i)])
 }

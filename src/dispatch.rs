@@ -899,11 +899,12 @@ fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
     }
 }
 
-/// A key the manifest writes and no reader reads (#3382) is a warning, once
-/// per command, printed here with the manifest refusals above. `check
-/// --json` carries it as a diagnostic row on stdout; every other command
-/// prints it on stderr, so no other machine-readable stdout changes. The
-/// exit code never changes: the build runs exactly as if the key were absent.
+/// A `[dependencies]` entry that declares nothing (#3382) is a warning, once
+/// per command, printed here with the manifest refusals above (an unknown key
+/// is one of those refusals since dialect epoch 17). `check --json` carries
+/// it as a diagnostic row on stdout; every other command prints it on
+/// stderr, so no other machine-readable stdout changes. The exit code never
+/// changes: the build runs exactly as if the entry were absent.
 /// `survive-test-leg` is a child of `apply`, and `test-run-compile` of
 /// `test`, which already warned.
 fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content: &str) {

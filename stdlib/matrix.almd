@@ -95,6 +95,7 @@ fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 // ── bytes serialisation ──
 /// f32 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
+@sized_by(b, rows)
 fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
@@ -111,10 +112,12 @@ fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
 /// f16 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
+@sized_by(b, rows)
 fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// f64 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
+@sized_by(b, rows)
 fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 // ── neural-network primitives (row-wise) ──
@@ -124,6 +127,7 @@ fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 
 /// n slices cols/n wide, remainder dropped; [] if n = 0.
 @intrinsic("almide_rt_matrix_split_cols_even")
+@sized_by(m, n)
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
@@ -137,6 +141,7 @@ fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
 /// Rows [start, end), each bound clamped to 0..row count.
 @intrinsic("almide_rt_matrix_slice_rows")
+@sized_by(m)
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
 
 /// Rows at indices; out of range is a zero row.

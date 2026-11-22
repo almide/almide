@@ -274,18 +274,55 @@ pub(crate) fn ty_has_sink_writer(t: &Ty) -> bool {
     )
 }
 
-/// Run-time-length heap constructors (ALS-B8): fn -> the size-argument slots
-/// that must be compile-time constants.
-const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
-    ("string.repeat", &[1]),
-    ("list.with_capacity", &[0]),
-    ("list.range", &[0, 1]),
-    ("list.repeat", &[1]),
-    ("bytes.zeros", &[0]),
-    ("bytes.repeat", &[1]),
-    ("string.pad_start", &[1]),
-    ("string.pad_end", &[1]),
-];
+/// ALS-B8 / E075: what each bundled stdlib fn's `@sized_by(p, …)` declares —
+/// module -> fn -> the indices of the parameters its result's size is bounded
+/// by. A named Int parameter is an amplifier (`string.repeat(s, n)`: the
+/// result grows with `n`), refused under @bounded when its argument is not a
+/// compile-time constant; named heap parameters bound the result by an input
+/// the caller already holds (`string.slice(s, a, b)`). Only the stdlib's own
+/// declarations are read (owner ruling 2026-11-22). The second map holds every
+/// name a declaration gives that is not one of its fn's parameters — kept so a
+/// test can refuse a misspelt declaration instead of reading it as "none".
+type SizedByTable = (HashMap<&'static str, HashMap<String, Vec<usize>>>, Vec<String>);
+
+fn stdlib_sized_by() -> &'static SizedByTable {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<SizedByTable> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = HashMap::new();
+        let mut unknown = Vec::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(src) = crate::stdlib::get_bundled_source(module) else { continue };
+            if !src.contains("@sized_by") {
+                continue;
+            }
+            let Some(prog) = almide_lang::parse_cached(src) else { continue };
+            let mut t = HashMap::new();
+            for d in &prog.decls {
+                let ast::Decl::Fn { name, attrs, params, .. } = d else { continue };
+                for a in attrs.iter().filter(|a| a.name.as_str() == "sized_by") {
+                    let slots: &mut Vec<usize> = t.entry(name.to_string()).or_default();
+                    for arg in &a.args {
+                        let p = match &arg.value {
+                            ast::AttrValue::Ident { name } => name.to_string(),
+                            ast::AttrValue::String { value } => value.clone(),
+                            _ => String::new(),
+                        };
+                        match params.iter().position(|q| q.name.as_str() == p) {
+                            Some(i) if !slots.contains(&i) => slots.push(i),
+                            Some(_) => {}
+                            None => unknown.push(format!("{module}.{name}: `{p}`")),
+                        }
+                    }
+                }
+            }
+            if !t.is_empty() {
+                out.insert(module, t);
+            }
+        }
+        (out, unknown)
+    })
+}
 
 /// In-loop allocating calls (ALS-B4).
 const BOUNDED_ALLOC_CALLS: &[&str] = &[
@@ -1169,7 +1206,7 @@ impl BoundedCx<'_, '_> {
             return;
         }
         // ALS-B8 / E075: run-time-length heap construction
-        if self.has_runtime_sized_slot(&full, args) || self.call_sizes_from_an_int(call, args) {
+        if self.sizes_at_run_time(call, m, f, args) {
             self.err(
                 "run-time-length heap construction is not admissible in a @bounded function",
                 "give every constructed length a compile-time size",
@@ -1293,12 +1330,47 @@ impl BoundedCx<'_, '_> {
         self.call_ty(call).is_none_or(has_float)
     }
 
-    /// A sized constructor (`list.repeat`-like) given a size slot that is not
-    /// a compile-time Int.
-    fn has_runtime_sized_slot(&self, full: &str, args: &[ast::Expr]) -> bool {
-        BOUNDED_SIZED_CTORS
-            .iter()
-            .find(|(n, _)| *n == full)
-            .is_some_and(|(_, slots)| slots.iter().filter_map(|slot| args.get(*slot)).any(|a| !self.is_const_int(a)))
+    /// ALS-B8 / E075: a call whose result's length is set at run time.
+    ///
+    /// A stdlib fn declaring `@sized_by` is judged by its declaration: it is
+    /// refused when a named Int parameter gets an Int that is not a
+    /// compile-time constant. An UNDECLARED stdlib fn returning a heap value,
+    /// handed a heap input AND a run-time Int, is refused (fail closed): only
+    /// its body could say whether the Int only indexes the input or multiplies
+    /// it, and the checker does not read bodies. Every other call keeps the
+    /// type rule (#4855): a collection built from a run-time Int with no heap
+    /// input.
+    fn sizes_at_run_time(&self, call: &ast::Expr, m: &str, f: &str, args: &[ast::Expr]) -> bool {
+        let arg_ty = |a: &ast::Expr| self.checker.type_map.get(&a.id);
+        // An Int the fn DECLARES as Int: an element of a generic (`set.insert(s, i)`
+        // at `A = Int`) is a value, not a size.
+        let sig = crate::stdlib::lookup_sig(m, f);
+        let declared_int = |i: usize| sig.as_ref().is_some_and(|s| s.params.get(i).is_some_and(|(_, t)| matches!(t, Ty::Int)));
+        let runtime_int = |i: usize| {
+            declared_int(i) && args.get(i).is_some_and(|a| matches!(arg_ty(a), Some(Ty::Int)) && !self.is_const_int(a))
+        };
+        if let Some(named) = stdlib_sized_by().0.get(m).and_then(|t| t.get(f)) {
+            return named.iter().any(|&i| runtime_int(i));
+        }
+        if sig.is_some()
+            && self.call_ty(call).is_none_or(almide_lang::types::is_heap_ty)
+            && args.iter().any(|a| arg_ty(a).is_some_and(almide_lang::types::is_heap_ty))
+            && (0..args.len()).any(runtime_int)
+        {
+            return true;
+        }
+        self.call_sizes_from_an_int(call, args)
+    }
+}
+
+#[cfg(test)]
+mod sized_by_tests {
+    /// A `@sized_by` name that is not a parameter of its fn would read as
+    /// "bounded by nothing named" — refuse the misspelling here instead.
+    #[test]
+    fn every_sized_by_declaration_names_parameters_of_its_fn() {
+        let (table, unknown) = super::stdlib_sized_by();
+        assert!(unknown.is_empty(), "@sized_by names that are not parameters: {unknown:?}");
+        assert!(!table.is_empty(), "the stdlib declares @sized_by; the table must not be empty");
     }
 }

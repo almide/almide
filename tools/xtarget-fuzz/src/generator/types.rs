@@ -66,6 +66,24 @@ pub enum GenType {
     /// `secret.Secret[inner]` (#4107): built with `secret.new`, observed
     /// through `secret.reveal` — its own rendering is always `Secret(***)`.
     Secret(Box<GenType>),
+    /// A generic stdlib collection over its element (`Deque[A]`, `Heap[A]`),
+    /// built with its module's `from_list` and observed through its
+    /// `to_list` ([`COLLECTIONS`]).
+    Coll(&'static str, Box<GenType>),
+}
+
+/// The generic stdlib collections the grammar builds: `(type, module)`.
+/// Each is made by `<module>.from_list(xs)`, read back by
+/// `<module>.to_list(c)` and sized by `<module>.len(c)`.
+pub const COLLECTIONS: &[(&str, &str)] = &[("Deque", "deque"), ("Heap", "heap")];
+
+/// The module of collection `name`.
+pub fn coll_module(name: &str) -> &'static str {
+    COLLECTIONS
+        .iter()
+        .find(|(t, _)| *t == name)
+        .map(|(_, m)| *m)
+        .unwrap_or("deque")
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -140,13 +158,27 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
-            GenType::Nominal(k) => out.push_str(k),
+            GenType::Nominal(k) => out.push_str(super::nominal::spelled(k)),
             GenType::Secret(e) => {
                 out.push_str("Secret[");
                 e.render_into(out);
                 out.push(']');
             }
+            GenType::Coll(k, e) => {
+                out.push_str(k);
+                out.push('[');
+                e.render_into(out);
+                out.push(']');
+            }
         }
+    }
+
+    /// A value held inline, with no heap allocation behind it.
+    pub fn is_scalar(&self) -> bool {
+        matches!(
+            self,
+            GenType::Int | GenType::Float | GenType::Bool | GenType::Unit | GenType::Sized(_)
+        )
     }
 
     /// A type a `Set` can hold: hashable and equal by value (no Float — a
@@ -155,6 +187,9 @@ impl GenType {
         match self {
             GenType::Int | GenType::String | GenType::Bool => true,
             GenType::Sized(name) => !name.starts_with("Float"),
+            // A hashable record (`{ neg: Bool, limbs: List[Int] }`): the
+            // heap-backed Numeric conformer a set's sum and product take.
+            GenType::Nominal("BigInt") => true,
             _ => false,
         }
     }
@@ -188,21 +223,31 @@ impl GenType {
         let x = format!("o{depth}");
         let inner = |e: &GenType| -> Option<String> {
             let (pre, expr) = e.observe(&x, depth + 1)?;
-            pre.is_empty().then(|| format!("(({x}) => {expr})"))
+            if pre.is_empty() {
+                return Some(format!("(({x}) => {expr})"));
+            }
+            // A callback has no room for the `let` a tuple is destructured
+            // with: read its fields instead (value.as_object's
+            // `List[(String, Value)]` was "not printable" for want of this).
+            let expr = e.observe_fields(&x, depth + 1)?;
+            Some(format!("(({x}) => {expr})"))
         };
         // An observation that calls an effect closure (a handler) cannot sit
         // in a plain callback: an Option or Result is taken apart with a
-        // `match`, a list mapped in its fallible form.
+        // `match`, a list mapped in its fallible form — when the observation
+        // propagates (`h(req)!`); one that recovers its own error (`?? []`)
+        // maps in the plain form (a trailing `!` on a List is E034).
         if let GenType::List(e) | GenType::Option(e) | GenType::Result(e) = self {
             if e.observe_calls_effect() {
                 let (pre, expr) = e.observe(&x, depth + 1)?;
                 if !pre.is_empty() {
                     return None;
                 }
+                let bang = if expr.contains(")!") { "!" } else { "" };
                 return Some((
                     String::new(),
                     match self {
-                        GenType::List(_) => format!("list.map({v}, ({x}) => {expr})!"),
+                        GenType::List(_) => format!("list.map({v}, ({x}) => {expr}){bang}"),
                         GenType::Option(_) => {
                             format!("match {v} {{ some({x}) => some({expr}), none => none }}")
                         }
@@ -235,6 +280,10 @@ impl GenType {
         }
         if let GenType::Secret(e) = self {
             return e.observe(&format!("secret.reveal({v})"), depth + 1);
+        }
+        if let GenType::Coll(k, e) = self {
+            return GenType::List(e.clone())
+                .observe(&format!("{}.to_list({v})", coll_module(k)), depth + 1);
         }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
@@ -270,6 +319,35 @@ impl GenType {
         }
     }
 
+    /// [`observe`](Self::observe) as one expression, a tuple read through its
+    /// fields (`v.0`, `v.1`) rather than a `let` — for a callback body, which
+    /// has no room for the `let`. None where an element still needs one.
+    pub fn observe_fields(&self, v: &str, depth: usize) -> Option<String> {
+        let one = |e: &GenType, at: String| -> Option<String> {
+            match e.observe(&at, depth + 1)? {
+                (pre, expr) if pre.is_empty() => Some(expr),
+                _ => e.observe_fields(&at, depth + 1),
+            }
+        };
+        match self {
+            GenType::Tuple2(a, b) => Some(format!(
+                "({}, {})",
+                one(a, format!("{v}.0"))?,
+                one(b, format!("{v}.1"))?
+            )),
+            GenType::Tuple3(a, b, c) => Some(format!(
+                "({}, {}, {})",
+                one(a, format!("{v}.0"))?,
+                one(b, format!("{v}.1"))?,
+                one(c, format!("{v}.2"))?
+            )),
+            _ => match self.observe(v, depth)? {
+                (pre, expr) if pre.is_empty() => Some(expr),
+                _ => None,
+            },
+        }
+    }
+
     /// [`observe`](Self::observe) calls an effect closure somewhere inside.
     pub fn observe_calls_effect(&self) -> bool {
         match self {
@@ -282,7 +360,8 @@ impl GenType {
             | GenType::Result(e)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => e.observe_calls_effect(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
             GenType::Tuple3(a, b, c) => {
                 a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect()
@@ -301,7 +380,8 @@ impl GenType {
             | GenType::Result(e)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => e.refuses_var(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
@@ -322,6 +402,7 @@ impl GenType {
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
             GenType::Secret(e) => return e.observed(),
+            GenType::Coll(_, e) => return GenType::List(e.clone()).observed(),
             GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
             GenType::Tuple3(a, b, c) => GenType::Tuple3(inner(a)?, inner(b)?, inner(c)?),
@@ -348,6 +429,8 @@ impl GenType {
             GenType::Nominal(_) | GenType::ResultNom(..) => false,
             // Prints `Secret(***)`: observed through `secret.reveal`.
             GenType::Secret(_) => false,
+            // No string form of its own: observed through its `to_list`.
+            GenType::Coll(..) => false,
         }
     }
 
@@ -371,7 +454,8 @@ impl GenType {
             | GenType::ResultNom(e, _)
             | GenType::Map(e)
             | GenType::Set(e)
-            | GenType::Secret(e) => 1 + e.depth(),
+            | GenType::Secret(e)
+            | GenType::Coll(_, e) => 1 + e.depth(),
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
             GenType::Tuple3(a, b, c) => 1 + a.depth().max(b.depth()).max(c.depth()),
         }
@@ -412,6 +496,21 @@ pub fn render_print(name: &str, ty: &GenType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tuple_inside_a_callback_is_observed_through_its_fields() {
+        // value.as_object: Result[List[(String, Value)], String].
+        let t = GenType::Result(Box::new(GenType::List(Box::new(GenType::Tuple2(
+            Box::new(GenType::String),
+            Box::new(GenType::Value),
+        )))));
+        let (pre, expr) = t.observe("v", 0).expect("observable");
+        assert!(pre.is_empty(), "{pre}");
+        assert!(expr.contains(".0") && expr.contains("json.stringify(o1.1)"), "{expr}");
+        // A top-level tuple keeps its `let` form.
+        let top = GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::Value));
+        assert!(!top.observe("v", 0).expect("observable").0.is_empty());
+    }
 
     /// #3636: the observed image of a non-printable value is a call, and a
     /// call interpolated inside `${…}` whose type is a Result is E041

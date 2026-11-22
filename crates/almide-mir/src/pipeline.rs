@@ -174,8 +174,17 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
         /// stayed a `CallTarget::Module`, and the MIR walled it as an
         /// "effectful/impure stdlib Module call layout.layout" (#904).
         enclosing: Option<String>,
+        /// Each minted call symbol with the module fn it names
+        /// (`CodegenAnnotations::minted_call_symbols`): the fan pass asks
+        /// that fn's declaration, never the symbol's spelling (#4893).
+        minted: Vec<(almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym))>,
     }
     impl Rw<'_> {
+        fn mint(&mut self, module: &str, f: &str) -> almide_base::intern::Sym {
+            let name = sym(&user_module_fn_name(module, f));
+            self.minted.push((name, (sym(module), sym(f))));
+            name
+        }
         /// The user module a call's `module` segment refers to: an exact match,
         /// or — inside a package — the sibling under the enclosing module's own
         /// package prefix.
@@ -198,22 +207,22 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
             if let IrExprKind::Call { target, .. } = &mut e.kind {
                 if let CallTarget::Module { module, func, .. } = target {
                     let (m, f) = (module.as_str(), func.as_str());
-                    if let Some(owner) = self.resolve_module(m, f) {
-                        *target = CallTarget::Named {
-                            name: sym(&user_module_fn_name(owner, f)),
-                        };
+                    if let Some(owner) = self.resolve_module(m, f).map(str::to_string) {
+                        let name = self.mint(&owner, f.to_string().as_str());
+                        *target = CallTarget::Named { name };
                     }
                 } else if let CallTarget::Named { name } = target {
                     // A module body's BARE call of a fn its own module defines is that fn, by
                     // definition (#3831): it takes the module fn's mangled def name whatever the
                     // root or another module spells the same way.
-                    let f = name.as_str();
+                    let f = name.as_str().to_string();
+                    let f = f.as_str();
                     if let Some(own) = self
                         .enclosing
-                        .as_deref()
-                        .filter(|m| self.user_mods.get(*m).is_some_and(|fs| fs.contains(f)))
+                        .clone()
+                        .filter(|m| self.user_mods.get(m.as_str()).is_some_and(|fs| fs.contains(f)))
                     {
-                        *target = CallTarget::Named { name: sym(&user_module_fn_name(own, f)) };
+                        *target = CallTarget::Named { name: self.mint(&own, f) };
                         return;
                     }
                     // A BARE Named call to a fn that lives in exactly ONE linked user module: the
@@ -224,9 +233,8 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
                     if !self.root_fns.contains(f) {
                         let mut owners = self.user_mods.iter().filter(|(_, fs)| fs.contains(f));
                         if let (Some((m, _)), None) = (owners.next(), owners.next()) {
-                            *target = CallTarget::Named {
-                                name: sym(&user_module_fn_name(m, f)),
-                            };
+                            let m = m.clone();
+                            *target = CallTarget::Named { name: self.mint(&m, f) };
                         }
                     }
                 }
@@ -242,6 +250,7 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
         user_mods: &user_mods,
         root_fns,
         enclosing: None,
+        minted: Vec::new(),
     };
     for func in &mut ir.functions {
         rw.visit_expr_mut(&mut func.body);
@@ -258,6 +267,7 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
             rw.visit_expr_mut(&mut tl.value);
         }
     }
+    ir.codegen_annotations.minted_call_symbols.extend(rw.minted);
 }
 
 /// The #1052 pre-inference import audit: every non-stdlib import must have a

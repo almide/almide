@@ -1,0 +1,6 @@
+import self.m
+
+test "local fn as a value" {
+  let f = m.secret
+  assert(f(1) == 2)
+}

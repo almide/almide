@@ -1,0 +1,2 @@
+# The probe of effect.e007-e008-fan-context: a fan wrapper (its parameter flows into fan.map) put in a list, i.e. named as a value (#4903).
+expect = "runs an argument concurrently (fan.map), so it can only be called directly"

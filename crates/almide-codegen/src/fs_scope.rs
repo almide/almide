@@ -70,6 +70,7 @@ macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__al
 macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = __ALMIDE_RT::fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from((&*__almide_p).split('\0').next().unwrap_or("")); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = std::env::temp_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_shm_dir { ($f:expr $(, $a:expr)* $(,)?) => {{ let __almide_s = __ALMIDE_RT::almide_shm_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => ($f)($($a),*), Err(e) => Err(e.into()) } }}; }
 "#;
 
 /// The fs runtime module's embedded source (includes inlined).
@@ -81,9 +82,11 @@ pub(crate) fn fs_runtime_source() -> &'static str {
 /// bundled stdlib's declarations (#4825): an `@intrinsic` fn marked
 /// `@fs_path(p)` (a path the call touches; `@fs_path(src, dst)` two),
 /// `@fs_glob(p)` (a pattern, judged by its literal base), `@fs_temp(p)` (a
-/// call that creates in the temp dir) or `@fs_root(p)` (a rooted call's
-/// root). The marked parameters lead the signature in that order — a guard
-/// takes the path first. A runtime helper's `Send`-free twin
+/// call that creates in the temp dir), `@fs_root(p)` (a rooted call's
+/// root) or `@fs_shm_dir` (no path: a call judged by the directory a
+/// shared-memory region's file is made in, `almide_shm_dir`). The marked
+/// parameters lead the signature in that order — a guard takes the path
+/// first. A runtime helper's `Send`-free twin
 /// (`runtime_fn_modes::send_free_twin`, where the lowering routes a
 /// non-`Send` value) takes its helper's guard. A malformed mark panics
 /// (`fs_runtime_guards_from` says why): a mark that cannot be read guards
@@ -102,7 +105,7 @@ pub(crate) fn fs_runtime_guards() -> std::collections::HashMap<String, &'static 
 }
 
 /// The path marks [`fs_runtime_guards`] reads.
-pub(crate) const FS_PATH_MARKS: &[&str] = &["fs_path", "fs_glob", "fs_temp", "fs_root"];
+pub(crate) const FS_PATH_MARKS: &[&str] = &["fs_path", "fs_glob", "fs_temp", "fs_root", "fs_shm_dir"];
 
 /// [`fs_runtime_guards`] over `sources` (`(module, text)`).
 pub(crate) fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collections::HashMap<String, &'static str>, String> {
@@ -138,7 +141,9 @@ pub(crate) fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::co
                 })
                 .collect::<Result<_, _>>()?;
             let leading: Vec<&str> = params.iter().take(named.len()).map(|p| p.name.as_str()).collect();
-            if named.is_empty() || !named.iter().map(String::as_str).eq(leading.iter().copied()) {
+            // `@fs_shm_dir` names no parameter: its directory is the runtime's.
+            let pathless = mark.name.as_str() == "fs_shm_dir";
+            if named.is_empty() != pathless || !named.iter().map(String::as_str).eq(leading.iter().copied()) {
                 return Err(at(&format!("names {named:?}, but a guard takes the leading parameters {leading:?}")));
             }
             let returns_bool = matches!(return_type, TypeExpr::Simple { name } if name.as_str() == "Bool");
@@ -149,6 +154,7 @@ pub(crate) fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::co
                 ("fs_glob", 1) if params.len() == 1 => "__almide_fs_glob",
                 ("fs_temp", 1) if params.len() == 1 => "__almide_fs_temp",
                 ("fs_root", 1) => "__almide_fs_root",
+                ("fs_shm_dir", 0) if !returns_bool => "__almide_fs_shm_dir",
                 _ => return Err(at("has no guard of that shape")),
             };
             let mut entries = vec![symbol.clone()];
@@ -335,6 +341,9 @@ almide_rt_fs_write(x, y)
             "@fs_path(p)\neffect fn f(p: String) -> Result[Unit, String] = _\n",
             "@intrinsic(\"x\")\n@fs_path(p)\n@fs_glob(p)\neffect fn f(p: String) -> Result[Unit, String] = _\n",
             "@intrinsic(\"x\")\n@fs_temp(p)\neffect fn f(p: String, q: String) -> Result[Unit, String] = _\n",
+            "@intrinsic(\"x\")\n@fs_shm_dir(p)\neffect fn f(p: String) -> Result[Unit, String] = _\n",
+            "@intrinsic(\"x\")\n@fs_path\neffect fn f(p: String) -> Result[Unit, String] = _\n",
+            "@intrinsic(\"x\")\n@fs_shm_dir\neffect fn f(n: Int) -> Bool = _\n",
         ] {
             assert!(fs_runtime_guards_from(&[("fixture", src)]).is_err(), "accepted: {src}");
         }
@@ -358,6 +367,16 @@ almide_rt_fs_write(x, y)
         for s in ["almide_rt_unix___os_connect", "almide_rt_unix___os_listen"] {
             assert_eq!(guards.get(s), Some(&"__almide_fs_path"), "{s}");
         }
+    }
+
+    /// C-393: `unix.shm_create` names no path; its leaf is guarded by the
+    /// directory its region's file is made in, and the guard keeps the size.
+    #[test]
+    fn the_shm_create_leaf_is_guarded_by_its_directory() {
+        let guards = fs_runtime_guards();
+        assert_eq!(guards.get("almide_rt_unix___os_shm_create"), Some(&"__almide_fs_shm_dir"));
+        let wrapped = wrap_fs_calls("let fd = almide_rt_unix___os_shm_create(n)?;", &guards, &Default::default());
+        assert_eq!(wrapped, "let fd = __almide_fs_shm_dir!(almide_rt_unix___os_shm_create, n)?;");
     }
 
     /// The negative control: a reached string-taking fs runtime fn the

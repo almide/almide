@@ -1,0 +1,16 @@
+# The probe of net.shm-create-tempfile: `[permissions] fs` grants ./data only,
+# and $XDG_RUNTIME_DIR names `/`, so the directory a shared-memory region's
+# file would be made in lies outside the grant (C-393). The program prints
+# the refusal (exit 0); build runs the built binary.
+expect = 'fs: "/" is outside [permissions] fs'
+exit = "any"
+exec_out = ["build"]
+env = { XDG_RUNTIME_DIR = "/" }
+
+[expect_by]
+# the test route: the refusal-asserting test passes
+test = "All 1 test file(s) passed"
+# bench: the run's output is checked before it is timed
+bench = "output verified identical across all runs"
+# emit: the emitted Rust wraps the call in its scope guard
+emit = "__almide_fs_shm_dir!("

@@ -159,6 +159,9 @@ struct OrderedReach<'a> {
     modules: std::collections::HashSet<Sym>,
     /// Memo per fn: does its body reach an ordered op.
     memo: std::cell::RefCell<std::collections::HashMap<(Option<Sym>, Sym), bool>>,
+    /// The module fn each minted call symbol names, recorded where it was
+    /// minted (`CodegenAnnotations::minted_call_symbols`).
+    minted: &'a std::collections::HashMap<Sym, (Sym, Sym)>,
 }
 
 impl<'a> OrderedReach<'a> {
@@ -173,7 +176,12 @@ impl<'a> OrderedReach<'a> {
             }
         }
         let modules = program.modules.iter().map(|m| m.name).collect();
-        Self { fns, modules, memo: std::cell::RefCell::new(std::collections::HashMap::new()) }
+        Self {
+            fns,
+            modules,
+            memo: std::cell::RefCell::new(std::collections::HashMap::new()),
+            minted: &program.codegen_annotations.minted_call_symbols,
+        }
     }
 
     fn expr_reaches_ordered(&self, e: &IrExpr, module: Option<Sym>) -> bool {
@@ -196,11 +204,11 @@ impl<'a> OrderedReach<'a> {
                         }
                     }
                     (Some(CallTarget::Named { name }), _) | (_, IrExprKind::FnRef { name }) => {
-                        // A bodied stdlib fn is called by its runtime name
-                        // here (`almide_rt_env_set`, #4200).
-                        if almide_lang::stdlib_info::is_ordered_runtime_symbol(name.as_str())
-                            || self.reach.fn_reaches_ordered(self.module, *name)
-                        {
+                        // A bodied module fn is called by the symbol a pass
+                        // minted for it (`almide_rt_env_set`, #4200): the
+                        // record names the fn, whose own `@ordered` mark and
+                        // body answer.
+                        if self.reach.minted_reaches_ordered(*name) || self.reach.fn_reaches_ordered(self.module, *name) {
                             self.hit = true;
                         }
                     }
@@ -242,6 +250,17 @@ impl<'a> OrderedReach<'a> {
     /// answer is memoised once its body is fully walked.
     fn fn_reaches_ordered(&self, module: Option<Sym>, name: Sym) -> bool {
         let key = if self.fns.contains_key(&(module, name)) { (module, name) } else { (None, name) };
+        self.body_reaches_ordered(key)
+    }
+
+    /// A minted call symbol: the fn the record names, by its declaration —
+    /// the stdlib's `@ordered` mark, else its body (in that module only).
+    fn minted_reaches_ordered(&self, symbol: Sym) -> bool {
+        let Some(&(module, func)) = self.minted.get(&symbol) else { return false };
+        almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) || self.body_reaches_ordered((Some(module), func))
+    }
+
+    fn body_reaches_ordered(&self, key: (Option<Sym>, Sym)) -> bool {
         let Some(f) = self.fns.get(&key) else { return false };
         if let Some(&b) = self.memo.borrow().get(&key) {
             return b;

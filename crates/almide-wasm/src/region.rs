@@ -157,7 +157,39 @@ fn stmts_pure(ss: &[IrStmt], cx: &PureCx) -> bool {
     })
 }
 
-fn call_pure(target: &CallTarget, args: &[IrExpr], cx: &PureCx) -> bool {
+/// C-364 (amended 2026-11-20): the checker admits a stdlib call into a
+/// scoped region by its declared SIGNATURE — not an effect, no `@ordered` /
+/// memory-unsafe / signals mark, every argument and the result a scalar — so
+/// the emitter's vocabulary admits the same calls, whatever their module
+/// (`datetime.hour` was admitted by the checker and refused here, E083).
+fn stdlib_call_by_signature(module: &str, func: &str, args: &[IrExpr], ret: &almide_types::types::Ty) -> bool {
+    use almide_types::types::Ty;
+    let scalar = |t: &Ty| {
+        matches!(
+            t,
+            Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                | Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Bool | Ty::Unit
+        )
+    };
+    almide_lang::stdlib_info::is_any_stdlib(module)
+        && !almide_ir::effect::stdlib_fn_is_effect(module, func)
+        && !almide_lang::stdlib_info::is_ordered_stdlib_fn(module, func)
+        && !almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(module, func)
+        && !almide_lang::stdlib_info::is_signals_process_stdlib_fn(module, func)
+        && scalar(ret)
+        && args.iter().all(|a| scalar(&a.ty))
+}
+
+fn module_call_pure(target: &CallTarget, args: &[IrExpr], ret: &almide_types::types::Ty) -> bool {
+    match target {
+        CallTarget::Module { module, func, .. } => {
+            SCALAR_MODULES.contains(&module.as_str()) || stdlib_call_by_signature(module.as_str(), func.as_str(), args, ret)
+        }
+        _ => false,
+    }
+}
+
+fn call_pure(target: &CallTarget, args: &[IrExpr], ret: &almide_types::types::Ty, cx: &PureCx) -> bool {
     if !all_pure(args, cx) {
         return false;
     }
@@ -167,7 +199,7 @@ fn call_pure(target: &CallTarget, args: &[IrExpr], cx: &PureCx) -> bool {
             cx.ctors.contains(name)
                 || resolve_named(cx.table, cx.cur_module, name).is_some_and(|i| cx.pure.contains(&i))
         }
-        CallTarget::Module { module, .. } => SCALAR_MODULES.contains(&module.as_str()),
+        CallTarget::Module { .. } => module_call_pure(target, args, ret),
         _ => false,
     }
 }
@@ -198,7 +230,7 @@ fn expr_pure(e: &IrExpr, cx: &PureCx) -> bool {
             matches!(iterable.kind, K::Range { .. }) && expr_pure(iterable, cx) && stmts_pure(body, cx)
         }
         K::Range { start, end, .. } => expr_pure(start, cx) && expr_pure(end, cx),
-        K::Call { target, args, .. } => call_pure(target, args, cx),
+        K::Call { target, args, .. } => call_pure(target, args, &e.ty, cx),
         K::Tuple { elements } => all_pure(elements, cx),
         K::Record { fields, .. } => fields.iter().all(|(_, fe)| expr_pure(fe, cx)),
         K::Member { object, .. } | K::TupleIndex { object, .. } => expr_pure(object, cx),
@@ -228,7 +260,7 @@ fn scalar_arg(e: &IrExpr, cx: &PureCx) -> bool {
                 && match target {
                     CallTarget::Named { name } => resolve_named(cx.table, cx.cur_module, name.as_str())
                         .is_some_and(|i| cx.pure.contains(&i)),
-                    CallTarget::Module { module, .. } => SCALAR_MODULES.contains(&module.as_str()),
+                    CallTarget::Module { .. } => module_call_pure(target, args, &e.ty),
                     _ => false,
                 }
         }
