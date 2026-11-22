@@ -101,6 +101,11 @@ pub(crate) struct AddrState {
     /// append pushes it, instead of a `vec![…]` allocated and appended per
     /// iteration. `true` once the element is stored.
     single_rec: BTreeMap<ValueId, bool>,
+    /// The `+` twin of `single_rec` (#4902): a one-element generated list
+    /// whose window is the right side of a list `+` other than its own kind's
+    /// self-append. Its element waits in `<list>_e0` and the `+` pushes it onto
+    /// the left list (`single_rec_concat`). `true` once the element is stored.
+    single_rec_concat: BTreeMap<ValueId, bool>,
     building_enum: BTreeMap<ValueId, (u32, Vec<Option<NTy>>)>,
     /// List blocks filled in slot order right after their allocation
     /// (`render_native_slots::filled_in_order`): reserved, then pushed.
@@ -189,11 +194,15 @@ impl AddrState {
         // Chosen only where the push is sure: the list the window appends to
         // is of the block's own kind, and the window's result is the rebind's
         // alone.
-        let single_rec = slots::single_elem_blocks(func, &base_of, &consts)
+        let (own_kind, other): (Vec<ValueId>, Vec<ValueId>) = slots::single_elem_blocks(func, &base_of, &consts)
             .into_iter()
-            .filter(|b| pushed.contains(b) && generated(b) && pushes_onto_own_kind(func, *b, &alloc_rec))
-            .map(|b| (b, false))
-            .collect();
+            .filter(|b| pushed.contains(b) && generated(b))
+            .partition(|b| pushes_onto_own_kind(func, *b, &alloc_rec));
+        let single_rec = own_kind.into_iter().map(|b| (b, false)).collect();
+        // Any other window of a chosen block is a list `+`'s right side
+        // (`single_elem_blocks`); whether its left list takes the push is
+        // decided at the `+`, which builds the list there when it does not.
+        let single_rec_concat = other.into_iter().map(|b| (b, false)).collect();
         let reassigned = stale_handles(func);
         // A carrier can share DynListStr's physical layout, but is not a
         // constant string table. Its payload still needs a real binding.
@@ -259,6 +268,7 @@ impl AddrState {
             building_enum: BTreeMap::new(),
             single,
             single_rec,
+            single_rec_concat,
             pushed,
             literal: BTreeMap::new(),
             borrowed_list_slots: slots::borrowed_stores(func, &handle_of, &base_of),

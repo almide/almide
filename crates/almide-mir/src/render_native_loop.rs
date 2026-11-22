@@ -465,6 +465,14 @@ fn render_fn_appends(st: &mut FnLoop<'_>, i: usize, ops: &mut impl Iterator) -> 
             _ => None,
         }).expect("a list `+`"), NTy::VecStr);
     }
+    // A one-element generated list held as its element: pushed onto the
+    // left list of a `+`, or built here for it (#4902).
+    if let Some((code, done)) = crate::render_native_addr::single_rec_concat(func, i, &mut st.tys, &mut st.addrs) {
+        line!("{code}");
+        if done {
+            return true;
+        }
+    }
     if let Some(append) = crate::render_native_append::list_self_append(func, i, &st.tys, &st.borrows.arms) {
         line!("{append}");
         ops.nth(1);

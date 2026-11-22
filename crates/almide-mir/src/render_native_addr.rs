@@ -696,7 +696,13 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
     if st.single.get(x) != Some(&true) {
         return None;
     }
+    let taken = crate::render_native_move::taken_arg(*a);
     let left = match tys.get(a)? {
+        // A field or payload the `+` takes out of its dying carrier (#4902):
+        // grown in place, whatever its binding's type says.
+        NTy::VecStr | NTy::VecStrRef if taken.is_some() => {
+            format!("let mut r: Vec<AlmideString> = {}; r.push({}_e0);", taken.unwrap_or_default(), var(*x))
+        }
         NTy::VecStr if crate::render_native_move::moving_arg(*a) => {
             format!("let mut r: Vec<AlmideString> = {}; r.push({}_e0);", crate::render_native_move::take_expr(&var(*a)), var(*x))
         }
@@ -713,6 +719,42 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
     Some((format!("let mut {}: Vec<AlmideString> = {{ {left} r }};", var(*d)), true))
 }
 
+/// The generated-list twin of [`single_concat`] (#4902): a list `+` whose
+/// right side is a one-element list of records, lists or variants held as its
+/// element ([`AddrState::single_rec_concat`]) pushes that element onto the
+/// left list's elements — the left list itself when it dies at the `+` or is
+/// a field or payload the `+` takes out of its dying carrier, a copy of it
+/// otherwise — and no one-element list is built. A left list of another kind
+/// gets the list built here for the `+` below (`false`).
+pub(crate) fn single_rec_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<ValueId, NTy>, st: &mut AddrState) -> Option<(String, bool)> {
+    let Op::CallFn { dst: Some(d), name, args, .. } = func.ops.get(i)? else { return None };
+    if !crate::native_list_ops::is_list_concat(name) {
+        return None;
+    }
+    let [crate::CallArg::Handle(a), crate::CallArg::Handle(x)] = args.as_slice() else { return None };
+    if st.single_rec_concat.get(x) != Some(&true) {
+        return None;
+    }
+    st.single_rec_concat.remove(x);
+    let xt = *tys.get(x)?;
+    let left = tys.get(a).copied().filter(|at| a != x && crate::native_list_ops::owned(*at) == xt).and_then(|at| {
+        let (sa, ty) = crate::native_list_ops::as_slice(&var(*a), at)?;
+        let head = match crate::render_native_move::taken_arg(*a) {
+            _ if at == xt && crate::render_native_move::moving_arg(*a) => crate::render_native_move::take_expr(&var(*a)),
+            Some(take) => take,
+            None => format!("{{ let mut c: {ty} = Vec::with_capacity({sa}.len() + 1); c.extend_from_slice({sa}); c }}"),
+        };
+        Some(format!("let mut {}: {ty} = {{ let mut r: {ty} = {head}; r.push({}_e0); r }};", var(*d), var(*x)))
+    });
+    match left {
+        Some(code) => {
+            tys.insert(*d, xt);
+            Some((code, true))
+        }
+        // Any other left side: the list is built here for the `+` below.
+        None => Some((format!("let mut {x}: {} = vec![{x}_e0];", crate::render_native_rec::owned_ty(xt), x = var(*x)), false)),
+    }
+}
 
 include!("render_native_addr_op.rs");
 include!("render_native_addr_alloc.rs");

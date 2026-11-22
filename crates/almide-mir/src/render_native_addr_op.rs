@@ -665,7 +665,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             let b = var(ad.base);
             list_literal::elem_local(out, indent, (&b, k), &crate::render_native_rec::owned_ty(e), &rhs, pair.is_some());
             st.literal.insert(ad.base, (n, k + 1));
-            if let Some(stored) = st.single_rec.get_mut(&ad.base) {
+            if let Some(stored) = st.single_rec.get_mut(&ad.base).or(st.single_rec_concat.get_mut(&ad.base)) {
                 // Its one element waits for the append that pushes it.
                 *stored = true;
                 return Ok(true);
