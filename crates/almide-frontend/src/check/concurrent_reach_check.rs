@@ -141,17 +141,31 @@ fn escape_diagnostic(f: &crate::concurrent_reach::EscapeFinding, file: Option<St
     let name = f.name.as_str();
     let surface = f.surface.as_str();
     let message = format!("{name} runs an argument concurrently ({surface}), so it can only be called directly");
-    let how = if name == "this lambda" {
-        "bind it with `let` and call it by that name".to_string()
+    let why = "A call made through a value cannot be resolved, so a `var` reached from its concurrent \
+               argument would escape the check that keeps `var`s out of concurrent bodies.";
+    // The rewrite is the same whatever the value position was: make the call
+    // where the fn argument is known, instead of handing the fn on.
+    let (hint, try_snippet) = if name == "this lambda" {
+        (
+            format!(
+                "this lambda hands its parameter on to {surface}. Call the parameter itself instead of passing it \
+                 on — `(next) => (x) => next(x)!` rather than `(next) => w(next, …)` — or bind the lambda with \
+                 `let run = (f) => …` and call `run(g)` by that name. {why}"
+            ),
+            "(next) => (x) => next(x)!".to_string(),
+        )
     } else {
-        format!("call `{name}(…)` by name, or through a `let` alias of it")
+        (
+            format!(
+                "call `{name}` directly with the fn it should run — `{name}(f)`, or `let g = {name}` then `g(f)` — \
+                 at the place `f` is known, instead of passing `{name}` itself as an argument, a list or record \
+                 element, or a `var` to be called later. {why}"
+            ),
+            format!("{name}(f)"),
+        )
     };
-    let hint = format!(
-        "{how}. Passed as a value — an argument, a list or record element, a `var` — its call cannot be \
-         resolved, so the concurrent argument would escape the check that keeps `var`s out of concurrent bodies."
-    );
     let context = format!("a fn whose argument runs in {surface}, used as a value");
-    let mut d = Diagnostic::error(message, hint, context).with_code("E008");
+    let mut d = Diagnostic::error(message, hint, context).with_code("E008").with_try(try_snippet);
     d.file = file;
     if let Some(s) = f.span {
         d.line = Some(s.line);
