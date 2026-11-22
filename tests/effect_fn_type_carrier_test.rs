@@ -308,7 +308,7 @@ effect fn main() -> Unit = {
   let c = option.unwrap_or_else(none_h, () => (req) => http.response(200, "c"))
   let d = http.wrap(
     option.unwrap_or_else(
-      some(http.wrap((req) => http.response(200, "d"), [(next) => http.wrap(next, [])])),
+      some(http.wrap((req) => http.response(200, "d"), [(next) => (req) => next(req)!])),
       () => (req) => http.response(200, "z"),
     ),
     [],
@@ -363,7 +363,7 @@ effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/
 effect fn main() -> Unit = {
   let r = http.route("GET /p", map.get(["k0": (req) => http.response(200, "a"), "k1": (req) => http.redirect("/r")], "k0") ?? ((req) => http.response(200, "y")))
   let b = hit(map.get(["k0": (req) => http.response(200, "x")], "zz") ?? ((req) => http.response(200, "b")))!
-  let w = http.wrap((req) => http.response(200, "c"), map.values(["k0": (next) => http.wrap(next, []), "k1": (next) => next]))
+  let w = http.wrap((req) => http.response(200, "c"), map.values(["k0": (next) => (req) => next(req)!, "k1": (next) => next]))
   let mws: List[HttpMiddleware] = list.range(0, 2) |> list.map((i) => (next) => (req) => http.set_header(next(req)!, "x${i}", "1"))
   let resp = http.wrap((req) => http.response(200, "d"), mws)(http.new_request("GET", "/", "", []))!
   println(hit(r.handler)! + b + hit(w)! + http.body(resp) + (http.header(resp, "x0") ?? "-") + (http.header(resp, "x1") ?? "-"))
