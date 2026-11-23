@@ -580,13 +580,13 @@
 10880	spec/wasm_cross/matrix_mul_no_fma.almd
 8627	spec/wasm_cross/matrix_neg_signed_zero.almd
 11195	spec/wasm_cross/matrix_pow_libm.almd
-18428	spec/wasm_cross/matrix_producers_uniform_rows.almd
+18610	spec/wasm_cross/matrix_producers_uniform_rows.almd
 9211	spec/wasm_cross/matrix_product_family.almd
 8410	spec/wasm_cross/matrix_select_rows.almd
 3387	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
 9346	spec/wasm_cross/matrix_select_rows_oob.almd
 7638	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
-15921	spec/wasm_cross/matrix_shape_family.almd
+16285	spec/wasm_cross/matrix_shape_family.almd
 15208	spec/wasm_cross/matrix_shape_precondition_family.almd
 11354	spec/wasm_cross/matrix_slice_rows_domain.almd
 15239	spec/wasm_cross/matrix_zero_cols_rows.almd
