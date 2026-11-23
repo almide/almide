@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "108"
+# unstamped_ceiling     = "109"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "175"
-# failopen_ceiling      = "29"
+# failopen_ceiling      = "30"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -155,6 +155,11 @@
 #               manifest.package-name refused by parse_toml (STAMPED); #4904 E420
 #               on the value and method routes (scope.e420-local-fn closed, c1
 #               prefix stays). 49 stamped, 108 not, 175 skipped, 30 fail-open.
+#   2026-11-23  unstamped ceiling raised 108 -> 109 and fail-open 29 -> 30 by
+#               owner ruling 2026-11-23, for verify.wasi-e081-availability only
+#               (#4913: build / check --target wasi refuse a declared rustc-wasip1
+#               fn). Same name-keyed table as verify.wasm-e081-availability, so an
+#               unknown fn is admitted; both rows close under ruling B (#4918).
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3629,6 +3634,30 @@ control_test = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e0
 novel = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
 control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871/#4857): base green, patched red (scripts/run-decision-controls.sh); the test-lane hunk alone turns novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host red"
 probe = "tests/decision-probes/verify.wasm-e081-availability"
+
+[[site]]
+id = "verify.wasi-e081-availability"
+at = "src/cli/wasm_compile.rs::check_wasi_rustc_availability"
+items = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability",
+]
+keys = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S1::E081",
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S3::ALMIDE_NO_AVAIL_CHECK",
+]
+decides = "a reachable call to a stdlib fn whose proofs/target-availability.toml row declares the rustc-wasip1 leg is E081 on build / check --target wasi (#4913)"
+from = "name"
+unknown = "allow"
+unknown_note = "the same name-keyed table and reachable-body scan as verify.wasm-e081-availability (scan_unavailable); a runtime fn with no rustc-wasip1 row is admitted, and this route has no render wall behind it: the module builds and the call aborts at run time on wasip1"
+routes = { check = "runs: --target wasi only (check.rs check_one)", check_json = "runs: check --json --target wasi (wasi_rustc_refusals)", check_effects = "n.a.", run = "n.a.: native", build = "n.a.: native", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.: the embedded host answers it (stock-p1 / embedded legs are verify.wasm-e081-availability)", wasi = "runs", component = "n.a.: stock-p1 leg (verify.wasm-e081-availability)", lsp = "n.a.", mcp = "n.a.: almide_check offers target = wasm only", emit = "n.a." }
+tests = [
+  "tests/wasi_rustc_availability_test.rs",
+  "tests/diagnostics/e081-process-pid-wasi",
+  "tests/diagnostics/e081-pid-through-helper-wasi",
+]
+issues = [4913, 4918]
+status = "UNSTAMPED"
+reasons = ["c1:name table (as verify.wasm-e081-availability)", "c2:unknown = allow (a fn with no rustc-wasip1 row builds and aborts at run time; #4918, closed before the final under ruling B)", "c3:cells not observed by the route matrix (no probe)", "c4:no control run (no build VM)"]
 
 [[site]]
 id = "verify.wasm-e082-wall"
