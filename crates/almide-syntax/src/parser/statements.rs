@@ -59,6 +59,20 @@ impl Parser {
             return self.parse_var_rest(span);
         }
 
+        // `let` alone on its line, the bindings on the lines below and a
+        // closing `in` (Haskell / OCaml layout). Named here: "Expected
+        // identifier (got Newline)" says nothing about what to write.
+        if self.check(TokenType::Newline) {
+            let tok = self.current().clone();
+            let diag = self.diag_error(
+                "`let` must be followed by the name it binds; a `let` block closed by `in` is Haskell/OCaml layout",
+                "In Almide each binding is its own statement — `let x = expr`, one per line inside a block `{ ... }` — and the block's last expression is its value. There is no `in`.",
+                "let ... in",
+            ).with_try("{\n    let a = 1\n    let b = 2\n    a + b\n}");
+            self.errors.push(diag);
+            return Err(format!("'let' without a binding name at line {}:{}", tok.line, tok.col));
+        }
+
         // Detect `let rec name(args) = ...` (OCaml / SML / F#). Almide
         // doesn't need `rec` — top-level fns are recursive by default.
         // Only when a name follows: `let rec = …` / `let rec: T = …` bind a

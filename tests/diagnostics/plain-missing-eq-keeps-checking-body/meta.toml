@@ -1,0 +1,2 @@
+expects_error = "'let mut' is not valid in Almide"
+hint_substring = "requires '=' before the body"
