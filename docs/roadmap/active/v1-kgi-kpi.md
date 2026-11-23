@@ -14,6 +14,9 @@ belongs to Dojo per [the repository boundary](../../../CLAUDE.md); this update
 does not invent external results or fill the old counters with estimates.
 The weekly observations and their original metrics remain below.
 
+The two end goals' counting rules, the baseline measured in November 2026 and
+the milestones are in [ship-without-reading](ship-without-reading.md).
+
 > **これは何か**: v1 の終局指標(KGI)と、それを守る/攻める指標(KPI)を週次で
 > 埋めるスコアボード。このプロジェクトは構造が特殊で ―― **KPI が「攻める系
 > (伸ばす)」と「守る系(絶対に劣化させない不変条件)」の2種に割れ、守る系を破った

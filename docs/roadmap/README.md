@@ -7,7 +7,7 @@
 
 ## Active
 
-99 items
+100 items
 
 | Item | Description |
 |------|-------------|
@@ -75,6 +75,7 @@
 | [Security by construction](active/security-by-construction.md) | Security class ledger and recorded controls, with explicit remaining gaps and claim scope |
 | [Self-host linking v2 — link the mono instances, retire the twin matrix](active/selfhost-link-v2.md) | Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces |
 | [Shell scripting stance: structured pipelines, no interactive shell](active/shell-scripting-surface.md) | Take Nushell's data model for scripts; do not build an interactive shell |
+| [人が読まずに出荷できる — 2 つの目標と数え方](active/ship-without-reading.md) | Goal sheet: the two end goals (a model writes it right; a proven check covers what ships), how each is counted, the baseline measured 2026-11-22/23, milestones and guards |
 | [Stdlib redesign (three layers)](active/stdlib-redesign.md) | Three-layer redesign of the standard library against nine languages — rules, category list, per-module role tables, a verdict for every public function, and the issues the adopted proposals became |
 | [Test-surface 25× — the road to reference-compiler scale](active/test-surface-25x.md) | Grow the committed test surface 25x toward reference-compiler scale |
 | [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
