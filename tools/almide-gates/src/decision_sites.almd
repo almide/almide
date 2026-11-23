@@ -8,7 +8,7 @@
 // half reads the ROWS and the evidence they point at (#2128's split), and it is
 // the one place that says what STAMPED means:
 //
-//   c1  `from` is a declaration, a type or reach — never a name;
+//   c1  `from` is a declaration, a type or reach, or a `mixed:` of two or more of them — never a name;
 //   c2  `unknown = "refuse"`, and `novel` names a test that calls a
 //       tests/support/novel.rs generator (an item no test author listed);
 //   c3  every route cell is `runs` or `n.a.: <why>`, and `probe` names the
@@ -140,10 +140,21 @@ fn novel_file(r: Row) -> String = list.get(string.split(r.novel, "::"), 0) ?? ""
 
 fn novel_fn(r: Row) -> String = list.last(string.split(r.novel, "::")) ?? ""
 
+// c1's sources: a declaration, a type or reach — or a `mixed:` of two or
+// more of them (owner ruling 2026-11-23). A mix with any other part (a name,
+// a text, a path) is not decided from these alone.
+fn from_decided(from: String) -> Bool = {
+  let sources = ["declaration", "type", "reach"]
+  if string.starts_with(from, "mixed:") then {
+    let parts = string.split(string.drop(from, 6), "+")
+    list.len(parts) >= 2 and list.all(parts, (x) => list.contains(sources, x))
+  } else list.contains(sources, from)
+}
+
 // Why a STAMPED row is not, one line per missing condition.
 fn stamp_findings(r: Row, ev: Evidence) -> List[String] = {
   let p = r.id + ": STAMPED but "
-  let c1 = if list.contains(["declaration", "type", "reach"], r.from) then []
+  let c1 = if from_decided(r.from) then []
   else [
     p + "c1: decides from `" + r.from + "` (declaration | type | reach)"
   ]
@@ -401,6 +412,25 @@ test "a STAMPED row that decides from a name, or lets an unknown item through, f
   assert(judge(named, full_evidence()) |> list.any((b) => string.contains(b, "c1:")))
   let open = string.replace(forged(ctl), "unknown = \"refuse\"", "unknown = \"allow\"")
   assert(judge(open, full_evidence()) |> list.any((b) => string.contains(b, "c2:")))
+}
+
+test "a mixed `from` of declaration, type and reach is decided; a mix with any other part is not" {
+  let sources = ["declaration", "type", "reach"]
+  let mixes = sources |> list.flat_map((a) => sources |> list.filter((b) => b != a) |> list.map((b) => "mixed:" + a + "+" + b))
+  assert(list.len(mixes) == 6)
+  assert(list.all(mixes, (m) => from_decided(m)))
+  assert(from_decided("mixed:declaration+type+reach"))
+  let others = ["name", "text", "path-text", "param-name", "spelling"]
+  let tainted = mixes |> list.flat_map((m) => others |> list.flat_map((o) => [m + "+" + o, "mixed:" + o + "+" + string.drop(m, 6)]))
+  assert(list.all(tainted, (m) => not from_decided(m)))
+  assert(list.all(others, (o) => not from_decided(o) and not from_decided("mixed:" + o)))
+  assert(not from_decided("mixed:declaration"))
+  assert(not from_decided("mixed:"))
+  let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"tests/x_test.rs::novel_x\"\ncontrol_seen = \"abc\"\n"
+  let mixed = string.replace(forged(ctl), "from = \"declaration\"", "from = \"mixed:declaration+type\"")
+  assert_eq(judge(mixed, full_evidence()), [])
+  let named = string.replace(forged(ctl), "from = \"declaration\"", "from = \"mixed:declaration+name\"")
+  assert(judge(named, full_evidence()) |> list.any((b) => string.contains(b, "c1:")))
 }
 
 test "a novel test that calls no generator does not count" {
