@@ -265,7 +265,7 @@ impl Emitter<'_> {
         // the shared ceiling — the constructor guard with (parts, rows).
         let hr64 = self.hold_i64()?;
         self.f.instructions().local_get(hr).i64_extend_i32_u().local_set(hr64);
-        self.q_dims_guard(hn, hr64);
+        self.shared_dims_guard(hn, hr64);
         self.release_i64();
         let oom = self.pool.intern("Error: out of memory");
         let hparts = self.hold_i32()?;

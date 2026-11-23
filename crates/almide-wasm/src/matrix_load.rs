@@ -43,9 +43,16 @@ impl Emitter<'_> {
         i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select().local_set(h);
     }
 
+    /// [`Self::q_dims_guard`] for the other matrix emitters (#4914: the
+    /// split_cols_even part-count ceiling), kept apart so the loaders'
+    /// own guard text stays as inspected.
+    pub(crate) fn shared_dims_guard(&mut self, hr: u32, hc: u32) {
+        self.q_dims_guard(hr, hc);
+    }
+
     /// The byte-loader constructor ceiling (#1525): rows > 2^28 dies, then
     /// rows > 0 and cols > 2^28/rows dies — the unified T6 abort.
-    pub(crate) fn q_dims_guard(&mut self, hr: u32, hc: u32) {
+    fn q_dims_guard(&mut self, hr: u32, hc: u32) {
         let msg = self.pool.intern("matrix dimensions too large");
         {
             let mut i = self.f.instructions();
