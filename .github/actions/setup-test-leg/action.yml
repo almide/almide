@@ -33,6 +33,11 @@ runs:
     - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
         toolchain: ${{ inputs.toolchain }}
+        # `almide build --target wasi` compiles with rustc for wasm32-wasip1;
+        # the legs claim full tool coverage (ALMIDE_EXPECT_TOOLS), so the
+        # wasi-route tests (tests/wasi_build_process_signal_test.rs) run
+        # here instead of tripping on a missing target.
+        targets: wasm32-wasip1
 
     # #1732: no compile here anymore — the build job ships the
     # ci-test-profile test binaries (dev minus debuginfo) as a nextest
