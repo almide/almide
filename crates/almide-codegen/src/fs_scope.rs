@@ -14,16 +14,17 @@ pub struct FsScope {
 }
 
 impl FsScope {
-    /// `Err` names a string-taking fs runtime fn `calls` reaches that no
-    /// declaration guards: a scoped build refuses it rather than call it
-    /// unguarded (#4825).
+    /// `Err` names a runtime call `calls` reaches that the scope must judge —
+    /// one whose declaration carries an `FS` leaf (C-460), or a string-taking
+    /// fs runtime fn — but that no declaration's path mark guards: a scoped
+    /// build refuses it rather than call it unguarded (#4825).
     pub fn new(roots: &[String], rt_path: &str, rt_use: &str, calls: &str) -> Result<Self, String> {
         let reached: std::collections::HashSet<_> = crate::rust_idents::identifiers(calls).collect();
         let mut guards = fs_runtime_guards();
         let unguarded = unguarded(&reached, &guards);
         if !unguarded.is_empty() {
             return Err(format!(
-                "[permissions] fs: the program reaches {} of the fs runtime, which no declaration marks with its path (@fs_path / @fs_glob / @fs_temp / @fs_root), so it cannot be bounded",
+                "[permissions] fs: the program reaches {}, which touches files but no declaration marks with its path (@fs_path / @fs_glob / @fs_temp / @fs_root / @fs_shm_dir), so it cannot be bounded",
                 unguarded.join(", ")
             ));
         }
@@ -38,14 +39,18 @@ impl FsScope {
     }
 
     /// Does `code` call anything the scope bounds — a guarded runtime fn, or
-    /// a string-taking fs runtime fn (which [`FsScope::new`] then refuses)?
+    /// one the scope must judge but no mark guards (an `FS`-category call, a
+    /// string-taking fs runtime fn), which [`FsScope::new`] then refuses?
     pub fn applies_to(code: &str) -> bool {
         let guards = fs_runtime_guards();
-        let fs_fns = fs_runtime_str_fns();
-        crate::rust_idents::identifiers(code).any(|id| guards.contains_key(id) || fs_fns.iter().any(|f| f == id))
+        let judged = fs_judged_symbols();
+        crate::rust_idents::identifiers(code).any(|id| guards.contains_key(id) || judged.contains(id))
     }
 
-    pub fn wrap_calls(&self, code: &str) -> String {
+    /// `Err` when a guarded fn is named other than as a direct call (a fn
+    /// value, a cast): the scope cannot judge a call it cannot see, so the
+    /// build refuses rather than copy it unguarded.
+    pub fn wrap_calls(&self, code: &str) -> Result<String, String> {
         wrap_fs_calls(code, &self.guards, &self.twinned)
     }
 }
@@ -108,7 +113,7 @@ pub(crate) fn fs_runtime_guards() -> std::collections::HashMap<String, &'static 
 pub(crate) const FS_PATH_MARKS: &[&str] = &["fs_path", "fs_glob", "fs_temp", "fs_root", "fs_shm_dir"];
 
 /// [`fs_runtime_guards`] over `sources` (`(module, text)`).
-pub(crate) fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collections::HashMap<String, &'static str>, String> {
+pub fn fs_runtime_guards_from(sources: &[(&str, &str)]) -> Result<std::collections::HashMap<String, &'static str>, String> {
     use almide_lang::ast::{AttrValue, Decl, TypeExpr};
     let mut out: std::collections::HashMap<String, &'static str> = std::collections::HashMap::new();
     for (module, text) in sources {
@@ -195,10 +200,76 @@ fn intrinsic_symbols() -> std::collections::HashSet<String> {
     }).clone()
 }
 
-/// The string-taking fs runtime fns `reached` calls that `guards` leaves
-/// unguarded.
+/// The calls `reached` makes that the scope must judge and `guards` leaves
+/// unguarded, sorted.
 fn unguarded(reached: &std::collections::HashSet<&str>, guards: &std::collections::HashMap<String, &'static str>) -> Vec<String> {
-    fs_runtime_str_fns().into_iter().filter(|f| reached.contains(f.as_str()) && !guards.contains_key(f)).collect()
+    let mut out: Vec<String> = fs_judged_symbols().into_iter().filter(|f| reached.contains(f.as_str()) && !guards.contains_key(f)).collect();
+    out.sort();
+    out
+}
+
+/// The runtime calls `[permissions] fs` must judge: every runtime symbol
+/// whose declaration carries an `FS` leaf ([`fs_category_symbols_from`],
+/// C-460), and every string-taking fn of the fs runtime
+/// ([`fs_runtime_str_fns`]). A reached one with no path mark refuses the
+/// scope.
+fn fs_judged_symbols() -> std::collections::HashSet<String> {
+    static JUDGED: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    JUDGED
+        .get_or_init(|| {
+            let mut out = fs_category_symbols_from(&bundled_sources()).unwrap_or_else(|e| panic!("[permissions] fs categories: {e}"));
+            out.extend(fs_runtime_str_fns());
+            out
+        })
+        .clone()
+}
+
+/// The bundled stdlib sources, `(module, text)`.
+fn bundled_sources() -> Vec<(&'static str, &'static str)> {
+    almide_lang::stdlib_info::BUNDLED_MODULES
+        .iter()
+        .filter_map(|&m| almide_lang::stdlib_info::bundled_source(m).map(|s| (m, s)))
+        .collect()
+}
+
+/// The runtime symbols — each `@intrinsic` with its `Send`-free twin — whose
+/// declaration in `sources` (`(module, text)`) carries `FS.read` or
+/// `FS.write`, by its own `@category` or its module's row (C-460): the
+/// calls that touch files, read off the declarations, never a name.
+pub fn fs_category_symbols_from(sources: &[(&str, &str)]) -> Result<std::collections::HashSet<String>, String> {
+    use almide_ir::effect::Effect;
+    use almide_lang::ast::{AttrValue, Decl};
+    let mut out = std::collections::HashSet::new();
+    for (module, text) in sources {
+        let program = almide_lang::parser::Parser::new(almide_lang::lexer::Lexer::tokenize(text))
+            .parse()
+            .map_err(|_| format!("bundled module `{module}` does not parse"))?;
+        for d in &program.decls {
+            let Decl::Fn { attrs, .. } = d else { continue };
+            let Some(symbol) = attrs.iter().find(|a| a.name.as_str() == "intrinsic").and_then(|a| match a.args.first().map(|x| &x.value) {
+                Some(AttrValue::String { value }) => Some(value.clone()),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let effects = almide_ir::effect::declaration_effects(module, d);
+            if effects.iter().any(|e| matches!(e, Effect::FsRead | Effect::FsWrite)) {
+                out.extend(crate::generated::runtime_fn_modes::send_free_twin(&symbol).map(str::to_string));
+                out.insert(symbol);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The calls of `reached` a scope over the declarations `sources` would
+/// refuse: each carries an `FS` leaf but no path mark guards it (C-460),
+/// sorted. [`FsScope::new`] asks the same of the bundled stdlib.
+pub fn fs_scope_refusals(sources: &[(&str, &str)], reached: &std::collections::HashSet<&str>) -> Result<Vec<String>, String> {
+    let guards = fs_runtime_guards_from(sources)?;
+    let mut out: Vec<String> = fs_category_symbols_from(sources)?.into_iter().filter(|f| reached.contains(f.as_str()) && !guards.contains_key(f)).collect();
+    out.sort();
+    Ok(out)
 }
 
 /// The fns of the fs runtime module a program reaches as host calls — the
@@ -251,8 +322,10 @@ pub(crate) fn fs_runtime_str_fns() -> Vec<String> {
 
 /// `code` with every call `almide_rt_fs_<f>[::<..>](` whose fn has a guard
 /// rewritten to `<guard>!(almide_rt_fs_<f>[::<..>], ` — the twin's
-/// `__almide_scoped_fs::almide_rt_fs_<f>` when `twinned` holds it.
-fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>, twinned: &std::collections::BTreeSet<String>) -> String {
+/// `__almide_scoped_fs::almide_rt_fs_<f>` when `twinned` holds it. A
+/// guarded name in any other position than a call or its own definition is
+/// `Err` (fail closed: it would reach the host unguarded).
+fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>, twinned: &std::collections::BTreeSet<String>) -> Result<String, String> {
     let mut out = String::with_capacity(code.len() + 256);
     let mut copied = 0;
     // Literal/comment contents are not calls, even when they spell a host
@@ -287,14 +360,19 @@ fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static
                 out.push_str(&format!("{g}!({twin}{}, ", &after[..j]));
                 copied = i + j + 1;
             }
-            _ => {
+            Some(_) if before.ends_with("fn ") => {
                 out.push_str(ident);
                 copied = i + ident_len;
+            }
+            _ => {
+                return Err(format!(
+                    "[permissions] fs: `{ident}` is named other than as a direct call, so the scope cannot judge the path it is given"
+                ))
             }
         }
     }
     out.push_str(&code[copied..]);
-    out
+    Ok(out)
 }
 
 
@@ -311,7 +389,7 @@ let b = r#"almide_rt_fs_write(x)"#;
 fn almide_rt_fs_write(x: &str) {}
 almide_rt_fs_write(x, y)
 "##;
-        let wrapped = wrap_fs_calls(src, &guards, &Default::default());
+        let wrapped = wrap_fs_calls(src, &guards, &Default::default()).unwrap();
         assert_eq!(wrapped, src.strip_suffix("almide_rt_fs_write(x, y)\n").unwrap().to_string()
             + "__almide_fs_path!(almide_rt_fs_write, x, y)\n");
     }
@@ -375,7 +453,7 @@ almide_rt_fs_write(x, y)
     fn the_shm_create_leaf_is_guarded_by_its_directory() {
         let guards = fs_runtime_guards();
         assert_eq!(guards.get("almide_rt_unix___os_shm_create"), Some(&"__almide_fs_shm_dir"));
-        let wrapped = wrap_fs_calls("let fd = almide_rt_unix___os_shm_create(n)?;", &guards, &Default::default());
+        let wrapped = wrap_fs_calls("let fd = almide_rt_unix___os_shm_create(n)?;", &guards, &Default::default()).unwrap();
         assert_eq!(wrapped, "let fd = __almide_fs_shm_dir!(almide_rt_unix___os_shm_create, n)?;");
     }
 

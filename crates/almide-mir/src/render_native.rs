@@ -488,7 +488,7 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         out.push_str(&user);
     }
     if let Some(scope) = fs_scope {
-        let user = scope.wrap_calls(&out[user_start..]);
+        let user = scope.wrap_calls(&out[user_start..]).map_err(wall)?;
         out.truncate(user_start);
         out.push_str(&scope.prelude);
         out.push_str(&user);

@@ -111,6 +111,8 @@ const WRITE_ENTROPY: &[Capability] = &[FsWrite, Entropy];
 const OUT: &[Capability] = &[Stdout];
 const IN: &[Capability] = &[Stdin];
 const NET: &[Capability] = &[Net];
+const NET_READ: &[Capability] = &[Net, FsRead];
+const NET_WRITE: &[Capability] = &[Net, FsWrite];
 const PROCESS: &[Capability] = &[Process];
 
 /// Every admitted host op. Adding one is adding a row; the contract gate then
@@ -255,16 +257,18 @@ pub const HOST_OPS: &[HostOp] = &[
     // the embedded wasm host serves the same core as interim ops 104..=116.
     // The native render serves them from the runtime's `unix` module as the
     // NATIVE UNIX HOST CALLS (proofs/TRUSTED_BASE.md). Every op is local
-    // inter-process I/O, counted as `Net` like the tcp ops above.
-    op("unix", "__os_connect", "almide_rt_unix___os_connect", NET).result(),
-    op("unix", "__os_listen", "almide_rt_unix___os_listen", NET).result(),
+    // inter-process I/O, counted as `Net` like the tcp ops above; the ones
+    // that reach a file entry count its fs capability too (C-460): connect
+    // looks the socket file up, listen and shm_create make a file.
+    op("unix", "__os_connect", "almide_rt_unix___os_connect", NET_READ).result(),
+    op("unix", "__os_listen", "almide_rt_unix___os_listen", NET_WRITE).result(),
     op("unix", "__os_accept", "almide_rt_unix___os_accept", NET).result(),
     op("unix", "__os_send", "almide_rt_unix___os_send", NET).result(),
     op("unix", "__os_recv", "almide_rt_unix___os_recv", NET).result(),
     op("unix", "__os_take_fds", "almide_rt_unix___os_take_fds", NET),
     op("unix", "__os_wait", "almide_rt_unix___os_wait", NET).result(),
     op("unix", "__os_close", "almide_rt_unix___os_close", NET).result(),
-    op("unix", "__os_shm_create", "almide_rt_unix___os_shm_create", NET).result(),
+    op("unix", "__os_shm_create", "almide_rt_unix___os_shm_create", WRITE).result(),
     op("unix", "__os_shm_resize", "almide_rt_unix___os_shm_resize", NET).result(),
     op("unix", "__os_shm_write", "almide_rt_unix___os_shm_write", NET).result(),
     op("unix", "__os_shm_read", "almide_rt_unix___os_shm_read", NET).result(),

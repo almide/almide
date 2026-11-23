@@ -297,6 +297,14 @@ fn decl_effects(row: ModuleEffects, decl: &almide_lang::ast::Decl) -> Vec<Effect
     }
 }
 
+/// The categories a declaration `decl` of the stdlib module `module` carries:
+/// its own `@category`, else the module's row. Empty for a module with no
+/// row. [`stdlib_call_effect`] is this over the bundled source; a gate that
+/// parsed a declaration itself asks here (C-460).
+pub fn declaration_effects(module: &str, decl: &almide_lang::ast::Decl) -> Vec<Effect> {
+    module_effects(module).map_or_else(Vec::new, |row| decl_effects(row, decl))
+}
+
 /// The categories a call `module.func` carries, empty for a pure call.
 ///
 /// The function must be one the stdlib module declares: a call to a name the

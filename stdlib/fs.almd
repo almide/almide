@@ -222,6 +222,7 @@ effect fn remove_all(path: String) -> Result[Unit, String] = _
 // constant — the bare-`fn` spelling was a misdeclaration.
 /// Host temp dir; a location, not a safe name.
 @intrinsic("almide_rt_fs_temp_dir")
+@category("Env.read")
 effect fn temp_dir() -> String = _
 
 /// Size, kind and mtime; err if missing.

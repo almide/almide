@@ -45,6 +45,8 @@ const OP_SHM_RESIZE: i32 = host_ops::nth(host_ops::UNIX_SHM, 10);
 const OP_SHM_WRITE: i32 = host_ops::nth(host_ops::UNIX_SHM, 11);
 const OP_SHM_READ: i32 = host_ops::nth(host_ops::UNIX_SHM, 12);
 const _: () = assert!(OP_SHM_READ == *host_ops::UNIX_SHM.end());
+// `host_ops::unix_shm_caps` counts the fs capability of these three by number.
+const _: () = assert!(OP_UNIX_CONNECT == 104 && OP_UNIX_LISTEN == 105 && OP_SHM_CREATE == 113);
 
 /// The udp and name-lookup ops (#4306): the embedded host serves them with
 /// the net core (crates/almide-wasm-run/src/net_host.rs); a stock artifact

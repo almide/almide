@@ -523,7 +523,10 @@ pub(crate) fn inject_fs_scope(rs_code: String, roots: Option<Vec<String>>) -> St
         err(&format!("error: {e}"));
         std::process::exit(1)
     });
-    let user = scope.wrap_calls(user);
+    let user = scope.wrap_calls(user).unwrap_or_else(|e| {
+        err(&format!("error: {e}"));
+        std::process::exit(1)
+    });
     if head.is_empty() {
         splice_after_inner_attrs(&user, &scope.prelude)
     } else {
