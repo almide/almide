@@ -37,6 +37,8 @@ jobs:
             ${{ runner.temp }}/census/rows.tsv
             ${{ runner.temp }}/census/fnrows.tsv
             ${{ runner.temp }}/census/fxrows.tsv
+            ${{ runner.temp }}/census/fyrows.tsv
+            ${{ runner.temp }}/census/bodyrows.tsv
             ${{ runner.temp }}/census/mutrows.tsv
             ${{ runner.temp }}/census/mutrows-old.tsv
             ${{ runner.temp }}/census/storerows.tsv

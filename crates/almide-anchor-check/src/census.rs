@@ -250,10 +250,31 @@ fn addr_shape(b: &Body<'_>, k: usize) -> &'static str {
     }
 }
 
+/// Probe only: the producers behind an address [`addr_shape`] does not name —
+/// the instruction's name, or for an addition the names of its two operands.
+fn addr_fine(b: &Body<'_>, k: usize) -> String {
+    let prod = |i: usize, n: usize| b.args.get(i).and_then(|a| a.get(n)).copied().flatten();
+    let name = |q: Option<usize>| -> String {
+        match q {
+            None => "?".to_string(),
+            Some(q) => {
+                let text = format!("{:?}", b.ops[q]);
+                text.split(|c: char| !c.is_ascii_alphanumeric()).next().unwrap_or("").to_string()
+            }
+        }
+    };
+    match prod(k, 0) {
+        Some(p) if matches!(b.ops[p], Op::I32Add) => format!("add({},{})", name(prod(p, 0)), name(prod(p, 1))),
+        p => name(p),
+    }
+}
+
 /// The accesses [`census_by_function`] leaves in no class, by where they sit
 /// (inside an inlined routine's or arm's window, or not), what they are and
-/// how their address was built: `(function, key, count)`.
-pub fn census_detail(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -> Result<Vec<(usize, String, usize)>, String> {
+/// how their address was built: `(function, key, count)`. With `fine`, an
+/// address the classifier calls `add-other` or `other` also names its
+/// producers.
+pub fn census_detail(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>, fine: bool) -> Result<Vec<(usize, String, usize)>, String> {
     let at = located(anchors)?;
     let (routines, arms) = (windows(anchors, "rcroutines "), windows(anchors, "rcarms "));
     let inside = |w: &[(usize, usize, usize)], f: usize, k: usize| w.iter().any(|&(p, lo, hi)| p == f && lo <= k && k <= hi);
@@ -284,7 +305,9 @@ pub fn census_detail(bodies: &[Body<'_>], anchors: &str, linear: &HashSet<At>) -
                 12 => "12",
                 _ => ">12",
             };
-            *out.entry((func, format!("{region}|{kind}{width}|off{offc}|{}", addr_shape(b, k)))).or_insert(0) += 1;
+            let shape = addr_shape(b, k);
+            let addr = if fine && matches!(shape, "add-other" | "other") { format!("{shape}:{}", addr_fine(b, k)) } else { shape.to_string() };
+            *out.entry((func, format!("{region}|{kind}{width}|off{offc}|{addr}"))).or_insert(0) += 1;
         }
     }
     Ok(out.into_iter().map(|((f, key), n)| (f, key, n)).collect())

@@ -36,6 +36,64 @@ fn body_shape(bodies: &[almide_anchor_check::Body<'_>], imports: u32, f: u32, me
     h
 }
 
+/// Probe only: one hash per body after `rounds` rounds of refinement. Round 0
+/// hashes a body's own instructions; each later round replaces a call by its
+/// callee's hash from the round before, so the value does not depend on the
+/// order bodies are visited in or on function indices. With `mask`, the
+/// module-specific operands (large constants, global indices, an indirect
+/// call's type index) are hidden as well; without it only call targets are
+/// abstracted. A call to an import hashes as one fixed token.
+fn body_hashes(bodies: &[almide_anchor_check::Body<'_>], imports: u32, mask: bool, rounds: u32) -> Vec<u64> {
+    // Each instruction once: its text, or the callee's body position.
+    let toks: Vec<Vec<Result<String, Option<usize>>>> = bodies
+        .iter()
+        .map(|b| {
+            b.ops
+                .iter()
+                .map(|op| match op {
+                    wasmparser::Operator::Call { function_index } => Err(function_index.checked_sub(imports).map(|p| p as usize)),
+                    wasmparser::Operator::I32Const { value } if mask && (*value >= 1024 || *value < -1024) => Ok("i32.const#big;".to_string()),
+                    wasmparser::Operator::GlobalGet { .. } if mask => Ok("global.get;".to_string()),
+                    wasmparser::Operator::GlobalSet { .. } if mask => Ok("global.set;".to_string()),
+                    wasmparser::Operator::CallIndirect { .. } if mask => Ok("call_indirect;".to_string()),
+                    o => Ok(format!("{o:?};")),
+                })
+                .collect()
+        })
+        .collect();
+    let mut prev: Vec<u64> = vec![0; bodies.len()];
+    for round in 0..=rounds {
+        let next: Vec<u64> = toks
+            .iter()
+            .map(|body| {
+                let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                for t in body {
+                    let call;
+                    let s: &str = match t {
+                        Ok(s) => s.as_str(),
+                        Err(callee) => {
+                            let c: u64 = match callee {
+                                None => 0x1111,
+                                Some(_) if round == 0 => 0x3333,
+                                Some(p) => prev.get(*p).copied().unwrap_or(0x4444),
+                            };
+                            call = format!("call#{c:x};");
+                            &call
+                        }
+                    };
+                    for c in s.bytes() {
+                        h ^= u64::from(c);
+                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                }
+                h
+            })
+            .collect();
+        prev = next;
+    }
+    prev
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(at) = args.iter().position(|a| a == "--explain") {
@@ -182,9 +240,20 @@ fn main() {
                 .map(|r| r.located.into_iter().map(|(func, op)| almide_anchor_check::At { func, op }).collect())
                 .unwrap_or_default(),
         };
-        if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_detail(&bodies, &a, &linear)) {
-            for (func, key, n) in rows {
-                println!("CENSUSX {func} {key} {n}");
+        if let Ok(bodies) = almide_anchor_check::decode(&w) {
+            // CENSUSX: the shapes as first measured; CENSUSY: the same rows
+            // with the producers named where the classifier said "other".
+            for (tag, fine) in [("CENSUSX", false), ("CENSUSY", true)] {
+                if let Ok(rows) = almide_anchor_check::census_detail(&bodies, &a, &linear, fine) {
+                    for (func, key, n) in rows {
+                        println!("{tag} {func} {key} {n}");
+                    }
+                }
+            }
+            let imports = almide_anchor_check::function_imports(&w);
+            let (strict, masked) = (body_hashes(&bodies, imports, false, 6), body_hashes(&bodies, imports, true, 6));
+            for (p, b) in bodies.iter().enumerate() {
+                println!("BODYFN {p} {} {:016x} {:016x}", b.ops.len(), strict[p], masked[p]);
             }
         }
     }
