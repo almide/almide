@@ -467,4 +467,131 @@ almide_rt_fs_write(x, y)
         assert_eq!(unguarded(&reached, &guards), vec!["almide_rt_fs_read_text".to_string()]);
         assert!(unguarded(&reached, &fs_runtime_guards()).is_empty());
     }
+
+    /// Every stdlib call that carries an `FS` leaf has a path mark, so a
+    /// scoped build never meets one it must refuse.
+    #[test]
+    fn every_fs_category_call_has_a_path_mark() {
+        let guards = fs_runtime_guards();
+        let syms = fs_category_symbols_from(&bundled_sources()).unwrap();
+        assert!(syms.len() > 30, "the FS-category calls were not found: {syms:?}");
+        let mut missing: Vec<_> = syms.iter().filter(|s| !guards.contains_key(*s)).collect();
+        missing.sort();
+        assert!(missing.is_empty(), "FS-category calls no declaration marks with its path: {missing:?}");
+        // And the scope refuses such a call when one is reached.
+        let reached: std::collections::HashSet<&str> = ["almide_rt_unix___os_shm_create"].into_iter().collect();
+        let mut g = guards.clone();
+        g.remove("almide_rt_unix___os_shm_create");
+        assert_eq!(unguarded(&reached, &g), vec!["almide_rt_unix___os_shm_create".to_string()]);
+    }
+
+    /// The runtime calls that touch a filesystem entry by name, read off the
+    /// embedded runtime source: what each runtime fn's body calls — a
+    /// `std::fs` path fn, an open, a socket bind / connect, the scoped fs
+    /// facade, a child's working directory — followed through the fns its
+    /// own module defines. Over-approximate by construction: a helper name
+    /// several fns share is all of them.
+    fn file_touching_fns<'a>(modules: &[(&'a str, &str)]) -> std::collections::BTreeMap<String, &'a str> {
+        const TOUCH: &[&str] = &[
+            "std::fs::read(", "std::fs::read_to_string(", "std::fs::write(", "std::fs::metadata(", "std::fs::symlink_metadata(",
+            "std::fs::canonicalize(", "std::fs::create_dir(", "std::fs::create_dir_all(", "std::fs::remove_file(",
+            "std::fs::remove_dir(", "std::fs::remove_dir_all(", "std::fs::rename(", "std::fs::copy(", "std::fs::read_dir(",
+            "std::fs::read_link(", "std::fs::hard_link(", "std::fs::set_permissions(", "File::open(", "File::create(",
+            "OpenOptions::new()", "UnixListener::bind(", "UnixStream::connect(", "UnixDatagram::bind(", "almide_sfs::",
+            "std::os::unix::fs::symlink(", ".current_dir(",
+        ];
+        let mut out = std::collections::BTreeMap::new();
+        for (module, text) in modules {
+            let bodies = fn_bodies(text);
+            for name in bodies.keys() {
+                let mut seen = std::collections::HashSet::new();
+                let mut stack = vec![name.as_str()];
+                let mut touches = false;
+                while let Some(n) = stack.pop() {
+                    if !seen.insert(n) { continue; }
+                    let Some(b) = bodies.get(n) else { continue };
+                    if TOUCH.iter().any(|t| b.contains(t)) { touches = true; break; }
+                    stack.extend(called_names(b).filter(|c| bodies.contains_key(*c)));
+                }
+                if touches { out.insert(name.clone(), *module); }
+            }
+        }
+        out
+    }
+
+    /// Each `fn` of `text` with a body, name -> its bodies joined.
+    fn fn_bodies(text: &str) -> std::collections::HashMap<String, String> {
+        let b = text.as_bytes();
+        let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut i = 0;
+        while let Some(at) = text[i..].find("fn ").map(|k| k + i) {
+            i = at + 3;
+            if at > 0 && (b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_') { continue; }
+            let name: String = text[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if name.is_empty() { continue; }
+            let (mut j, mut depth) = (i + name.len(), 0i32);
+            while j < b.len() && !(depth == 0 && (b[j] == b'{' || b[j] == b';')) {
+                match b[j] { b'(' | b'[' => depth += 1, b')' | b']' => depth -= 1, _ => {} }
+                j += 1;
+            }
+            if j >= b.len() || b[j] == b';' { continue; }
+            let (mut k, mut braces) = (j, 0i32);
+            while k < b.len() {
+                match b[k] { b'{' => braces += 1, b'}' => { braces -= 1; if braces == 0 { break; } } _ => {} }
+                k += 1;
+            }
+            out.entry(name).or_default().push_str(&text[j..k.min(b.len() - 1) + 1]);
+        }
+        out
+    }
+
+    /// The names `body` calls: `f(`, `.f(`, `m::f(`, `f::<..>(`.
+    fn called_names(body: &str) -> impl Iterator<Item = &str> {
+        crate::rust_idents::identifiers(body).filter(move |id| {
+            let end = id.as_ptr() as usize - body.as_ptr() as usize + id.len();
+            let rest = &body[end..];
+            rest.starts_with('(') || rest.starts_with("::<")
+        })
+    }
+
+    /// C-460, the gate: every runtime fn that touches a filesystem entry and
+    /// is an `@intrinsic` some declaration names carries an `FS` leaf — or
+    /// is `Proc` (a child's program and working directory are bounded by
+    /// `[permissions] proc`, not `fs`). Enumerated from the runtime source,
+    /// so a new file-touching runtime fn whose declaration forgot its
+    /// category fails here; calibrated by finding every guarded call.
+    #[test]
+    fn every_file_touching_runtime_fn_declares_an_fs_category() {
+        use almide_ir::effect::{runtime_symbol_effect, Effect};
+        let touching = file_touching_fns(crate::generated::rust_runtime::RUST_RUNTIME_MODULES);
+        let intrinsics = intrinsic_symbols();
+        let fs_syms = fs_category_symbols_from(&bundled_sources()).unwrap();
+        // Calibration: the scan finds every call a path mark guards.
+        let mut unseen: Vec<_> = fs_runtime_guards().into_keys().filter(|g| intrinsics.contains(g) && !touching.contains_key(g)
+            && crate::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().any(|(_, t)| t.contains(&format!("fn {g}(")))).collect();
+        unseen.sort();
+        assert!(unseen.is_empty(), "the runtime scan misses guarded calls — its TOUCH list is stale: {unseen:?}");
+        let mut checked = 0;
+        let mut undeclared = Vec::new();
+        for (f, module) in &touching {
+            if !intrinsics.contains(f) { continue; }
+            checked += 1;
+            let effects = runtime_symbol_effect(f);
+            if !fs_syms.contains(f) && !effects.contains(&Effect::Proc) {
+                undeclared.push(format!("{f} ({module}: {effects:?})"));
+            }
+        }
+        assert!(checked > 30, "only {checked} file-touching intrinsics found — the scan found nothing");
+        assert!(undeclared.is_empty(), "runtime fns that touch files but whose declaration carries no FS leaf: {undeclared:?}");
+    }
+
+    /// The gate's negative control: a runtime fn that touches a file is
+    /// found through a helper of its module, and one that does not is not.
+    #[test]
+    fn the_runtime_scan_follows_helpers_and_admits_pure_fns() {
+        let text = "pub fn almide_rt_x_a(p: &str) -> u8 { helper(p) }\nfn helper(p: &str) -> u8 { let _ = std::fs::metadata(p); 0 }\n\
+                    pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\npub fn almide_rt_x_c(d: &str) { std::process::Command::new(\"ls\").current_dir(d); }\n";
+        let found = file_touching_fns(&[("x", text)]);
+        assert!(found.contains_key("almide_rt_x_a") && found.contains_key("almide_rt_x_c") && !found.contains_key("almide_rt_x_b"), "{found:?}");
+    }
 }
