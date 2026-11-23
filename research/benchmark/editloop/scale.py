@@ -123,6 +123,7 @@ PRIM_REF_RE = re.compile(r"\bprim\.")
 PRIM_IMPORT_RE = re.compile(r"^import prim$", re.M)
 RAWPTR_RE = re.compile(r"\bHandle\b")
 FFI_IMPORT_RE = re.compile(r"^import ffi$", re.M)
+SIZED_BY_RE = re.compile(r"^[ \t]*@sized_by\([^)\n]*\)[ \t]*\n", re.M)
 PRIM_DECL_RE = re.compile(r"^((?:effect )?fn (\w+)(?:\[[^\]]*\])?\(([^)]*)\).*?) = _$")
 
 
@@ -145,7 +146,10 @@ def prim_stand_in():
 def to_stand_in(text):
     """Point a copied stdlib source's `prim.*` at the `mprim` stand-in, and give a
     copy that handles a `Handle` (ADR-0031, was `RawPtr`) the `import ffi` a user file needs to call the
-    raw-memory functions (E100, #4043); the stdlib's own sources are exempt."""
+    raw-memory functions (E100, #4043); the stdlib's own sources are exempt.
+    A `@sized_by` line is dropped: it is the stdlib's own size declaration, refused
+    in a user file (E085), and no copied source is `@bounded`, so nothing reads it."""
+    text = SIZED_BY_RE.sub("", text)
     if RAWPTR_RE.search(text) and not FFI_IMPORT_RE.search(text):
         text = "import ffi\n" + text
     had_import = PRIM_IMPORT_RE.search(text) is not None
