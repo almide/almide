@@ -257,7 +257,15 @@ mod tests {
         }
         // The families #4338 moved into the table reach the network.
         for op in TCP.chain(UNIX_SHM).chain(UDP) {
-            assert_eq!(caps_of(op), Some(&[NET][..]), "op {op}");
+            let want: &[u32] = match op {
+                // C-460: unix connect / listen reach a socket file, shm_create
+                // makes its backing file and reaches no network.
+                104 => &[NET, FS_READ],
+                105 => &[NET, FS_WRITE],
+                113 => &[FS_WRITE],
+                _ => &[NET],
+            };
+            assert_eq!(caps_of(op), Some(want), "op {op}");
         }
         assert_eq!(caps_of(119), None, "an op no family declares");
     }

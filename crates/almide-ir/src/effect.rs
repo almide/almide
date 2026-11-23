@@ -652,8 +652,12 @@ mod classification_gate {
         assert_eq!(stdlib_call_effect("uuid", "v4"), vec![Rand]);
         assert_eq!(stdlib_call_effect("uuid", "v7"), vec![Time, Rand]);
         assert!(stdlib_call_effect("uuid", "parse").is_empty());
-        assert_eq!(stdlib_call_effect("unix", "connect"), vec![NetFetch]);
-        assert_eq!(stdlib_call_effect("unix", "listen"), vec![NetListen]);
+        // C-460: a call that reaches a file entry carries its FS leaf too.
+        assert_eq!(stdlib_call_effect("unix", "connect"), vec![NetFetch, FsRead]);
+        assert_eq!(stdlib_call_effect("unix", "listen"), vec![NetListen, FsWrite]);
+        assert_eq!(stdlib_call_effect("unix", "shm_create"), vec![FsWrite]);
+        assert_eq!(stdlib_call_effect("unix", "shm_write"), vec![NetFetch, NetListen]);
+        assert_eq!(stdlib_call_effect("fs", "temp_dir"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("net", "lookup_host"), vec![NetFetch]);
         assert!(stdlib_call_effect("net", "parse_ip").is_empty());
         assert_eq!(stdlib_call_effect("process", "exit"), vec![Abort]);
