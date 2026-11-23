@@ -287,8 +287,8 @@ effect fn main() -> Unit = {
 
 /// The route the cost model picks on its own (no ablation): the embedded
 /// run's debug stderr, after checking native and wasm agree with and
-/// without `ALMIDE_FAN_COST_OFF`.
-fn route_by_cost_model(src: &str, args: &[&str]) -> String {
+/// without `ALMIDE_FAN_COST_OFF`. `env` is set on every run.
+fn route_by_cost_model(src: &str, args: &[&str], env: &[(&str, &str)]) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("m.almd"), src).expect("write");
     let go = |wasm: bool, off: bool, dbg: bool| {
@@ -297,7 +297,7 @@ fn route_by_cost_model(src: &str, args: &[&str]) -> String {
         if wasm {
             cmd.args(["--target", "wasm"]);
         }
-        cmd.arg("--").args(args);
+        cmd.arg("--").args(args).envs(env.iter().copied());
         if off {
             cmd.env("ALMIDE_FAN_COST_OFF", "1");
         }
@@ -337,15 +337,29 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// What every later offer of the cheap site is planned from: the cost a
+/// ~10-iteration body measures warm on a CI runner (1_803 and 2_350 ns per
+/// element in run 44922622737), far below the 8-element break-even of
+/// 8_334 ns (host_fan.rs `decide`, whose unit tests pin the verdict on fixed
+/// costs).
+const CHEAP_ESTIMATE_NS: &str = "2000";
+
 #[test]
 fn the_cost_model_keeps_a_cheap_chunk_map_sequential() {
-    // ~10 iterations per element: far below the measured break-even. The
-    // site's first offer goes parallel (no measurement yet); the next two
-    // know better.
-    let route = route_by_cost_model(COST_SRC, &["10"]);
+    // ~10 iterations per element: far below the break-even. The site's
+    // first offer goes parallel (no measurement yet); the next two know
+    // better. What a runner MEASURES depends on the runner (a cold worker on
+    // a loaded shared runner read 14_133 ns per element, #4910), so the
+    // estimate they are planned from is injected: the verdict is asserted
+    // on every run, never conditioned on the machine's speed.
+    let route = route_by_cost_model(COST_SRC, &["10"], &[("ALMIDE_DBG_FAN_ESTIMATE_NS", CHEAP_ESTIMATE_NS)]);
+    let planned: Vec<&str> = route.lines().filter(|l| l.contains("__fan_site_0: planned ")).collect();
     let lines: Vec<&str> = route.lines().filter(|l| l.contains("__fan_site_0: served")).collect();
-    assert_eq!(lines.len(), 3, "{route}");
+    assert_eq!((planned.len(), lines.len()), (3, 3), "{route}");
+    assert!(planned[0].contains("with no estimate"), "{route}");
     assert!(lines[0].contains("separate instances (8 elements"), "{route}");
+    let from = format!("planned 1 workers from an estimate of {CHEAP_ESTIMATE_NS} ns per element");
+    assert!(planned[1..].iter().all(|l| l.contains(&from)), "{route}");
     assert!(lines[1..].iter().all(|l| l.contains("the cost model kept it sequential (8 elements)")), "{route}");
 }
 
@@ -356,7 +370,7 @@ fn the_cost_model_runs_an_expensive_chunk_map_in_parallel() {
     if std::thread::available_parallelism().map_or(1, |p| p.get()) < 2 {
         return;
     }
-    let route = route_by_cost_model(COST_SRC, &["3000000"]);
+    let route = route_by_cost_model(COST_SRC, &["3000000"], &[]);
     assert_eq!(route.matches("served on separate instances (8 elements").count(), 3, "{route}");
 }
 
