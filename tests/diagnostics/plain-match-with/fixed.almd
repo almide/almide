@@ -1,0 +1,8 @@
+// `match x with` and bar-led arms (OCaml / F#).
+fn name(n: Int) -> String =
+  match n {
+    1 => "one",
+    _ => "other",
+  }
+
+fn main() -> Unit = println(name(1))

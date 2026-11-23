@@ -329,6 +329,11 @@ pub(crate) const RTLIB_DIR_PREFIX: &str = "almide-rtlib-";
 /// skipped.
 pub(crate) fn sweep_rtlib_cache(in_use: &std::path::Path) {
     let temp = cache_base();
+    // The size bound first, on its own minute-long rate limit: the age rule
+    // alone does not bound the dirs inside a burst of distinct programs (#4911).
+    if let Some(cap) = super::cache_bound::cache_max_bytes() {
+        super::cache_bound::bound_rtlib_dirs(&temp, in_use, cap);
+    }
     if !sweep_due(&temp) {
         return;
     }

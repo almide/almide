@@ -1,0 +1,9 @@
+// `let` alone on its line, the bindings below it, a closing `in`
+// (Haskell / OCaml layout).
+fn total() -> Int = {
+  let quantity = 40
+  let unit_price = 2
+  quantity * unit_price
+}
+
+fn main() -> Unit = println(int.to_string(total()))

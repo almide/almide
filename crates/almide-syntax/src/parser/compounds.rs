@@ -130,6 +130,18 @@ impl Parser {
         self.skip_newlines();
         let subject = self.parse_block_head(|p| p.parse_or())?;
         self.skip_newlines();
+        // `match x with | p -> e` (OCaml / F#). Named here: "Expected LBrace
+        // (got Ident 'with')" sends the reader to count delimiters.
+        if self.check_ident("with") {
+            let tok = self.current().clone();
+            let diag = self.diag_error(
+                "`match ... with` is OCaml/F# syntax: Almide wraps the arms in braces",
+                "Write `match x { pattern => expr, ... }` — `{` after the subject, `=>` after each pattern, `}` at the end. There is no `with` and no leading `|`.",
+                "match",
+            ).with_try("match x { 1 => 2, _ => 3 }");
+            self.errors.push(diag);
+            return Err(format!("'match ... with' is not valid in Almide at line {}:{}", tok.line, tok.col));
+        }
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let (mut leading, _) = self.skip_newlines_collect_comments();
@@ -153,6 +165,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
+        self.skip_leading_bar();
         self.skip_case_prefix();
         let pattern = self.parse_pattern()?;
         // #1461: or-pattern alternatives — `a | b | c => body`.
@@ -177,6 +190,21 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(MatchArm { pattern, guard, body, comments: Vec::new() })
+    }
+
+    /// `| p => e` (OCaml / Haskell / F#): one error, and the arm parses
+    /// without the leading bar. No pattern starts with `|`, so nothing valid
+    /// is taken away; the alternatives of ONE arm (`a | b => e`) are read
+    /// after its first pattern.
+    fn skip_leading_bar(&mut self) {
+        if !self.check(TokenType::Pipe) { return; }
+        let diag = self.diag_error(
+            "a match arm does not start with '|': it is 'pattern => expr'",
+            "Drop the leading `|` (OCaml / Haskell / F#): `match x { 1 => \"one\", _ => \"other\" }`. Inside ONE arm, `a | b => expr` matches either pattern.",
+            "match",
+        ).with_try("match x { 1 => 2, _ => 3 }");
+        self.errors.push(diag);
+        self.advance();
     }
 
     /// `case p => e` (Scala / Swift): one error, and the arm parses without
