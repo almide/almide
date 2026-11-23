@@ -427,9 +427,17 @@ test "a mixed `from` of declaration, type and reach is decided; a mix with any o
   assert(not from_decided("mixed:declaration"))
   assert(not from_decided("mixed:"))
   let ctl = "control_patch = \"proofs/decision-controls/x.forged.patch\"\ncontrol_test = \"tests/x_test.rs::novel_x\"\ncontrol_seen = \"abc\"\n"
-  let mixed = string.replace(forged(ctl), "from = \"declaration\"", "from = \"mixed:declaration+type\"")
+  let mixed = string.replace(
+    forged(ctl),
+    "from = \"declaration\"",
+    "from = \"mixed:declaration+type\"",
+  )
   assert_eq(judge(mixed, full_evidence()), [])
-  let named = string.replace(forged(ctl), "from = \"declaration\"", "from = \"mixed:declaration+name\"")
+  let named = string.replace(
+    forged(ctl),
+    "from = \"declaration\"",
+    "from = \"mixed:declaration+name\"",
+  )
   assert(judge(named, full_evidence()) |> list.any((b) => string.contains(b, "c1:")))
 }
 
