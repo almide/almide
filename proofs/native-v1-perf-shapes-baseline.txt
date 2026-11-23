@@ -25,7 +25,7 @@
 #   (`{closure#3}::{closure#0}`, 2).
 crates/almide-mir/src/render_native.rs	<almide_mir::render_native::NTy>::is_stringy	1
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::as_str_arg	7
-crates/almide-mir/src/render_native.rs	almide_mir::render_native::render_items	29
+crates/almide-mir/src/render_native.rs	almide_mir::render_native::render_items	3
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::render_native_items	4
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::repr_nty	6
 crates/almide-mir/src/render_native.rs	almide_mir::render_native::seed_param_ntys	3
