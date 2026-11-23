@@ -253,17 +253,27 @@ impl Emitter<'_> {
         let (hm, hr, hc) = self.mat_open(m)?;
         self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
-        let oom = self.pool.intern("Error: out of memory");
-        let hparts = self.hold_i32()?;
-        let hw = self.hold_i32()?;
-        let hl = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
             i.local_set(hn);
             // parts = rows == 0 || n < 1 ? 0 : n, judged in i64 before the wrap
             i.i64_const(0).local_get(hn);
             i.local_get(hr).i32_eqz().local_get(hn).i64_const(1).i64_lt_s().i32_or().select();
-            i.local_tee(hn).i64_const(0x7FFF_0000 / 4).i64_gt_s().if_(BlockType::Empty);
+            i.local_set(hn);
+        }
+        // #4914, C-161: n parts of rows(m) rows are n x rows row slots under
+        // the shared ceiling — the constructor guard with (parts, rows).
+        let hr64 = self.hold_i64()?;
+        self.f.instructions().local_get(hr).i64_extend_i32_u().local_set(hr64);
+        self.q_dims_guard(hn, hr64);
+        self.release_i64();
+        let oom = self.pool.intern("Error: out of memory");
+        let hparts = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hl = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hn).i64_const(0x7FFF_0000 / 4).i64_gt_s().if_(BlockType::Empty);
             i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
             i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
             i.end();

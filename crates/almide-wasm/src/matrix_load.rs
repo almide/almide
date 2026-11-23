@@ -45,7 +45,7 @@ impl Emitter<'_> {
 
     /// The byte-loader constructor ceiling (#1525): rows > 2^28 dies, then
     /// rows > 0 and cols > 2^28/rows dies — the unified T6 abort.
-    fn q_dims_guard(&mut self, hr: u32, hc: u32) {
+    pub(crate) fn q_dims_guard(&mut self, hr: u32, hc: u32) {
         let msg = self.pool.intern("matrix dimensions too large");
         {
             let mut i = self.f.instructions();

@@ -400,6 +400,14 @@ pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideM
     // became 18446744073709551615 parts and the collect died in a raw
     // `capacity overflow` panic (exit 101) where wasm printed 0.
     if m.is_empty() || n <= 0 { return vec![].into(); }
+    // #4914, C-161: the result holds n parts of rows(m) rows each, so the
+    // part count is a row count — n x rows(m) row slots take the shared
+    // ceiling (tested by division), or a huge n allocated gigabytes natively
+    // and died in a raw abort past the allocator where wasm aborted out of
+    // memory.
+    if n > ALMIDE_MATRIX_MAX_ELEMS / (m.len() as i64).max(1) {
+        almide_abort("matrix dimensions too large");
+    }
     let n = n as usize;
     let cols = m[0].len();
     let chunk = cols / n;
