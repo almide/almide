@@ -59,36 +59,7 @@ ir() {
     | awk '/I *refs:/ { gsub(",", "", $NF); print $NF }'
 }
 # Instructions executed inside the binary's `main` and every thread's start.
-in_main() {
-  local out="$WORK/cg.$$.$RANDOM"
-  timeout 900 valgrind --tool=callgrind --fair-sched=yes --collect-atstart=no --toggle-collect='almide_*::main' --toggle-collect='*thread_start*' \
-    --toggle-collect='*almide_stack_guard_install' \
-    --callgrind-out-file="$out" "$1" </dev/null >/dev/null 2>&1
-  [ -s "$out" ] || return 0
-  local n
-  n=$(callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
-  rm -f "$out"
-  # Valgrind 3.22 reads no symbols from a binary whose two writable PT_LOAD
-  # segments land in one mapping (a link-layout accident: guard_statement's
-  # v1 binary). It then names each block by its address, so the same three
-  # entry points are toggled by address: the symbol's address from `nm`
-  # plus the load base valgrind gives a PIE on amd64 (0x108000). Both sides
-  # fail closed: a wrong base toggles nothing, and nothing collected is
-  # MEASURE-FAIL.
-  if ! [[ "$n" =~ ^[0-9]+$ ]] && command -v nm >/dev/null; then
-    local addrs=()
-    while read -r a _k _name; do
-      addrs+=("--toggle-collect=$(printf '0x%016x' $((0x$a + 0x108000)))")
-    done < <(nm -C "$1" 2>/dev/null | grep -E ' almide_[A-Za-z0-9_]*::main$|thread_start$|::almide_stack_guard_install$')
-    if [ "${#addrs[@]}" -gt 0 ]; then
-      timeout 900 valgrind --tool=callgrind --fair-sched=yes --collect-atstart=no "${addrs[@]}" \
-        --callgrind-out-file="$out" "$1" </dev/null >/dev/null 2>&1
-      [ -s "$out" ] && n=$(callgrind_annotate --auto=no "$out" 2>/dev/null | awk '/PROGRAM TOTALS/ { gsub(",", "", $1); print $1 }')
-      rm -f "$out"
-    fi
-  fi
-  echo "$n"
-}
+source scripts/lib/native-v1-perf-in-main.sh
 ratio() { awk -v a="$1" -v b="$2" 'BEGIN { if (a > 0) printf "%.3f", b / a; else print "inf" }'; }
 
 # Each leg's fixed glue: `main` of a program that does nothing.
@@ -111,6 +82,12 @@ while IFS=$'\t' read -r prog r _found _plan; do
   listed["$prog"]="$r"
 done < "$LEDGER"
 
+declare -A time_bound
+while IFS=$'\t' read -r prog sc _reads _why; do
+  case "$prog" in ''|'#'*) continue ;; esac
+  time_bound["$prog"]="$sc"
+done < proofs/native-v1-perf-time-bound.txt
+
 fail=0; gated=0; rows=()
 while read -r f; do
   n="$(echo "$f" | tr '/.' '__')"
@@ -123,8 +100,11 @@ while read -r f; do
   fi
   a=$(ir "$WORK/$n.v0")
   [ -n "$a" ] || { echo "RUN-FAIL $f (v0)"; fail=1; continue; }
-  # The large programs are check-native-v1-perf.sh's.
+  # The large programs are check-native-v1-perf.sh's, and so is every
+  # time-bound program whatever its size (it runs as many passes as fit in
+  # its wall time; that gate counts it per pass).
   [ "$a" -ge "$MIN_IR" ] && continue
+  [ -n "${time_bound[$f]:-}" ] && continue
   m0=$(in_main "$WORK/$n.v0"); m1=$(in_main "$WORK/$n.v1")
   # callgrind prints `.` for a count of zero: `main` was never entered.
   if ! [[ "$m0" =~ ^[0-9]+$ ]] || ! [[ "$m1" =~ ^[0-9]+$ ]]; then

@@ -25,7 +25,7 @@ pub fn almide_rt_io_read_line() -> Option<AlmideString> {
     let __almide_v: Option<String> = {
         use std::io::BufRead;
         almide_stdout_flush();
-        let mut buf: Vec<u8> = Vec::new();
+        let mut buf: std::vec::Vec<u8> = std::vec::Vec::new();
         match std::io::stdin().lock().read_until(b'\n', &mut buf) {
             Ok(0) | Err(_) => None,
             Ok(_) => {
@@ -45,7 +45,7 @@ pub fn almide_rt_io_read_all() -> AlmideString {
         // stream on one invalid byte and `unwrap_or(0)` answered "", where the wasm
         // self-host (stdlib/io_read_all.almd) decodes the same bytes with U+FFFD. The
         // bytes read before an I/O error are kept — the wasm fd_read loop stops there too.
-        let mut buf: Vec<u8> = Vec::new();
+        let mut buf: std::vec::Vec<u8> = std::vec::Vec::new();
         let _ = std::io::stdin().lock().read_to_end(&mut buf);
         String::from_utf8_lossy(&buf).into_owned()
     };
@@ -81,10 +81,10 @@ pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 // real defect was only ever `n` too large to REPRESENT at the i32 host boundary
 // (i64::MAX truncated to -1 and read nothing), and the self-host twin now solves that
 // by looping over 2^26 chunks instead of asking the floor for the whole span at once.
-pub fn almide_rt_io___read_stdin_bytes(n: i64) -> Vec<u8> {
+pub fn almide_rt_io___read_stdin_bytes(n: i64) -> AlmideList<u8> {
     use std::io::Read;
     almide_stdout_flush();
-    if n <= 0 { return Vec::new(); }
+    if n <= 0 { return AlmideList::new(); }
     // Slices of at most 64 KiB read straight into one zeroed-once chunk and
     // widened into the answer: a slice of 8 KiB or more bypasses stdin's
     // buffer, so its bytes are not copied through it. `take(n).read_to_end`
@@ -94,11 +94,11 @@ pub fn almide_rt_io___read_stdin_bytes(n: i64) -> Vec<u8> {
     // a per-call cost that moved with n. Nothing is sized from n past one slice.
     const SLICE: usize = 1 << 16;
     thread_local! {
-        static CHUNK: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0u8; SLICE]);
+        static CHUNK: std::cell::RefCell<AlmideList<u8>> = std::cell::RefCell::new(almide_list![0u8; SLICE]);
     }
     CHUNK.with(|chunk| {
         let mut chunk = chunk.borrow_mut();
-        let mut out: Vec<u8> = Vec::with_capacity((n as u64).min(SLICE as u64) as usize);
+        let mut out: AlmideList<u8> = AlmideList::with_capacity((n as u64).min(SLICE as u64) as usize);
         let mut left = n as u64;
         let mut input = std::io::stdin().lock();
         while left > 0 {
@@ -120,13 +120,13 @@ pub fn almide_rt_io___read_stdin_bytes(n: i64) -> Vec<u8> {
 // Byte writes share the buffer with `println` (#2245), so they interleave in
 // PROGRAM order without a flush per call (the C-162 fixture pins the order on
 // both legs); a terminal still sees each write as it happens.
-pub fn almide_rt_io___write_stdout(data: &Vec<u8>) {
+pub fn almide_rt_io___write_stdout(data: &AlmideList<u8>) {
     almide_stdout_write_bytes(data);
 }
 
 // stderr is unbuffered: stdout is flushed first so the two streams keep
 // program order on a terminal, as `eprintln` does.
-pub fn almide_rt_io___write_stderr(data: &Vec<u8>) {
+pub fn almide_rt_io___write_stderr(data: &AlmideList<u8>) {
     almide_stderr_write_bytes(data);
 }
 

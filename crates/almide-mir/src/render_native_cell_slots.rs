@@ -76,7 +76,7 @@ fn inner(op: &Op, st: &mut AddrState, tys: &mut BTreeMap<ValueId, NTy>, out: &mu
                     }
                     match got {
                         NTy::StrRef => format!("AlmideString::from({})", var(src.base)),
-                        NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(src.base)),
+                        NTy::VecRef | NTy::VecStrRef => format!("{}.to_list()", var(src.base)),
                         NTy::RecRef(_) => format!("(*{}).clone()", var(src.base)),
                         _ => var(src.base),
                     } }

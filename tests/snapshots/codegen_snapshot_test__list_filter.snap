@@ -2,9 +2,9 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
-pub fn positives(xs: &[i64]) -> Vec<i64> {
+pub fn positives(xs: &[i64]) -> AlmideList<i64> {
     (xs).iter().cloned().filter(|x| {
         let x: i64 = (*x);
         (x > 0i64)
-    }).collect::<Vec<_>>()
+    }).collect::<AlmideList<_>>()
 }

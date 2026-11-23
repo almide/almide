@@ -121,7 +121,7 @@ fn scalar_agrees(d: &DTy, r: &str, by_ref: bool) -> Option<bool> {
         DTy::Str => (by_ref && r == "str") || (!by_ref && r == "AlmideString"),
         DTy::Matrix => r == "AlmideMatrix",
         DTy::Value => r == "AlmideValue",
-        DTy::Bytes => r == "Vec<u8>" || (by_ref && r == "[u8]"),
+        DTy::Bytes => r == "AlmideList<u8>" || (by_ref && r == "[u8]"),
         DTy::Runtime(runtime) => r == runtime.rust(),
         DTy::Var(_) => r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !by_ref,
         _ => return None,
@@ -136,9 +136,9 @@ fn composite_agrees(d: &DTy, r: &str, by_ref: bool) -> bool {
         // (`fn f<M: Deref<Target = AlmideMatrix>>(xs: &[M])`) carries a bound
         // the native element kind need not meet: not this route's.
         DTy::List(e) => {
-            let inner = r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
+            let inner = r.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')).or_else(|| r.strip_prefix('[').and_then(|x| x.strip_suffix(']')));
             let bare_param = inner.is_some_and(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_uppercase()));
-            (r.starts_with("Vec<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
+            (r.starts_with("AlmideList<") || (by_ref && r.starts_with('['))) && !(bare_param && !matches!(**e, DTy::Var(_)))
         }
         DTy::Opt(_) => r.starts_with("Option<"),
         DTy::Map(..) => r.starts_with("AlmideMap<"),
@@ -514,7 +514,7 @@ fn runtime_arg(code: &str, got: NTy, by_ref: bool, dying: bool) -> String {
         (false, _) if owned && dying => crate::render_native_move::take_expr(code),
         (false, _) if owned => format!("{code}.clone()"),
         (false, NTy::StrRef) => format!("AlmideString::from({code})"),
-        (false, NTy::VecRef | NTy::VecStrRef) => format!("{code}.to_vec()"),
+        (false, NTy::VecRef | NTy::VecStrRef) => format!("{code}.to_list()"),
         (false, _) => format!("{code}.clone()"),
     }
 }
@@ -599,7 +599,7 @@ fn plan(
     let mut twin = hof.twin.as_str();
     for (k, (((d, by_ref), (code, t)), a)) in hof.params.iter().zip(&got).zip(call.args.iter()).enumerate() {
         if hof.matrix_ref_lists[k] {
-            rendered.push(format!("&{code}.iter().collect::<Vec<_>>()"));
+            rendered.push(format!("&{code}.iter().collect::<AlmideList<_>>()"));
             continue;
         }
         if lent.is_some_and(|l| l.0 == k) {

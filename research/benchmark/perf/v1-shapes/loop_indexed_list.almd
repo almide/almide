@@ -1,0 +1,18 @@
+// v1-vs-v0 shape bench (scripts/check-native-v1-perf-shapes.sh, ADR-0037): a
+// loop that writes a list only through `xs[i] = v` and reads it only through
+// `xs[i]`, and a loop that only reads another list by index. It takes the
+// native render's slice taken once before each loop (render_native_elem_slices):
+// `&mut [i64]` for the written list, `&[i64]` for the read-only one.
+fn main() -> Unit = {
+  let n = int.parse("4000") ?? 4
+  var xs: List[Int] = list.repeat(0, n)
+  let ys: List[Int] = list.range(0, n)
+  for i in 1..<n {
+    xs[i] = xs[i - 1] + ys[i]
+  }
+  var total = 0
+  for i in 0..<n {
+    total = total + ys[i] * 2
+  }
+  println(int.to_string(xs[n - 1] + total))
+}

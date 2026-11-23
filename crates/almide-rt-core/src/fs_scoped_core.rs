@@ -75,7 +75,7 @@ fn fs_scoped_refused() -> std::io::Error {
 
 /// The granted roots, each with the descriptor its calls walk from.
 pub struct FsScoped {
-    roots: Vec<FsScopedRoot>,
+    roots: std::vec::Vec<FsScopedRoot>,
 }
 
 struct FsScopedRoot {
@@ -136,14 +136,14 @@ thread_local! {
 /// not resolve (fs_scope_resolve_parts).
 struct FsScopedPlace {
     root: usize,
-    segs: Vec<String>,
+    segs: std::vec::Vec<String>,
     dotdot: Option<std::io::Error>,
 }
 
 impl FsScopedPlace {
     /// The segments, or the plain call's error when the path holds a `..`
     /// the OS would not get past.
-    fn segs(self) -> std::io::Result<(usize, Vec<String>)> {
+    fn segs(self) -> std::io::Result<(usize, std::vec::Vec<String>)> {
         match self.dotdot {
             Some(e) => Err(e),
             None => Ok((self.root, self.segs)),
@@ -208,7 +208,7 @@ impl FsScoped {
     }
 
     /// The root a resolved path lies under, and its segments below it.
-    fn root_of(&self, resolved: &std::path::Path) -> Option<(usize, Vec<String>)> {
+    fn root_of(&self, resolved: &std::path::Path) -> Option<(usize, std::vec::Vec<String>)> {
         (0..self.roots.len()).find_map(|i| {
             let rest = resolved.strip_prefix(self.root_path(i)).ok()?;
             Some((i, rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect()))
@@ -281,7 +281,7 @@ impl FsScoped {
         if segs.is_empty() {
             return Ok(root);
         }
-        let v: Vec<&str> = segs.iter().map(String::as_str).collect();
+        let v: std::vec::Vec<&str> = segs.iter().map(String::as_str).collect();
         let r = fs_beneath_imp::parent_from(&root, &v, false, &mut |_| {});
         r.map_err(fs_scoped_from_beneath)
     }
@@ -357,7 +357,7 @@ impl FsScoped {
     }
 
     /// The entry names of the directory `path`, in the system's order.
-    pub fn read_dir_names(&self, path: &str) -> std::io::Result<Vec<std::ffi::OsString>> {
+    pub fn read_dir_names(&self, path: &str) -> std::io::Result<std::vec::Vec<std::ffi::OsString>> {
         let (i, segs) = self.place(path, true)?.segs()?;
         let fd = match segs.split_last() {
             Some((last, parents)) => {
@@ -563,7 +563,7 @@ impl FsScoped {
     pub fn metadata(&self, _path: &str) -> std::io::Result<FsScopedMeta> {
         Err(fs_beneath_unsupported())
     }
-    pub fn read_dir_names(&self, _path: &str) -> std::io::Result<Vec<std::ffi::OsString>> {
+    pub fn read_dir_names(&self, _path: &str) -> std::io::Result<std::vec::Vec<std::ffi::OsString>> {
         Err(fs_beneath_unsupported())
     }
     pub fn create_dir_all(&self, _path: &str) -> std::io::Result<()> {
@@ -743,11 +743,11 @@ pub mod almide_sfs {
         }
     }
 
-    pub fn read<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<Vec<u8>> {
+    pub fn read<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<std::vec::Vec<u8>> {
         if scope().is_none() {
             return std::fs::read(p);
         }
-        let mut out = Vec::new();
+        let mut out = std::vec::Vec::new();
         std::io::Read::read_to_end(&mut File::open(p)?, &mut out)?;
         Ok(out)
     }
@@ -766,7 +766,7 @@ pub mod almide_sfs {
     /// directory its read's EISDIR), at most `FS_READ_MAX_BYTES`. The entry is
     /// opened O_NONBLOCK and judged by its descriptor's fstat; scoped, the
     /// open is the scope's no-follow descriptor walk.
-    pub fn read_bounded<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<Vec<u8>> {
+    pub fn read_bounded<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<std::vec::Vec<u8>> {
         match scope() {
             None => super::fs_read_bounded_path(p.as_ref(), super::FS_READ_MAX_BYTES),
             Some(sc) => super::fs_read_bounded_file(&mut open_bounded(&sc, p.as_ref())?, super::FS_READ_MAX_BYTES),
@@ -879,7 +879,7 @@ pub mod almide_sfs {
     /// `std::fs::read_dir`'s entries, in the system's order.
     pub fn read_dir<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<ReadDir> {
         let dir = p.as_ref().to_path_buf();
-        let names: Vec<std::io::Result<std::ffi::OsString>> = match scope() {
+        let names: std::vec::Vec<std::io::Result<std::ffi::OsString>> = match scope() {
             None => std::fs::read_dir(&dir)?.map(|e| e.map(|e| e.file_name())).collect(),
             Some(sc) => sc.read_dir_names(&s(&dir))?.into_iter().map(Ok).collect(),
         };
@@ -1056,15 +1056,15 @@ pub fn fs_walk_join(dir: &str, rel: &str) -> String {
 /// would (its own symlinks followed: the program named it), beneath the
 /// granted root under `[permissions] fs`. An error names the directory it
 /// came from, as `fs_walk_join(dir, rel)`.
-pub fn fs_walk_nofollow(dir: &str, depth: Option<usize>) -> Result<Vec<String>, (String, std::io::Error)> {
-    let mut out = Vec::new();
+pub fn fs_walk_nofollow(dir: &str, depth: Option<usize>) -> Result<std::vec::Vec<String>, (String, std::io::Error)> {
+    let mut out = std::vec::Vec::new();
     fs_walk_imp(dir, depth, &mut out)?;
     Ok(out)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
-    fn level(fd: &almide_fs_beneath_sys::Handle, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut std::vec::Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(fd: &almide_fs_beneath_sys::Handle, rel: &str, depth: Option<usize>, out: &mut std::vec::Vec<String>) -> Result<(), (String, std::io::Error)> {
         let names = fd.try_clone().and_then(almide_fs_beneath_sys::list_fd).map_err(|e| (rel.to_string(), e))?;
         for n in names {
             let name = n.to_string_lossy().into_owned();
@@ -1089,8 +1089,8 @@ fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
-    fn level(base: &str, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut std::vec::Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(base: &str, rel: &str, depth: Option<usize>, out: &mut std::vec::Vec<String>) -> Result<(), (String, std::io::Error)> {
         let here = fs_walk_join(base, rel);
         for e in almide_sfs::read_dir(&here).map_err(|e| (rel.to_string(), e))? {
             let e = e.map_err(|e| (rel.to_string(), e))?;

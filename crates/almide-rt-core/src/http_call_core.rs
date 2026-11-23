@@ -65,13 +65,13 @@ pub fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
 
 pub struct AlmideHttpCallHead {
     status: i64,
-    headers: Vec<(String, String)>,
+    headers: std::vec::Vec<(String, String)>,
 }
 
 pub struct AlmideHttpCallState {
     head: Option<AlmideHttpCallHead>,
     /// The transfer-decoded body received so far.
-    body: Vec<u8>,
+    body: std::vec::Vec<u8>,
     /// How much of `body` `read_new` has handed out.
     delivered: usize,
     /// `Some` once the call is over: `Ok` = a complete response.
@@ -186,7 +186,7 @@ pub fn http_call_take_new(st: &mut AlmideHttpCallState) -> String {
 /// A finished call: status, header fields and the body EXACTLY as the server
 /// sent it (#4746) — `http.body_bytes` of the waited response answers these
 /// bytes on every lane, as it does for `http.send`; `http.body` decodes them.
-pub type HttpCallResponse = (i64, Vec<(String, String)>, Vec<u8>);
+pub type HttpCallResponse = (i64, std::vec::Vec<(String, String)>, std::vec::Vec<u8>);
 
 fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> Result<HttpCallResponse, String> {
     match (outcome, &st.head) {
@@ -205,7 +205,7 @@ pub enum HttpCallFraming {
 
 /// Move the decoded body bytes out of `raw` into `out`; `Ok(true)` once the
 /// body is complete by its own framing, `Err` on a malformed chunk size.
-pub fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
+pub fn http_call_decode(f: &mut HttpCallFraming, raw: &mut std::vec::Vec<u8>, out: &mut std::vec::Vec<u8>) -> Result<bool, String> {
     match f {
         HttpCallFraming::Length(left) => {
             let take = (*left).min(raw.len());
@@ -237,7 +237,7 @@ fn http_call_decode_chunks(
     awaiting_size: &mut bool,
     raw: &[u8],
     at: &mut usize,
-    out: &mut Vec<u8>,
+    out: &mut std::vec::Vec<u8>,
 ) -> Result<bool, String> {
     loop {
         if !*awaiting_size && *remaining == 0 {
@@ -276,7 +276,7 @@ fn http_call_decode_chunks(
 /// (wire order, repeats kept — the `request_response` rule) and framing. A
 /// 1xx interim head (`100 Continue`) is dropped and the next one awaited
 /// (#2824); a head past `HTTP_MAX_HEAD_BYTES` is an error.
-fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
+fn http_call_parse_head(raw: &mut std::vec::Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
     let (section, status) = loop {
         let Some(idx) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
             return if raw.len() > HTTP_MAX_HEAD_BYTES { Err("head too large".to_string()) } else { Ok(None) };
@@ -423,9 +423,9 @@ fn http_call_pump<S: AlmideHttpCallSock>(
     if let Err(e) = s.write_all(request) {
         return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { http_io_error_text(url, &e) });
     }
-    let mut raw: Vec<u8> = Vec::new();
+    let mut raw: std::vec::Vec<u8> = std::vec::Vec::new();
     let mut framing: Option<HttpCallFraming> = None;
-    let mut buf = vec![0u8; 8192];
+    let mut buf = ::std::vec![0u8; 8192];
     loop {
         s.tcp().set_read_timeout(http_call_step_timeout(sh, true)?).ok();
         let n = match http_read_retrying(s, &mut buf) {
@@ -462,7 +462,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
             st.head = Some(head);
             framing = Some(f);
         }
-        let mut decoded = Vec::new();
+        let mut decoded = std::vec::Vec::new();
         let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded).map_err(malformed)?;
         {
             let mut st = sh.lock();
@@ -486,7 +486,7 @@ pub fn http_call_spawn(
     method: &str,
     url: &str,
     body: impl AsRef<[u8]>,
-    headers: Vec<(String, String)>,
+    headers: std::vec::Vec<(String, String)>,
     total_ms: i64,
     idle_ms: i64,
 ) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
@@ -505,7 +505,7 @@ pub fn http_call_spawn_classic(
     method: &str,
     url: &str,
     body: impl AsRef<[u8]>,
-    headers: Vec<(String, String)>,
+    headers: std::vec::Vec<(String, String)>,
 ) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
     let idle_ms = client_read_timeout(120).map_or(0, |d| d.as_millis() as i64);
     http_call_spawn_with(method, url, body.as_ref(), headers, (0, idle_ms), true)
@@ -516,7 +516,7 @@ fn http_call_spawn_with(
     method: &str,
     url: &str,
     body: &[u8],
-    headers: Vec<(String, String)>,
+    headers: std::vec::Vec<(String, String)>,
     (total_ms, idle_ms): (i64, i64),
     classic: bool,
 ) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
@@ -524,7 +524,7 @@ fn http_call_spawn_with(
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
             head: None,
-            body: Vec::new(),
+            body: std::vec::Vec::new(),
             delivered: 0,
             outcome: None,
             socket: None,

@@ -209,14 +209,19 @@ fn method_call(receiver: IrExpr, method: &str, ty: Ty) -> IrExpr {
     }, ty, span)
 }
 
-/// The owned form of a by-reference param's value: a `&[T]` is `.to_vec()`,
+/// The owned form of a by-reference param's value: a `&[T]` is `.to_list()` (ADR-0037: an owned list block),
 /// a `&str` is `.to_string()`, anything else is `.clone()` — a `.clone()`
 /// of a slice would stay a `&[T]` and mismatch the owned `Vec<T>` (#624).
 fn owned_read(p: IrExpr) -> IrExpr {
     let ty = p.ty.clone();
     match &ty {
         Ty::String => method_call(p, "to_string", ty),
-        Ty::Applied(TypeConstructorId::List, _) => method_call(p, "to_vec", ty),
+        // The `ToVec` node renders `(x).to_list()` (ADR-0037), with no
+        // method name for the UFCS split to key on.
+        Ty::Applied(TypeConstructorId::List, _) => {
+            let span = p.span;
+            mk(IrExprKind::ToVec { expr: Box::new(p) }, ty, span)
+        }
         _ => {
             let span = p.span;
             mk(IrExprKind::Clone { expr: Box::new(p) }, ty, span)

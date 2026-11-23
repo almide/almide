@@ -64,7 +64,7 @@ fn runtime_type(env: &Env, d: &DTy) -> Option<String> {
             let ts = es.iter().map(|e| runtime_type(env, e)).collect::<Option<Vec<_>>>()?;
             format!("({}{})", ts.join(", "), if ts.is_empty() { "" } else { "," })
         }
-        DTy::List(e) => format!("Vec<{}>", runtime_type(env, e)?),
+        DTy::List(e) => format!("AlmideList<{}>", runtime_type(env, e)?),
         DTy::Opt(e) => format!("Option<{}>", runtime_type(env, e)?),
         DTy::Result(a, b) => format!("Result<{}, {}>", runtime_type(env, a)?, runtime_type(env, b)?),
         DTy::Fn(..) => return None,

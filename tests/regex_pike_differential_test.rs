@@ -29,6 +29,8 @@
 #[allow(dead_code, clippy::all, clippy::pedantic)]
 mod rt {
     pub type AlmideString = String;
+    // ADR-0037: the list type the runtime ships, not a stand-in.
+    pub use almide_str::{almide_list, AlmideList, AlmideToList};
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
         panic!("{msg}")
     }
@@ -155,7 +157,7 @@ mod rt {
     }
 
     pub fn find_all(pat: &str, s: &str) -> Vec<String> {
-        almide_regex_find_all(pat, s)
+        almide_regex_find_all(pat, s).into()
     }
 
     /// The compiled pattern the cache hands out for `pat`. Held by the caller,

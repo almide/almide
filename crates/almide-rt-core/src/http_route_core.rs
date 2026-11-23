@@ -32,7 +32,7 @@ pub struct AlmideHttpUrl {
     /// query, percent-encoded, without the fragment.
     pub target: String,
     /// The percent-decoded `user` and `password` of the userinfo, if any.
-    pub userinfo: Option<(Vec<u8>, Vec<u8>)>,
+    pub userinfo: Option<(std::vec::Vec<u8>, std::vec::Vec<u8>)>,
     /// The URL as the program passed it: the operand every error names.
     pub url: String,
 }
@@ -109,7 +109,7 @@ fn http_url_clean(url: &str) -> Result<String, String> {
 /// trailing empty label dropped) is all digits or `0x` and hex digits must
 /// be four decimal labels 0..=255 without leading zeros.
 fn http_url_ipv4_ok(host: &str) -> bool {
-    let mut labels: Vec<&str> = host.split('.').collect();
+    let mut labels: std::vec::Vec<&str> = host.split('.').collect();
     if labels.len() > 1 && labels.last() == Some(&"") {
         labels.pop();
     }
@@ -120,7 +120,7 @@ fn http_url_ipv4_ok(host: &str) -> bool {
     if !numeric {
         return true;
     }
-    let all: Vec<&str> = host.split('.').collect();
+    let all: std::vec::Vec<&str> = host.split('.').collect();
     all.len() == 4
         && all.iter().all(|l| digits(l) && l.len() <= 3 && (l.len() == 1 || !l.starts_with('0')) && l.parse::<u16>().is_ok_and(|n| n <= 255))
 }
@@ -133,8 +133,8 @@ fn http_url_remove_dots(path: &str) -> String {
     let Some(body) = path.strip_prefix('/') else {
         return path.to_string();
     };
-    let segs: Vec<&str> = body.split('/').collect();
-    let mut out: Vec<&str> = Vec::new();
+    let segs: std::vec::Vec<&str> = body.split('/').collect();
+    let mut out: std::vec::Vec<&str> = std::vec::Vec::new();
     for (i, seg) in segs.iter().enumerate() {
         let last = i + 1 == segs.len();
         let kind = match seg.to_ascii_lowercase().as_str() {
@@ -256,8 +256,8 @@ fn http_normalize_host(host: &str) -> Result<String, String> {
     if host.is_empty() {
         return Err("empty host".to_string());
     }
-    let labels: Vec<&str> = host.split('.').collect();
-    let mut out: Vec<String> = Vec::with_capacity(labels.len());
+    let labels: std::vec::Vec<&str> = host.split('.').collect();
+    let mut out: std::vec::Vec<String> = std::vec::Vec::with_capacity(labels.len());
     for (i, label) in labels.iter().enumerate() {
         if label.is_empty() {
             if i + 1 == labels.len() && i > 0 {
@@ -266,7 +266,7 @@ fn http_normalize_host(host: &str) -> Result<String, String> {
             }
             return Err(format!("empty label in host {}", http_quote(host)));
         }
-        let lower: Vec<char> = label.chars().flat_map(char::to_lowercase).collect();
+        let lower: std::vec::Vec<char> = label.chars().flat_map(char::to_lowercase).collect();
         if let Some(c) = lower.iter().find(|c| c.is_ascii() && !(c.is_ascii_alphanumeric() || **c == '-' || **c == '_')) {
             return Err(format!("invalid character {} in host {}", http_quote(&c.to_string()), http_quote(host)));
         }
@@ -357,10 +357,10 @@ fn http_percent_encode(s: &str, query: bool) -> String {
     out
 }
 
-fn http_percent_decode_bytes(s: &str) -> Vec<u8> {
+fn http_percent_decode_bytes(s: &str) -> std::vec::Vec<u8> {
     let b = s.as_bytes();
     let hex = |c: u8| (c as char).to_digit(16);
-    let mut out = Vec::with_capacity(b.len());
+    let mut out = std::vec::Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if let (b'%', Some(h), Some(l)) =
@@ -481,7 +481,7 @@ pub fn http_request_bytes(
     route: &AlmideHttpRoute,
     body: &[u8],
     headers: &[(String, String)],
-) -> Vec<u8> {
+) -> std::vec::Vec<u8> {
     let has = |name: &str| headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
     let mut req = format!("{} {} HTTP/1.1\r\n", method, route.target);
     if !has("host") {
@@ -603,7 +603,7 @@ fn http_tls_config() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
             let mut roots = rustls::RootCertStore::empty();
             roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             let native = rustls_native_certs::load_native_certs();
-            let named = ["SSL_CERT_FILE", "SSL_CERT_DIR"].into_iter().filter(|v| std::env::var_os(v).is_some()).collect::<Vec<_>>();
+            let named = ["SSL_CERT_FILE", "SSL_CERT_DIR"].into_iter().filter(|v| std::env::var_os(v).is_some()).collect::<std::vec::Vec<_>>();
             if !named.is_empty() && native.certs.is_empty() {
                 let why = native.errors.first().map(|e| e.to_string()).unwrap_or_else(|| "no certificates found".to_string());
                 return Err(format!("TLS error: could not load the CA certificates {} names: {}", named.join(" / "), why));

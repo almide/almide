@@ -265,7 +265,7 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Applied(TCI::List, args) if args.len() == 1 => {
             let inner = rf(&args[0]);
-            tmpl("type_list", &[("inner", inner.as_str())], format!("Vec<{}>", inner))
+            tmpl("type_list", &[("inner", inner.as_str())], format!("AlmideList<{}>", inner))
         }
         Ty::Applied(TCI::Map, args) if args.len() == 2 => {
             let (k, v) = (rf(&args[0]), rf(&args[1]));

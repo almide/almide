@@ -8,7 +8,7 @@
 // args_get with argv[0] skipped (stdlib/env_args.almd). An argument that is
 // not UTF-8 is its lossy decode (#4391, C-449): a String is valid UTF-8, and
 // `std::env::args` panicked on such an argument (exit 101).
-pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_env_args() -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = { std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect() }; __almide_v.into_almide() }
 
 pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
@@ -37,8 +37,8 @@ pub fn almide_rt_env___set(name: &str, value: &str) {
 // `env.vars`'s op (#3908): `name=value` per variable, in the process's order;
 // the Almide body keys and sorts them. A variable whose name or value is not
 // UTF-8 is left out, as `env.get` answers none for it.
-pub fn almide_rt_env___environ() -> Vec<AlmideString> {
-    let __almide_v: Vec<String> = std::env::vars_os()
+pub fn almide_rt_env___environ() -> AlmideList<AlmideString> {
+    let __almide_v: AlmideList<String> = std::env::vars_os()
         .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
         .collect();
     __almide_v.into_almide()

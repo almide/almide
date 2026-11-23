@@ -30,9 +30,12 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
     let args: Vec<String> = func.params.iter().map(|p| extern_rust_arg(p, &mut before, &mut after)).collect();
     let ret = render_type(ctx, &func.ret_ty);
     let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
-    let result = if extern_rust_is_rc_cow(&func.ret_ty) {
+    let result = if matches!(func.ret_ty, Ty::Bytes) {
+        // The host's `Vec<u8>` becomes the Almide list block (ADR-0037).
+        "AlmideRcCow::from(AlmideList::<u8>::from(__almide_r))".to_string()
+    } else if extern_rust_is_rc_cow(&func.ret_ty) {
         "__almide_r.into()".to_string()
-    } else if extern_rust_has_str(&func.ret_ty) {
+    } else if extern_rust_host_differs(&func.ret_ty) {
         extern_rust_str_conv("&__almide_r", &func.ret_ty, false, 0)
     } else {
         "__almide_r".to_string()
@@ -59,13 +62,29 @@ fn extern_rust_has_str(ty: &Ty) -> bool {
     }
 }
 
+/// Whether the host shape of `ty` differs from the Almide shape at all: a
+/// String inside it (ADR-0013), or a List / Bytes, which generated code holds
+/// as the counted `AlmideList` block and the host as std's `Vec` (ADR-0037,
+/// owner ruling (A): the documented host ABI is unchanged; the wrapper copies
+/// at the boundary). A borrowed list of such values needs no copy: it is a
+/// slice either way.
+pub(super) fn extern_rust_host_differs(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId as C;
+    match ty {
+        Ty::String | Ty::Bytes | Ty::Applied(C::List, _) => true,
+        Ty::Applied(C::Set | C::Option | C::Result | C::Map, args) => args.iter().any(extern_rust_host_differs),
+        Ty::Tuple(elems) => elems.iter().any(extern_rust_host_differs),
+        _ => false,
+    }
+}
+
 /// An owned copy of the value `e` (an expression of type `&T`) in the host's
 /// shape (`to_host`: every Almide String becomes a `String`) or in the Almide
 /// shape (every host `String`, or an `AlmideString` a host already returns,
 /// becomes an `AlmideString`). `depth` keeps closure binders distinct.
 fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String {
     use almide_lang::types::TypeConstructorId as C;
-    if !extern_rust_has_str(ty) {
+    if !extern_rust_host_differs(ty) {
         return format!("({e}).clone()");
     }
     let x = format!("__x{depth}");
@@ -74,7 +93,9 @@ fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String
     match ty {
         Ty::String if to_host => format!("({e}).to_string()"),
         Ty::String => format!("AlmideString::from(({e}).as_str())"),
-        Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<Vec<_>>()", inner(&x, &args[0])),
+        Ty::Bytes if to_host => format!("({e}).as_slice().to_vec()"),
+        Ty::Bytes => format!("AlmideRcCow::from(AlmideList::<u8>::from(({e}).as_slice()))"),
+        Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<{}<_>>()", inner(&x, &args[0]), if to_host { "Vec" } else { "AlmideList" }),
         Ty::Applied(C::Set, args) => format!("({e}).iter().map(|{x}| {}).collect::<AlmideSet<_>>()", inner(&x, &args[0])),
         Ty::Applied(C::Option, args) => format!("({e}).as_ref().map(|{x}| {})", inner(&x, &args[0])),
         Ty::Applied(C::Result, args) => format!(
@@ -242,7 +263,7 @@ fn render_foreign_region(region_ty: &str, len: &str, release: &str) -> String {
     let release_call = format!("|__almide_q: *mut u8| unsafe {{ {release}(__almide_q) }}");
     let keep = format!("almide_rt_ffi_release_guard(__almide_p, {release_call})");
     format!(
-        "{n}    {region_ty} {{ owner: Vec::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
+        "{n}    {region_ty} {{ owner: AlmideList::<u8>::new().into(), base: __almide_p, off: 0, len: __almide_n, writable: false, keep: {keep} }}\n"
     )
 }
 
@@ -384,8 +405,190 @@ fn export_c_out_params(func: &IrFunction) -> Vec<String> {
 /// the call.
 fn render_lent_region(region_ty: &str, name: &str, writable: bool) -> String {
     format!(
-        "{region_ty} {{ owner: Vec::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
+        "{region_ty} {{ owner: AlmideList::<u8>::new().into(), base: {name} as *mut u8, off: 0, \
          len: if {name}.is_null() {{ 0 }} else {{ i64::try_from({name}_len).unwrap_or(i64::MAX) }}, \
          writable: {writable}, keep: almide_rt_ffi_lent_keep() }}"
     )
+}
+
+// ── Host faces of package fns (ADR-0037, ruling 1) ──────────────
+//
+// A package's `native/*.rs` calls the module fns it links by their symbol
+// (`crate::almide_rt_<pkg>_0v<N>_<name>`) with std vectors: `&mut Vec<i64>`,
+// a `Vec<T>` result. Generated code holds a list as the counted `AlmideList`
+// block, so a pub module fn whose signature holds a list where the host
+// passes or receives it directly is emitted under `almd_<symbol>`, and the
+// symbol itself is a face in the host's spelling that copies at the boundary,
+// as an `@extern(rust)` wrapper does in the other direction (ruling (A)): a
+// borrowed list is a slice on both sides (no copy); an owned one and a result
+// are copied, O(n); a `mut` one is copied in and back after the call, on the
+// error arm too. A record or variant is the program's own type, which the host
+// uses as it is.
+
+/// Whether the host spelling of `ty`, passed or received directly, differs
+/// from the generated one: a List or Bytes, or one inside an Option / Result /
+/// tuple / Set / Map. Strings are `AlmideString` on both sides.
+fn callback_host_differs(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId as C;
+    match ty {
+        Ty::Bytes | Ty::Applied(C::List, _) => true,
+        Ty::Applied(C::Set | C::Option | C::Result | C::Map, args) => args.iter().any(callback_host_differs),
+        Ty::Tuple(elems) => elems.iter().any(callback_host_differs),
+        _ => false,
+    }
+}
+
+/// The host spelling of `ty`: std's `Vec` for a list in a structural position.
+fn callback_host_type(ctx: &RenderContext, ty: &Ty) -> String {
+    use almide_lang::types::TypeConstructorId as C;
+    if !callback_host_differs(ty) {
+        return types::render_type(ctx, ty);
+    }
+    let h = |t: &Ty| callback_host_type(ctx, t);
+    match ty {
+        Ty::Bytes => "AlmideRcCow<Vec<u8>>".to_string(),
+        Ty::Applied(C::List, a) => format!("Vec<{}>", h(&a[0])),
+        Ty::Applied(C::Set, a) => format!("AlmideSet<{}>", h(&a[0])),
+        Ty::Applied(C::Option, a) => format!("Option<{}>", h(&a[0])),
+        Ty::Applied(C::Result, a) => format!("Result<{}, {}>", h(&a[0]), h(&a[1])),
+        Ty::Applied(C::Map, a) => format!("AlmideMap<{}, {}>", h(&a[0]), h(&a[1])),
+        Ty::Tuple(elems) if elems.len() == 1 => format!("({},)", h(&elems[0])),
+        Ty::Tuple(elems) => format!("({})", elems.iter().map(h).collect::<Vec<_>>().join(", ")),
+        _ => types::render_type(ctx, ty),
+    }
+}
+
+/// An owned copy of `e` (an expression of type `&T`) in the host's spelling
+/// (`to_host`) or the generated one.
+fn callback_face_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String {
+    use almide_lang::types::TypeConstructorId as C;
+    if !callback_host_differs(ty) {
+        return format!("({e}).clone()");
+    }
+    let x = format!("__x{depth}");
+    let y = format!("__y{depth}");
+    let inner = |e: &str, ty: &Ty| callback_face_conv(e, ty, to_host, depth + 1);
+    match ty {
+        Ty::Bytes if to_host => format!("AlmideRcCow::from(({e})[..].to_vec())"),
+        Ty::Bytes => format!("AlmideRcCow::from(AlmideList::<u8>::from(&({e})[..]))"),
+        Ty::Applied(C::List, a) => format!("({e}).iter().map(|{x}| {}).collect::<{}<_>>()", inner(&x, &a[0]), if to_host { "Vec" } else { "AlmideList" }),
+        Ty::Applied(C::Set, a) => format!("({e}).iter().map(|{x}| {}).collect::<AlmideSet<_>>()", inner(&x, &a[0])),
+        Ty::Applied(C::Option, a) => format!("({e}).as_ref().map(|{x}| {})", inner(&x, &a[0])),
+        Ty::Applied(C::Result, a) => format!("match {e} {{ Ok({x}) => Ok({}), Err({x}) => Err({}) }}", inner(&x, &a[0]), inner(&x, &a[1])),
+        Ty::Applied(C::Map, a) => format!("({e}).iter().map(|({x}, {y})| ({}, {})).collect::<AlmideMap<_, _>>()", inner(&x, &a[0]), inner(&y, &a[1])),
+        Ty::Tuple(elems) => {
+            let parts: Vec<String> = elems.iter().enumerate().map(|(i, t)| inner(&format!("&{x}.{i}"), t)).collect();
+            format!("{{ let {x} = {e}; ({},) }}", parts.join(", "))
+        }
+        _ => format!("({e}).clone()"),
+    }
+}
+
+/// The type the host receives from `f`: an effect fn whose declared type is
+/// not a Result answers `Result<T, String>`.
+fn callback_face_ret(f: &IrFunction) -> Ty {
+    if f.is_effect && f.ret_ty.result_ok_ty().is_none() { Ty::result(f.ret_ty.clone(), Ty::String) } else { f.ret_ty.clone() }
+}
+
+/// Whether the pub module fn `f` gets a host face: a package's own fn, not
+/// generic, whose signature spells a list where the host passes or receives it.
+fn callback_face_applies(f: &IrFunction) -> bool {
+    let user_module = f.module_origin.as_deref().is_some_and(|o| !almide_lang::stdlib_info::is_any_stdlib(o));
+    let plain = !f.is_test && f.extern_attrs.is_empty() && matches!(f.visibility, IrVisibility::Public)
+        && f.generics.as_ref().is_none_or(|g| g.is_empty()) && f.ret_ty != Ty::Never;
+    let crosses = |p: &IrParam| !matches!(p.ty, Ty::Fn { .. }) && !matches!(p.borrow, ParamBorrow::RefStr) && callback_host_differs(&p.ty);
+    user_module && plain && (f.params.iter().any(crosses) || callback_host_differs(&callback_face_ret(f)))
+}
+
+/// The face `pub fn <public>` in the host's spelling over the fn emitted as `inner`.
+fn render_callback_face(ctx: &RenderContext, f: &IrFunction, public: &str, inner: &str) -> String {
+    use almide_lang::types::TypeConstructorId as C;
+    let fn_ctx = fn_render_context(ctx, f);
+    let (mut params, mut args, mut before, mut after) = (Vec::new(), Vec::new(), String::new(), String::new());
+    for p in &f.params {
+        let name = fn_ctx.param_ident(p);
+        if matches!(p.ty, Ty::Fn { .. }) || matches!(p.borrow, ParamBorrow::RefStr) || !callback_host_differs(&p.ty) {
+            params.push(format!("{name}: {}", fn_param_type_str(&fn_ctx, p)));
+            args.push(name);
+            continue;
+        }
+        let host = callback_host_type(ctx, &p.ty);
+        let local = format!("__almide_{name}");
+        match (p.borrow, &p.ty) {
+            (ParamBorrow::Own, Ty::Applied(C::List, a)) if !callback_host_differs(&a[0]) => {
+                params.push(format!("{name}: {host}"));
+                args.push(format!("AlmideList::from({name})"));
+            }
+            (ParamBorrow::Own, _) => {
+                params.push(format!("{name}: {host}"));
+                args.push(callback_face_conv(&format!("&{name}"), &p.ty, false, 0));
+            }
+            (ParamBorrow::RefMut, _) => {
+                params.push(format!("{name}: &mut {host}"));
+                before.push_str(&format!("    let mut {local} = {};\n", callback_face_conv(&format!("&*{name}"), &p.ty, false, 0)));
+                after.push_str(&format!("    *{name} = {};\n", callback_face_conv(&format!("&{local}"), &p.ty, true, 0)));
+                args.push(format!("&mut {local}"));
+            }
+            (ParamBorrow::RefSlice, Ty::Applied(_, a)) if !a.is_empty() => {
+                params.push(format!("{name}: &[{}]", callback_host_type(ctx, &a[0])));
+                before.push_str(&format!("    let {local}: AlmideList<_> = {name}.iter().map(|__x0| {}).collect();\n", callback_face_conv("__x0", &a[0], false, 1)));
+                args.push(format!("&{local}[..]"));
+            }
+            _ => {
+                params.push(format!("{name}: &{host}"));
+                args.push(format!("&{}", callback_face_conv(&name, &p.ty, false, 0)));
+            }
+        }
+    }
+    let ret_ty = callback_face_ret(f);
+    let ret = callback_host_type(ctx, &ret_ty);
+    let result = match &ret_ty {
+        Ty::Applied(C::List, a) if !callback_host_differs(&a[0]) => "Vec::from(__almide_r)".to_string(),
+        t if callback_host_differs(t) => callback_face_conv("&__almide_r", t, true, 0),
+        _ => "__almide_r".to_string(),
+    };
+    format!("pub fn {public}({}) -> {ret} {{\n{before}    let __almide_r = {inner}({});\n{after}    {result}\n}}", params.join(", "), args.join(", "))
+}
+
+/// `text` with every whole identifier `from` spelled `to`.
+fn rename_ident(text: &str, from: &str, to: &str) -> String {
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(from) {
+        let (head, tail) = rest.split_at(at);
+        let whole = !head.chars().next_back().is_some_and(ident) && !tail[from.len()..].chars().next().is_some_and(ident)
+            && !(out.chars().next_back().is_some_and(ident) && head.is_empty());
+        out.push_str(head);
+        out.push_str(if whole { to } else { from });
+        rest = &tail[from.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Emit every host face of `program` into `parts`: the faced fns are renamed
+/// to their `almd_` symbol in the text already rendered, then each face is
+/// appended under the public symbol.
+fn render_callback_faces(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
+    let faces: Vec<(String, String, &IrFunction)> = program.functions.iter()
+        .filter(|f| callback_face_applies(f))
+        .map(|f| {
+            let public = module_fn_symbol(f.name.as_str(), f.module_origin.as_deref().unwrap_or_default());
+            (format!("almd_{public}"), public, f)
+        })
+        .collect();
+    if faces.is_empty() {
+        return;
+    }
+    for part in parts.iter_mut() {
+        for (inner, public, _) in &faces {
+            if part.contains(public.as_str()) {
+                *part = rename_ident(part, public, inner);
+            }
+        }
+    }
+    for (inner, public, f) in &faces {
+        parts.push(render_callback_face(ctx, f, public, inner));
+    }
 }
