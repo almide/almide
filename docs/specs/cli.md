@@ -1438,6 +1438,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
 | `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
+| `ALMIDE_DBG_FAN_ESTIMATE_NS=value` | ablation | plan every `fan` offer of the embedded wasm host that has a measurement from the value (ns per element) instead of what the previous offer measured: the test hook that pins the cost model's verdict on a known cost whatever the machine's speed (tests/wasm_fan_par_test.rs, #4910); never set otherwise |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_INOUT` | debug | print why a `mut` param keeps the move-mode convention instead of the in-out lend (native v1) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
