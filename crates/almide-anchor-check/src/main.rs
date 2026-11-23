@@ -263,6 +263,40 @@ fn main() {
             for (p, b) in bodies.iter().enumerate() {
                 println!("BODYFN {p} {} {:016x} {:016x} {:016x} {:016x}", b.ops.len(), strict[p], masked[p], own[p], names[p]);
             }
+            // The functions the anchor file names as `$alloc`, the +1 routine
+            // and the release routines, and every function set against the
+            // four proven runtime bodies (proven.rs).
+            if let Ok((alloc, _, _, _, _, rc)) = almide_anchor_check::parse_anchors_held(&a) {
+                let pos = |f: u32| f.checked_sub(imports).map(|p| p as usize).filter(|p| *p < bodies.len());
+                let mut roles: Vec<(&str, u32)> = vec![("alloc", alloc)];
+                if let Some((inc, releases, ..)) = &rc {
+                    if let Some(f) = inc {
+                        roles.push(("inc", *f));
+                    }
+                    let mut all: Vec<u32> = releases.iter().copied().collect();
+                    all.sort_unstable();
+                    for f in all {
+                        roles.push(("release", f));
+                    }
+                }
+                let mut named: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                for (role, f) in &roles {
+                    match pos(*f) {
+                        Some(p) => {
+                            named.insert(p);
+                            println!("ROLEFN {role} {p} {}", bodies[p].ops.len());
+                        }
+                        None => println!("ROLEFN {role} - 0"),
+                    }
+                }
+                for pr in almide_anchor_check::proven::proven() {
+                    for (p, b) in bodies.iter().enumerate() {
+                        if let Some(line) = almide_anchor_check::proven::compare(&w, b, &pr.insts, named.contains(&p)) {
+                            println!("PROVENFN {p} {} {line}", pr.name);
+                        }
+                    }
+                }
+            }
         }
     }
     if census {

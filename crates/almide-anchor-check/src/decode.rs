@@ -48,6 +48,10 @@ pub struct Body<'a> {
     /// pops, bottom first, when the provenance walk knows it (operands.rs
     /// rebuilds a value's expression from these).
     pub args: Vec<Vec<Option<usize>>>,
+    /// Probe only: the module offset each instruction starts at.
+    pub at: Vec<usize>,
+    /// Probe only: the module offset one past the body's last instruction.
+    pub end: usize,
 }
 
 /// The proposals whose control flow this checker does not classify (#4854):
@@ -126,8 +130,10 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
     let mut r = wasmparser::OperatorsReader::new(br);
     let (mut ops, mut depth, mut addr, mut args) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut shadow: Vec<Option<usize>> = Vec::new();
+    let mut at: Vec<usize> = Vec::new();
     while !r.eof() {
         let off = r.original_position();
+        at.push(off);
         let op = r.read().map_err(|e| e.to_string())?;
         let i = ops.len();
         if control(&op) == Control::Refused {
@@ -162,7 +168,8 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         reshadow(&mut shadow, arity, (pre, post, floor), i);
         ops.push(op);
     }
-    Ok(Body { ops, depth, addr, args })
+    let end = r.original_position();
+    Ok(Body { ops, depth, addr, args, at, end })
 }
 
 /// The producers of the operands an instruction of `arity` pops from a
