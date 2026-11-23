@@ -90,7 +90,7 @@ one() { # one <leg> <file>
     grep '^ROUTINE' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/routinerows.tsv" || true
     grep '^CENSUSX' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fxrows.tsv" || true
     grep '^CENSUSY' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4}' >> "$OUT/fyrows.tsv" || true
-    grep '^BODYFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/bodyrows.tsv" || true
+    grep '^BODYFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7}' >> "$OUT/bodyrows.tsv" || true
     python3 scripts/probe-witness-census-split.py "$leg" "$f" "$W/a.bundle" "$W/a.anchors" "$W/a.fn" "$OUT/fnrows.tsv" || echo "split failed: $f" >&2
   fi
   local verdict

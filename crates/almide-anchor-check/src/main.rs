@@ -39,11 +39,11 @@ fn body_shape(bodies: &[almide_anchor_check::Body<'_>], imports: u32, f: u32, me
 /// Probe only: one hash per body after `rounds` rounds of refinement. Round 0
 /// hashes a body's own instructions; each later round replaces a call by its
 /// callee's hash from the round before, so the value does not depend on the
-/// order bodies are visited in or on function indices. With `mask`, the
-/// module-specific operands (large constants, global indices, an indirect
-/// call's type index) are hidden as well; without it only call targets are
-/// abstracted. A call to an import hashes as one fixed token.
-fn body_hashes(bodies: &[almide_anchor_check::Body<'_>], imports: u32, mask: bool, rounds: u32) -> Vec<u64> {
+/// order bodies are visited in or on function indices. `level` 0 abstracts
+/// only call targets; level 1 also hides the module-specific operands (large
+/// constants, global indices, an indirect call's type index); level 2 keeps
+/// only each instruction's name. A call to an import hashes as one fixed token.
+fn body_hashes(bodies: &[almide_anchor_check::Body<'_>], imports: u32, level: u8, rounds: u32) -> Vec<u64> {
     // Each instruction once: its text, or the callee's body position.
     let toks: Vec<Vec<Result<String, Option<usize>>>> = bodies
         .iter()
@@ -52,10 +52,14 @@ fn body_hashes(bodies: &[almide_anchor_check::Body<'_>], imports: u32, mask: boo
                 .iter()
                 .map(|op| match op {
                     wasmparser::Operator::Call { function_index } => Err(function_index.checked_sub(imports).map(|p| p as usize)),
-                    wasmparser::Operator::I32Const { value } if mask && (*value >= 1024 || *value < -1024) => Ok("i32.const#big;".to_string()),
-                    wasmparser::Operator::GlobalGet { .. } if mask => Ok("global.get;".to_string()),
-                    wasmparser::Operator::GlobalSet { .. } if mask => Ok("global.set;".to_string()),
-                    wasmparser::Operator::CallIndirect { .. } if mask => Ok("call_indirect;".to_string()),
+                    o if level == 2 => {
+                        let text = format!("{o:?}");
+                        Ok(format!("{};", text.split(|c: char| !c.is_ascii_alphanumeric()).next().unwrap_or("")))
+                    }
+                    wasmparser::Operator::I32Const { value } if level == 1 && (*value >= 1024 || *value < -1024) => Ok("i32.const#big;".to_string()),
+                    wasmparser::Operator::GlobalGet { .. } if level == 1 => Ok("global.get;".to_string()),
+                    wasmparser::Operator::GlobalSet { .. } if level == 1 => Ok("global.set;".to_string()),
+                    wasmparser::Operator::CallIndirect { .. } if level == 1 => Ok("call_indirect;".to_string()),
                     o => Ok(format!("{o:?};")),
                 })
                 .collect()
@@ -251,9 +255,13 @@ fn main() {
                 }
             }
             let imports = almide_anchor_check::function_imports(&w);
-            let (strict, masked) = (body_hashes(&bodies, imports, false, 6), body_hashes(&bodies, imports, true, 6));
+            // strict / masked: the body with its call tree (6 rounds); own: the
+            // body's own instructions, calls as one token; names: only the
+            // instruction names of the body itself.
+            let (strict, masked) = (body_hashes(&bodies, imports, 0, 6), body_hashes(&bodies, imports, 1, 6));
+            let (own, names) = (body_hashes(&bodies, imports, 0, 0), body_hashes(&bodies, imports, 2, 0));
             for (p, b) in bodies.iter().enumerate() {
-                println!("BODYFN {p} {} {:016x} {:016x}", b.ops.len(), strict[p], masked[p]);
+                println!("BODYFN {p} {} {:016x} {:016x} {:016x} {:016x}", b.ops.len(), strict[p], masked[p], own[p], names[p]);
             }
         }
     }
