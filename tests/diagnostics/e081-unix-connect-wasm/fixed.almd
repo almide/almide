@@ -1,0 +1,9 @@
+// A Unix-domain socket on `--target wasm`: WASI has no Unix sockets, so the
+// stock build route refuses the reachable call at check time (E081) with the
+// declared reason. A program meant for a stock WASI runtime waits on a file
+// it can see through the preopened directory instead.
+import fs
+
+effect fn main() -> Unit = {
+  println(if fs.exists("almide-e081.ready") then "ready" else "waiting")
+}
