@@ -311,7 +311,9 @@ at = "src/cli/check.rs::check_one"
 items = [
   "src/cli/check.rs::check_one",
 ]
-keys = []
+keys = [
+  "src/cli/check.rs::check_one::S1::E081",
+]
 decides = "almide check applies [permissions] (allow + proc) on the whole-program IR when the entry's project has `allow` or `proc`; Proc-without-list refused under critical"
 from = "declaration"
 unknown = "refuse"
@@ -322,7 +324,7 @@ control_note = "security-by-construction.md row 26 (rc2 control)"
 issues = [4815]
 status = "UNSTAMPED"
 reasons = ["c2: when whole_program_ir returns None, check judges the entry's IR alone (check.rs:193-201) — fail-open (issue draft issue-check-whole-ir-fallback; kept `refuse` pending a ruling: `allow` would raise the failopen count)"]
-note = "check.rs:228-242 (check_one). #4815: check --json has its own copy now (check_json_one, check.rs:394-402), so the draft cells check_json / mcp = skipped are stale (VM). An fs-only manifest (no allow / proc) skips enforce_project_permissions on check (check.rs:236)."
+note = "check.rs:228-242 (check_one). #4815: check --json has its own copy now (check_json_one, check.rs:394-402), so the draft cells check_json / mcp = skipped are stale (VM). An fs-only manifest (no allow / proc) skips enforce_project_permissions on check (check.rs:236). The S1::E081 key (#4913) is not a permissions decision: check_one forwards the `--target wasi` verdict that check_wasi_rustc_availability (wasm_compile.rs) decides, as the exit code."
 novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
 control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
 control_patch = "proofs/decision-controls/perm.check-route-gate.patch"
@@ -1705,13 +1707,14 @@ switches = [
   "ALMIDE_NO_AVAIL_CHECK",
 ]
 keys = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S3::ALMIDE_NO_AVAIL_CHECK",
   "src/cli/wasm_compile.rs::check_wasm_availability::S3::ALMIDE_NO_AVAIL_CHECK",
 ]
-decides = "bypass the E081 stdlib availability check on the wasm build"
+decides = "bypass the E081 stdlib availability check on the wasm build and on the --target wasi rustc route (#4913)"
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
-routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "runs: read since #4913 by check_wasi_rustc_availability on build --target wasi, before rustc runs (build.rs cmd_build)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
 ]
