@@ -533,7 +533,9 @@ fn render_list_concat(call: NativeCall<'_>, s: OpSink<'_>) -> Result<(), LowerEr
         if l != r && (owned_list(at) || taken.is_some()) && owned_list(bt) {
             let left = crate::render_native_move::moving_arg(*l);
             let right = crate::render_native_move::moving_arg(*r) && bt != NTy::Vec;
-            if left || right {
+            // A taken left list is owned here whatever the right one is: a
+            // field of a `mut` parameter grows in place (#4902).
+            if left || right || taken.is_some() {
                 let head = match (left, taken) {
                     (true, _) => format!("let mut r: {ty} = {}", crate::render_native_move::take_expr(&a)),
                     (false, Some(take)) => format!("let mut r: {ty} = {take}"),

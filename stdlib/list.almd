@@ -21,16 +21,19 @@ fn length[A](xs: List[A]) -> Int = _
 
 /// Element at index i, or none when out of range.
 @intrinsic("almide_rt_list_get")
+@sized_by(xs)
 fn get[A](xs: List[A], i: Int) -> A? = _
 
 /// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
+@sized_by(xs, x)
 fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
 @reuse(xs)
+@sized_by(xs)
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
 /// Ascending copy; Floats in IEEE totalOrder.
@@ -72,11 +75,13 @@ fn flatten[A](xs: List[List[A]]) -> List[A] = _
 /// First n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take")
 @reuse(xs)
+@sized_by(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
+@sized_by(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Duplicates removed; first occurrences kept.
@@ -93,6 +98,7 @@ fn last[A](xs: List[A]) -> A? = _
 
 /// Runs of n, last may be short; n <= 0 aborts.
 @intrinsic("almide_rt_list_chunk")
+@sized_by(xs)
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
@@ -291,6 +297,7 @@ fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 @intrinsic("almide_rt_list_update")
 @reuse(xs)
 @consume(xs)
+@sized_by(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
 /// Running fold values, init excluded.
@@ -316,20 +323,24 @@ fn range(start: Int, end: Int) -> List[Int] = _
 /// Indices start..<end, each clamped to 0..len; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @reuse(xs)
+@sized_by(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
+@sized_by(xs, x)
 fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
+@sized_by(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
 /// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
+@sized_by(x, n)
 fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
@@ -344,15 +355,18 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 /// Last n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take_end")
 @reuse(xs)
+@sized_by(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
+@sized_by(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
+@sized_by(xs, n)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Index of target in xs sorted ascending (list.sort's order), or none.
@@ -382,6 +396,7 @@ fn clear[A](mut xs: List[A]) -> Unit = _
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
 /// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+@sized_by(xs)
 fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`
@@ -399,6 +414,7 @@ fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), l
 // it is the spelling this body already holds its constant stack with, and
 // swapping it would move the allocation ledger to buy nothing.
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
+@sized_by(seed, n)
 fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
   var out: List[A] = []
   var x = seed

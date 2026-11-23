@@ -1,0 +1,15 @@
+# Negative control of manifest.package-name (c2, proofs/decision-sites.toml): the manifest reader accepts any [package].name without `-`
+# control_test: tests/decision_package_name_novel_test.rs::novel_a_fresh_non_plain_package_name_is_refused_on_every_route
+diff --git a/src/project.rs b/src/project.rs
+index 1d844cb171..4fd4fd28dd 100644
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -686,7 +686,7 @@ fn validate_package_name(name: &str) -> Result<(), String> {
+     // name: one grammar for every route that reads the manifest, so a name
+     // `check` accepts is a name `build` accepts. A manifest without a name
+     // declares none.
+-    if name.is_empty() {
++    if true || name.is_empty() {
+         return Ok(());
+     }
+     check_plain_name(name).map_err(|e| {

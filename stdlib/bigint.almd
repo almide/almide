@@ -22,6 +22,7 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
 /// err on junk, and on more than 4300 digits in a radix that is not a power of two;
 /// radix outside 2..36 aborts.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
   let codes = bytes.to_list(bytes.from_string(string.trim(s)))
@@ -38,6 +39,7 @@ fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
 /// a radix that is not a power of two when the text would pass 4300 digits.
+@sized_by(x)
 fn to_string_radix(x: BigInt, radix: Int) -> String = {
   check_radix(radix)
   let k = chunk_width(radix, 1, radix)
@@ -121,6 +123,7 @@ fn modulo(a: BigInt, b: BigInt) -> BigInt = {
 }
 
 /// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
+@sized_by(base, exp)
 fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
 else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
 else power(base, exp, small(1))
@@ -149,10 +152,12 @@ fn bxor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg != b.neg, (x, y) =
 fn bnot(x: BigInt) -> BigInt = add(negate(x), small(-1))
 
 /// a shifted left by n bits (a * 2^n); n < 0 aborts.
+@sized_by(a, n)
 fn bshl(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
 else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0, []))
 
 /// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+@sized_by(a)
 fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
 else if a.neg then bnot(shr_magnitude(bnot(a), n))
 else shr_magnitude(a, n)

@@ -251,6 +251,14 @@ impl Checker {
             // qualified, so probing only `lib.P.encode` missed every derived
             // method across an import (#1087).
             if let Some(key) = crate::canonicalize::registration::convention_fn_key(&self.env, &type_name, field) {
+                // A method call reaches the fn as much as `m.f(x)` does (#4904).
+                // Probed under the receiver type's qualified spelling too: a
+                // derived or dual-registered method may resolve to a bare key.
+                let qualified = format!("{type_name}.{field}");
+                self.check_key_visibility(key.as_str());
+                if qualified != key.as_str() && !self.env.fn_visibility.contains_key(&key) {
+                    self.check_key_visibility(&qualified);
+                }
                 let mut all_args = vec![obj_ty.clone()];
                 all_args.extend(arg_tys.iter().cloned());
                 return Some(self.check_named_call(&key.to_string(), &all_args));
@@ -334,6 +342,7 @@ impl Checker {
             if let Some(module) = defining_module {
                 let key = format!("{}.{}", module, field);
                 if self.env.functions.contains_key(&sym(&key)) {
+                    self.check_fn_visibility(&module, field.as_str(), &key);
                     let mut all_args = vec![obj_ty.clone()];
                     all_args.extend(arg_tys.iter().cloned());
                     return Some(self.check_named_call(&key, &all_args));

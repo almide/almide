@@ -1,0 +1,10 @@
+// process.pid on `--target wasi`: a wasm32-wasip1 module has no process id,
+// so the rustc route refuses the call (#4913) instead of building a module
+// that aborts when it reaches it. A program meant for a wasip1 runtime
+// names itself without the pid.
+import env
+
+effect fn main() -> Unit = {
+  let me = env.get("ALMIDE_RUN_ID") ?? "local"
+  println("run ${me}")
+}

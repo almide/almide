@@ -58,15 +58,18 @@ fn ends_with(s: String, suffix: String) -> Bool = _
 
 /// Codepoints [start, end), clamped to s.
 @intrinsic("almide_rt_string_slice")
+@sized_by(s)
 fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 
 // UTF-8 byte offsets, half-open. Invalid ranges or split codepoints return none.
 /// Byte range [start, end); none if bad or mid-char.
 @intrinsic("almide_rt_string_byte_slice")
+@sized_by(s)
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
 /// Left-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_left")
+@sized_by(s, n, fill)
 fn pad_start(s: String, n: Int, fill: String) -> String = _
 
 /// First char uppercased as to_upper does, rest untouched.
@@ -89,6 +92,7 @@ fn replace(s: String, from: String, to: String) -> String = _
 
 /// Codepoint at i, or none if out of range.
 @intrinsic("almide_rt_string_char_at")
+@sized_by(s)
 fn get(s: String, i: Int) -> String? = _
 
 /// Split on \n or \r\n; endings dropped.
@@ -105,6 +109,7 @@ fn index_of(s: String, needle: String) -> Int? = _
 
 /// s repeated n times; empty for n <= 0.
 @intrinsic("almide_rt_string_repeat")
+@sized_by(s, n)
 fn repeat(s: String, n: Int) -> String = _
 
 /// All ASCII 0-9; false for empty s.
@@ -146,6 +151,7 @@ fn __from_codepoint(n: Int) -> String = _
 
 /// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
+@sized_by(s, n, fill)
 fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
@@ -199,19 +205,23 @@ fn last(s: String) -> String? = _
 
 /// First n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take")
+@sized_by(s)
 fn take(s: String, n: Int) -> String = _
 
 /// Last n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take_end")
+@sized_by(s)
 fn take_end(s: String, n: Int) -> String = _
 
 /// s minus first n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop")
+@sized_by(s)
 fn drop(s: String, n: Int) -> String = _
 
 /// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
 @reuse(s)
+@sized_by(s)
 fn drop_end(s: String, n: Int) -> String = _
 
 // ── Mutable string operations ──
@@ -299,6 +309,7 @@ fn filter(s: String, f: (String) -> Bool) -> String = list.join(
 fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
 
 /// s with x inserted before character i; i outside 0..=len aborts.
+@sized_by(s, x)
 fn insert(s: String, i: Int, x: String) -> String = {
   let n = string.len(s)
   if i < 0 or i > n then panic("string.insert: index ${i} out of range 0..=${n}")
@@ -306,6 +317,7 @@ fn insert(s: String, i: Int, x: String) -> String = {
 }
 
 /// s without character i; i outside 0..len aborts.
+@sized_by(s)
 fn remove_at(s: String, i: Int) -> String = {
   let n = string.len(s)
   if i < 0 or i >= n then panic("string.remove_at: index ${i} out of range 0..${n}")
@@ -472,16 +484,19 @@ fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(
 )
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
+@sized_by(s)
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
   else list.chunk(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+@sized_by(s, n)
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
   else list.window(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+@sized_by(s)
 fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.

@@ -1,0 +1,6 @@
+effect fn wrap(f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = fan.map([1, 2, 3], f)
+
+effect fn main() -> Unit = {
+  let hs = [wrap]
+  println("${list.len(hs)}")
+}

@@ -213,69 +213,82 @@ pub(crate) fn capturing_route_refusals<T>(f: impl FnOnce() -> T) -> (T, Vec<(&'s
 /// ops (none today; the list is NATIVE_ONLY_MATRIX_OPS) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
 /// verbatim.
-/// #1423 stage 3 — the check-time availability diagnostic. The declared
-/// BOTH-LEGS wall set (proofs/target-availability.toml, measured with
-/// default routing and gated four-directionally by
-/// scripts/check-target-availability.sh) turns the late render wall into
-/// an E081 at check time, naming the reason and — where one exists — the
-/// portable alternative. The render wall stays as the backstop.
-fn check_wasm_availability(
-    ir_program: &almide::ir::IrProgram,
-    package: &std::collections::HashSet<String>,
-    embedded_leg: bool,
-    serve_shape: &Result<(), String>,
-) -> Result<bool, ()> {
-    // The measurement escape: the availability PROBE builds through this
-    // binary to measure the ground truth the table declares — with the
-    // check armed it would measure its own declaration (circular).
-    if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
-        return Ok(!embedded_leg && serve_shape.is_ok() && reaches_http_serve(ir_program));
+/// One `[[unavailable]]` row of proofs/target-availability.toml: its `legs`
+/// list as written and the row's own lines, read per key.
+struct AvailRow {
+    legs: String,
+    block: String,
+}
+
+impl AvailRow {
+    fn field(&self, k: &str) -> Option<String> {
+        let prefix = format!("{k} = \"");
+        self.block
+            .lines()
+            .find_map(|l| l.strip_prefix(prefix.as_str()).and_then(|r| r.strip_suffix('"')).map(str::to_string))
     }
+
+    /// The row's closure class on `leg`: its `class-<leg>` when the row
+    /// declares one (#4913: a row's legs need not end the same way), else
+    /// its `class`.
+    fn class_on(&self, leg: &str) -> Option<String> {
+        self.field(&format!("class-{leg}")).or_else(|| self.field("class"))
+    }
+
+    /// Whether the row refuses a build on `leg`. A host-capability leg
+    /// (#2589, ADR-0025) is not a build wall: the artifact ships with the
+    /// capability's import and a host without it refuses at load.
+    fn walls(&self, leg: &str) -> bool {
+        self.legs.contains(&format!("\"{leg}\"")) && self.class_on(leg).as_deref() != Some("host-capability")
+    }
+
+    /// The reason the row gives for `leg`, else its shared one.
+    fn reason_on(&self, leg: &str) -> String {
+        self.field(&format!("reason-{leg}"))
+            .or_else(|| self.field("reason"))
+            .unwrap_or_else(|| "declared unavailable on this leg".to_string())
+    }
+
+    /// The portable alternative the row names for `leg`, else its shared one.
+    fn alt_on(&self, leg: &str) -> Option<String> {
+        self.field(&format!("alt-{leg}")).or_else(|| self.field("alt"))
+    }
+}
+
+/// Every row of proofs/target-availability.toml, by fn. Schema 2 (#1710
+/// increment 2): one `[[unavailable]]` row per fn with a per-leg
+/// `legs = [..]` list. E081 is a PER-LEG verdict (#1710 increment 3): the
+/// build path walls on the stock-p1 leg, the run/bench path (the embedded
+/// host) on the embedded leg, `--target wasi` on the rustc-wasip1 leg
+/// (#4913). Line-anchored block split (a substring split once ate the first
+/// row through the header comment).
+fn availability_rows() -> &'static std::collections::BTreeMap<String, AvailRow> {
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
-    type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
-    static UNAVAILABLE: OnceLock<BTreeMap<String, Row>> = OnceLock::new();
-    let table = UNAVAILABLE.get_or_init(|| {
+    static ROWS: OnceLock<BTreeMap<String, AvailRow>> = OnceLock::new();
+    ROWS.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
-        // Schema 2 (#1710 increment 2): one `[[unavailable]]` row per fn
-        // with a per-leg `legs = [..]` list. E081 is a PER-LEG verdict
-        // (#1710 increment 3): the build path walls on the stock-p1 leg,
-        // the run/bench path (the embedded host) walls on the embedded
-        // leg — a stock wall alone no longer refuses the run route the
-        // row's own reason says is served. Rows keep their raw legs list
-        // and both per-leg reasons; the caller filters. Line-anchored
-        // block split, as before (a substring split once ate the first
-        // row through the header comment).
         for block in toml.split("\n[[unavailable]]\n").skip(1) {
-            let field = |k: &str| {
-                block.lines().find_map(|l| {
-                    l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
-                })
-            };
-            let legs = block
-                .lines()
-                .find_map(|l| l.strip_prefix("legs = ["))
-                .unwrap_or("")
-                .to_string();
-            // A host-capability row (#2589, ADR-0025) is not a build wall:
-            // the artifact ships with the capability's import and a host
-            // without it refuses at load.
-            if field("class").as_deref() == Some("host-capability") {
-                continue;
-            }
-            if let Some(fn_name) = field("fn") {
-                out.insert(
-                    fn_name,
-                    (legs, field("reason-stock-p1"), field("reason-embedded"), field("reason"), field("alt"), field("class")),
-                );
+            let legs = block.lines().find_map(|l| l.strip_prefix("legs = [")).unwrap_or("").to_string();
+            let row = AvailRow { legs, block: block.to_string() };
+            if let Some(fn_name) = row.field("fn") {
+                out.insert(fn_name, row);
             }
         }
         out
-    });
-    let leg_lit = if embedded_leg { "\"embedded\"" } else { "\"stock-p1\"" };
-    let mut hits: BTreeMap<String, &Row> = BTreeMap::new();
-    use almide::ir::visit::IrVisitor;
+    })
+}
+
+/// The reachable calls into a stdlib fn whose row walls `leg`, by key, and
+/// whether a reachable body calls `http.serve` (#2659), row or no row.
+fn scan_unavailable(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+    leg: &str,
+) -> (std::collections::BTreeMap<String, &'static AvailRow>, bool) {
+    use std::collections::BTreeMap;
+    let table = availability_rows();
     // #2865: a call into a module the package's own source declares is the
     // package's fn, whatever its key spells — `src/process.almd`'s `exec` is
     // not the stdlib's `process.exec`, so the stdlib's row does not bar it.
@@ -285,15 +298,15 @@ fn check_wasm_availability(
         .filter(|m| package.contains(m.name.as_str()))
         .flat_map(|m| m.functions.iter().map(move |f| format!("{}.{}", m.name.as_str(), f.name.as_str())))
         .collect();
+    use almide::ir::visit::IrVisitor;
     struct Scan<'a> {
-        table: &'a BTreeMap<String, Row>,
+        table: &'static BTreeMap<String, AvailRow>,
         own: &'a std::collections::HashSet<String>,
-        leg_lit: &'static str,
-        hits: BTreeMap<String, &'a Row>,
-        /// A reachable `http.serve` call (#2659), row or no row.
+        leg: &'a str,
+        hits: BTreeMap<String, &'static AvailRow>,
         serves: bool,
     }
-    impl<'a> IrVisitor for Scan<'a> {
+    impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
             if let almide::ir::IrExprKind::Call {
                 target: almide::ir::CallTarget::Module { module, func, .. }, ..
@@ -302,7 +315,7 @@ fn check_wasm_availability(
                 let key = format!("{}.{}", module.as_str(), func.as_str());
                 self.serves |= key == "http.serve" && !self.own.contains(&key);
                 if let Some(row) = self.table.get(&key)
-                    && row.0.contains(self.leg_lit)
+                    && row.walls(self.leg)
                     && !self.own.contains(&key)
                 {
                     self.hits.entry(key).or_insert(row);
@@ -311,7 +324,7 @@ fn check_wasm_availability(
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new(), serves: false };
+    let mut scan = Scan { table, own: &own, leg, hits: BTreeMap::new(), serves: false };
     // Only REACHABLE bodies are scanned — the same reachability the wasm
     // emitter prunes by (`reachability::reachable_fn_names`), so the
     // check-time diagnostic and the emit agree: a call the emitter never
@@ -331,8 +344,29 @@ fn check_wasm_availability(
             scan.visit_expr(&f.body);
         }
     }
-    hits.extend(scan.hits);
-    let serves = scan.serves;
+    (scan.hits, scan.serves)
+}
+
+/// #1423 stage 3 — the check-time availability diagnostic. The declared
+/// BOTH-LEGS wall set (proofs/target-availability.toml, measured with
+/// default routing and gated four-directionally by
+/// scripts/check-target-availability.sh) turns the late render wall into
+/// an E081 at check time, naming the reason and — where one exists — the
+/// portable alternative. The render wall stays as the backstop.
+fn check_wasm_availability(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+    embedded_leg: bool,
+    serve_shape: &Result<(), String>,
+) -> Result<bool, ()> {
+    // The measurement escape: the availability PROBE builds through this
+    // binary to measure the ground truth the table declares — with the
+    // check armed it would measure its own declaration (circular).
+    if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
+        return Ok(!embedded_leg && serve_shape.is_ok() && reaches_http_serve(ir_program));
+    }
+    let leg = if embedded_leg { "embedded" } else { "stock-p1" };
+    let (mut hits, serves) = scan_unavailable(ir_program, package, leg);
     // The p3 component (ALMIDE_COMPONENT_P3) is its own service leg, and
     // until ADR-0023 step 9 gives it rows, what it serves is exactly the
     // emitted-op audit (`component_availability::check`, p3). A stock-p1 row
@@ -341,7 +375,7 @@ fn check_wasm_availability(
     // really emits — the shim's http families pass, any other op is refused
     // there with its own text. Rows of the other classes still refuse here.
     if almide_base::env::flag("ALMIDE_COMPONENT_P3") {
-        hits.retain(|_, row| row.5.as_deref() != Some("pending-port"));
+        hits.retain(|_, row| row.class_on(leg).as_deref() != Some("pending-port"));
     }
     // The stock serve export (#2659, C-375): a program whose `main` is
     // serve-shaped builds as a `wasi:http/handler@0.3.0` component; any other
@@ -362,12 +396,9 @@ fn check_wasm_availability(
     if hits.is_empty() {
         return if shape_refusal.is_some() { Err(()) } else { Ok(serve_export) };
     }
-    for (key, (_, r_stock, r_emb, r_shared, alt, _)) in &hits {
-        let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
-            .or(r_shared.as_ref())
-            .cloned()
-            .unwrap_or_else(|| "declared unavailable on this leg".to_string());
-        let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
+    for (key, row) in &hits {
+        let reason = row.reason_on(leg);
+        let alt_line = row.alt_on(leg).map(|a| format!("\n  try: {a}")).unwrap_or_default();
         route_refusal("E081", format!(
             "error[E081]: `{key}` is not available on --target wasm\n  \
              reason: {reason}{alt_line}\n  \
@@ -376,6 +407,49 @@ fn check_wasm_availability(
         ));
     }
     Err(())
+}
+
+/// #4913: the availability verdict of `--target wasi` (and `wasm32`), the
+/// route that renders the program to Rust and compiles it with rustc for
+/// wasm32-wasip1, carrying the native runtime whole. A runtime fn the
+/// platform has no implementation for aborts there at run time (std's
+/// `unsupported` platform panics), so a reachable call into a fn whose row
+/// declares the `rustc-wasip1` leg is refused at check and build time
+/// instead, from that declaration — never from the fn's name.
+pub(crate) fn check_wasi_rustc_availability(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+) -> Result<(), ()> {
+    const LEG: &str = "rustc-wasip1";
+    // The measurement escape, as on the wasm legs: what a declared row
+    // claims is measured by building through it (tests/wasi_rustc_availability_test.rs).
+    if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
+        return Ok(());
+    }
+    let (hits, _) = scan_unavailable(ir_program, package, LEG);
+    if hits.is_empty() {
+        return Ok(());
+    }
+    for (key, row) in &hits {
+        let reason = row.reason_on(LEG);
+        let alt_line = row.alt_on(LEG).map(|a| format!("\n  try: {a}")).unwrap_or_default();
+        route_refusal("E081", format!(
+            "error[E081]: `{key}` is not available on --target wasi\n  \
+             reason: {reason}{alt_line}\n  \
+             note: the availability matrix is proofs/target-availability.toml (leg rustc-wasip1, #4913); \
+             the same program builds with --target rust"
+        ));
+    }
+    Err(())
+}
+
+/// [`check_wasi_rustc_availability`] with its refusals as text rows, for
+/// `check --json --target wasi`.
+pub(crate) fn wasi_rustc_refusals(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+) -> Vec<(&'static str, String)> {
+    capturing_route_refusals(|| check_wasi_rustc_availability(ir_program, package)).1
 }
 
 /// #4857: the embedded leg's availability verdict — the one `almide run

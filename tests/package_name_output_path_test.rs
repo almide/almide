@@ -59,12 +59,15 @@ fn build_names_a_plain_package_and_honours_o() {
     assert!(o.status.success(), "{}", text(&o));
     let exe = if cfg!(windows) { "tool.exe" } else { "tool" };
     assert!(p.join(exe).is_file(), "the output is named after a plain package name");
-    // `-o` overrides even a name that would be refused.
+    // `-o` does not admit a refused name: the manifest reader refuses it on
+    // every route (manifest.package-name), before any output is named.
     let td = tempfile::tempdir().unwrap();
     let p = project(td.path(), "../outside/pwned");
     let o = almide(&p, &["build", "app.almd", "-o", "chosen"]);
-    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+    assert!(text(&o).contains("is not a plain name"), "{}", text(&o));
     assert!(!td.path().join("outside/pwned").exists());
+    assert!(!p.join("chosen").exists(), "nothing is built for a refused name");
 }
 
 #[test]

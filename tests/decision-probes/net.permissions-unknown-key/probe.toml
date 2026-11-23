@@ -1,0 +1,2 @@
+# The probe of net.permissions-unknown-key: a [permissions] key no reader reads (`net`), which would leave a hoped-for bound unset.
+expect = "unknown key `net` in [permissions] is refused"

@@ -32,6 +32,9 @@
 #   c4  a negative control: proofs/decision-controls/<id>.patch removes the
 #       check and `control_test` turns red (`control_seen = "<sha> <date>"`,
 #       recorded from scripts/run-decision-controls.sh).
+#       A rule with two checks one patch cannot each neuter names a second
+#       control beside it (`control_extra` = <id>.<what>.patch, with
+#       `control_extra_test` / `control_extra_seen`).
 #
 # Status: STAMPED (`stamp = "<sha> <date>"`) | UNSTAMPED (`reasons` says which
 # condition fails) | UNCLASSIFIED (not yet read to a verdict; never counted as
@@ -41,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "125"
+# unstamped_ceiling     = "109"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "187"
-# failopen_ceiling      = "43"
+# skipped_route_ceiling = "175"
+# failopen_ceiling      = "30"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -103,6 +106,60 @@
 #               anchor.may-write-memory (#4826) unknown -> refuse: fail-open 46 -> 43.
 #               deps.dep-manifest-swallow and native.dispatch-gate STAMPED (controls red
 #               on the merged tree): 32 stamped, 125 not.
+#   2026-11-21  ninth engineer: anchor.branch-target-depth (try_table refused,
+#               operator-matrix novel, cells name the CI verifier and quote #4849)
+#               and native.media-grant (#4892 case-keeping grant key, novel,
+#               control) STAMPED: 34 stamped, 123 not.
+#   2026-11-21  tenth engineer: ownership.e087-scoped-callee (e410b68def merged:
+#               admitted by signature; wasm region vocabulary follows it) and
+#               effect.fan-ordered-reach (build / bench driven; second control
+#               for the minted-symbol record) STAMPED: 36 stamped, 121 not.
+#   2026-11-21  owner ruling B (replaces "every row stamped before the final"):
+#               before v0.70.0 every fail-open row (43) is closed — hole fixed,
+#               novel test, control; stamped when all four hold, else no longer
+#               fail-open with honest cells. Rows unstamped only for missing
+#               evidence move to after the final; the unstamped ceiling stays
+#               shrink-only.
+#   2026-11-21  net.unix-path-unscoped re-read after #4832 (marks + shared gate):
+#               from the declaration, novel fresh-directory test, probe driven on
+#               run/build/test/bench/native/wasm/emit (bench compiles since #4899),
+#               control red. STAMPED: 37 stamped, 120 not, 180 skipped, 42 fail-open.
+#   2026-11-21  perm.proc-allowlist-static and proc.native-no-runtime-list re-read
+#               after #4817 (@spawns_process + reach): one probe driven on every
+#               route but lsp, the batch-1a novel test, the neuter red. STAMPED:
+#               39 stamped, 118 not, 175 skipped, 40 fail-open.
+#   2026-11-21  env.run-project-dir re-read after #4842 (the override is held to
+#               the private base's rules): novel fresh-directory test, probe on
+#               run/build/bench/native/wasm, control red. STAMPED: 40 stamped,
+#               117 not, 175 skipped, 39 fail-open.
+#   2026-11-21  net.shm-create-tempfile: C-393 amended (almide/als#270, pin
+#               03c2eaac); the region's directory is judged under [permissions]
+#               fs natively (@fs_shm_dir) and on the embedded host (unix path
+#               gate). Probe on every route, two controls red. STAMPED: 41
+#               stamped, 116 not, 175 skipped, 39 fail-open.
+#   2026-11-21  owner ruling: an unknown key in any almide.toml section is an
+#               error (one MANIFEST_SCHEMA table, did-you-mean hint, dialect
+#               epoch 17). manifest.unknown-keys and net.permissions-unknown-key
+#               refuse on every route, novel fresh-key tests, controls red.
+#               STAMPED: 43 stamped, 114 not, 175 skipped, 37 fail-open.
+#   2026-11-21  thirteenth engineer: proc.command-path-resolution (C-459 launch
+#               PATH, #4844) and env.test-wasm-runner (the wasmtime lane preopens
+#               the grant, #4842) re-read as stale; trust.add-trust-flag (#4867)
+#               and trust.install-owner (#4864) residuals closed, second controls
+#               red. Fresh novel tests and probes; anchor.branch-target-depth's
+#               control re-pointed at the control table. STAMPED: 47 stamped,
+#               110 not, 175 skipped, 33 fail-open.
+#   2026-11-21  owner rulings 2026-11-21: #4903 rule (b) — a fn with a concurrent
+#               slot is called only by name, a `let` alias is followed, any other
+#               use as a value is E008 (effect.e007-e008-fan-context STAMPED);
+#               manifest.package-name refused by parse_toml (STAMPED); #4904 E420
+#               on the value and method routes (scope.e420-local-fn closed, c1
+#               prefix stays). 49 stamped, 108 not, 175 skipped, 30 fail-open.
+#   2026-11-23  unstamped ceiling raised 108 -> 109 and fail-open 29 -> 30 by
+#               owner ruling 2026-11-23, for verify.wasi-e081-availability only
+#               (#4913: build / check --target wasi refuse a declared rustc-wasip1
+#               fn). Same name-keyed table as verify.wasm-e081-availability, so an
+#               unknown fn is admitted; both rows close under ruling B (#4918).
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -259,7 +316,9 @@ at = "src/cli/check.rs::check_one"
 items = [
   "src/cli/check.rs::check_one",
 ]
-keys = []
+keys = [
+  "src/cli/check.rs::check_one::S1::E081",
+]
 decides = "almide check applies [permissions] (allow + proc) on the whole-program IR when the entry's project has `allow` or `proc`; Proc-without-list refused under critical"
 from = "declaration"
 unknown = "refuse"
@@ -270,7 +329,7 @@ control_note = "security-by-construction.md row 26 (rc2 control)"
 issues = [4815]
 status = "UNSTAMPED"
 reasons = ["c2: when whole_program_ir returns None, check judges the entry's IR alone (check.rs:193-201) — fail-open (issue draft issue-check-whole-ir-fallback; kept `refuse` pending a ruling: `allow` would raise the failopen count)"]
-note = "check.rs:228-242 (check_one). #4815: check --json has its own copy now (check_json_one, check.rs:394-402), so the draft cells check_json / mcp = skipped are stale (VM). An fs-only manifest (no allow / proc) skips enforce_project_permissions on check (check.rs:236)."
+note = "check.rs:228-242 (check_one). #4815: check --json has its own copy now (check_json_one, check.rs:394-402), so the draft cells check_json / mcp = skipped are stale (VM). An fs-only manifest (no allow / proc) skips enforce_project_permissions on check (check.rs:236). The S1::E081 key (#4913) is not a permissions decision: check_one forwards the `--target wasi` verdict that check_wasi_rustc_availability (wasm_compile.rs) decides, as the exit code."
 novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
 control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
 control_patch = "proofs/decision-controls/perm.check-route-gate.patch"
@@ -305,17 +364,22 @@ items = [
   "src/cli/mod.rs::check_proc_allowlist",
 ]
 keys = []
-decides = "every process.{exec,output,run,start} call must name its command as a string literal on [permissions] proc; non-literal command or the fn passed as a value is refused"
-from = "name"
-unknown = "allow"
-unknown_note = "a spawning fn not in PROC_SPAWNING (process.__os_run/__os_output/__os_start today; any future spawner) passes (#4817); match is module == \"process\" and func name, FnRef by \"process.\" prefix"
-routes = { check = "runs", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
+decides = "every call that reaches a process spawn must name its command as a string literal on [permissions] proc; the spawning fns are read off the @spawns_process leaves and what each bundled fn reaches (src/cli/proc_spawn.rs, #4817); a computed command, or a spawning fn passed as a value, is refused"
+from = "reach"
+unknown = "refuse"
+unknown_note = "Stale draft (PROC_SPAWNING name table) superseded by #4817: the spawning fns are read off @spawns_process and reach (src/cli/proc_spawn.rs). Driven 2026-11-21 (ds-2): every route but lsp refuses the probe inside and outside the project."
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs (only bound on native)", wasm = "runs (+ host bound perm.proc-host-bound)", wasi = "runs", component = "runs", lsp = "n.a.: produces and runs no code", mcp = "runs", emit = "runs" }
 tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route", "tests/proc_allowlist_test.rs::a_command_the_list_cannot_check_is_refused_too", "tests/proc_allowlist_test.rs::a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing"]
 control_note = "NONE"
 issues = [4817, 4815]
-status = "UNSTAMPED"
-reasons = ["c1: PROC_SPAWNING names the spawning fns (mod.rs:180-185); a fn value is matched by its `process.` prefix (mod.rs:257)", "c2: a spawning fn not on the table (process.__os_run / __os_output / __os_start, stdlib/process.almd:105-114) passes (#4817)", "c2: no novel test", "c4: no control"]
+status = "STAMPED"
+stamp = "edd22e2812 2026-11-21"
 note = "Listed in proofs/name-keyed-sites.toml (src/cli/mod.rs::PROC_SPAWNING::table). #4815 closed: check --json and check --effects run this gate (check.rs:394-402, 525-531), so the draft cells skipped #4815 are stale (VM). Batch 1a wrote no evidence: c1 / c2 need the declaration fix first (#4817)."
+probe = "tests/decision-probes/perm.proc-allowlist-static"
+novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_patch = "proofs/decision-controls/perm.proc-allowlist-static.patch"
+control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_seen = "edd22e2812 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "perm.proc-signal-kill"
@@ -767,8 +831,8 @@ keys = [
 ]
 decides = "E070 unbounded loops, E071 alloc in loop, E072 break/continue, E073 recursion (user_call_cycle over entry fns), E074 indirect/higher-order/closure, E075 run-time sized heap ctor, E077 Float compute, E078 early exit in loop"
 from = "mixed:declaration+type"
-unknown = "allow"
-unknown_note = "E071 / E077 now judge a member from its checked types (a heap result or a mut heap parameter allocates; a Float result computes; an unknown type counts as both), and E075 refuses a collection built from a run-time Int with no heap input (#4855). Left open: a String- or heap-input amplifier (string.repeat-like) is still known only from BOUNDED_SIZED_CTORS"
+unknown = "refuse"
+unknown_note = "E071 / E077 judge a member from its checked types (a heap result or a mut heap parameter allocates; a Float result computes; an unknown type counts as both). E075 (owner ruling 2026-11-22): a stdlib fn declaring `@sized_by(p, ...)` is refused when a named Int parameter gets a run-time Int; an UNDECLARED heap-returning stdlib fn handed a heap input and a run-time Int is refused (only its body could tell an index from a multiplier); every other call keeps the type rule (a collection from a run-time Int with no heap input, #4855). BOUNDED_SIZED_CTORS is gone; 118 stdlib fns declare @sized_by (21 amplifiers). @sized_by outside the stdlib is E085"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/decision_batch1a_test.rs::novel_recursion_through_every_direct_call_form_is_refused",
@@ -781,14 +845,19 @@ tests = [
   "tests/diagnostics/e077-*",
   "tests/diagnostics/e078-*",
   "tests/critical_profile_test.rs::a_violation_is_seen_through_every_expression_kind",
+  "tests/decision_sized_by_novel_test.rs::novel_a_declared_amplifier_is_refused_with_a_run_time_int_and_admitted_with_a_constant",
+  "tests/decision_sized_by_novel_test.rs::novel_a_user_sized_by_declaration_is_refused_outside_the_stdlib",
 ]
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
 issues = [4855, 4871, 4883]
 status = "UNSTAMPED"
-reasons = ["c2:fail-open (an unlisted String / heap-input sized constructor)"]
+reasons = ["c3: re-observe the 14 routes on the @sized_by tree (the probe allocates only through a @bounded callee; add a declared-amplifier case)"]
 note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates); the probe allocates only through a @bounded callee in a counted loop, observed refused on all 14 routes inside and outside the project (2026-11-20 ds-2)."
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
+control_extra = "proofs/decision-controls/bounded.shape-rules.sized-by.patch"
+control_extra_test = "tests/decision_sized_by_novel_test.rs::novel_a_declared_amplifier_is_refused_with_a_run_time_int_and_admitted_with_a_constant"
+control_extra_seen = "ds-2 2026-11-22 (tree = d5b126c67e + @sized_by): base green, patched red (scripts/run-decision-controls.sh); the main patch re-observed the same run: base green, patched red"
 novel = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
 control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871): base green, patched red (scripts/run-decision-controls.sh); the #4871 hunk alone turns novel_a_callee_allocation_is_followed_by_reach red; 2026-11-20 ds-2 (tree = 03f7cb5877 + ADR-0038 stage 1): base green, patched red, and the ADR-0038 hunk alone (ty_has_sink_writer -> true) turns novel_an_output_line_of_scalars_is_admitted_by_its_hole_types red"
 probe = "tests/decision-probes/bounded.shape-rules"
@@ -942,21 +1011,25 @@ items = [
 ]
 keys = []
 decides = "a fan arm whose closure reaches an @ordered stdlib fn (ADR-0024 D3) is serialized instead of run in parallel"
-from = "mixed:declaration+reach"
+from = "reach"
 unknown = "refuse"
 unknown_note = "a callee the walk cannot see — a fn value (Computed, not a lambda literal or fn reference) or an unresolved Method call — is read as ordered and the arm is serialized (#4856)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "unknown: the matrix does not execute a built artifact; build lowers the fan as run does (run / native / emit are driven)", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "unknown: bench verifies the output but does not print it, and a serial and a parallel run take the same 80 ms here", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
-tests = []
+routes = { check = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", check_json = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", check_effects = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", run = "runs", build = "runs: the route matrix runs the built binary (probe `exec_out`); observed 2026-11-21 ds-2 serialized in+out, threaded under the #4856 control", test = "n.a.: the default test lane runs the file on wasm (same reason as the wasm cell; observed `1 via WASM`)", bench = "runs: a threaded run fails the probe's assert, so bench refuses to time it; observed 2026-11-21 ds-2 timed (serialized) in+out, refused under the #4856 control", native = "runs", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", component = "n.a.: wasm evaluates fan arms in arm order on one thread (pass_fan_lowering.rs:92-97), so serialization changes nothing there; observed 2026-11-19 `wrote new` with and without the walk", lsp = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", mcp = "n.a.: serialization is decided while lowering a fan for execution; this route lowers and runs nothing", emit = "runs" }
+tests = ["tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order"]
 control_note = "NONE"
-issues = [4856]
-status = "UNSTAMPED"
-reasons = ["c1:a bodied stdlib fn is matched by its reconstructed runtime name `almide_rt_<module>_<fn>` (stdlib_info.rs:773) — a naming bridge, not a declaration", "c3:build / bench not driven (see cells)"]
-note = "Lowering-time guard (serial vs parallel), included because the task lists @ordered determinism; may belong to the concurrency ledger."
+issues = [4856, 4893]
+status = "STAMPED"
+reasons = []
+stamp = "16d18342c7 2026-11-21"
+note = "Lowering-time guard (serial vs parallel), included because the task lists @ordered determinism; may belong to the concurrency ledger. c1 (2026-11-21): the `almide_rt_<module>_<fn>` reconstruction in stdlib_info::is_ordered_runtime_symbol was LIVE on the Rust codegen route (emit: without it the fans of fanenv.almd and two spec fixtures were threaded, under every pass order) AND on the native v1 route (pipeline_native_bundled.rs Resolve mints `almide_rt_unix_shm_write` before fan_native.rs marks fans: without the clause spec/embedded_cross/fan_ordered_shm_arms.almd threaded on native, caught by embedded_cross_test). Every mint site now records the fn it names: ResolveCalls, StdlibLowering, the v1 user-module rewrite (pipeline.rs) and the v1 bundled resolve. It also missed a module-internal call StdlibLowering renames (`almide_rt_<m>_<f>` of a user module fn): such an arm was threaded (#4893; the minted-symbol test sees 2 thread groups on the old tree, 3 without the clause, 1 with the record). Replaced by CodegenAnnotations.minted_call_symbols, recorded where ResolveCalls / StdlibLowering mint the symbol; the c1 control (record lookup off, ds/fanc1.patch) turns the test red (3), observed ds-2 2026-11-21."
 novel = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 control_patch = "proofs/decision-controls/effect.fan-ordered-reach.patch"
 control_test = "tests/decision_fixes_test.rs::novel_fan_arms_through_fn_values_run_in_order"
 probe = "tests/decision-probes/effect.fan-ordered-reach"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/effect.fan-ordered-reach.minted.patch"
+control_extra_test = "tests/decision_fixes_test.rs::novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order"
+control_extra_seen = "16d18342c7 ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "effect.e007-e008-fan-context"
@@ -969,6 +1042,7 @@ items = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_settle",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_timeout",
   "crates/almide-frontend/src/check/concurrent_reach_check.rs::concurrent_reach_diagnostic",
+  "crates/almide-frontend/src/check/concurrent_reach_check.rs::escape_diagnostic",
 ]
 files = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs",
@@ -976,6 +1050,7 @@ files = [
 ]
 keys = [
   "crates/almide-frontend/src/check/concurrent_reach_check.rs::concurrent_reach_diagnostic::S1::E008",
+  "crates/almide-frontend/src/check/concurrent_reach_check.rs::escape_diagnostic::S1::E008",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan::S1::E007",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_bounded::S1::E007",
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_race::S1::E007",
@@ -984,19 +1059,26 @@ keys = [
   "crates/almide-frontend/src/check/infer_calls_closures.rs::Checker::infer_expr_g3_fan_timeout::S1::E007",
 ]
 decides = "E007: fan block / fan.bounded / fan.min / fan.timeout / fan.settle in a pure context; E008: a var reachable from a concurrent body"
-from = "mixed:declaration+name"
-unknown = "allow"
-unknown_note = "E007: each fan form has its own `can_call_effect` arm (declaration). E008: FAN_OPS is a name list; Callee::Unknown/Value/Method and a fan op not in FAN_OPS fall to `_ => Vec::new()` (concurrent_reach.rs:463). Not probed"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "E007: each fan form has its own `can_call_effect` arm. E008 (#4903, rule (b)): every fn-valued argument of any `fan.<op>` call is a slot (no op list), a stdlib `@concurrent` parameter is a slot (also when called as a method), and a user fn's or lambda's parameter flowing into one is an inferred slot; a `let` alias is followed to the fn or lambda it names, and every other use of a slotted fn as a value (argument, list / tuple / record element, `var`) is refused with E008. The `http` spelling selects only the handler wording and disables folding (the fail-closed direction)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/diagnostics/e007-bounded-in-helper",
   "tests/diagnostics/e007-timeout-in-pure-helper",
 ]
-control_note = "NONE"
-issues = []
-status = "UNSTAMPED"
-reasons = ["c1:name-keyed (FAN_OPS, `fan`/`http` module names)", "c2:fail-open read (E008: Callee::Unknown/Value/Method fall to `_ => Vec::new()`), not yet probed; E007 is a declaration rule", "c4:no-control (a neuter is located in the row's note; not run)"]
+issues = [4903]
+status = "STAMPED"
 note = "Front-end validate_after_solve, so every checker route runs it."
+probe = "tests/decision-probes/effect.e007-e008-fan-context"
+novel = "tests/decision_e008_value_novel_test.rs::novel_a_fan_wrapper_used_as_a_value_is_refused"
+control_patch = "proofs/decision-controls/effect.e007-e008-fan-context.patch"
+control_test = "tests/decision_e008_value_novel_test.rs::novel_a_fan_wrapper_used_as_a_value_is_refused"
+control_extra = "proofs/decision-controls/effect.e007-e008-fan-context.alias.patch"
+control_extra_test = "tests/decision_e008_value_novel_test.rs::novel_a_let_alias_of_a_fan_wrapper_holds_its_callback_to_e008"
+stamp = "d203a5fa30 2026-11-21"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "fsscope.native-guard-map"
@@ -1356,73 +1438,76 @@ id = "net.unix-path-unscoped"
 at = "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_listen"
 items = [
   "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_listen",
+  "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::unix_connect",
 ]
 keys = []
-decides = "unix.listen / unix.connect bind/connect a filesystem path with no [permissions] fs judgement on either leg"
-from = "prefix"
-unknown = "allow"
-unknown_note = "the path never reaches fs_scoped_admits: native guards only almide_rt_fs_* (unix is almide_rt_unix___os_*), wasm ops 104..=116 go to net_host::dispatch before host_fs_scope (host.rs:1009-1016)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4832", build = "skipped: #4832", test = "skipped: #4832", bench = "skipped: #4832", native = "skipped: #4832", wasm = "skipped: #4832", wasi = "n.a.: unix ops not served", component = "n.a.: walled (component_availability.rs:240)", lsp = "n.a.", mcp = "n.a.", emit = "skipped: #4832" }
-tests = [
-  "tests/net_unix_test.rs",
-  "tests/net_unix_embedded_cross_test.rs",
-]
-control_note = "NONE"
-issues = [4832]
-status = "UNSTAMPED"
-reasons = [
-  "c1:prefix",
-  "c2:fail-open",
-  "c3:route-skipped",
-  "c4:no-control",
-]
-note = "net_unix_core.rs:145-154 UnixListener::bind(path) / UnixStream::connect(path)."
+decides = "unix.listen / unix.connect bind or connect a filesystem path; under [permissions] fs the path is judged first (C-393, #4832): natively by the @fs_path(path) guard read off the leaf's declaration, on the embedded host by the unix path gate host_fs_scope installs"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "a socket path outside every grant, whatever its name (the novel test makes a fresh directory), is refused with the fs refusal before any socket is made; the bind / connect then runs on the path as given (not beneath a held descriptor: the kernel resolves a socket address again)"
+routes = { check = "n.a.: makes no socket", check_json = "n.a.: makes no socket", check_effects = "n.a.: makes no socket", run = "runs", build = "runs", test = "runs", bench = "runs: compiles since #4899", native = "runs", wasm = "runs", wasi = "n.a.: the stock build refuses the unix family (E081)", component = "n.a.: walled (E081)", lsp = "n.a.: makes no socket", mcp = "n.a.: makes no socket", emit = "runs: the emitted Rust wraps the leaf in __almide_fs_path!" }
+probe = "tests/decision-probes/net.unix-path-unscoped"
+tests = ["tests/fs_scope_test.rs::unix_socket_paths_are_bounded_by_permissions_fs_on_both_targets", "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused", "crates/almide-codegen/src/fs_scope.rs::tests::the_unix_socket_paths_are_guarded"]
+control_note = "one patch removes both halves (the two @fs_path marks and the two gate calls)"
+issues = [4832, 4899]
+status = "STAMPED"
+stamp = "30b1fac0fb 2026-11-21"
+note = "Fixed by #4832 (marks + shared gate); the bench route failed to compile a scoped socket-only program (#4899, fixed: emit_source includes the fs runtime when a guard applies)."
+control_patch = "proofs/decision-controls/net.unix-path-unscoped.patch"
+control_test = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
+novel = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
+control_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "net.shm-create-tempfile"
 at = "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_open"
 items = [
   "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_open",
+  "crates/almide-rt-core/src/net_unix_core.rs::almide_shm_dir",
+  "crates/almide-rt-core/src/net_unix_core.rs::AlmideUnixTables::shm_create",
 ]
 keys = []
-decides = "unix.shm_create creates (then unlinks) a file in $XDG_RUNTIME_DIR or the temp dir with plain std::fs, outside [permissions] fs"
-from = "type"
+decides = "unix.shm_create makes an unnamed file in the directory almide_shm_dir answers ($XDG_RUNTIME_DIR when it names a directory, else the temp dir); under [permissions] fs that directory is judged first (C-393): natively by the @fs_shm_dir guard read off the declaration, on the embedded host by the unix path gate"
+from = "declaration"
 unknown = "refuse"
-unknown_note = "the backing file has no name any path reaches (#4850): Linux O_TMPFILE in the runtime dir; elsewhere a fresh 0700 directory made with create (AlreadyExists -> next name, never followed) and the file create_new in it, both unlinked at once"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: the runtime core (almide_shm_open_in), not driven by a probe", build = "runs: the runtime core (almide_shm_open_in), not driven by a probe", test = "runs: the runtime core (almide_shm_open_in), not driven by a probe", bench = "runs: the runtime core (almide_shm_open_in), not driven by a probe", native = "runs: the runtime core (almide_shm_open_in), not driven by a probe", wasm = "runs: the embedded host links the same core (net_unix_host ops 113-116)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "runs: the runtime core (almide_shm_open_in), not driven by a probe" }
-tests = []
-control_note = "NONE"
+unknown_note = "the backing file has no name any path reaches (#4850): Linux O_TMPFILE in the runtime dir; elsewhere a fresh 0700 directory made with create (AlreadyExists -> next name, never followed) and the file create_new in it, both unlinked at once. A directory outside every grant (any name: the novel test makes a fresh one) is refused with the fs refusal before any file is made"
+routes = { check = "n.a.: makes no region", check_json = "n.a.: makes no region", check_effects = "n.a.: makes no region", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs: the embedded host links the same core (net_unix_host op 113) behind the unix path gate", wasi = "n.a.: the stock build refuses the unix family (E081)", component = "n.a.: the unix family is walled (E081)", lsp = "n.a.: makes no region", mcp = "n.a.: makes no region", emit = "runs: the emitted Rust wraps the leaf in __almide_fs_shm_dir!" }
+probe = "tests/decision-probes/net.shm-create-tempfile"
+tests = ["tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets", "crates/almide-codegen/src/fs_scope.rs::tests::the_shm_create_leaf_is_guarded_by_its_directory"]
+control_note = "two controls: the backing file keeps a name (control_patch); the region's directory is not judged (control_extra: no mark natively, no gate embedded; each half alone was also red, q70)"
 issues = [4850]
-status = "UNSTAMPED"
-reasons = ["c3:no probe yet: the cells are read, not driven by the route matrix"]
-note = "net_unix_core.rs:330-347: env-chosen dir (XDG_RUNTIME_DIR, a direct std::env read in rt-core), program-unnamed file, unlinked at once — low impact; a sibling of #4832 that #4832's title does not name."
+status = "STAMPED"
+stamp = "d3cf1880d5 2026-11-21"
+note = "C-393 amended in almide/als#270 (the directory of a shared-memory region is judged like a socket path). The bind is not beneath a held descriptor: the region has no name, so a directory swapped after the decision only moves an unnamed inode."
 control_patch = "proofs/decision-controls/net.shm-create-tempfile.patch"
 control_test = "crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory"
-novel = "crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory"
+novel = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
 control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/net.shm-create-tempfile.scope.patch"
+control_extra_test = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
+control_extra_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "net.permissions-unknown-key"
-at = "src/project.rs::manifest_warnings"
-items = [
-  "src/project.rs::manifest_warnings",
-]
+at = "src/project.rs::refuse_unknown_keys (MANIFEST_SCHEMA [permissions])"
+items = ["src/project.rs::refuse_unknown_keys", "src/project.rs::MANIFEST_SCHEMA"]
 keys = []
-decides = "an unknown [permissions] key (e.g. `net = []`, a misspelled `fs`) is only a warning; the build proceeds with that bound absent"
-from = "name"
-unknown = "allow"
-unknown_note = "PERMISSION_KEYS = allow/proc/fs/native (project.rs:906); anything else -> unknown_key_warnings (project.rs:993). There is no run-time network address policy: sockets are bounded only by the Net.* capability category"
-routes = { check = "runs (warning)", check_json = "unknown", check_effects = "unknown", run = "runs (warning)", build = "runs (warning)", test = "runs (warning)", bench = "runs (warning)", native = "runs", wasm = "runs", wasi = "runs", component = "runs: inherit_network + allow_tcp/udp/name_lookup (component_host.rs:181)", lsp = "unknown", mcp = "unknown", emit = "unknown" }
-tests = []
-control_note = "NONE"
+decides = "an unknown [permissions] key (`net = []`, a misspelled `fs`) is refused before any command runs (#4851, now through the one MANIFEST_SCHEMA refusal), naming the keys [permissions] declares"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "PERMISSION_KEYS (allow/proc/fs/native) is the [permissions] row of MANIFEST_SCHEMA; any other key, whatever its name, is refused. There is no run-time network address policy: sockets are bounded only by the Net.* capability category"
+routes = { check = "runs", check_json = "runs: the refusal is on stderr and the exit is 1 (no envelope)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs: an error diagnostic on the document (project_refusal_for)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused", "tests/manifest_unknown_key_test.rs::a_misspelled_security_key_or_table_is_refused"]
+control_note = "[permissions] keys are accepted whatever their name (control_patch)"
 issues = [4851]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "A security-meaning key the tool does not know (`fs` misspelled as `fs_allow`, or a hoped-for `net`) yields a warning, not a refusal, so the author believes a bound exists that is not enforced."
+status = "STAMPED"
+stamp = "107cc444da 2026-11-21"
+note = "A security-meaning key the tool does not know (`fs` misspelled as `fs_allow`, or a hoped-for `net`) used to warn, so the author believed a bound existed that was not enforced; #4851 refused it, and the 2026-11-21 ruling moved the refusal onto the one schema table."
+probe = "tests/decision-probes/net.permissions-unknown-key"
+novel = "tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused"
+control_patch = "proofs/decision-controls/net.permissions-unknown-key.patch"
+control_test = "tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused"
+control_seen = "107cc444da 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on all 14 routes"
 
 [[site]]
 id = "net.httpoxy"
@@ -1475,17 +1560,22 @@ items = [
   "crates/almide-rt-core/src/process_core.rs::almide_proc_exec",
 ]
 keys = []
-decides = "native process spawning has no run-time allowlist: the bound is only the static check_proc_allowlist over named process.* calls"
-from = "name"
-unknown = "allow"
-unknown_note = "process.__os_run / __os_output / __os_start (public) are not in PROC_SPAWNING and spawn any command (#4817); any future spawning runtime fn likewise"
-routes = { check = "static only", check_json = "skipped: #4815", check_effects = "skipped: #4815", run = "static only", build = "static only", test = "static only", bench = "static only", native = "no run-time check", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "static only" }
+decides = "native process spawning has no run-time allowlist: every call that reaches a spawn is judged before the build by perm.proc-allowlist-static (read off @spawns_process and reach, #4817), and a command it cannot trace is refused, so no native artifact is produced that spawns outside [permissions] proc"
+from = "reach"
+unknown = "refuse"
+unknown_note = "a fresh module or fn reaching a spawn (the novel test makes one) is refused statically on every route; residual, stdlib-internal: a new runtime leaf that spawns without @spawns_process (see perm.proc-allowlist-static)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces and runs no code", mcp = "runs", emit = "runs" }
 tests = ["tests/proc_allowlist_test.rs::a_command_outside_the_list_is_refused_by_name_on_every_route"]
 control_note = "NONE"
 issues = [4817, 4815]
-status = "UNSTAMPED"
-reasons = ["c1: the only bound is PROC_SPAWNING by name (mod.rs:180-185)", "c2: process.__os_run / __os_output / __os_start spawn any command (#4817)", "c4: no control"]
-note = "runtime/rs/src/process.rs carries no list. #4815 closed: check --json / --effects run the static gate now."
+status = "STAMPED"
+stamp = "edd22e2812 2026-11-21"
+note = "Stale draft superseded by #4817. The static gate is the bound on native; the embedded wasm host keeps its own run-time list (perm.proc-host-bound). Same probe, novel test and neuter as perm.proc-allowlist-static, observed 2026-11-21 (ds-2)."
+probe = "tests/decision-probes/perm.proc-allowlist-static"
+novel = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_patch = "proofs/decision-controls/proc.native-no-runtime-list.patch"
+control_test = "tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest"
+control_seen = "edd22e2812 2026-11-21 ds-2: the same neuter as perm.proc-allowlist-static, patched red"
 
 [[site]]
 id = "proc.command-path-resolution"
@@ -1494,22 +1584,22 @@ items = [
   "crates/almide-rt-core/src/process_core.rs::almide_proc_exec",
 ]
 keys = []
-decides = "a listed bare command name is resolved through PATH at spawn time; native env.set(\"PATH\", ..) is std::env::set_var, so the program chooses which binary the listed name runs"
-from = "name"
-unknown = "allow"
-unknown_note = "proc = [\"git\"] + env.set(\"PATH\", dir) + fs.copy of any executable to dir/git -> process.exec(\"git\") runs it natively (code-read); arguments are never judged"
-routes = { check = "passes (probe p2: No errors found)", check_json = "passes", check_effects = "passes", run = "native: suspected bypass (not probed); wasm: host PATH used, no bypass (probe p2)", build = "native suspected", test = "native suspected", bench = "native suspected", native = "suspected bypass", wasm = "no bypass (probe p2)", wasi = "n.a.", component = "unknown", lsp = "n.a.", mcp = "n.a.", emit = "suspected" }
-tests = []
+decides = "which program a bare command name runs: the first executable of that name on the PATH the program was LAUNCHED with, captured once before the program can change it (C-459, #4844); env.set(\"PATH\", ..) changes what env.get answers, never which program a name runs; a name with a `/` runs as written"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "Stale draft (Command::new(cmd) resolving through the process PATH that native env.set rewrites) superseded by #4844 / C-459: process_core.rs spawns through almide_rt_launch_command (launch_core.rs), which searches only the launch PATH; a name found on no launch-PATH directory is spawned with the launch PATH set on the child, so it fails to start (refused). The decision is the invoker's declaration (the launch environment), not the program's. The embedded wasm host spawns from its own process, whose PATH the guest's env overlay never writes. Out of this row: which names may be spawned at all is perm.proc-allowlist-static; arguments are never judged"
+routes = { check = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", check_json = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", check_effects = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", run = "runs", build = "runs (the built binary, run in the probe environment)", test = "runs (the file runs on the embedded wasm host, which spawns from its own launch PATH)", bench = "runs", native = "runs", wasm = "runs", wasi = "n.a.: a stock WASI module has no process spawn, so no name is resolved (the build of a process program currently fails with a rustc error, #4907)", component = "n.a.: process.* is refused at build (E081: no component world declares almide:process/spawn)", lsp = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", mcp = "n.a.: spawns nothing; a name is resolved only when a running program spawns it", emit = "runs (the emitted Rust spawns through almide_rt_launch_command)" }
+tests = ["tests/proc_launch_path_test.rs::a_command_name_runs_what_the_launch_path_finds_on_both_legs", "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"]
 control_note = "NONE"
-issues = [4844]
-status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (command string, not identity)",
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "process_core.rs:32 Command::new(cmd) with no env/path pin; runtime/rs/src/env.rs:21-29 set_var. Needs Env.write + FS.write + Proc granted (or allow absent). Also a native/wasm divergence: the wasm host resolves with the host's PATH."
+issues = [4844, 4907]
+status = "STAMPED"
+note = "launch_core.rs:14-17 (OnceLock launch PATH), :25-42 resolution, :71-85 spawn; process_core.rs:32; runtime/rs/src/env.rs:26-28 captures the launch PATH before a native env.set writes. The probe plants an executable in the project and puts its directory on PATH with env.set."
+probe = "tests/decision-probes/proc.command-path-resolution"
+novel = "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"
+control_patch = "proofs/decision-controls/proc.command-path-resolution.patch"
+control_test = "tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found"
+stamp = "9894977bda 2026-11-21"
+control_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.switch-lock"
@@ -1544,21 +1634,22 @@ items = [
   "src/cli/test_wasm.rs::WasmTestRunner::from_env",
 ]
 keys = []
-decides = "ALMIDE_TEST_WASM_RUNNER=wasmtime runs the wasm test lane on the wasmtime CLI with --dir=/ (run.rs:665), so [permissions] fs and the embedded host's op/proc bounds do not apply to the test"
-from = "text"
-unknown = "allow"
-unknown_note = "scope Tool -> not held by the switch lock: an inherited value (.envrc, CI env) is honoured by the release binary"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "wasm lane: [permissions] fs OFF", bench = "n.a.", native = "n.a.", wasm = "test lane only", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "almide_test child inherits env: OFF", emit = "n.a." }
-tests = []
+decides = "ALMIDE_TEST_WASM_RUNNER=wasmtime runs the wasm test lane on the wasmtime CLI; that lane preopens exactly the test file's [permissions] fs roots (wasmtime_fs_args with file_fs_scope, #4842), never `/`, so the fs scope bounds it as it bounds the embedded lane; any other value runs the embedded host"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "Stale draft (`--dir=/` on the CLI lane) superseded by #4842: test_wasm.rs passes file_fs_scope(test_file) to wasmtime_fs_args, which preopens only the granted roots, so a read outside them finds no preopen and is refused. An unrecognised switch value keeps the embedded host. The switch stays scope Tool (not held by the lock): the lane it selects is bounded instead. Out of this row: the stock artifact has no process spawn, and the CLI is not given network"
+routes = { check = "n.a.: the switch selects only the wasm test lane of `almide test`", check_json = "n.a.: the switch selects only the wasm test lane of `almide test`", check_effects = "n.a.: the switch selects only the wasm test lane of `almide test`", run = "n.a.: the switch selects only the wasm test lane of `almide test`", build = "n.a.: the switch selects only the wasm test lane of `almide test`", test = "runs", bench = "n.a.: the switch selects only the wasm test lane of `almide test`", native = "n.a.: the switch selects only the wasm test lane of `almide test`", wasm = "n.a.: `almide run --target wasm` runs on the embedded host; the switch selects only the test lane", wasi = "n.a.: the switch selects only the wasm test lane of `almide test`", component = "n.a.: the switch selects only the wasm test lane of `almide test`", lsp = "n.a.: the switch selects only the wasm test lane of `almide test`", mcp = "n.a.: almide_check runs no test; the almide_test tool runs `almide test`, the test column", emit = "n.a.: the switch selects only the wasm test lane of `almide test`" }
+tests = ["tests/fs_scope_routes_test.rs::the_wasmtime_test_runner_is_bounded_by_the_fs_scope", "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"]
 control_note = "NONE"
 issues = [4842]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-  "lock:not-held (Tool)",
-]
-note = "env.rs:240 (Tool); test_wasm.rs:256-260, 589-614; run.rs:649-666 wasmtime_fs_args `--dir=/` on non-Windows. Release-reachable, not announced as a gate bypass. secaudit P7 mentioned it; not filed."
+status = "STAMPED"
+note = "env.rs:241 (Tool); test_wasm.rs:276-281 from_env, :631-633 the CLI lane (wasmtime_fs_args with file_fs_scope); run.rs:652-658 preopens exactly the granted roots under a scope (#4842). Before #4842 the lane preopened `/` (secaudit P7)."
+probe = "tests/decision-probes/env.test-wasm-runner"
+novel = "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"
+control_patch = "proofs/decision-controls/env.test-wasm-runner.patch"
+control_test = "tests/decision_wasmtime_lane_novel_test.rs::novel_the_wasmtime_lane_refuses_a_read_outside_a_fresh_grant"
+stamp = "9894977bda 2026-11-21"
+control_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.run-project-dir"
@@ -1567,24 +1658,25 @@ items = [
   "src/cli/build_dir.rs::shared_run_project_dir",
 ]
 keys = []
-decides = "ALMIDE_RUN_PROJECT_DIR replaces the private per-user cache base (#4180: 0700, owned by euid, no symlink) for native binaries and the wasm run cache with an unchecked create_dir_all"
-from = "text"
-unknown = "allow"
-unknown_note = "scope Tool -> honoured under the lock; a shared directory lets another user plant a binary AND its digest record, which cached_binary_intact then accepts"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (native cache, wasm_run_cache.rs:87,111)", build = "runs (build.rs:200)", test = "per-file override dirs (unknown)", bench = "runs (build_native_cached)", native = "runs", wasm = "runs (run cache)", wasi = "unknown", component = "unknown", lsp = "n.a.", mcp = "unknown", emit = "n.a." }
+decides = "ALMIDE_RUN_PROJECT_DIR replaces the private per-user cache base; the override is used only when it is a real directory owned by the effective uid and closed to group and other writers (a missing one is made 0700), else the command refuses before building (#4842)"
+from = "type"
+unknown = "refuse"
+unknown_note = "judged by the directory itself (file type, owner, mode), not its name: a fresh directory others can write, a symlink, or another owner's is refused (the novel test makes fresh ones). The switch stays scope Tool (not held by the lock): what it may name is bounded instead"
+routes = { check = "n.a.: builds no binary", check_json = "n.a.: builds no binary", check_effects = "n.a.: builds no binary", run = "runs", build = "runs", test = "n.a.: almide test builds its workers under the private base, never the override (shared_run_project_dir: run.rs, build.rs, wasm_run_cache.rs, clean.rs only)", bench = "runs", native = "runs", wasm = "runs", wasi = "n.a.: the stock build caches nothing in it", component = "n.a.: the stock build caches nothing in it", lsp = "n.a.: builds no binary", mcp = "n.a.: almide_check / almide_test build no binary in the override", emit = "n.a.: emits source, builds no binary" }
 tests = [
   "tests/run_cache_recovery_test.rs",
   "tests/wasm_run_cache_test.rs",
 ]
 control_note = "NONE"
 issues = [4842]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-  "lock:not-held (Tool)",
-]
+status = "STAMPED"
+stamp = "ef40f4d5d3 2026-11-21"
 note = "build_dir.rs:84-88 vs private_base_in/ensure_private_dir :115-160; run.rs:173-176 create_dir_all only. secaudit listed it as low; not filed."
+probe = "tests/decision-probes/env.run-project-dir"
+novel = "tests/decision_run_dir_novel_test.rs::novel_an_override_others_could_write_into_is_refused"
+control_patch = "proofs/decision-controls/env.run-project-dir.patch"
+control_test = "tests/decision_run_dir_novel_test.rs::novel_an_override_others_could_write_into_is_refused"
+control_seen = "ef40f4d5d3 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "env.certify-ownership"
@@ -1620,13 +1712,14 @@ switches = [
   "ALMIDE_NO_AVAIL_CHECK",
 ]
 keys = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S3::ALMIDE_NO_AVAIL_CHECK",
   "src/cli/wasm_compile.rs::check_wasm_availability::S3::ALMIDE_NO_AVAIL_CHECK",
 ]
-decides = "bypass the E081 stdlib availability check on the wasm build"
+decides = "bypass the E081 stdlib availability check on the wasm build and on the --target wasi rustc route (#4913)"
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
-routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "runs", wasi = "runs: read since #4913 by check_wasi_rustc_availability on build --target wasi, before rustc runs (build.rs cmd_build)", component = "runs", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)" }
 tests = [
   "tests/switch_lock_test.rs::the_lock_ignores_an_inherited_gate_switch_unless_allowed",
 ]
@@ -2110,17 +2203,21 @@ items = [
   "src/project_fetch.rs::add_dep_to_toml",
 ]
 keys = []
-decides = "a [package].name with `-` is refused by parse_toml; where the name becomes a file name (build/compile/install) only ASCII letters/digits/_ pass"
-from = "text"
-unknown = "allow"
-unknown_note = "parse_toml accepts any name without `-` (e.g. `../x`, U+202E is refused by control-text); the hyphen refusal is not in the check_manifest gate, so a hyphen drops [permissions] on .ok() readers (#4829)"
-routes = { check = "runs:via parse_toml", check_json = "runs", check_effects = "runs", run = "runs", build = "runs+plain-name", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "runs", emit = "runs" }
+decides = "a [package].name outside the plain-name grammar (ASCII letters, digits, `_`, not starting with a digit) is refused by parse_toml, so every route that reads the manifest refuses it (a `-` keeps its rename hint)"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "one declared grammar (check_plain_name) read by the manifest reader itself; an empty / absent name declares none. The novel test puts each non-plain spelling into a fresh identifier"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = ["tests/install_destination_test.rs"]
-control_note = "NONE"
 issues = [4829]
-status = "UNSTAMPED"
-reasons = ["c1: a one-character blacklist (`-`, project.rs:674-684); the plain-name grammar applies only at file-name sites (project.rs:665-672)", "c2: a name with a space, `/`, `..`, a leading digit or a non-ASCII letter is read (issue draft issue-package-name-grammar)", "c4: no control"]
+status = "STAMPED"
 note = "#4829 closed: a hyphen now ends every command (governing_manifest) instead of dropping [permissions]. No evidence written (c1 / c2 need the grammar)."
+probe = "tests/decision-probes/manifest.package-name"
+novel = "tests/decision_package_name_novel_test.rs::novel_a_fresh_non_plain_package_name_is_refused_on_every_route"
+control_patch = "proofs/decision-controls/manifest.package-name.patch"
+control_test = "tests/decision_package_name_novel_test.rs::novel_a_fresh_non_plain_package_name_is_refused_on_every_route"
+stamp = "d203a5fa30 2026-11-21"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "manifest.control-text"
@@ -2203,30 +2300,25 @@ note = "Line scanner (project.rs:680-759) is diagnostic quality; the binding ref
 
 [[site]]
 id = "manifest.unknown-keys"
-at = "src/project.rs::manifest_warnings / unknown_key_warnings (dispatch.rs::report_manifest_warnings)"
-items = [
-  "src/project.rs::manifest_warnings",
-  "src/project.rs::unknown_key_warnings",
-  "src/dispatch.rs::report_manifest_warnings",
-]
+at = "src/project.rs::refuse_unknown_keys (MANIFEST_SCHEMA)"
+items = ["src/project.rs::refuse_unknown_keys", "src/project.rs::MANIFEST_SCHEMA", "src/project.rs::manifest_warnings", "src/dispatch.rs::report_manifest_warnings"]
 keys = []
-decides = "an unknown top-level table, [package]/[permissions]/[trust]/dependency key, or a dependency naming neither git nor path is a WARNING only; the command runs as if the key were absent"
-from = "name"
-unknown = "allow"
-unknown_note = "a typo of the restricting table or key (`[permission]`, `alow`) drops the restriction: absent `allow` is unchecked, so every capability is granted with exit 0 (probe P2)"
-routes = { check = "runs:warn only", check_json = "runs:warn row", check_effects = "runs:warn only", run = "runs:warn only", build = "runs:warn only", test = "runs:warn only", bench = "runs:warn only", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor route produces no code (an exit would end the session; dispatch.rs ~704-706 exempts it)", mcp = "runs", emit = "runs" }
-tests = [
-  "tests/manifest_unknown_key_test.rs::package_permissions_and_top_level_tables_warn",
-  "tests/manifest_unknown_key_test.rs::the_cli_warns_once_and_exits_zero",
-]
-control_note = "NONE"
+decides = "a key almide.toml writes outside its section's declaration in MANIFEST_SCHEMA (top-level tables, [package], [permissions], [trust], each [dependencies] entry, each [target.<platform>]) is refused by check_manifest on every command, with the declared keys and the one a single edit away (owner ruling 2026-11-21, dialect epoch 17); only a dependency entry that declares nothing still warns"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the vocabulary is the schema table, not the key's name: any key outside its section's declared list is refused, so a fresh key (the novel tests make one per section) is refused; [native-deps] and [trust].media are maps keyed by crate name / package source and declare no list. A dependency's own manifest is read by parse_toml only (manifest.dep-manifest-swallow)"
+routes = { check = "runs", check_json = "runs: the refusal is on stderr and the exit is 1 (no envelope)", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs: an error diagnostic on the document (project_refusal_for)", mcp = "runs", emit = "runs" }
+tests = ["tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused", "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route", "tests/manifest_unknown_key_test.rs::package_permissions_and_top_level_tables_are_refused_in_file_order", "tests/manifest_unknown_key_test.rs::the_cli_refuses_once_and_exits_non_zero"]
+control_note = "the refusal accepts every key (control_patch)"
 issues = [4851]
-status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "By design per #3382 (project.rs:981 'A warning never fails a command'), but fail-open for a security table: probe P2 `[permission] allow = []` / `[permissions] alow = []` -> 'No errors found' while `allow = []` refuses. No open issue. bugs-final: unchanged."
+status = "STAMPED"
+stamp = "107cc444da 2026-11-21"
+note = "#3382 made an unknown key a warning; #4851 refused it in [permissions]/[trust]; the owner ruling of 2026-11-21 refuses it in every section (one line in dialect epoch 17)."
+probe = "tests/decision-probes/manifest.unknown-keys"
+novel = "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route"
+control_patch = "proofs/decision-controls/manifest.unknown-keys.patch"
+control_test = "tests/manifest_unknown_key_test.rs::novel_a_fresh_dependency_key_is_refused_on_every_route"
+control_seen = "107cc444da 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on all 14 routes"
 
 [[site]]
 id = "manifest.permission-list-shape"
@@ -2433,19 +2525,22 @@ items = ["src/dispatch.rs::dispatch_add", "src/trust.rs::owner_arg", "src/trust.
 keys = []
 decides = "`almide add` reads the source once into a GitSource and refuses it unless github.com/almide or the root [trust] owners cover it, or --trust (read with the same grammar) covers it; a --trust that does not cover the source is refused; the tag is a GitRef; only then is the repository probed and almide.toml / almide.lock written"
 from = "type"
-unknown = "allow"
-unknown_note = "the source is typed and the trust check refuses an uncovered owner (dispatch.rs:359-384); but the dependency NAME is written into almide.toml unescaped (project_fetch.rs ~1216): a name holding TOML adds a path dependency or a [trust] owners line (probed 2026-11-19, #4867)"
+unknown = "refuse"
+unknown_note = "Stale residual (#4867, the name written into almide.toml unescaped) closed: dispatch_add refuses a name that is not an identifier before anything is probed, fetched or written (dispatch.rs:373-376), and add_dep_to_toml refuses it again and writes every value through the TOML encoder (project_fetch.rs:1198-1234). The source is typed and an uncovered owner is refused (dispatch.rs:377-406); a --trust that does not cover the source is refused"
 routes = { check = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", check_json = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", check_effects = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", run = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", build = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", test = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", bench = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", native = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", wasm = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", wasi = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", component = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", lsp = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)", mcp = "n.a.: the MCP server has no add tool (almide_check / almide_test / almide_fmt_check / almide_survive / almide_explain / almide_api / almide_deploy)", emit = "n.a.: `almide add` is its own command; no compile route adds a dependency (the walk's own trust check is trust.source-owner)" }
 tests = ["tests/dependency_trust_test.rs::an_untrusted_add_is_refused_with_the_source_and_writes_nothing", "tests/dependency_trust_test.rs::a_trust_flag_naming_another_owner_is_refused", "tests/dependency_trust_test.rs::dry_run_reports_the_verdict_and_writes_nothing", "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"]
 control_note = "row 14 (is_trusted -> true)"
 issues = [4867]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4867, probed: the add name injects manifest lines)"]
+status = "STAMPED"
 note = "dispatch.rs:342-467: source parsed :359, --trust :361-371, verdict :372-386, tag :388-390, probe :401-423, write :445-466. #4810/#4811 closed by this code."
 novel = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
 control_patch = "proofs/decision-controls/trust.add-trust-flag.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_owner_is_refused_and_a_trust_flag_must_name_it"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/trust.add-trust-flag.name.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_add_a_fresh_name_carrying_toml_is_refused_before_anything_is_written"
+stamp = "9894977bda 2026-11-21"
+control_extra_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.install-owner"
@@ -2454,19 +2549,22 @@ items = ["src/cli/install.rs::check_install_trust", "src/cli/install.rs::spec_so
 keys = []
 decides = "`almide tool install <spec>`: an existing local directory needs no trust; any other spec (a URL, or a package spec expanded to https://…) is read into a GitSource and installed only when github.com/almide covers it or --trust (same grammar) covers it"
 from = "type"
-unknown = "allow"
-unknown_note = "a remote spec is read into one GitSource and its owner checked (install.rs:323-354); but a spec that names an existing directory is installed as local with no trust check, even when it is spelled as a remote source (probed 2026-11-19, #4864)"
+unknown = "refuse"
+unknown_note = "Stale residual (#4864, an existing directory named like a source installed as local) closed: only a spec SPELLED as a path (`.`, `..`, `./`, `../`, absolute) is local (install.rs:332-334); anything else is read into one GitSource and its owner checked before anything is fetched, whatever exists on disk under that name (install.rs:336-366)"
 routes = { check = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", check_json = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", check_effects = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", run = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", build = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", test = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", bench = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", native = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", wasm = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", wasi = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", component = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", lsp = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", mcp = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)", emit = "n.a.: only `almide tool install` takes a remote spec; no compile route installs ([routes] ToolCommand::Install)" }
 tests = ["tests/install_native_gate_test.rs::an_untrusted_remote_spec_is_refused_before_any_fetch", "src/cli/install.rs::tests::install_trust_follows_the_add_rule", "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"]
 control_note = "NONE"
 issues = [4864]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4864, probed: a planted github.com/<o>/<r> directory skips trust)"]
+status = "STAMPED"
 note = "install.rs:22-37 (trust before anything), 202-257 resolve_source, 323-354. #4810/#4811 closed by this code."
 novel = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
 control_patch = "proofs/decision-controls/trust.install-owner.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_install_a_fresh_owner_is_refused_before_any_fetch"
 control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra = "proofs/decision-controls/trust.install-owner.planted.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_install_a_planted_directory_named_like_a_fresh_source_is_not_installed"
+stamp = "9894977bda 2026-11-21"
+control_extra_seen = "9894977bda 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "trust.media-grant-key"
@@ -2871,21 +2969,28 @@ keys = [
   "crates/almide-frontend/src/check/intrinsic_authority.rs::Checker::check_media_ownership::S1::E118",
 ]
 decides = "a dependency owning a @script_capable media type without a root [trust].media grant, a grant for an undeclared type, a grant naming no dependency, or two overlapping owners is refused (E118)"
-from = "mixed:declaration+text"
+from = "declaration"
 unknown = "refuse"
 unknown_note = "a media type not declared script-capable by html needs no grant (by design); a dependency file the scan cannot parse contributes no @media_owns; check skips the gate on a fetch error"
 routes = { check = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_json = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", check_effects = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", run = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", build = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", test = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", bench = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", native = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", wasi = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", lsp = "n.a.: produces no code (observed 2026-11-20: the probe is not judged there)", mcp = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project; probe tests/decision-probes/native.media-grant)" }
 tests = [
+  "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused",
+  "src/media_grant.rs::tests::a_grant_key_keeps_the_paths_case",
   "tests/media_grant_test.rs::the_grant_removed_refuses_the_build_naming_the_line_to_add",
   "tests/media_grant_test.rs::two_granted_owners_of_one_type_are_refused",
   "tests/media_grant_test.rs::a_grant_for_a_type_the_package_does_not_declare_is_refused",
 ]
 control_note = "GCE 2026-10-29 (sec doc, ADR-0032 D7): grant check off -> media_grant_test 101; one-owner rule off -> 101; check-time E118 off -> diagnostic_harness_test 101"
-issues = [4830, 4809, 4834]
-status = "UNSTAMPED"
-reasons = ["c1:url-text", "c2:no novel test (on a fetch error check_media_grants_or_exit returns and the command refuses the fetch error itself: observed 2026-11-20 on 88531b1b22, a missing path dependency -> check, check --json, run all exit 1 `path dependency 'svg' not found`)", "c4:the GCE 2026-10-29 controls predate the ledger patch format (no control_patch)"]
-note = "The cwd-only reader is gone: every route reads the entry's own project (manifest_for_entry, #4830 fixed on bugs-final fdd8fa4af4). owns_under uses native_grant::almd_files (#4809 fixed on bugs-final)."
+issues = [4830, 4809, 4834, 4892]
+status = "STAMPED"
+reasons = []
+note = "The cwd-only reader is gone: every route reads the entry's own project (manifest_for_entry, #4830 fixed on bugs-final fdd8fa4af4). owns_under uses native_grant::almd_files (#4809 fixed on bugs-final). c1 (2026-11-21): the grant key is the dependency's typed origin (#4868, 77589bce28) and keeps the path's case on both sides (#4892: the old key folded it, so one grant covered `Alice/svg` and `alice/svg`); the grant and the owned types are declarations (root [trust] media, @media_owns). On a fetch error check_media_grants_or_exit returns and the command refuses the fetch error itself (observed 2026-11-20 on 88531b1b22: a missing path dependency -> check, check --json, run all exit 1)."
 probe = "tests/decision-probes/native.media-grant"
+control_patch = "proofs/decision-controls/native.media-grant.patch"
+control_test = "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused"
+novel = "tests/media_grant_test.rs::novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused"
+control_seen = "a4d13b850e + the 2026-11-21 batch (q53), ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "a4d13b850e 2026-11-21"
 
 [[site]]
 id = "toolchain.rustc-floor"
@@ -3053,7 +3158,7 @@ from = "type"
 unknown = "refuse"
 unknown_note = "a fresh 0700 scratch directory per run (almide_base::private_dir, #4853): an existing name is skipped, never written through; artifact and bundle are made inside it and removed with it"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "runs: wasm, verifier present", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs: build", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = []
+tests = ["tests/decision_scratch_dir_test.rs::novel_the_build_route_hands_the_verifier_a_fresh_private_directory"]
 control_note = "NONE"
 issues = [4853]
 status = "UNSTAMPED"
@@ -3239,19 +3344,75 @@ decides = "whether an instruction inside a site's window branches out of it, and
 from = "type"
 unknown = "refuse"
 unknown_note = "the validator refuses the proposals the check does not classify (GC, legacy exceptions, stack switching: UNCLASSIFIED_PROPOSALS, #4854), and depth is the validator's own control-stack height, so a control operator added later cannot mis-depth the window"
-routes = { check = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_json = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_effects = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", run = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", build = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", test = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", bench = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", native = "n.a.", wasm = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", wasi = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", component = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_json = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_effects = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", run = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", build = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", test = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", bench = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", native = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasm = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasi = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", component = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", lsp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", mcp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", emit = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)" }
 tests = [
   "crates/almide-anchor-check/tests/check.rs::a_store_behind_a_branch_is_refused",
+  "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused",
 ]
 control_note = "NONE"
 issues = [4854, 4849]
-status = "UNSTAMPED"
-reasons = ["c3:CI fixtures only (#4849, claim narrowed)", "c3:no probe yet: the cells are read, not driven by the route matrix"]
-note = "NEW sibling of #4826 (same crate, same validator-admits-all cause, different function). Latent: none of these operators is emitted today."
+status = "STAMPED"
+reasons = []
+note = "NEW sibling of #4826 (same crate, same validator-admits-all cause, different function). Latent: none of these operators is emitted today. 2026-11-21 (task-6 item 3): exception handling's try_table joined UNCLASSIFIED_PROPOSALS — its catch clauses take control from any call in its body to a label outside a window, a transfer branch_target cannot name; the operator matrix test classifies every admitted control operator and refuses every unclassified proposal and an unassigned opcode."
 control_patch = "proofs/decision-controls/anchor.branch-target-depth.patch"
-control_test = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused"
-novel = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_test = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
+novel = "crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused"
+control_seen = "346da18eaf 2026-11-22 ds-2: patch re-anchored after the anchor-count-word-writes merge moved its context: base green, patched red; earlier: 9894977bda 2026-11-21 ds-2: re-run after the decoder took develop's control table (the patch now neuters the per-operator refusal): base green, patched red"
+stamp = "a4d13b850e 2026-11-21"
+
+[[site]]
+id = "anchor.memory-shape"
+at = "crates/almide-anchor-check/src/decode.rs::one_plain_memory"
+items = [
+  "crates/almide-anchor-check/src/decode.rs::one_plain_memory",
+]
+keys = []
+decides = "whether a module is judged at all by the memories it declares or imports: exactly one, unshared and 32-bit"
+from = "type"
+unknown = "refuse"
+unknown_note = "a memory the shape does not admit (a second one, declared or imported; a shared one; a 64-bit one) refuses the module at decode, before any rule reads an address; the shape is the memory type itself, no name is consulted"
+routes = { check = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_json = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_effects = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", run = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", build = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", test = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", bench = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", native = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasm = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasi = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", component = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", lsp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", mcp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", emit = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)" }
+tests = [
+  "crates/almide-anchor-check/tests/memories.rs",
+  "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_memory_shape_is_judged_only_when_it_is_one_plain_memory",
+]
+control_note = "NONE"
+issues = []
+status = "STAMPED"
+reasons = []
+note = "From anchor-count-word-writes (30dfcbb67a). The novel test enumerates every one- and two-memory module over declared/imported x shared x 32/64-bit (72 modules) and expects exactly the one plain memory judged, each other refused for the first memory that breaks the shape."
+control_patch = "proofs/decision-controls/anchor.memory-shape.patch"
+control_test = "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_memory_shape_is_judged_only_when_it_is_one_plain_memory"
+novel = "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_memory_shape_is_judged_only_when_it_is_one_plain_memory"
+control_seen = "346da18eaf ds-2 2026-11-22: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "346da18eaf 2026-11-22"
+
+[[site]]
+id = "anchor.count-word-writes"
+at = "crates/almide-anchor-check/src/operands.rs::Flow::writes_count_word"
+items = [
+  "crates/almide-anchor-check/src/operands.rs::Flow::writes_count_word",
+]
+keys = []
+decides = "whether a write between a bounds check and its access reaches the checked list block count word (bytes 4..8), by the bytes it writes from base + constant"
+from = "reach"
+unknown = "refuse"
+unknown_note = "a store is judged by its width from its static start, a bulk fill / copy / init has no static extent and is taken to run on from its start; an atomic access does not validate (decode.rs drops the threads proposals), so the module is not judged"
+routes = { check = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_json = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", check_effects = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", run = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", build = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", test = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", bench = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", native = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasm = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", wasi = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", component = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", lsp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", mcp = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)", emit = "n.a.: a CI verifier over emitted fixtures, not a product route \u2014 `almide-anchor-check` on every fixture of `proofs/structural-wall.sh` (CI; it is not linked into `almide` or `almide-verify`, so a user's build is not anchor-checked, #4849) (docs/contracts/proven-vs-trusted.md); CI job: .github/workflows/trust-spine.yml `Coq proofs + axiom audit + PCC gate`, step `make verify-trust` (Makefile verify-trust runs proofs/structural-wall.sh)" }
+tests = [
+  "crates/almide-anchor-check/tests/count_word.rs",
+  "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_write_meeting_the_count_word_is_refused_and_no_other",
+]
+control_note = "NONE"
+issues = []
+status = "STAMPED"
+reasons = []
+note = "From anchor-count-word-writes (0515f7528b). The novel test enumerates every plain store operator at every start 0..=16 (as the offset and as an added constant) and fill / copy from the same starts: refused exactly when the written bytes meet the count word."
+control_patch = "proofs/decision-controls/anchor.count-word-writes.patch"
+control_test = "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_write_meeting_the_count_word_is_refused_and_no_other"
+novel = "crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_write_meeting_the_count_word_is_refused_and_no_other"
+control_seen = "346da18eaf ds-2 2026-11-22: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "346da18eaf 2026-11-22"
 
 [[site]]
 id = "witness.subset-gate"
@@ -3473,6 +3634,30 @@ control_test = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e0
 novel = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
 control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871/#4857): base green, patched red (scripts/run-decision-controls.sh); the test-lane hunk alone turns novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host red"
 probe = "tests/decision-probes/verify.wasm-e081-availability"
+
+[[site]]
+id = "verify.wasi-e081-availability"
+at = "src/cli/wasm_compile.rs::check_wasi_rustc_availability"
+items = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability",
+]
+keys = [
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S1::E081",
+  "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S3::ALMIDE_NO_AVAIL_CHECK",
+]
+decides = "a reachable call to a stdlib fn whose proofs/target-availability.toml row declares the rustc-wasip1 leg is E081 on build / check --target wasi (#4913)"
+from = "name"
+unknown = "allow"
+unknown_note = "the same name-keyed table and reachable-body scan as verify.wasm-e081-availability (scan_unavailable); a runtime fn with no rustc-wasip1 row is admitted, and this route has no render wall behind it: the module builds and the call aborts at run time on wasip1"
+routes = { check = "runs: --target wasi only (check.rs check_one)", check_json = "runs: check --json --target wasi (wasi_rustc_refusals)", check_effects = "n.a.", run = "n.a.: native", build = "n.a.: native", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.: the embedded host answers it (stock-p1 / embedded legs are verify.wasm-e081-availability)", wasi = "runs", component = "n.a.: stock-p1 leg (verify.wasm-e081-availability)", lsp = "n.a.", mcp = "n.a.: almide_check offers target = wasm only", emit = "n.a." }
+tests = [
+  "tests/wasi_rustc_availability_test.rs",
+  "tests/diagnostics/e081-process-pid-wasi",
+  "tests/diagnostics/e081-pid-through-helper-wasi",
+]
+issues = [4913, 4918]
+status = "UNSTAMPED"
+reasons = ["c1:name table (as verify.wasm-e081-availability)", "c2:unknown = allow (a fn with no rustc-wasip1 row builds and aborts at run time; #4918, closed before the final under ruling B)", "c3:cells not observed by the route matrix (no probe)", "c4:no control run (no build VM)"]
 
 [[site]]
 id = "verify.wasm-e082-wall"
@@ -3906,21 +4091,25 @@ keys = [
   "crates/almide-frontend/src/check/scoped.rs::scoped_err::S1::E087",
   "crates/almide-frontend/src/check/scoped.rs::scoped_err::S1::E088",
 ]
-decides = "a scoped fn may call only scoped fns, scalar-module members and the admitted builtins"
-from = "mixed:declaration+type+name"
+decides = "a scoped fn may call only scoped fns, stdlib fns whose declared signature is effect-free with scalar arguments and result (C-364 amended), and the admitted builtins"
+from = "declaration"
 unknown = "refuse"
-status = "UNSTAMPED"
-reasons = ["c1:name-keyed (SCOPED_SCALAR_MODULES; print*/assert names pick the message)"]
-unknown_note = "any bare callee that is not a local, a scoped program fn, or one of the worded refusals (print*, assert*) is refused as a call the region cannot follow (#4860); the names only pick the wording"
+status = "STAMPED"
+reasons = []
+stamp = "16d18342c7 2026-11-21"
+unknown_note = "a stdlib call is admitted by its declared signature (no effect, no @ordered / memory-unsafe / signals mark, every argument and the result as instantiated a scalar); an unknown signature or type is refused. Any bare callee that is not a local, a scoped program fn, or one of the worded refusals (print*, assert*) is refused as a call the region cannot follow (#4860); the names only pick the wording"
 routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "runs", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e087-scope-unscoped-callee"]
+tests = ["tests/diagnostics/e087-scope-unscoped-callee", "tests/diagnostics/e087-scope-effect-call", "tests/diagnostics/e087-scope-string-param-call", "tests/diagnostics/e087-scope-string-result-call", "tests/decision_gap_fixes_test.rs::novel_e087_a_stdlib_call_admitted_by_its_signature"]
 issues = [4860]
-note = "scoped.rs / scoped_walk.rs / scoped_shape.rs; inside a module scoped is refused outright (scoped.rs:41-46)."
+note = "scoped.rs / scoped_walk.rs / scoped_shape.rs; inside a module scoped is refused outright (scoped.rs:41-46). c1 (2026-11-21, e410b68def merged): SCOPED_SCALAR_MODULES removed — a stdlib callee is admitted by its signature, so `int.to_string` (old list, String result) is refused and `datetime.hour` (never listed, Int -> Int) is admitted and runs alike on native and wasm; the print*/assert* names only choose the refusal wording (every non-scoped bare callee is refused, #4860) — counted c1-clean by the coordinator's ruling 2026-11-21. The backends' region-pure lists (pass_region_window.rs / almide-wasm region.rs SCALAR_MODULES) are a lowering choice, not this decision; the wasm one refused the newly admitted `datetime.hour` region with E083 until d6fa4eb268 made it admit by the same signature rule (the novel test runs the program on native and wasm)."
 novel = "tests/decision_gap_fixes_test.rs::novel_e087_an_unnamed_builtin_in_a_scoped_fn"
 control_patch = "proofs/decision-controls/ownership.e087-scoped-callee.patch"
 control_test = "tests/decision_gap_fixes_test.rs::novel_e087_an_unnamed_builtin_in_a_scoped_fn"
 control_seen = "73b18e7eee 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 probe = "tests/decision-probes/ownership.e087-scoped-callee"
+control_extra = "proofs/decision-controls/ownership.e087-scoped-callee.signature.patch"
+control_extra_test = "tests/decision_gap_fixes_test.rs::novel_e087_a_stdlib_call_admitted_by_its_signature"
+control_extra_seen = "16d18342c7 ds-2 2026-11-21: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "ownership.e088-scoped-tail-recursion"
@@ -4109,14 +4298,19 @@ keys = [
 ]
 decides = "a `local fn` is called only from its own module (a `mod fn` from its own package)"
 from = "mixed:declaration+prefix"
-unknown = "allow"
+unknown = "refuse"
 status = "UNSTAMPED"
-reasons = ["c1:prefix (package from the module name)", "c2:fail-open (no visibility entry; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "a fn with no visibility entry returns admitted (infer_loops_records.rs:539-541); the package is the module name's first segment. Not probed"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
+reasons = ["c1:prefix (a `mod fn`'s package is the module name's first segment)"]
+unknown_note = "#4904: the visibility check runs on the call routes, on a module fn named as a value (`let g = m.f`, `list.map(xs, m.f)`) and on a method call (`x.f()` resolved to a convention or cross-module fn); a restricted fn whose declaring module is unknown is judged against its key's prefix, which refuses. A fn with no visibility entry is declared public (registration stores every non-public one)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = ["tests/diagnostics/e420-local-fn-from-entry"]
-issues = []
+issues = [4904]
 note = "infer_loops_records.rs:538-596."
+probe = "tests/decision-probes/scope.e420-local-fn"
+novel = "tests/decision_e420_value_novel_test.rs::novel_a_local_fn_is_refused_on_every_route_from_another_module"
+control_patch = "proofs/decision-controls/scope.e420-local-fn.patch"
+control_test = "tests/decision_e420_value_novel_test.rs::novel_a_local_fn_is_refused_on_every_route_from_another_module"
+control_seen = "d203a5fa30 2026-11-21 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "deps.lock-readonly"

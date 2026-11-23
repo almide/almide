@@ -4,9 +4,13 @@
 # wrote; run on threads (v0.69.1), it prints `wrote old`.
 expect = "wrote new"
 exit = "any"
+# build: run the built binary and read its output
+exec_out = ["build"]
 
 [expect_by]
 # the test route: the refusal-asserting test passes
 test = "1 passed"
 # emit: the inline (arm-order) fan form, not the thread scope
 emit = "let __almide_fan_r0 = (move ||"
+# bench: a threaded run fails its assert, so only a serialized one is timed
+bench = "output verified identical across all runs"

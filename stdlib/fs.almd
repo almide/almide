@@ -131,6 +131,7 @@ effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, Str
 /// Folds lines starting in bytes [start, end).
 @intrinsic("almide_rt_fs_fold_lines_range")
 @fs_path(path)
+@sized_by(path, init)
 effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String] = _
 
 // Chunk-PARALLEL fold: N workers each fold their byte-range partition on
@@ -143,6 +144,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 @fs_path(path)
+@sized_by(path, workers, init)
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): none ⇔ the path

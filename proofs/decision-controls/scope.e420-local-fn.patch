@@ -1,0 +1,14 @@
+# Negative control of scope.e420-local-fn (c2, proofs/decision-sites.toml): a `local fn` is reachable from any module
+# control_test: tests/decision_e420_value_novel_test.rs::novel_a_local_fn_is_refused_on_every_route_from_another_module
+diff --git a/crates/almide-frontend/src/check/infer_loops_records.rs b/crates/almide-frontend/src/check/infer_loops_records.rs
+index 3544f25e75..04a1fbed04 100644
+--- a/crates/almide-frontend/src/check/infer_loops_records.rs
++++ b/crates/almide-frontend/src/check/infer_loops_records.rs
+@@ -554,6 +554,7 @@ impl Checker {
+     /// canonical module, the call is intra-module and all visibilities are
+     /// allowed. Otherwise only `Public` is reachable.
+     pub(super) fn check_fn_visibility(&mut self, callee_module: &str, field: &str, key: &str) {
++        if true { return; }
+         let vis = match self.env.fn_visibility.get(&sym(key)) {
+             Some(v) => *v,
+             None => return,

@@ -1,0 +1,6 @@
+import self.m
+
+effect fn main() -> Unit = {
+  let f = m.secret
+  println("${f(1)}")
+}

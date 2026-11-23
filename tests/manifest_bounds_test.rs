@@ -76,15 +76,18 @@ fn a_lock_over_the_cap_is_refused_and_a_symlinked_manifest_is_read() {
 
 /// N unknown tables cost O(N): quadrupling N must not cost anything like the
 /// twelve times a per-warning rescan did (#4194 measured 0.49 s at 20 000
-/// and 5.8 s at 80 000).
+/// and 5.8 s at 80 000). An unknown table is refused (dialect epoch 17), and
+/// every one is named, so the refusal is the work being timed.
 #[test]
-fn unknown_table_warnings_scale_linearly() {
+fn unknown_table_refusals_scale_linearly() {
     let run = |n: usize| {
         let tables: String = (0..n).map(|i| format!("[t{i}]\nk=1\n")).collect();
         let dir = project(&format!("{PACKAGE}{tables}"));
         let start = std::time::Instant::now();
         let o = check(dir.path());
-        assert!(o.status.success(), "{}", stderr(&o));
+        assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+        let last = format!("unknown table `t{}` in almide.toml is refused", n - 1);
+        assert!(stderr(&o).contains(&last), "the last unknown table is not named: {}", stderr(&o).lines().last().unwrap_or(""));
         start.elapsed().as_secs_f64()
     };
     // Warm the binary and the page cache, so the first timed run is not the

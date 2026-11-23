@@ -1,0 +1,2 @@
+# The probe of perm.proc-allowlist-static: a process.exec of a command not on [permissions] proc (only `git` is listed).
+expect = "`almide-probe-unlisted` is not in [permissions] proc"

@@ -10,6 +10,9 @@
 
 #[path = "support/git_host.rs"]
 mod git_host;
+#[path = "support/novel.rs"]
+#[allow(dead_code)]
+mod novel;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -211,4 +214,33 @@ fn an_old_owner_repo_grant_key_is_refused_with_its_new_form() {
     let o = h.almide(&dir, &["check", "src/main.almd"]);
     assert!(!o.status.success(), "an old-form key was read:\n{}", stderr(&o));
     assert!(stderr(&o).contains("\"github.com/almide/svg\""), "the refusal does not give the new form:\n{}", stderr(&o));
+}
+
+/// Decision-site c2 (native.media-grant): a dependency no table has heard of —
+/// a fresh owner, repository and package name — that owns a script-capable
+/// type without a grant is refused on the run, build and check routes; the
+/// same package granted by its source builds (the control half).
+#[test]
+fn novel_a_fresh_ungranted_owner_of_a_script_capable_type_is_refused() {
+    let h = Hosts::new("novel");
+    let (owner, repo, pkg) = (novel::ident("owner"), novel::ident("repo"), novel::ident("pkg"));
+    h.repo(&owner, &repo, &pkg, &body_pkg("image/svg+xml", "image/svg+xml"), "");
+    let dep = format!("\n[dependencies]\n{pkg} = {{ git = \"https://github.com/{owner}/{repo}\", tag = \"v0.1.0\" }}\n");
+    let owners = format!("\n[trust]\nowners = [\"github.com/{owner}\"]\n");
+    let dir = h.project("app", &format!("{dep}{owners}"), &pkg);
+    for args in [RUN, &["build", "src/main.almd", "--target", "wasm", "-o", "out.wasm"], &["check", "src/main.almd"]] {
+        let o = h.almide(&dir, args);
+        let err = stderr(&o);
+        assert_eq!(o.status.code(), Some(1), "`almide {}` admitted a fresh ungranted owner:\n{err}", args.join(" "));
+        let needle = format!("error[E118]: dependency `{pkg}` (github.com/{owner}/{repo}) owns `image/svg+xml`");
+        assert!(err.contains(&needle), "missing `{needle}`:\n{err}");
+    }
+    let granted = h.project(
+        "granted",
+        &format!("{dep}{owners}media = {{ \"github.com/{owner}/{repo}\" = [\"image/svg+xml\"] }}\n"),
+        &pkg,
+    );
+    let o = h.almide(&granted, RUN);
+    assert!(o.status.success(), "the granted fresh owner is refused:\n{}", stderr(&o));
+    assert_eq!(stdout(&o), "image/svg+xml\n");
 }

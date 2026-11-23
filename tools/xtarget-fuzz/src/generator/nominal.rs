@@ -69,6 +69,22 @@ macro_rules! http_call {
     };
 }
 
+/// The ok payload of a Result-returning constructor, an `err` stopping the
+/// program (every constructor here is given input it accepts).
+macro_rules! ok_or_panic {
+    ($e:literal) => {
+        concat!("(match ", $e, " { ok(okv) => okv, err(e) => panic(e) })")
+    };
+}
+
+/// A stream to the loopback echo fixture with "hello world" written, so
+/// 11 bytes are on their way back.
+macro_rules! tcp_echo {
+    () => {
+        "(match net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_TCP_PORT\") ?? \"0\") ?? 0) { ok(ts) => { let _tw: Result[Unit, String] = io.write(ts, bytes.from_string(\"hello world\"))\n ts }, err(e) => panic(e) })"
+    };
+}
+
 /// Sized values use fixed-width keys (`k100000000`…), so a series is
 /// linear in n.
 pub const NOMINALS: &[Nominal] = &[
@@ -105,7 +121,13 @@ pub const NOMINALS: &[Nominal] = &[
         name: "HttpResponse",
         module: "http",
         small: "http.with_headers(200, \"aé\", [(\"k\", \"v\")])",
-        sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        // One header past n: a header looked up by name (`http.header`'s last
+        // key) is present at n = 0 too, the fixed-cost probe's size. Its name
+        // differs from every other in its first digit, so each miss compares
+        // the same 2 characters at every n: with "k${100000000 + i}" for all,
+        // the shared prefix with the looked-up name grew and shrank as n
+        // crossed digit boundaries, and http.header's steps read 1.74 / 1.82.
+        sized: "http.with_headers(200, \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${(if i == {n} then 900000000 else 100000000) + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
             "http.with_headers(404, \"aé\", [(\"x-kind\", \"text/plain\")])",
@@ -124,7 +146,7 @@ pub const NOMINALS: &[Nominal] = &[
         name: "HttpRequest",
         module: "http",
         small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [(\"k\", \"v\")])",
-        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
+        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n} + 1) |> list.map((i) => (\"k${(if i == {n} then 900000000 else 100000000) + i}\", \"v\"))))",
         leaves: &[
             "http.new_request(\"GET\", \"/\", \"\", [])",
             "http.new_request(\"POST\", \"/users/42\", \"aé\", [(\"content-type\", \"text/plain\")])",
@@ -363,7 +385,313 @@ pub const NOMINALS: &[Nominal] = &[
         refuses_var: false,
         in_flight: false,
     },
+    // An arbitrary-precision integer. The sized value is 2^n + 1234567: n + 1
+    // bits, built by one shift (a decimal parse of n digits is quadratic).
+    Nominal {
+        name: "BigInt",
+        module: "bigint",
+        small: "bigint.from(1234567)",
+        sized: "bigint.bor(bigint.bshl(bigint.from(1), {n}), bigint.from(1234567))",
+        leaves: &[
+            "bigint.from(0)",
+            "bigint.from(-7)",
+            "bigint.from(1234567)",
+            "bigint.bshl(bigint.from(3), 70)",
+            ok_or_panic!("bigint.parse(\"-98765432109876543210987654321\")"),
+            ok_or_panic!("bigint.parse_radix(\"ff00ff00ff00ff00ff00\", 16)"),
+        ],
+        observe: "bigint.to_string({v})",
+        observed: string,
+        digest: "bigint.bit_length({v})",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A UUID from its text or its 16 bytes; it has no size.
+    Nominal {
+        name: "Uuid",
+        module: "uuid",
+        small: ok_or_panic!("uuid.parse(\"0190a6e2-7c3b-7d4e-8f00-123456789abc\")"),
+        sized: ok_or_panic!("uuid.parse(\"0190a6e2-7c3b-7d4e-8f00-123456789abc\")"),
+        leaves: &[
+            ok_or_panic!("uuid.parse(\"00000000-0000-0000-0000-000000000000\")"),
+            ok_or_panic!("uuid.parse(\"0190a6e2-7c3b-7d4e-8f00-123456789abc\")"),
+            ok_or_panic!("uuid.parse(\"F47AC10B-58CC-4372-A567-0E02B2C3D479\")"),
+            ok_or_panic!("uuid.from_bytes(bytes.from_list([255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 254]))"),
+        ],
+        observe: "uuid.to_string({v})",
+        observed: string,
+        digest: "bytes.len(uuid.to_bytes({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A compiled pattern, observed through what it finds in a fixed text.
+    // The sized pattern is n literal `ab` pairs.
+    Nominal {
+        name: "Regex",
+        module: "regex",
+        small: "regex.new(\"a+(b)\")",
+        sized: "regex.new(string.repeat(\"ab\", {n}))",
+        leaves: &[
+            "regex.new(\"a+(b)\")",
+            "regex.new(\"(é)\")",
+            "regex.new(\"[a-c]+\")",
+            "regex.new(\"^\\\\s*$\")",
+            "regex.new(\"(\\\\w+)@(\\\\w+)\")",
+            "regex.new(\"x|y*\")",
+        ],
+        observe: "regex.find_all({v}, \"aab ab aé b x@y \")",
+        observed: || GenType::List(Box::new(GenType::String)),
+        digest: "string.len({v}.pattern)",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A seeded generator (pure: the same seed draws the same values on
+    // every leg), observed through its first draw.
+    Nominal {
+        name: "Rng",
+        module: "random",
+        small: "random.seeded(42)",
+        sized: "random.seeded({n})",
+        leaves: &["random.seeded(0)", "random.seeded(1)", "random.seeded(-7)", "random.seeded(123456789)"],
+        observe: "random.next_int({v}, 0, 1000000).0",
+        observed: || GenType::Int,
+        digest: "random.next_int({v}, 0, 1000000).0",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A path into a Value. The sized path is n key steps; it is observed
+    // through what it finds in a fixed value.
+    Nominal {
+        name: "Path",
+        module: "value",
+        small: "value.key(value.root(), \"a\")",
+        sized: "list.range(0, {n}) |> list.fold(value.root(), (vp, i) => value.key(vp, \"k${100000000 + i}\"))",
+        leaves: &[
+            "value.root()",
+            "value.key(value.root(), \"a\")",
+            "value.index(value.key(value.root(), \"a\"), 1)",
+            "value.key(value.key(value.root(), \"snake_case\"), \"k\")",
+            "value.index(value.root(), -1)",
+        ],
+        observe: "json.stringify(value.get_path(value.object([(\"a\", value.array([value.int(1), value.int(2)])), (\"snake_case\", value.object([(\"k\", value.null())]))]), {v}) ?? value.string(\"-\"))",
+        observed: string,
+        digest: "(match value.get_path(value.null(), {v}) { some(_) => 1, none => 0 })",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A directory capability over the run's sandbox (its cwd).
+    Nominal {
+        name: "FsRoot",
+        module: "fs",
+        small: ok_or_panic!("fs.open_root(\".\")"),
+        sized: ok_or_panic!("fs.open_root(\".\")"),
+        leaves: &[ok_or_panic!("fs.open_root(\".\")"), ok_or_panic!("fs.open_root(\"sub\")")],
+        observe: "fs.root_list_dir({v}, \".\")!",
+        observed: || GenType::List(Box::new(GenType::String)),
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A child's settings, over the fixed command set (ADR-0027 D4). The
+    // sized command passes n / 5 arguments.
+    Nominal {
+        name: "ProcessCommand",
+        module: "process",
+        small: "process.ProcessCommand { cmd: \"/bin/echo\", args: [\"aé\"] }",
+        sized: "process.ProcessCommand { cmd: \"/bin/echo\", args: list.range(0, {n} / 5) |> list.map((i) => \"aé\") }",
+        leaves: &[
+            "process.ProcessCommand { cmd: \"/bin/echo\", args: [\"aé\", \"b\"] }",
+            "process.ProcessCommand { cmd: \"/usr/bin/true\", args: [] }",
+            "process.ProcessCommand { cmd: \"/usr/bin/false\", args: [] }",
+            "process.ProcessCommand { cmd: \"/bin/cat\", args: [], stdin: \"in aé\" }",
+            "process.ProcessCommand { cmd: \"/bin/echo\", args: [\"d\"], dir: \"sub\" }",
+            "process.ProcessCommand { cmd: \"/no/such/command\", args: [] }",
+        ],
+        observe: "\"${{v}.cmd} ${list.len({v}.args)} ${{v}.dir} ${{v}.stdin}\"",
+        observed: string,
+        digest: "list.len({v}.args)",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A started child, observed by how it ends (`wait`). Only commands that
+    // start: a start that fails is the error path.
+    Nominal {
+        name: "ProcessChild",
+        module: "process",
+        small: ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/bin/echo\", args: [\"aé\"] })"),
+        sized: ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/bin/echo\", args: list.range(0, {n} / 5) |> list.map((i) => \"aé\") })"),
+        leaves: &[
+            ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/bin/echo\", args: [\"aé\"] })"),
+            ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/usr/bin/true\", args: [] })"),
+            ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/usr/bin/false\", args: [] })"),
+            ok_or_panic!("process.start(process.ProcessCommand { cmd: \"/bin/cat\", args: [], stdin: \"in aé\" })"),
+        ],
+        observe: "{ let pw = process.wait({v})!\n \"${pw.code}|${pw.stdout}|${pw.stderr}\" }",
+        observed: string,
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // The standard streams.
+    Nominal {
+        name: "Stdin",
+        module: "io",
+        small: ok_or_panic!("io.stdin()"),
+        sized: ok_or_panic!("io.stdin()"),
+        leaves: &[ok_or_panic!("io.stdin()")],
+        observe: "\"stdin\"",
+        observed: string,
+        digest: "1",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    Nominal {
+        name: "Stdout",
+        module: "io",
+        small: ok_or_panic!("io.stdout()"),
+        sized: ok_or_panic!("io.stdout()"),
+        leaves: &[ok_or_panic!("io.stdout()")],
+        observe: "\"stdout\"",
+        observed: string,
+        digest: "1",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    Nominal {
+        name: "Stderr",
+        module: "io",
+        small: ok_or_panic!("io.stderr()"),
+        sized: ok_or_panic!("io.stderr()"),
+        leaves: &[ok_or_panic!("io.stderr()")],
+        observe: "\"stderr\"",
+        observed: string,
+        digest: "1",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A stream to the loopback echo fixture with "hello world" on its way
+    // back, so a read never waits on nothing (ADR-0027 D5).
+    Nominal {
+        name: "TcpStream",
+        module: "net",
+        small: tcp_echo!(),
+        sized: tcp_echo!(),
+        leaves: &[tcp_echo!()],
+        observe: "net.tcp_is_open({v})!",
+        observed: || GenType::Bool,
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A listener on an ephemeral loopback port with one connection pending,
+    // so an accept never waits.
+    Nominal {
+        name: "TcpListener",
+        module: "net",
+        small: TCP_PENDING_LISTENER,
+        sized: TCP_PENDING_LISTENER,
+        leaves: &[TCP_PENDING_LISTENER],
+        observe: "net.tcp_local_port({v})! > 0",
+        observed: || GenType::Bool,
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A UDP socket on an ephemeral loopback port.
+    Nominal {
+        name: "UdpSocket",
+        module: "net",
+        small: ok_or_panic!("net.udp_bind(\"127.0.0.1\", 0)"),
+        sized: ok_or_panic!("net.udp_bind(\"127.0.0.1\", 0)"),
+        leaves: &[ok_or_panic!("net.udp_bind(\"127.0.0.1\", 0)")],
+        observe: "net.udp_local_port({v})! > 0",
+        observed: || GenType::Bool,
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A received datagram; its port is the sender's ephemeral one, so it is
+    // observed through its data and host.
+    Nominal {
+        name: "UdpPacket",
+        module: "net",
+        small: "{ data: bytes.from_list([1, 2]), host: \"127.0.0.1\", port: 9 }",
+        sized: "{ data: bytes.zeros({n}), host: \"127.0.0.1\", port: 9 }",
+        leaves: &["{ data: bytes.new(), host: \"::1\", port: 0 }"],
+        observe: "\"${bytes.to_list({v}.data)} ${{v}.host}\"",
+        observed: string,
+        digest: "bytes.len({v}.data)",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    Nominal {
+        name: "IpAddr",
+        module: "net",
+        small: ok_or_panic!("net.parse_ip(\"127.0.0.1\")"),
+        sized: ok_or_panic!("net.parse_ip(\"2001:db8::ff00:42:8329\")"),
+        leaves: &[
+            ok_or_panic!("net.parse_ip(\"127.0.0.1\")"),
+            ok_or_panic!("net.parse_ip(\"10.0.0.255\")"),
+            ok_or_panic!("net.parse_ip(\"::1\")"),
+            ok_or_panic!("net.parse_ip(\"2001:db8::ff00:42:8329\")"),
+        ],
+        observe: "net.ip_to_string({v})",
+        observed: string,
+        digest: "string.len(net.ip_to_string({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
+        in_flight: false,
+    },
+    // A descriptor of the program's own (#3620): a shared-memory file, whose
+    // reads end (a socket to the sink would wait forever on a read).
+    // Calls that need a socket build their own (`net_unix_args.rs`).
+    Nominal {
+        name: "Fd",
+        module: "unix",
+        small: ok_or_panic!("unix.shm_create(8)"),
+        sized: ok_or_panic!("unix.shm_create({n})"),
+        leaves: &[ok_or_panic!("unix.shm_create(8)"), ok_or_panic!("unix.shm_create(2)"), ok_or_panic!("unix.shm_create(3)")],
+        // A socket has no offset (shm_read is ESPIPE on it): it reads as [].
+        // Any err reads as [] (`??`): branching on an error's text is E035,
+        // which the generated program must not trip.
+        observe: "bytes.to_list(unix.shm_read({v}, 0, 2) ?? bytes.new())",
+        observed: || GenType::List(Box::new(GenType::Int)),
+        digest: "1",
+        observe_calls_effect: true,
+        refuses_var: false,
+        in_flight: false,
+    },
 ];
+
+/// The listener of [`NOMINALS`]' `TcpListener`.
+const TCP_PENDING_LISTENER: &str = "(match net.tcp_listen(\"127.0.0.1\", 0) { ok(tl) => { let _tc: Result[TcpStream, String] = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(tl) ?? 0)\n tl }, err(e) => panic(e) })";
+
+/// Nominals a program names by their module (`value.Path`): the bare name
+/// is another type in a program's own scope.
+const QUALIFIED: &[(&str, &str)] = &[("Path", "value.Path")];
+
+/// How a program spells nominal `name` in a type annotation.
+pub fn spelled(name: &str) -> &str {
+    QUALIFIED
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(name, |(_, q)| *q)
+}
 
 /// The nominal named `name`, if the grammar builds it.
 pub fn get(name: &str) -> Option<&'static Nominal> {

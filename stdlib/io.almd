@@ -62,12 +62,14 @@ effect fn stderr() -> Stderr = Stderr(2)
 /// Up to max bytes from h; empty once h has ended; err if max < 0.
 @ordered
 @category
+@sized_by(h, max)
 effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
   if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
 
 /// Exactly n bytes from h; err if h ends first, naming how many arrived.
 @ordered
 @category
+@sized_by(h, n)
 effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("io.read_exact: negative length ${n}")
   else __read_exact_from(h, n, 0, [])

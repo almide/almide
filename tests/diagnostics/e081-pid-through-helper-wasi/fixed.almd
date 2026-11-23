@@ -1,0 +1,12 @@
+// process.pid reached through a helper on `--target wasi`: the availability
+// verdict scans every REACHABLE body, not only `main`, so a pid behind a
+// helper fn is refused at check time (#4913) the same as a direct call. The
+// helper names the instance from the environment instead.
+import env
+
+effect fn instance_id() -> String = env.get("ALMIDE_INSTANCE_ID") ?? "local"
+
+effect fn main() -> Unit = {
+  let id = instance_id()!
+  println("instance ${id}")
+}

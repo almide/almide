@@ -558,18 +558,16 @@ fn render_fn_move_op(st: &mut FnLoop<'_>, i: usize, op: &Op) -> Result<bool, Low
             line!("// drop: a heap slot's snapshot, scope-end");
         }
         // A copy of a borrow-only read whose own uses only borrow
-        // (render_native_borrow_read::ref_dups): the same reference.
+        // (render_native_borrow_read::ref_dups): the same reference; and a
+        // copy of a slot alias.
         Op::Dup { dst, src }
-            if crate::render_native_borrow_read::ref_dup(*dst)
-                && matches!(st.tys.get(src), Some(NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef)) =>
+            if (crate::render_native_borrow_read::ref_dup(*dst)
+                && matches!(st.tys.get(src), Some(NTy::RecRef(_) | NTy::VecRef | NTy::VecStrRef | NTy::StrRef)))
+                || st.addrs.slot_alias(dst) =>
         {
             let t = st.tys[src];
             st.tys.insert(*dst, t);
-            line!("let mut {} = {};", var(*dst), var(*src));
-        }
-        Op::Dup { dst, src } if st.addrs.slot_alias(dst) => {
-            let t = st.tys[src];
-            st.tys.insert(*dst, t);
+            crate::render_native_addr::alias_field(*dst, *src);
             line!("let mut {} = {};", var(*dst), var(*src));
         }
         // A copy no op reads, only releases (`let snap = b.m` read through

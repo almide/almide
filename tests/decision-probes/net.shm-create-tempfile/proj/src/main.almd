@@ -1,0 +1,6 @@
+import unix
+
+effect fn main() -> Unit = match unix.shm_create(8) {
+  ok(_) => println("shm: ok"),
+  err(e) => println("shm: err ${e}"),
+}

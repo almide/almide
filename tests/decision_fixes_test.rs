@@ -160,3 +160,41 @@ fn novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host() {
     let b = run(&proj, &["build", "src/main.almd", "--target", "wasm", "-o", "out.wasm"]);
     assert!(!b.status.success() && text(&b).contains("E081"), "control: the stock artifact was not refused:\n{}", text(&b));
 }
+
+/// effect.fan-ordered-reach (c1): on the Rust codegen route the fan pass sees
+/// a bodied stdlib call (`env.set` over `__set`) and a module's sibling call
+/// as the symbols ResolveCalls / StdlibLowering mint (`almide_rt_<m>_<f>`).
+/// The walk follows the record of what each minted symbol names — never its
+/// spelling — so both fans run inline, in arm order; the reading-only fan
+/// beside them stays threaded (the control half). Observed by emitting the
+/// program (`--target rust`): a threaded fan opens its thread group
+/// (`let __almide_fan_go = almide_fan_group(..)`; the runtime's own helpers
+/// spell the call otherwise).
+#[test]
+fn novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order() {
+    let (m, outer, inner) = (novel::module(), novel::ident("put"), novel::ident("write_it"));
+    let (setter, getter, reader) = (novel::ident("set_it"), novel::ident("get_it"), novel::ident("read_it"));
+    let module = format!(
+        "import fs\n\neffect fn {inner}(path: String) -> Result[String, String] = {{\n  fs.write_text(path, \"new\")!\n  ok(\"wrote\")\n}}\n\neffect fn {outer}(path: String) -> Result[String, String] = ok({inner}(path)!)\n"
+    );
+    let main = format!(
+        "import env\nimport fs\nimport {m}\n\n\
+         effect fn {setter}(k: String) -> Result[String, String] = {{\n  env.set(k, \"new\")!\n  ok(\"set\")\n}}\n\n\
+         effect fn {getter}(k: String) -> Result[String, String] = ok(env.get(k) ?? \"none\")\n\n\
+         effect fn {reader}(path: String) -> Result[String, String] = ok(fs.read_text(path)!)\n\n\
+         effect fn main() -> Unit = {{\n  let k = \"NOVEL_FAN_KEY\"\n  let p = \"f.txt\"\n\
+         \x20 let (a, b) = fan {{\n    {setter}(k)!\n    {getter}(k)!\n  }}\n\
+         \x20 let (c, d) = fan {{\n    {m}.{outer}(p)!\n    {reader}(p)!\n  }}\n\
+         \x20 let (e, f) = fan {{\n    {getter}(k)!\n    {reader}(p)!\n  }}\n\
+         \x20 println(\"${{a}} ${{b}} ${{c}} ${{d}} ${{e}} ${{f}}\")\n}}\n"
+    );
+    let (_t, proj) = project("", &[("src/main.almd", main.clone()), (format!("src/{m}.almd").as_str(), module.clone())]);
+    let o = run(&proj, &["src/main.almd", "--target", "rust"]);
+    let rust = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "emit failed:\n{main}\n{}", text(&o));
+    let threaded = rust.matches("let __almide_fan_go = almide_fan_group(").count();
+    assert_eq!(
+        threaded, 1,
+        "expected exactly the reading-only fan threaded; {threaded} fans open a thread group (an arm reaching an @ordered fn through a minted symbol was threaded, or the control fan was not):\n{module}\n{main}"
+    );
+}

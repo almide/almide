@@ -9,6 +9,7 @@ effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
+@sized_by(b)
 effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
@@ -17,6 +18,7 @@ fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
+@sized_by(b)
 fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Deflate (raw, no header — used by Minecraft protocol) ──
@@ -26,6 +28,7 @@ effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
+@sized_by(b)
 effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
@@ -34,6 +37,7 @@ fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
+@sized_by(b)
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Gzip ──
@@ -54,4 +58,5 @@ fn gunzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
+@sized_by(b)
 fn gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _

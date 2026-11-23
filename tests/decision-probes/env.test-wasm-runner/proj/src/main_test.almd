@@ -1,0 +1,6 @@
+import fs
+
+test "a read outside the grant is refused on the wasmtime lane" {
+  assert_eq(fs.read_text("secret.txt") ?? "refused", "refused")
+  assert_eq(fs.read_text("proj/secret.txt") ?? "refused", "refused")
+}
