@@ -204,22 +204,25 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(hb).local_set(ha);
                 let tag = slot_memarg(almide_layout::SUM_TAG);
                 self.f.instructions().local_get(ha).i32_load(tag);
+                self.fw_res_tag();
                 self.f.instructions().local_get(hb).i32_load(tag);
+                self.fw_res_tag();
                 self.f.instructions().i32_ne().if_(BlockType::Result(ValType::I32));
                 self.f.instructions().i32_const(0);
                 self.f.instructions().else_();
                 self.f.instructions().local_get(ha).i32_load(tag).i32_eqz();
+                self.fw_res_tag_back(1);
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                 self.f.instructions().local_get(ha);
-                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
+                self.load_res_slot(ot);
                 self.f.instructions().local_get(hb);
-                self.load_ty_slot(ot, almide_layout::SUM_FIELD);
+                self.load_res_slot(ot);
                 self.emit_val_eq_at(ot, path)?;
                 self.f.instructions().else_();
                 self.f.instructions().local_get(ha);
-                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.load_res_slot(et);
                 self.f.instructions().local_get(hb);
-                self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                self.load_res_slot(et);
                 self.emit_val_eq_at(et, path)?;
                 self.f.instructions().end().end();
                 self.release_i32();
@@ -249,12 +252,14 @@ impl Emitter<'_> {
                 let ha = self.hold_i32()?;
                 self.f.instructions().local_set(hb).local_set(ha);
                 self.f.instructions().i32_const(1);
-                for (fty, off) in fields {
+                for (pos, (fty, off)) in fields.into_iter().enumerate() {
                     self.f.instructions().if_(BlockType::Result(ValType::I32));
                     self.f.instructions().local_get(ha);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(SliceTy::Tuple(id), None, pos);
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
+                    self.fw_field(SliceTy::Tuple(id), None, pos);
                     self.emit_val_eq_at(fty, path)?;
                     self.f.instructions().else_().i32_const(0).end();
                 }
@@ -462,7 +467,10 @@ impl Emitter<'_> {
                         let hb = self.hold_i32()?;
                         self.f.instructions().local_set(hb);
                         self.f.instructions().i32_load(m);
-                        self.f.instructions().local_get(hb).i32_load(m).i32_eq();
+                        self.fw_tag(SliceTy::Named(ti));
+                        self.f.instructions().local_get(hb).i32_load(m);
+                        self.fw_tag(SliceTy::Named(ti));
+                        self.f.instructions().i32_eq();
                         self.release_i32();
                     }
                     Shape::Variant(cases) => {
@@ -472,23 +480,31 @@ impl Emitter<'_> {
                         let m = slot_memarg(almide_layout::SUM_TAG);
                         self.f.instructions().local_set(hb).local_set(ha);
                         self.f.instructions().local_get(ha).i32_load(m);
-                        self.f.instructions().local_get(hb).i32_load(m).i32_ne();
+                        self.fw_tag(SliceTy::Named(ti));
+                        self.f.instructions().local_get(hb).i32_load(m);
+                        self.fw_tag(SliceTy::Named(ti));
+                        self.f.instructions().i32_ne();
                         self.f.instructions().if_(BlockType::Result(ValType::I32));
                         self.f.instructions().i32_const(0);
                         self.f.instructions().else_();
                         let payload: Vec<_> =
-                            cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
+                            cases.iter().enumerate().filter(|(_, (_, fs))| !fs.is_empty()).collect();
                         // if tag==A { fields-A } else if tag==B { fields-B }
                         // … else { 1 } (a unit case: tag equality settled it).
-                        for (tag, fields) in &payload {
+                        for (case, (tag, fields)) in &payload {
                             self.f.instructions().local_get(ha).i32_load(m);
+                            self.fw_tag(SliceTy::Named(ti));
                             self.f.instructions().i32_const(*tag as i32).i32_eq();
                             self.f.instructions().if_(BlockType::Result(ValType::I32));
                             self.f.instructions().i32_const(1);
-                            for (fty, off) in fields.iter() {
+                            for (pos, (fty, off)) in fields.iter().enumerate() {
                                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                                 self.f.instructions().local_get(ha);
                                 self.load_ty_slot(*fty, *off);
+                                // The left block's read sits under its own tag test; the
+                                // right block's is covered by the tags-equal test only, which
+                                // the byte check does not follow, so it stays unrecorded.
+                                self.fw_field(SliceTy::Named(ti), Some(*case), pos);
                                 self.f.instructions().local_get(hb);
                                 self.load_ty_slot(*fty, *off);
                                 self.emit_val_eq_at(*fty, path)?;
@@ -509,12 +525,14 @@ impl Emitter<'_> {
                         let ha = self.hold_i32()?;
                         self.f.instructions().local_set(hb).local_set(ha);
                         self.f.instructions().i32_const(1);
-                        for (fty, off) in fields {
+                        for (pos, (fty, off)) in fields.into_iter().enumerate() {
                             self.f.instructions().if_(BlockType::Result(ValType::I32));
                             self.f.instructions().local_get(ha);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(SliceTy::Named(ti), None, pos);
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(fty, off);
+                            self.fw_field(SliceTy::Named(ti), None, pos);
                             self.emit_val_eq_at(fty, path)?;
                             self.f.instructions().else_().i32_const(0).end();
                         }
@@ -547,9 +565,9 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(1);
                 self.f.instructions().else_();
                 self.f.instructions().local_get(ha);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.f.instructions().local_get(hb);
-                self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                self.load_opt_slot(et);
                 self.emit_val_eq_at(et, path)?;
                 self.f.instructions().end().end();
                 self.release_i32();

@@ -1,0 +1,11 @@
+// Drill: an Option payload read loads 8 bytes past its slot while the fields
+// witness still records the slot — the fields checker accepts, the bytes
+// read outside the some block.
+fn pick(o: Int?) -> Int = match o {
+  some(v) => v,
+  none => 0,
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(pick(some(3))))
+}

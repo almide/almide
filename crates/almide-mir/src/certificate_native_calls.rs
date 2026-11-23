@@ -195,7 +195,7 @@ fn native_host_site(callee: &str) -> Option<usize> {
 /// (`mir_ops::INJECTED_ACCESSORS`). The spelling of a name — a `.` in it or
 /// a leading `__` — admits nothing: a callee in none of these sets gets the
 /// out-of-range row the checker rejects.
-pub(crate) fn render_served_callee(name: &str) -> bool {
+pub fn render_served_callee(name: &str) -> bool {
     static REGISTERED: std::sync::OnceLock<std::collections::HashSet<&'static str>> = std::sync::OnceLock::new();
     REGISTERED
         .get_or_init(|| crate::lower::registry_sig::registered_call_names().into_iter().collect())

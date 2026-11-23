@@ -114,15 +114,16 @@ pub fn program_witnesses(
             caps: crate::certificate::cap_witness_string(f),
         })
         .collect();
-    // The call-mode witness indexes functions by name. Dotted callees are
-    // purity-gated self-hosted stdlib calls and `__`-prefixed out-of-program
-    // names are render-linked runtime helpers: both borrow their heap args by
-    // the renderer contract (the emit_cert_from_source policy). Any other
-    // unknown callee gets the out-of-range index the checker rejects.
+    // The call-mode witness indexes functions by name. An out-of-program
+    // callee has no row only when it is a member of a set the render serves
+    // and borrows its heap args by the renderer contract
+    // (`certificate::render_served_callee`, #4828); its spelling admits
+    // nothing. A wall name the lowering minted (`*_x`, `*_wall`), a
+    // `__repr_*` routine no product path generates, a fn that walled: each
+    // gets the out-of-range index the checker rejects.
     let program: std::collections::BTreeMap<String, crate::MirFunction> =
         lowered.into_iter().map(|f| (f.name.clone(), f)).collect();
-    let call_modes = (!program.is_empty()).then(|| {
-        crate::certificate::call_modes_witness(&program, &|n: &str| n.contains('.') || n.starts_with("__"))
-    });
+    let call_modes = (!program.is_empty())
+        .then(|| crate::certificate::call_modes_witness(&program, &crate::certificate::render_served_callee));
     Ok(ProgramWitnesses { functions, call_modes, walled })
 }

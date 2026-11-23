@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+index eb6dd2df05..49f8785b03 100644
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -601,7 +601,8 @@ impl Emitter<'_> {
+                 let hold = self.hold_i32()?;
+                 self.f
+                     .instructions()
+-                    .i32_const(s.slot_size() as i32)
++                    // RE-INJECTED (drill): the some block is allocated 4 bytes short.
++                    .i32_const(s.slot_size() as i32 - 4)
+                     .call(F_ALLOC)
+                     .local_tee(hold);
+                 // A construction site: the payload does not leave the frame

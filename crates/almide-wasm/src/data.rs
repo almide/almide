@@ -55,14 +55,21 @@ impl Emitter<'_> {
                     .instructions()
                     .i32_const(16)
                     .call(F_ALLOC)
-                    .local_tee(hold)
+                    .local_tee(hold);
+                // A construction site: the payload does not leave the frame
+                // (the branch above took those).
+                let site = self.fw_res_site(side);
+                self.f
+                    .instructions()
                     .i32_const(i32::from(!is_ok))
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                self.fw_store(site, 0);
                 self.f.instructions().local_get(hold);
                 self.lower(expr, Some(side))?;
                 self.rc_share_guard(expr, side);
                 self.witness_store(expr, side);
                 self.store_ty_slot(side, almide_layout::SUM_FIELD);
+                self.fw_store(site, 1);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
                 hty
@@ -92,7 +99,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(self.scr_i32_local);
                     self.witness_branch_arm();
                     self.witness_branch_anchor(else_at);
-                    self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                    self.load_opt_slot(et);
                     self.own_unwrap_or_join(e, fallback, et);
                     self.witness_unwrap_or_arm(e, None, et);
                     self.witness_branch_close();
@@ -111,6 +118,7 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne()
                         .if_(BlockType::Result(et.val_type()));
+                    self.fw_res_tag_back(5);
                     let then_at = self.arm_anchor_here();
                     self.witness_branch_open();
                     self.witness_branch_arm();
@@ -122,7 +130,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(self.scr_i32_local);
                     self.witness_branch_arm();
                     self.witness_branch_anchor(else_at);
-                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    self.load_res_slot(et);
                     self.own_unwrap_or_join(e, fallback, et);
                     self.witness_unwrap_or_arm(e, None, et);
                     self.witness_branch_close();
@@ -156,6 +164,7 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne()
                         .if_(BlockType::Result(ValType::I32));
+                    self.fw_res_tag_back(5);
                     if let Some(dec) = err_dec {
                         self.f.instructions().local_get(hr).call(dec);
                     }
@@ -167,13 +176,13 @@ impl Emitter<'_> {
                         .call(F_ALLOC)
                         .local_tee(hc)
                         .local_get(hr);
-                    self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    self.load_res_slot(et);
                     if !owned_carrier {
                         // #2969: over a BORROWED carrier the cell takes its
                         // own credit on the payload, so it is owned too.
                         self.share_handle_top(et);
                     }
-                    self.store_ty_slot(et, almide_layout::OPTION_FIELD);
+                    self.store_opt_slot(et);
                     if owned_carrier {
                         self.f.instructions().local_get(hr).call(F_DEC_FLAT);
                     }
@@ -601,10 +610,19 @@ impl Emitter<'_> {
                     .i32_const(s.slot_size() as i32)
                     .call(F_ALLOC)
                     .local_tee(hold);
+                // A construction site: the payload does not leave the frame
+                // (the branch above took those), so nothing between the
+                // allocation and the store leaves the site's window.
+                let site = self.fw_opt_site(s);
                 self.lower(expr, Some(s))?;
                 self.rc_share_guard(expr, s);
                 self.witness_store(expr, s);
-                self.store_ty_slot(s, almide_layout::OPTION_FIELD);
+                if site.is_some() {
+                    self.store_ty_slot(s, almide_layout::OPTION_FIELD);
+                    self.fw_store(site, 0);
+                } else {
+                    self.store_opt_slot(s);
+                }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
         Ok(hty)
@@ -637,15 +655,18 @@ impl Emitter<'_> {
         self.f.instructions().local_set(val);
         let hold = self.hold_i32()?;
         self.f.instructions().i32_const(size).call(F_ALLOC).local_set(hold);
+        // A construction site either way: the allocation is held to the
+        // block's size and each store to its field.
+        debug_assert!(field == if tag.is_some() { almide_layout::SUM_FIELD } else { almide_layout::OPTION_FIELD });
+        debug_assert!(size as u32 == if tag.is_some() { 16 } else { side.slot_size() });
+        let site = if tag.is_some() { self.fw_res_site(side) } else { self.fw_opt_site(side) };
         if let Some(tag) = tag {
-            self.f
-                .instructions()
-                .local_get(hold)
-                .i32_const(tag)
-                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.f.instructions().local_get(hold).i32_const(tag).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            self.fw_store(site, 0);
         }
         self.f.instructions().local_get(hold).local_get(val);
         self.store_ty_slot(side, field);
+        self.fw_store(site, usize::from(tag.is_some()));
         self.f.instructions().local_get(hold);
         self.release_i32();
         self.release_val(side);
@@ -707,6 +728,7 @@ impl Emitter<'_> {
             .i32_const(0)
             .i32_ne()
             .if_(BlockType::Result(et.val_type()));
+        self.fw_res_tag_back(5);
         let then_at = self.arm_anchor_here();
         self.witness_branch_open();
         self.witness_branch_arm();
@@ -727,7 +749,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(self.scr_i32_local);
         self.witness_branch_arm();
         self.witness_branch_anchor(else_at);
-        self.load_ty_slot(et, almide_layout::SUM_FIELD);
+        self.load_res_slot(et);
         self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
         if let (Some(w), Some(t)) = (self.witness.as_mut(), temp) {
             w.temp_ops(t, "d");
