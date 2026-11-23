@@ -1,0 +1,6 @@
+[package]
+name = "fs_scope_refusals"
+version = "0.1.0"
+
+[permissions]
+fs = ["./src"]

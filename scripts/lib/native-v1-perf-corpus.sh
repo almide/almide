@@ -9,5 +9,8 @@ native_v1_perf_programs() {
       grep -E '^spec/' proofs/native-v1-perf-candidates.txt
     fi
     ls research/benchmark/perf/v1-shapes/*.almd
+    # Scoped shape benches: a project whose almide.toml grants [permissions] fs,
+    # built (and rendered by render_corpus) under that scope.
+    ls research/benchmark/perf/v1-shapes-scoped/*/src/main.almd
   } | LC_ALL=C sort -u
 }

@@ -456,6 +456,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     try_render_rust_source_certified(source).map(|(rust, _)| rust)
 }
 
+/// [`try_render_rust_source`] under a project's `[permissions] fs` roots, as
+/// the build renders a scoped project (`native_fs_scope`): the perf shapes
+/// gate's corpus renders its scoped programs through this, so the scope
+/// paths of the renderer are measured, not only the unscoped ones.
+pub fn try_render_rust_source_scoped(source: &str, fs_roots: Option<Vec<String>>) -> Result<String, LowerError> {
+    let _scope = crate::native_fs_scope::ScopeGuard::enter(fs_roots);
+    try_render_rust_source(source)
+}
+
 /// [`try_render_rust_source`] with the ownership certificate of EVERY
 /// function it rendered (#4006): the certificates are taken from the exact
 /// MIR handed to the renderer — after the probe charges, the result-window
