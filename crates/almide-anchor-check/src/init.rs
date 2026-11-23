@@ -284,9 +284,10 @@ pub fn check_init(
             return Err(what("too short".into()));
         }
         let (h, w) = (num(t[0], 'h').map_err(what)?, num(t[1], 'w').map_err(what)?);
+        // A site with no anchor is one this check cannot hold to the bytes:
+        // REFUSED, not counted (bounds.rs `stretch`).
         if g.iter().all(Option::is_none) {
-            rep.init_unlocated += 1;
-            continue;
+            return Err(what("carries no anchor".into()));
         }
         if t[2].starts_with('v') {
             // `h H w W v K r R f L t S`

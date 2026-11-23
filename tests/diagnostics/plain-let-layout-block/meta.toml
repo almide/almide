@@ -1,0 +1,2 @@
+expects_error = "must be followed by the name it binds"
+hint_substring = "one per line"

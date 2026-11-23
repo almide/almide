@@ -1,0 +1,2 @@
+expects_error = "is not an expression in Almide"
+hint_substring = "use a block"

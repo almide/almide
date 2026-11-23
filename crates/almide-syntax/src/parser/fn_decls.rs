@@ -174,21 +174,30 @@ impl Parser {
         effect: bool,
         return_type: &TypeExpr,
     ) -> Result<Option<Expr>, String> {
-        if self.check(TokenType::LBrace) {
-            let tok = self.current();
-            return Err(format!(
-                "Missing '=' before function body at line {}:{}\n  Hint: Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}",
-                tok.line, tok.col, name
-            ));
-        }
-        if !self.check(TokenType::Eq) {
+        // `fn f(..) -> T { .. }` (Rust / Go / TypeScript / Swift): one error,
+        // and the body parses as the block it is. Returning here dropped the
+        // whole body, so every other foreign idiom inside it (`let mut`, a
+        // braced `if`, ...) was reported one attempt at a time — a reader
+        // with three retries ran out before the file was clean.
+        let missing_eq = self.check(TokenType::LBrace);
+        if missing_eq {
+            let diag = self.diag_error(
+                "Missing '=' before function body",
+                format!("Almide requires '=' before the body. Write: fn {}(...) -> Type = {{ ... }}", name),
+                "fn",
+            );
+            self.errors.push(diag);
+        } else if !self.check(TokenType::Eq) {
             return Ok(None);
         }
         let eq_idx = self.pos;
-        self.advance();
-        self.skip_newlines();
+        if !missing_eq {
+            self.advance();
+            self.skip_newlines();
+        }
         let body_start_idx = self.pos;
         let body_span = self.current_span();
+        let pre_err_len = self.errors.len();
         let parsed = if self.check(TokenType::Let)
             || self.check(TokenType::Var)
             || self.check(TokenType::Guard)
@@ -199,7 +208,9 @@ impl Parser {
         };
         // #3370: recorded AFTER the body parsed, so a fn nested inside it
         // (itself an error) cannot leave its shape behind for this decl.
-        self.last_fn_body = parsed.as_ref().ok().map(|b| super::braceless_body::FnBodyShape {
+        // No shape is recorded for a body that had no `=`: `eq_idx` then names
+        // the `{`, and the shape's readers take it for the `=`.
+        self.last_fn_body = parsed.as_ref().ok().filter(|_| !missing_eq).map(|b| super::braceless_body::FnBodyShape {
             eq_idx,
             body_start_idx,
             braced: matches!(b.kind, ExprKind::Block { .. })
@@ -217,7 +228,17 @@ impl Parser {
                 // the checker treats it as Unknown and keeps checking
                 // everything else (the block-body twin of Stmt::Error,
                 // contract C-263's statement-granular recovery).
-                self.errors.push(self.string_to_diagnostic(&msg));
+                // A site that already pushed its own diagnostic for this
+                // failure (a targeted message with its hint, at the same
+                // position) is not repeated as a second, generic one. Only
+                // the LAST pushed diagnostic is compared: an earlier,
+                // recovered error in the same body must not swallow this one.
+                let d = self.string_to_diagnostic(&msg);
+                let repeated = self.errors.len() > pre_err_len
+                    && self.errors.last().is_some_and(|last| last.line == d.line && last.col == d.col);
+                if !repeated {
+                    self.errors.push(d);
+                }
                 self.skip_to_next_decl();
                 Expr::new(self.next_id(), Some(body_span), ExprKind::Error)
             }

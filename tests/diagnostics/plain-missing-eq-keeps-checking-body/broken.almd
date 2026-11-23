@@ -1,0 +1,9 @@
+// A Rust-shaped fn: no `=` before the body, and `let mut` inside it. Both
+// are reported in one pass — the body is still read after the missing `=`.
+fn bump(start: Int) -> Int {
+  let mut total = start
+  total = total + 1
+  total
+}
+
+fn main() -> Unit = println(int.to_string(bump(1)))
