@@ -701,3 +701,90 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     );
     assert!(dead2.join("libalmide_rt.rlib").is_file(), "a sweep within the stamp interval must not run");
 }
+
+// ── #4911: the rlib dirs are bounded by size, not only by age ────────────────
+//
+// A v1 runtime rlib is keyed by the runtime subset its program reaches, so
+// distinct programs make distinct dirs and a burst of them (an inspection
+// campaign) grew `<temp>` to 65 GB long before the week-long age rule fires.
+// `ALMIDE_CACHE_MAX_BYTES` bounds them least recently used first.
+
+/// `almide run` through the rlib fast path with the size bound set to `cap`.
+fn almide_run_rtlib_capped(td: &Path, program: &Path, cap: &str) -> std::process::Output {
+    let tmp = td.join("tmp");
+    Command::new(almide())
+        .arg("run")
+        .arg(program)
+        .current_dir(td)
+        .env("HOME", td.join("home"))
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", &tmp)
+        .env("ALMIDE_RUN_PROJECT_DIR", td.join("run"))
+        .env("ALMIDE_CACHE_MAX_BYTES", cap)
+        .env_remove("ALMIDE_NO_RTLIB")
+        .output()
+        .expect("spawn almide run")
+}
+
+/// Every file of `dir` aged by `by` (past the eviction grace, far inside the
+/// week the age rule waits), and the size sweep's rate-limit stamp removed.
+fn age_rtlib_dir(tmp: &Path, dir: &Path, by: Duration) {
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        set_mtime(&e.path(), SystemTime::now() - by);
+    }
+    let _ = std::fs::remove_file(cache_base(tmp).join(".almide-rtlib-size-stamp"));
+}
+
+#[test]
+fn rtlib_dirs_past_the_size_bound_are_emptied_least_recently_used_first() {
+    let td = tempfile::tempdir().unwrap();
+    let tmp = td.path().join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::create_dir_all(td.path().join("home")).unwrap();
+    // Three programs reaching different runtime items: three rlib dirs.
+    let progs = [
+        ("a.almd", "fn main() -> Unit = println(list.join(string.split(string.to_upper(\"a,bc\"), \",\"), \"+\"))\n", "A+BC\n"),
+        ("b.almd", "fn main() -> Unit = println(int.to_string(list.sum(list.reverse(list.sort([3, 1, 2])))))\n", "6\n"),
+        ("c.almd", "fn main() -> Unit = println(string.repeat(\"ab\", 2))\n", "abab\n"),
+    ];
+    let paths: Vec<PathBuf> = progs
+        .iter()
+        .map(|(n, src, _)| {
+            let p = td.path().join(n);
+            std::fs::write(&p, src).unwrap();
+            p
+        })
+        .collect();
+    let ten_minutes = Duration::from_secs(10 * 60);
+    let run = |i: usize, cap: &str| {
+        let out = almide_run_rtlib_capped(td.path(), &paths[i], cap);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), progs[i].2);
+    };
+    let holding = |tmp: &Path| -> Vec<PathBuf> {
+        rtlib_dirs(&cache_base(tmp)).into_iter().filter(|d| d.join("lib.rs").exists()).collect()
+    };
+
+    run(0, "4G");
+    let first = holding(&tmp);
+    assert_eq!(first.len(), 1, "{first:?}");
+    age_rtlib_dir(&tmp, &first[0], ten_minutes);
+    // Control: under the default-sized bound the aged dir is kept.
+    run(1, "4G");
+    let two = holding(&tmp);
+    assert_eq!(two.len(), 2, "two programs with different runtime subsets, two dirs kept: {two:?}");
+    for d in &two {
+        age_rtlib_dir(&tmp, d, ten_minutes);
+    }
+    // A one-byte bound: both aged dirs are emptied; the one this build links stays.
+    run(2, "1");
+    let left = holding(&tmp);
+    assert_eq!(left.len(), 1, "only the dir in use may keep its rlib: {left:?}");
+    assert!(!two.contains(&left[0]), "the surviving dir is the new program's");
+    for d in &two {
+        let entries: Vec<String> =
+            std::fs::read_dir(d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(entries, vec![".almide-build.lock".to_string()], "{} emptied to its lockfile", d.display());
+    }
+}

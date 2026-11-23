@@ -278,10 +278,15 @@ pub(super) fn test_art(ctx: &Ctx, file: &Path, src: &str, wasm: bool) -> Result<
 }
 
 /// The libtest binary a native `almide test` left in its build cache:
-/// `$TMPDIR/almide-test/native/<stem>-<path hash>/almide_test_bin`
-/// (`src/cli/test_scratch.rs`). Exactly one, or the layout moved.
+/// `$TMPDIR/almide-<uid>/test/native/<stem>-<path hash>/almide_test_bin`
+/// (`src/cli/test_scratch.rs`, the private cache base of #4180), or the
+/// older `$TMPDIR/almide-test/native/…`. Exactly one, or the layout moved.
 pub fn built_test_bin(tmp: &Path) -> Result<PathBuf, String> {
-    let root = tmp.join("almide-test").join("native");
+    let private = std::fs::read_dir(tmp).ok().into_iter().flatten().filter_map(|d| d.ok()).map(|d| d.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("almide-")))
+        .map(|p| p.join("test").join("native"))
+        .find(|p| p.is_dir());
+    let root = private.unwrap_or_else(|| tmp.join("almide-test").join("native"));
     let found: Vec<PathBuf> = std::fs::read_dir(&root)
         .map_err(|e| format!("no native test cache at {}: {e}", root.display()))?
         .filter_map(|d| d.ok())

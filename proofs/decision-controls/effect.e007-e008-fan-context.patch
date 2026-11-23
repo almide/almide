@@ -1,0 +1,14 @@
+# Negative control of effect.e007-e008-fan-context (c2, proofs/decision-sites.toml): a fn with a concurrent slot named as a value is not refused
+# control_test: tests/decision_e008_value_novel_test.rs::novel_a_fan_wrapper_used_as_a_value_is_refused
+diff --git a/crates/almide-frontend/src/concurrent_reach_escape.rs b/crates/almide-frontend/src/concurrent_reach_escape.rs
+index 46f4224875..5c036ba397 100644
+--- a/crates/almide-frontend/src/concurrent_reach_escape.rs
++++ b/crates/almide-frontend/src/concurrent_reach_escape.rs
+@@ -41,6 +41,7 @@ impl<'a> Analyzer<'a> {
+     /// At a value position in the final discovery round: refuse `e` when it
+     /// names a fn with a concurrent slot.
+     pub(super) fn check_escape(&mut self, e: &'a Expr, scope: &Scope<'a>) {
++        if true { return; }
+         if let Some((name, surface)) = self.slotted(e, scope) {
+             self.escape_findings.push(EscapeFinding { name, surface, span: e.span });
+         }

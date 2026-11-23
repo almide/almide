@@ -34,6 +34,7 @@ pub fn env() -> &'static [(String, String)] {
             ("XF_SOURCE_PORT".into(), source.to_string()),
             ("XF_HTTP".into(), format!("127.0.0.1:{http}")),
             ("XF_UNIX_SINK".into(), spawn_unix_sink()),
+            ("XF_UNIX_SOURCE".into(), spawn_unix_source()),
         ]
     })
 }
@@ -71,6 +72,43 @@ fn spawn_unix_sink() -> String {
 
 #[cfg(not(unix))]
 fn spawn_unix_sink() -> String {
+    String::new()
+}
+
+/// The Unix-domain sized source's path (`XF_UNIX_SOURCE`): a connection
+/// that writes a decimal line `N\n` is answered with N bytes `a`, then
+/// closed, so a reader's probe on an `Fd` reads exactly N bytes to its end.
+#[cfg(unix)]
+fn spawn_unix_source() -> String {
+    let path = format!("/tmp/xf-{}-source.sock", std::process::id());
+    let _ = std::fs::remove_file(&path);
+    let l = std::os::unix::net::UnixListener::bind(&path).expect("unix source listen");
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut line = String::new();
+                let Ok(mut w) = s.try_clone() else { return };
+                if BufReader::new(s).read_line(&mut line).is_err() {
+                    return;
+                }
+                let n: usize = line.trim().parse().unwrap_or(0);
+                let chunk = [b'a'; 65536];
+                let mut left = n;
+                while left > 0 {
+                    let k = left.min(chunk.len());
+                    if w.write_all(&chunk[..k]).is_err() {
+                        return;
+                    }
+                    left -= k;
+                }
+            });
+        }
+    });
+    path
+}
+
+#[cfg(not(unix))]
+fn spawn_unix_source() -> String {
     String::new()
 }
 

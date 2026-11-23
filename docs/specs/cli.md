@@ -528,12 +528,14 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
 
-`./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
-`check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
-行(`almide.toml:LINE`)・キー・その表が受け付けるキー・1 編集距離の候補を出す。
-ビルドはキーが無い場合と同じに走り、終了コードは変わらない(`--deny-warnings`
-も数えない)。`--json` では envelope の `diagnostics` に `"level":"warning"` の行として、それ以外は
-stderr に出る。表ごとの受理キーは [package-system.md §6](package-system.md#6-dependency-declaration)。
+`./almide.toml` にその節が宣言していないキー(`brnach = "main"` など)があると、
+`check` / `check --json` / `build` / `run` / `test` / `bench` / `emit` を含む全コマンドが
+何もする前にエラーで止まる(#3382 では警告、dialect epoch 17 からエラー):
+行(`almide.toml:LINE`)・キー・その節が宣言するキー・1 編集距離の候補を出す。
+エディタ(LSP)では文書のエラー診断になる。節ごとの宣言キーは
+[package-system.md §6](package-system.md#6-dependency-declaration)、その一覧は
+`src/project.rs` の `MANIFEST_SCHEMA` 1 つ。`git` も `path` も書かない依存の行だけは
+警告のままで、終了コードは変わらない。
 
 `almide check --explain CODE` was removed in #4590: it exits 2 with an error naming
 [`almide explain CODE`](#almide-explain).
@@ -1438,6 +1440,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
 | `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
+| `ALMIDE_DBG_FAN_ESTIMATE_NS=value` | ablation | plan every `fan` offer of the embedded wasm host that has a measurement from the value (ns per element) instead of what the previous offer measured: the test hook that pins the cost model's verdict on a known cost whatever the machine's speed (tests/wasm_fan_par_test.rs, #4910); never set otherwise |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_INOUT` | debug | print why a `mut` param keeps the move-mode convention instead of the in-out lend (native v1) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |

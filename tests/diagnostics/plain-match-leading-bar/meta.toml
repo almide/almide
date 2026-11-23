@@ -1,0 +1,2 @@
+expects_error = "does not start with '|'"
+hint_substring = "Drop the leading"

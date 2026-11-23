@@ -1,0 +1,8 @@
+import unix
+
+test "a socket path outside the grant is refused" {
+  match unix.listen("/almide-probe-outside.sock") {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "fs: \"/almide-probe-outside.sock\" is outside [permissions] fs"),
+  }
+}

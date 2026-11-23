@@ -29,7 +29,8 @@
 //!
 //! A case whose diagnostic is a TARGET verdict sets `check_target = "wasm"`
 //! in `meta.toml`: both halves are then checked with `almide check
-//! --target wasm` (#1922), the route E082 is reported on (#3285).
+//! --target wasm` (#1922), the route E082 is reported on (#3285). `"wasi"`
+//! checks the rustc wasm32-wasip1 route's E081 (#4913).
 //!
 //! A case whose diagnostic belongs to a PROFILE sets `check_profile =
 //! "critical"`: every check of the case (both halves, `--json` included) then
@@ -53,7 +54,7 @@ struct Meta {
     /// #2804: `"LINE:COL"` of the first diagnostic, asserted against both the
     /// rendered `broken.almd:LINE:COL` header and the `--json` primary span.
     expects_line_col: Option<String>,
-    /// `--target` for `almide check` (only `wasm`): the E082 families.
+    /// `--target` for `almide check` (`wasm`: the E082 families; `wasi`).
     check_target: Option<String>,
     /// `--profile` for `almide check` (only `critical`): the E100 families.
     check_profile: Option<String>,

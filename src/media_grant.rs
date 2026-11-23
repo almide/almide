@@ -44,12 +44,24 @@ pub struct DepMedia {
 
 /// The key `[trust] media` names a package by: the typed origin of its git
 /// source — host, port and the full path (ADR-0035 identity; ADR-0032's Q17
-/// amended by #4868) — or, without one, its package name.
+/// amended by #4868) — or, without one, its package name. The path keeps its
+/// case, as the origin does (#4892): on a host whose paths are case-sensitive,
+/// `Alice/svg` and `alice/svg` are two repositories and get two keys.
 pub fn grant_key(source: Option<&crate::git_source::GitSource>, name: &str) -> String {
     let Some(src) = source else { return name.to_ascii_lowercase() };
     let port = src.port.map(|p| format!(":{p}")).unwrap_or_default();
-    let path: Vec<String> = src.path.iter().map(|s| s.as_str().to_ascii_lowercase()).collect();
+    let path: Vec<&str> = src.path.iter().map(|s| s.as_str()).collect();
     format!("{}{port}/{}", src.host.as_str().to_ascii_lowercase(), path.join("/"))
+}
+
+/// A `[trust] media` key as the manifest writes it, in [`grant_key`]'s form:
+/// the host (before the first `/`) lowercased, the path as written; a key
+/// with no `/` is a package name, lowercased.
+pub fn manifest_grant_key(key: &str) -> String {
+    match key.split_once('/') {
+        Some((host, path)) => format!("{}/{path}", host.to_ascii_lowercase()),
+        None => key.to_ascii_lowercase(),
+    }
 }
 
 /// A `[trust] media` key in the form before #4868 — `owner/repo` with
@@ -153,7 +165,7 @@ pub fn refusal(proj: &Project, deps: &[DepMedia]) -> Option<String> {
     }
     for g in proj.media_grants.iter().filter(|g| !deps.iter().any(|d| d.key == g.key)) {
         msg.push_str(&format!(
-            "error[E118]: {}:{} grants media types to `{}`, which is not a dependency of this project\n  hint: a grant names a dependency's source (`owner/repo`); remove the entry or fix its source\n",
+            "error[E118]: {}:{} grants media types to `{}`, which is not a dependency of this project\n  hint: a grant names a dependency's source by host and full path (`github.com/owner/repo`); remove the entry or fix its source\n",
             manifest.display(), g.line, g.key
         ));
     }
@@ -232,9 +244,24 @@ mod tests {
     fn a_grant_names_the_source() {
         let src = |s: &str| crate::git_source::GitSource::parse(s).unwrap();
         assert_eq!(grant_key(Some(&src("https://github.com/almide/svg")), "svg"), "github.com/almide/svg");
-        assert_eq!(grant_key(Some(&src("https://github.com/Almide/SVG.git")), "svg"), "github.com/almide/svg");
+        assert_eq!(grant_key(Some(&src("https://GitHub.com/almide/svg.git")), "svg"), "github.com/almide/svg");
         assert_eq!(grant_key(Some(&src("https://gitlab.com/alice/svg")), "svg"), "gitlab.com/alice/svg");
         assert_eq!(grant_key(None, "local_svg"), "local_svg");
+    }
+
+    /// #4892: the path keeps its case on both sides — a grant written for
+    /// `alice/svg` is not the key of a source at `ALICE/svg`, and the manifest
+    /// side lowercases the host only.
+    #[test]
+    fn a_grant_key_keeps_the_paths_case() {
+        let src = |s: &str| crate::git_source::GitSource::parse(s).unwrap();
+        let lower = grant_key(Some(&src("https://gitlab.example/alice/svg")), "svg");
+        let upper = grant_key(Some(&src("https://gitlab.example/ALICE/svg")), "svg");
+        assert_ne!(lower, upper);
+        assert_eq!(upper, "gitlab.example/ALICE/svg");
+        assert_eq!(super::manifest_grant_key("GitLab.Example/alice/svg"), lower);
+        assert_ne!(super::manifest_grant_key("gitlab.example/alice/svg"), upper);
+        assert_eq!(super::manifest_grant_key("Local_SVG"), grant_key(None, "local_svg"));
     }
 
     /// #4868: two repositories under one group get two keys, the port is

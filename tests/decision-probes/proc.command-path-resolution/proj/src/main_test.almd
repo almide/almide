@@ -1,0 +1,10 @@
+import env
+import process
+
+test "a name planted on a PATH the program set is not found" {
+  env.set("PATH", "bin:proj/bin")!
+  match process.exec("almide-probe-planted", []) {
+    ok(_) => assert(false),
+    err(_) => assert(true),
+  }
+}

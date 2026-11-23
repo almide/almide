@@ -79,9 +79,52 @@ pub const VERDICTS: &[Verdict] = &[
             ("signal", "int.abs({signal}) % 2 * 6 + 9"),
         ],
     },
-    // net's and unix's calls take and return opaque handles (`net.TcpStream`,
-    // `unix.Fd`), outside the generator's type universe: none is catalogued,
-    // so none has a verdict until the generator builds handles.
+    // Entropy: n bytes, each a byte.
+    Verdict {
+        func: "random.bytes",
+        holds: "bytes.len(v) == {n} and list.all(bytes.to_list(v), (x) => x >= 0 and x <= 255)",
+        canon: "bytes.zeros({n})",
+        domain: &[("n", "int.abs({n}) % 64")],
+    },
+    // A random UUID: the canonical text of version 4 / 7, RFC 4122 variant.
+    Verdict {
+        func: "uuid.v4",
+        holds: "string.len(uuid.to_string(v)) == 36 and string.slice(uuid.to_string(v), 14, 15) == \"4\" and list.contains([\"8\", \"9\", \"a\", \"b\"], string.slice(uuid.to_string(v), 19, 20))",
+        canon: "(match uuid.parse(\"00000000-0000-4000-8000-000000000000\") { ok(cu) => cu, err(e) => panic(e) })",
+        domain: &[],
+    },
+    Verdict {
+        func: "uuid.v7",
+        holds: "string.len(uuid.to_string(v)) == 36 and string.slice(uuid.to_string(v), 14, 15) == \"7\" and list.contains([\"8\", \"9\", \"a\", \"b\"], string.slice(uuid.to_string(v), 19, 20))",
+        canon: "(match uuid.parse(\"00000000-0000-7000-8000-000000000000\") { ok(cu) => cu, err(e) => panic(e) })",
+        domain: &[],
+    },
+    // How many bytes one read hands back is the host's (a pipe or a socket
+    // answers what has arrived): at most what was asked for.
+    Verdict { func: "io.read", holds: "bytes.len(v) <= {max}", canon: "bytes.new()", domain: &[("max", "int.abs({max}) % 4096 + 1")] },
+    Verdict {
+        func: "net.tcp_read_timeout",
+        holds: "bytes.len(v) <= {len}",
+        canon: "bytes.new()",
+        domain: &[("len", "int.abs({len}) % 64 + 1"), ("timeout_ms", "int.abs({timeout_ms}) % 500 + 200")],
+    },
+    Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
+    // Ephemeral ports and pids are the host's.
+    Verdict { func: "net.tcp_local_port", holds: "v > 0 and v < 65536", canon: "1", domain: &[] },
+    Verdict { func: "net.udp_local_port", holds: "v > 0 and v < 65536", canon: "1", domain: &[] },
+    Verdict { func: "process.child_pid", holds: "v > 0", canon: "1", domain: &[] },
+    // Whether a child has ended when `poll` looks is the host's timing:
+    // `none`, or its outcome. The program goes on with the outcome `wait`
+    // answers, which no earlier poll changes.
+    Verdict {
+        func: "process.poll",
+        holds: "true",
+        canon: "some(match process.wait({c}) { ok(pw) => ok(pw), err(pe) => err(pe) })",
+        domain: &[],
+    },
+    // How much of a child's output has arrived is the host's timing.
+    Verdict { func: "process.read_new_stdout", holds: "string.len(v) >= 0", canon: "\"\"", domain: &[] },
+    Verdict { func: "process.read_new_stderr", holds: "string.len(v) >= 0", canon: "\"\"", domain: &[] },
     // An http call handle (#2631) against the loopback fixture. Whether the
     // exchange has ended when `poll` looks is the network's timing: `none`,
     // or the very result `wait` answers (an ended call's outcome never

@@ -296,9 +296,15 @@ fn at(file: &str, s: Option<BSpan>) -> String {
     }
 }
 
-/// Stdlib modules whose members are scalar-in / scalar-out: the region-pure
-/// whitelist of both backends (`SCALAR_MODULES`).
-const SCOPED_SCALAR_MODULES: &[&str] = &["int", "float", "math", "bool"];
+/// C-364 (ALS-E31, amended 2026-11-20): the scalars a stdlib call may take
+/// and return inside a scoped region — every numeric width, Bool and Unit.
+fn is_scalar_value_ty(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Bool | Ty::Unit
+    )
+}
 
 struct ScopedCx<'a, 'c> {
     checker: &'c Checker,
@@ -585,6 +591,36 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
         }
     }
 
+    /// A call into a stdlib module inside a scoped region (`check_call`).
+    fn check_stdlib_call(&mut self, call: &ast::Expr, args: &[ast::Expr], m0: &str, m: &str, field: &str) -> bool {
+        // C-364 (amended 2026-11-20): admitted by its declared
+        // SIGNATURE, never by its module name — no effect and no
+        // effect-bearing attribute, and every argument and the
+        // result (as the checker instantiated them) a scalar. An
+        // unknown signature or type is refused.
+        let effect_free = crate::stdlib::lookup_sig(m, field).is_some_and(|sig| !sig.is_effect)
+            && !almide_lang::stdlib_info::is_ordered_stdlib_fn(m, field)
+            && !almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, field)
+            && !almide_lang::stdlib_info::is_signals_process_stdlib_fn(m, field);
+        let scalar = self.checker.type_map.get(&call.id).is_some_and(is_scalar_value_ty)
+            && args.iter().all(|a| self.checker.type_map.get(&a.id).is_some_and(is_scalar_value_ty));
+        if effect_free && scalar {
+            return true;
+        }
+        let detail = match self.checker.type_map.get(&call.id) {
+            Some(t) if !effect_free => format!(" (`{m}.{field}` is an effect, returns `{}`)", t.display()),
+            Some(t) if !is_scalar_value_ty(t) => format!(" (returns `{}`)", t.display()),
+            _ => String::new(),
+        };
+        self.refuse(
+            &format!("`{m0}.{field}`"),
+            &format!("its signature is not scalar and effect-free{detail}"),
+            "compute with scalar operators and `scoped fn` helpers inside the scope",
+            call.span,
+        );
+        false
+    }
+
     /// The callee rule. Returns whether the call itself was admitted (so the
     /// caller judges its result type; a refused call is reported once).
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) -> bool {
@@ -630,15 +666,12 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
                 }
                 let resolved = self.checker.env.import_table.resolve(m0).map(|s| s.as_str().to_string()).unwrap_or_else(|| m0.to_string());
                 let m = resolved.as_str();
-                if SCOPED_SCALAR_MODULES.contains(&m) {
-                    return true;
+                let field = field.as_str();
+                if almide_lang::stdlib_info::is_any_stdlib(m) {
+                    return self.check_stdlib_call(call, args, m0, m, field);
                 }
                 let retained = self.retained_arg(args);
-                let reason = if almide_lang::stdlib_info::is_any_stdlib(m) {
-                    format!("may retain {retained} outside the allocation region (only `int`, `float`, `math` and `bool` calls are admitted)")
-                } else {
-                    format!("may retain {retained} outside the allocation region (a call across the module boundary)")
-                };
+                let reason = format!("may retain {retained} outside the allocation region (a call across the module boundary)");
                 self.refuse(&format!("`{m0}.{field}`"), &reason, "compute with scalar operators and `scoped fn` helpers inside the scope", call.span);
                 false
             }

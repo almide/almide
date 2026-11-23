@@ -214,10 +214,11 @@ impl<'b, 'a> Bounds<'b, '_, 'a> {
             let at = match (kind, parse_at(a)?) {
                 ('s', None) | ('x', None) => continue,
                 ('s' | 'x', Some(_)) => return Err(format!("`{tok}` carries an anchor")),
-                ('c' | 'e' | 'a' | 'w', None) => {
-                    rep.bounds_unlocated += 1;
-                    continue;
-                }
+                // An event the anchor file does not place in the shipped
+                // bytes is one this check cannot hold to an instruction: it is
+                // REFUSED, not counted — a producer that stops locating its
+                // events would otherwise be judged on fewer of them.
+                ('c' | 'e' | 'a' | 'w', None) => return Err(format!("`{tok}` carries no anchor")),
                 ('c' | 'e' | 'a' | 'w', Some(at)) => at,
                 _ => return Err(format!("unknown token `{tok}`")),
             };

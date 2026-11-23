@@ -145,12 +145,17 @@ fn render_call(
             args.push(b.rng.pick(lits).to_string());
             continue;
         }
-        // net's descriptors, socket paths and bounded sizes (#3620).
-        if sig.module == "net" {
+        // unix's descriptors, socket paths and bounded sizes (#3620).
+        if sig.module == "unix" {
             if let Some(a) = super::net_unix_args::arg(b, &sig.func, name) {
                 args.push(a);
                 continue;
             }
+        }
+        // A handle the call drains is one of its own.
+        if let Some(a) = super::net_unix_args::fresh_handle(b, sig, name, subst) {
+            args.push(a);
+            continue;
         }
         if let Some(a) = shaped.and_then(|(r, n)| super::inspect_gen::recipe_leaf(r, name, n)) {
             args.push(a);
@@ -171,7 +176,7 @@ fn render_call(
             Some(a) => args.push(a),
             None => {
                 let a = gen_arg(b, p, name, subst)?;
-                let bounded = (sig.module == "net")
+                let bounded = (sig.module == "unix")
                     .then(|| super::net_unix_args::int_domain(&sig.func, name))
                     .flatten();
                 args.push(bounded.map_or(a.clone(), |d| d.replace("{x}", &a)));
@@ -324,7 +329,7 @@ fn net_int_arg(sig: &Signature, name: &str) -> Option<String> {
     );
     let listener = "(match net.tcp_listen(\"127.0.0.1\", 0) { ok(l) => { let _c: Result[Int, String] = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l) ?? 0)\n l }, err(_) => -1 })".to_string();
     match (sig.module, sig.func.as_str(), name) {
-        ("net", "tcp_listen", "port") => Some("0".into()),
+        ("net", "tcp_listen" | "udp_bind", "port") => Some("0".into()),
         ("net", _, "port") => Some(tcp_port.into()),
         ("net", _, "stream") => Some(stream),
         ("net", _, "listener") => Some(listener),
@@ -468,6 +473,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Value => value_literal(b, 0),
         GenType::Nominal(k) => nominal_literal(b, k),
         GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
+        GenType::Coll(..) => gen_construct(b, goal),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -611,6 +617,17 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Matrix
         | GenType::Value => gen_leaf(b, goal),
         GenType::Nominal(_) | GenType::Secret(_) => gen_leaf(b, goal),
+        // A collection from a list of its elements (an empty one is ambiguous:
+        // the list is hoisted with its type).
+        GenType::Coll(k, elem) => {
+            let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
+            let m = super::types::coll_module(k);
+            if n == 0 {
+                return b.hoist(goal, format!("{m}.new()"));
+            }
+            let items: Vec<String> = (0..n).map(|_| gen_expr(b, elem)).collect();
+            format!("{m}.from_list([{}])", items.join(", "))
+        }
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -948,6 +965,11 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Nominal(k) => pure_nominal_literal(b, k),
         GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
+        GenType::Coll(k, e) => format!(
+            "{}.from_list([{}])",
+            super::types::coll_module(k),
+            gen_lambda_body(b, e)
+        ),
     }
 }
 

@@ -13,7 +13,7 @@ use std::fmt::Write;
 use super::catalogue::Signature;
 use super::nominal;
 use super::sig_type::SigType;
-use super::types::{render_print, GenType};
+use super::types::{coll_module, render_print, GenType};
 use super::Project;
 
 /// One function, instantiated, with the parameter its size is measured in.
@@ -46,6 +46,10 @@ pub struct Target {
     /// What the free type variables were bound to, as the verdicts label
     /// each instantiation (`Int`; `Bytes` for `[B: Body]` at the Int fill).
     pub vars: String,
+    /// The bindings of a target whose type variables are all pinned (a Map
+    /// key is String): its one instantiation is labelled with them, since it
+    /// is the heap instantiation the ledger asks for.
+    pub pinned: String,
     /// The literal-only parameters (E117): written inline at every call,
     /// never bound to a name first ([`Signature::literal_at`]).
     literal: Vec<(usize, &'static [&'static str])>,
@@ -190,6 +194,7 @@ fn has_size(t: &GenType) -> bool {
             | GenType::Matrix
             | GenType::Value
             | GenType::Nominal(_)
+            | GenType::Coll(..)
     )
 }
 
@@ -230,6 +235,23 @@ const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) =>
 pub mod effect_recipes;
 
 const SHAPE_RECIPES: &[Recipe] = &[
+    // Element-wise over two matrices of one shape: the second operand takes
+    // the sized operand's shape (the generic 2×2 refused every call).
+    Recipe { func: "matrix.zip_with", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
+    // A fixed-width conversion is in domain only for a value in range: 7 at
+    // whatever numeric type the source variable takes (a sized Int or BigInt
+    // panics). Sizeless: the conversion of one value.
+    // A product of n ones: the fold's n multiplications at one limb each.
+    Recipe { func: "list.product", size: "xs", args: &[("xs", "list.repeat({one_elem}, {n})")] },
+    Recipe { func: "deque.product", size: "d", args: &[("d", "deque.from_list(list.repeat({one_elem}, {n}))")] },
+    Recipe { func: "int8.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int16.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int32.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "int64.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint8.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint16.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint32.from", size: "", args: &[("x", "{seven}")] },
+    Recipe { func: "uint64.from", size: "", args: &[("x", "{seven}")] },
     // #4106: the message is the size (the key is fixed, one block, a
     // Secret[Bytes] like the tag — security table row 20). A verify
     // call is in-domain only with the right tag — the MAC of the same key and
@@ -318,8 +340,11 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The asserts' passing path, the one a stamp claims: a failing assert
     // aborts the probe. `contains` and `snapshot` scale with the strings
     // they compare (the needle at the end, two equal strings).
-    Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{n}"), ("b", "1")] },
-    Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "1"), ("b", "{n}")] },
+    // `{sized}` / `{small}` follow the instantiation: at Int n against 2, at
+    // String "aé"×n against "aé" (a longer string with the same prefix
+    // compares greater). Int literals made the [vars=String] probe E001.
+    Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{sized}"), ("b", "{small}")] },
+    Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "{small}"), ("b", "{sized}")] },
     Recipe { func: "testing.assert_approx", size: "a", args: &[("a", "float.from({n})"), ("b", "float.from({n})"), ("tolerance", "0.5")] },
     Recipe { func: "testing.assert_contains", size: "haystack", args: &[("haystack", "string.repeat(\"a\", {n}) + \"b\""), ("needle", "\"b\"")] },
     Recipe { func: "testing.assert_snapshot", size: "actual", args: &[("actual", "string.repeat(\"aé\", {n})"), ("expected", "string.repeat(\"aé\", {n})")] },
@@ -360,6 +385,11 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "zlib.decompress", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.inflate", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.gunzip", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    // The capped decoders: the same encoded input, and a cap above the
+    // decoded length so the run takes the success path.
+    Recipe { func: "zlib.decompress_max", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
+    Recipe { func: "zlib.inflate_max", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
+    Recipe { func: "zlib.gunzip_max", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!"), ("max_len", "{n} + 64")] },
     // `io.write` is generic over its handle (`H: Write`) now, outside the
     // generator's type universe, so it has no recipe until the generator
     // builds handles; its last recipe wrote 4n bytes so every size was past
@@ -378,9 +408,73 @@ const SHAPE_RECIPES: &[Recipe] = &[
         args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
     },
     Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
+    // The parsers in a radix (Int's and the fixed widths that delegate to
+    // it): n leading zeros then 0x7f, digits
+    // of radix 16 whose value every width holds, so the parse succeeds and
+    // walks n + 2 digits (the generic "aéaé…" was refused at its first
+    // character; n significant digits would overflow the width).
+    Recipe { func: "int.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int8.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int16.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int32.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "int64.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint8.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint16.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint32.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    Recipe { func: "uint64.parse_radix", size: "s", args: &[("s", RADIX_DIGITS), ("radix", "16")] },
+    // A pop from a buffer of n bytes: the derived one-parameter domain did not
+    // scale, so the probe had no size and popped an empty buffer (`none`).
+    Recipe { func: "bytes.pop", size: "b", args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
+    // regex: the subject is the size. A search's one hit is at the end (the
+    // whole subject is scanned, and the hit is the success path); a full
+    // match matches the whole subject; the many-match functions meet n
+    // matches. A pattern is not a needle (SEARCH_PARAMS): the compilers get
+    // n literal pairs, a pattern they accept.
+    Recipe { func: "regex.new", size: "pattern", args: &[("pattern", "string.repeat(\"ab\", {n})")] },
+    Recipe { func: "regex.compile", size: "pattern", args: &[("pattern", "string.repeat(\"ab\", {n})")] },
+    Recipe { func: "regex.is_match", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.find", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.index_of", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.captures", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    Recipe { func: "regex.is_full_match", size: "s", args: &[("re", "regex.new(\"(aé)*\")"), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.full_match", size: "s", args: &[("re", "regex.new(\"(aé)*\")"), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.find_all", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.captures_all", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.split", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.replace", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})"), ("rep", "\"x\"")] },
+    Recipe { func: "regex.replace_first", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL), ("rep", "\"x\"")] },
+    Recipe { func: "regex.replace_with", size: "s", args: &[("re", REGEX_EACH), ("s", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "regex.replace_first_with", size: "s", args: &[("re", REGEX_TAIL), ("s", SUBJECT_TAIL)] },
+    // value paths: a lookup through a one-step path to the key the sized
+    // object holds last (`k<100000000 + i>`), so the step scans the object
+    // and hits.
+    Recipe { func: "value.get_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    Recipe { func: "value.set_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    Recipe { func: "value.remove_path", size: "v", args: &[("p", LAST_KEY_PATH)] },
+    // Decoders on input they accept: n + 1 decimal digits; a fixed UUID
+    // text and 16 bytes; an address.
+    Recipe { func: "bigint.parse", size: "s", args: &[("s", "\"1\" + string.repeat(\"7\", {n})")] },
+    Recipe { func: "bigint.parse_radix", size: "s", args: &[("s", "\"1\" + string.repeat(\"f\", {n})"), ("radix", "16")] },
+    Recipe { func: "uuid.parse", size: "", args: &[("s", "\"0190a6e2-7c3b-7d4e-8f00-123456789abc\"")] },
+    Recipe { func: "uuid.from_bytes", size: "", args: &[("b", "bytes.from_list(list.range(0, 16) |> list.map((i) => i * 17 % 256))")] },
+    Recipe { func: "net.parse_ip", size: "", args: &[("s", "\"2001:db8::ff00:42:8329\"")] },
+    // The header the sized message holds last (`k<100000000 + i>`), so the
+    // lookup walks every header and hits.
+    Recipe { func: "http.header", size: "m", args: &[("name", "\"k${900000000 + {n}}\"")] },
+    Recipe { func: "http.header_values", size: "m", args: &[("name", "\"k${900000000 + {n}}\"")] },
 ];
+
+/// n zeros then `7f`: valid in radix 16, 127 in every fixed width.
+const RADIX_DIGITS: &str = "string.repeat(\"0\", {n}) + \"7f\"";
+/// A pattern whose one match is the subject's tail ([`SUBJECT_TAIL`]).
+const REGEX_TAIL: &str = "regex.new(\"a(b)\")";
+const SUBJECT_TAIL: &str = "string.repeat(\"aé\", {n}) + \"ab\"";
+/// A pattern matching every `é` of the sized subject.
+const REGEX_EACH: &str = "regex.new(\"(é)\")";
+/// The path to the sized Value's last key.
+const LAST_KEY_PATH: &str = "value.key(value.root(), \"k${100000000 + {n} - 1}\")";
 
 /// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
 /// in-domain leaves ([`recipe_leaf`]).
@@ -491,13 +585,64 @@ impl Target {
         // else its first conformer other than the heap fill String: the two
         // instantiations stay two different lowerings where the bound allows.
         for v in vars {
+            // At the heap fill (String) a bound String does not meet takes the
+            // next conformer the signature can hold (Float for `Numeric`; a
+            // Set holds no Float, so `set.product` takes a sized Int): the second
+            // pass must not repeat the first. A heap conformer (`BigInt`) is
+            // not preferred: `list.product` of n BigInts grows a quadratic
+            // number, past any probe's cap.
             let pick = match sig.bound_of(&v) {
-                Some(allowed) if !allowed.contains(&fill) => allowed
-                    .iter()
-                    .find(|t| **t != GenType::String)
-                    .or(allowed.first())
-                    .cloned()
-                    .unwrap_or_else(|| fill.clone()),
+                Some(allowed) if !allowed.contains(&fill) => {
+                    let holds = |t: &GenType| {
+                        // The other variables at the fill, as they will be.
+                        let mut s2 = subst.clone();
+                        for p in &sig.params {
+                            let mut used = Vec::new();
+                            p.collect_vars(&mut used);
+                            for u in used {
+                                s2.entry(u).or_insert_with(|| fill.clone());
+                            }
+                        }
+                        s2.insert(v.clone(), t.clone());
+                        sig.params
+                            .iter()
+                            .filter(|p| !matches!(p, SigType::Fn(..)))
+                            .all(|p| {
+                                let mut used = Vec::new();
+                                p.collect_vars(&mut used);
+                                !used.contains(&v) || p.instantiate(&s2).is_some()
+                            })
+                    };
+                    let fits: Vec<&GenType> =
+                        allowed.iter().filter(|t| **t != GenType::String && holds(t)).collect();
+                    let first = fits.first().copied();
+                    // A recipe spells its operands for one instantiation (io's
+                    // handles): it keeps that one. Else a non-sized second.
+                    let has_recipe = SHAPE_RECIPES
+                        .iter()
+                        .chain(effect_recipes::EFFECT_RECIPES)
+                        .any(|r| r.func == format!("{}.{}", sig.module, sig.func));
+                    // `XF_CONFORMER=<Type>`: measure a bounded variable at a
+                    // second admissible conformer (a Read/Write handle other
+                    // than the standard stream, HttpResponse for HttpMessage).
+                    if let Some(t) = std::env::var("XF_CONFORMER")
+                        .ok()
+                        .and_then(|want| fits.iter().find(|t| t.render() == want).copied())
+                    {
+                        subst.entry(v).or_insert(t.clone());
+                        continue;
+                    }
+                    let second = (fill == GenType::String && !has_recipe)
+                        .then(|| {
+                            let rest = fits.iter().skip(1);
+                            rest.clone()
+                                .find(|t| !matches!(t, GenType::Sized(_)))
+                                .or_else(|| fits.get(1))
+                                .copied()
+                        })
+                        .flatten();
+                    second.or(first).or(allowed.first()).cloned().unwrap_or_else(|| fill.clone())
+                }
                 _ => fill.clone(),
             };
             subst.entry(v).or_insert(pick);
@@ -521,10 +666,18 @@ impl Target {
             .zip(sig.params.iter().cloned())
             .collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
-        let recipe = SHAPE_RECIPES
-            .iter()
-            .chain(effect_recipes::EFFECT_RECIPES)
-            .find(|r| r.func == name);
+        let alt = std::env::var("XF_CONFORMER").ok().and_then(|c| {
+            effect_recipes::ALT_RECIPES
+                .iter()
+                .find(|(conf, r)| *conf == c && r.func == name)
+                .map(|(_, r)| r)
+        });
+        let recipe = alt.or_else(|| {
+            SHAPE_RECIPES
+                .iter()
+                .chain(effect_recipes::EFFECT_RECIPES)
+                .find(|r| r.func == name)
+        });
         let routed = ROUTED.iter().find(|r| r.func == name);
         let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
         if let Some(r) = routed {
@@ -599,7 +752,7 @@ impl Target {
             .position(|(_, t)| concrete(t).as_ref() == Some(&ret))
             .filter(|_| {
                 sig.verdict.is_none()
-                    || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_))
+                    || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_) | GenType::Coll(..))
             });
         let forced = sig.forced_bindings();
         let mut shown: Vec<String> = subst
@@ -610,6 +763,16 @@ impl Target {
         shown.sort();
         shown.dedup();
         let generic = !shown.is_empty();
+        // Every type variable pinned (a Map key is String): the one
+        // instantiation there is IS the heap one, and its evidence says so.
+        let pinned = if shown.is_empty() {
+            let mut p: Vec<String> = subst.values().map(|t| t.render()).collect();
+            p.sort();
+            p.dedup();
+            p.join(",")
+        } else {
+            String::new()
+        };
         let literal = (0..params.len())
             .filter_map(|i| sig.literal_at(i).map(|l| (i, l)))
             .collect();
@@ -626,6 +789,7 @@ impl Target {
             domain,
             generic,
             vars: shown.join(","),
+            pinned,
             literal,
             effect: sig.effect,
             observe: sig.observed_through,
@@ -742,7 +906,25 @@ impl Target {
             Some(GenType::String) => "int.to_string",
             _ => "",
         };
+        // `{seven}`: 7 in the instantiated type, in range of every fixed-width
+        // target (a conversion's sized BigInt or Int is out of its range).
+        let seven_v = match &ty {
+            Some(GenType::Int) => "7".to_string(),
+            Some(GenType::Float) => "7.0".to_string(),
+            Some(g) => format!("{}.from(7)", g.render().to_lowercase()),
+            None => "7".to_string(),
+        };
+        // `{one_elem}`: 1 in the element type, so a product over n of them
+        // stays one limb at every size (n distinct BigInts multiply out to
+        // a number of n log n bits, the probe's own growth, not the fold's).
+        let one_elem_v = match ty.as_ref().and_then(elem_of) {
+            Some(GenType::Int) | None => "1".to_string(),
+            Some(GenType::Float) => "1.0".to_string(),
+            Some(g) => format!("{}.from(1)", g.render().to_lowercase()),
+        };
         e.replace("{sized_flat}", &flat_v)
+            .replace("{one_elem}", &one_elem_v)
+            .replace("{seven}", &seven_v)
             .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
             .replace("{small_elem}", &elem_v)
@@ -765,6 +947,21 @@ impl Target {
 
     /// Parameter `i`'s recipe names the loop counter `{i}`: the direct
     /// program binds it inside the loop, every other program at `{i}` = 0.
+    /// The O(1) statement that puts one element back into the in-domain
+    /// `mut` size operand `x` after a call that took one out (an Option
+    /// answer), or None for every other shape.
+    fn refill(&self, i: usize) -> Option<String> {
+        if Some(i) != self.mut_param || !self.in_domain() || !matches!(self.ret, GenType::Option(_)) {
+            return None;
+        }
+        match self.ty(i)? {
+            GenType::Bytes => Some("bytes.push(x, i % 251)".into()),
+            GenType::String => Some("string.push(x, \"é\")".into()),
+            GenType::List(e) => Some(format!("list.push(x, {})", elem(&e))),
+            _ => None,
+        }
+    }
+
     fn per_step(&self, i: usize) -> bool {
         self.recipe_arg(i).is_some_and(|e| e.contains("{i}"))
     }
@@ -848,21 +1045,61 @@ impl Target {
 
     /// `(p0, ..) => body`: a parameter of the return type passes through,
     /// else a small value of it — the cheapest callback that keeps the types.
+    ///
+    /// The answer is never a constant the optimiser can see through: a
+    /// callback that ignores its element (`(acc, x) => acc`, `(x) => true`)
+    /// let LLVM fold the whole walk of `list.fold` / `list.drop_while` away on
+    /// native, which then measured O(1) while wasm measured n. So the answer
+    /// reads an element: `digest(x) >= 0` holds for every value the probes
+    /// build (each digest is a length, a count, an element >= 0 or a 0/1), so
+    /// the answer is the same as the constant's — a predicate still holds for
+    /// every element (a search still never hits), a fold still keeps its
+    /// accumulator — but only a load of each element can tell.
     fn lambda(&self, ps: &[SigType], r: &SigType) -> String {
         let names: Vec<String> = (0..ps.len()).map(|k| format!("p{k}")).collect();
         let want = r.instantiate(&self.subst);
-        let body = ps
+        // `digest(p) >= 0` for a parameter whose digest is a plain read.
+        let opaque = |skip: Option<usize>| -> Option<String> {
+            ps.iter().enumerate().filter(|(k, _)| Some(*k) != skip).find_map(|(k, p)| {
+                let g = p.instantiate(&self.subst)?;
+                (!g.observe_calls_effect()).then(|| format!("{} >= 0", digest(&names[k], &g)))
+            })
+        };
+        let pass = ps
             .iter()
-            .zip(&names)
-            .find(|(p, _)| p.instantiate(&self.subst) == want)
-            .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| match want {
-                // The worst case scans everything: a search that never hits,
-                // a filter that is evaluated on every element.
-                Some(GenType::Bool) if STOPS_ON_TRUE.contains(&self.func()) => "false".into(),
-                Some(ref g) => small(g),
-                None => "()".into(),
-            });
+            .position(|p| p.instantiate(&self.subst) == want);
+        let body = match (pass, &want) {
+            // The accumulator kept, unless an element says otherwise (none does).
+            // The other branch is an element of the same type where there is
+            // one: a constant there can equal the accumulator's start (fold's
+            // init is `small` too), and `if c then acc else init` from init is
+            // init again, foldable whatever c is.
+            (Some(k), Some(g)) => match opaque(Some(k)) {
+                Some(c) => {
+                    let other = ps
+                        .iter()
+                        .enumerate()
+                        .find(|(j, p)| *j != k && p.instantiate(&self.subst).as_ref() == Some(g))
+                        .map_or_else(|| small(g), |(j, _)| names[j].clone());
+                    format!("if {c} then {} else {other}", names[k])
+                }
+                None => names[k].clone(),
+            },
+            (Some(k), None) => names[k].clone(),
+            // The worst case scans everything: a search that never hits,
+            // a filter that is evaluated on every element.
+            (None, Some(GenType::Bool)) => {
+                let never = STOPS_ON_TRUE.contains(&self.func());
+                match opaque(None) {
+                    Some(c) if never => format!("not ({c})"),
+                    Some(c) => c,
+                    None if never => "false".into(),
+                    None => "true".into(),
+                }
+            }
+            (None, Some(g)) => small(g),
+            (None, None) => "()".into(),
+        };
         format!("({}) => {body}", names.join(", "))
     }
 
@@ -892,7 +1129,7 @@ impl Target {
             let varies = !matches!(self.ty(i), Some(GenType::String))
                 && !self.ty(i).is_some_and(|t| t.refuses_var())
                 && !self.is_routed(i);
-            let kw = if varies || Some(i) == self.mut_param {
+            let kw = if varies || Some(i) == self.mut_param || self.per_step(i) {
                 "var"
             } else {
                 "let"
@@ -919,12 +1156,22 @@ impl Target {
                 self.recipe_expr(p, n, "i")
             );
         }
-        if let Some((i, true)) = slot {
-            let _ = writeln!(
-                s,
-                "    x = {}",
-                vary("x", &self.ty(i).unwrap_or(GenType::Int), n)
-            );
+        // A sized operand its recipe builds per step (a stream read to its
+        // end, `{i}` in the recipe) is rebuilt every iteration in BOTH
+        // programs, as a per-step operand is: bound once, the first call
+        // consumed it and every later call read an ended stream.
+        match slot {
+            Some((i, _)) if self.per_step(i) => {
+                let _ = writeln!(s, "    x = {}", self.recipe_expr(i, n, "i"));
+            }
+            Some((i, true)) => {
+                let _ = writeln!(
+                    s,
+                    "    x = {}",
+                    vary("x", &self.ty(i).unwrap_or(GenType::Int), n)
+                );
+            }
+            _ => {}
         }
         if with_call {
             let _ = writeln!(
@@ -944,6 +1191,13 @@ impl Target {
                     s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
                 }
             }
+        }
+        // A call that takes one element out of its in-domain `mut` operand
+        // (an Option answer: `none` only when empty) would empty it once the
+        // calibrated k passed n — bytes.pop refused at k=16384, n=20000. One
+        // element goes back after each call, so every call sees size n.
+        if let Some(r) = slot.and_then(|(i, _)| self.refill(i)).filter(|_| with_call) {
+            let _ = writeln!(s, "    {r}");
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
@@ -1094,7 +1348,13 @@ impl Target {
     /// A call that consumes its whole input: its diamond runs each path alone.
     pub fn diamond_runs_paths_alone(&self) -> bool {
         // A call that does not return ends its path's program.
-        self.never || self.name == "io.read_all"
+        // Every stdin reader consumes what the next path would read: each
+        // path gets the same input of its own.
+        self.never
+            || matches!(
+                self.name.as_str(),
+                "io.read_all" | "io.read_to_end" | "io.read_exact" | "io.read" | "io.read_line"
+            )
     }
 
     fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {
@@ -1478,6 +1738,7 @@ fn small(t: &GenType) -> String {
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
         GenType::Secret(e) => format!("secret.new({})", small(e)),
+        GenType::Coll(k, e) => format!("{}.from_list([{}, {}])", coll_module(k), small(e), small(e)),
     }
 }
 
@@ -1488,7 +1749,8 @@ fn elem_of(t: &GenType) -> Option<GenType> {
         | GenType::Set(e)
         | GenType::Map(e)
         | GenType::Option(e)
-        | GenType::Result(e) => Some((**e).clone()),
+        | GenType::Result(e)
+        | GenType::Coll(_, e) => Some((**e).clone()),
         _ => None,
     }
 }
@@ -1515,8 +1777,10 @@ fn elem(t: &GenType) -> String {
         GenType::Tuple2(a, b) => format!("({}, {})", elem(a), elem(b)),
         GenType::Tuple3(a, b, c) => format!("({}, {}, {})", elem(a), elem(b), elem(c)),
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
+        GenType::Nominal("BigInt") => "bigint.from(i)".into(),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
         GenType::Secret(e) => format!("secret.new({})", elem(e)),
+        GenType::Coll(k, e) => format!("{}.from_list([{}])", coll_module(k), elem(e)),
         other => small(other),
     }
 }
@@ -1538,6 +1802,12 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| nominal::fill(d.sized, "", n)),
         // The size of what it holds.
         GenType::Secret(e) => format!("secret.new({})", sized(e, n)),
+        // n elements, through the collection's own builder.
+        GenType::Coll(k, e) => format!(
+            "{}.from_list(list.range(0, {n}) |> list.map((i) => {}))",
+            coll_module(k),
+            elem(e)
+        ),
         other => small(other),
     }
 }
@@ -1622,6 +1892,7 @@ fn digest(v: &str, t: &GenType) -> String {
         }
         // What it holds, read through the one way out.
         GenType::Secret(e) => digest(&format!("secret.reveal({v})"), e),
+        GenType::Coll(k, _) => format!("{}.len({v})", coll_module(k)),
     }
 }
 
@@ -2040,6 +2311,20 @@ pub(crate) mod tests {
                 r.func
             );
         }
+    }
+
+    /// An in-domain call that takes one element out of its `mut` operand gets
+    /// one back after each call, so a k past n never empties it; a mutator
+    /// that answers Unit gets nothing extra.
+    #[test]
+    fn a_taking_mut_call_puts_one_element_back_each_step() {
+        let direct = target("bytes.pop").direct_program(1000, 4, true);
+        assert!(
+            direct.contains("bytes.pop(x)") && direct.contains("    bytes.push(x, i % 251)\n"),
+            "{direct}"
+        );
+        assert!(!target("bytes.pop").direct_program(1000, 4, false).contains("bytes.push(x"));
+        assert!(!target("bytes.push").direct_program(1000, 4, true).contains("bytes.push(x, i % 251)"));
     }
 
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls

@@ -77,7 +77,7 @@ fn assert_cross_target_project(files: &[(&str, &str)]) {
     );
 }
 
-const CROSS_PKG_TOML: &str = "[package]\nname = \"clostest\"\nversion = \"0.1.0\"\n\n[targets]\nwasm = true\n";
+const CROSS_PKG_TOML: &str = "[package]\nname = \"clostest\"\nversion = \"0.1.0\"\n";
 const CROSS_PKG_LIB: &str = "pub fn neg() -> (Int) -> Int = (n) => 0 - n\n";
 
 #[test]
@@ -116,7 +116,7 @@ fn wasm_cross_module_lambda_without_local_decoy() {
     ]);
 }
 
-const MOD_PKG_TOML: &str = "[package]\nname = \"modtest\"\nversion = \"0.1.0\"\n\n[targets]\nwasm = true\n";
+const MOD_PKG_TOML: &str = "[package]\nname = \"modtest\"\nversion = \"0.1.0\"\n";
 
 #[test]
 fn wasm_cross_module_producer_side_variant_ctor() {

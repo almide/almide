@@ -1,0 +1,15 @@
+# Negative control of anchor.memory-shape (proofs/decision-sites.toml): one_plain_memory admits every memory, so a module with two memories, a shared one or a 64-bit one is judged
+# control_test: crates/almide-anchor-check/tests/decision_anchor_shapes_novel.rs::novel_every_memory_shape_is_judged_only_when_it_is_one_plain_memory
+diff --git a/crates/almide-anchor-check/src/decode.rs b/crates/almide-anchor-check/src/decode.rs
+--- a/crates/almide-anchor-check/src/decode.rs
++++ b/crates/almide-anchor-check/src/decode.rs
+@@ -91,6 +91,9 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
+ /// access. Such a module is not judged.
+ fn one_plain_memory(payload: &wasmparser::Payload<'_>, seen: &mut u32) -> Result<(), String> {
+     let mut found = Vec::new();
++    if true {
++        return Ok(());
++    }
+     match payload {
+         wasmparser::Payload::MemorySection(r) => {
+             for m in r.clone() {

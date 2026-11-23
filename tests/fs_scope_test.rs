@@ -15,6 +15,9 @@
 use std::path::Path;
 use std::process::Command;
 
+#[path = "support/novel.rs"]
+mod novel;
+
 const ROOTED: &str = r#"import fs
 
 fn show(label: String, r: Result[String, String]) -> Unit = match r {
@@ -63,7 +66,12 @@ fn tree(manifest: Option<&str>) -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn run(dir: &Path, args: &[&str]) -> String {
+    run_env(dir, args, &[])
+}
+
+fn run_env(dir: &Path, args: &[&str], envs: &[(&str, &Path)]) -> String {
     let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .envs(envs.iter().copied())
         .arg("run")
         .arg("main.almd")
         .args(args)
@@ -420,4 +428,65 @@ fn unix_socket_paths_are_bounded_by_permissions_fs_on_both_targets() {
     ] {
         assert!(outs[0].lines().any(|l| l == line), "missing `{line}` in:\n{}", outs[0]);
     }
+}
+
+const SHM: &str = r#"import unix
+
+effect fn main() -> Unit = match unix.shm_create(8) {
+  ok(_) => println("shm: ok"),
+  err(e) => println("shm: err ${e}"),
+}
+"#;
+
+/// C-393: `unix.shm_create` takes no path; it is judged by the directory its
+/// unnamed file is made in — `$XDG_RUNTIME_DIR` when that names a directory,
+/// else the temp dir — with the same refusal on both targets.
+#[test]
+fn shm_create_is_bounded_by_permissions_fs_on_both_targets() {
+    let mut outs = Vec::new();
+    for args in [&[][..], &["--target", "wasm"][..]] {
+        let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+        std::fs::write(proj.join("main.almd"), SHM).expect("write");
+        let base = proj.parent().expect("base").to_path_buf();
+        // A directory no test author named: the decision cannot be a list.
+        let outside = base.join(novel::ident("rundir"));
+        let inside = proj.join("data").join(novel::ident("rt"));
+        std::fs::create_dir_all(&outside).expect("mkdir");
+        std::fs::create_dir_all(&inside).expect("mkdir");
+        let runtime_out = run_env(&proj, args, &[("XDG_RUNTIME_DIR", &outside)]);
+        let temp_out = run_env(&proj, args, &[("XDG_RUNTIME_DIR", &base.join("not-a-dir")), ("TMPDIR", &outside)]);
+        let granted = run_env(&proj, args, &[("XDG_RUNTIME_DIR", &inside)]);
+        let line = format!("shm: err fs: \"{}\" is outside [permissions] fs\n", outside.display());
+        assert_eq!(runtime_out, line, "{args:?}: the runtime directory outside the scope");
+        assert_eq!(temp_out, line, "{args:?}: the temp dir outside the scope");
+        assert_eq!(granted, "shm: ok\n", "{args:?}: a runtime directory inside the scope");
+        outs.push((runtime_out.replace(&*outside.to_string_lossy(), "<outside>"), granted));
+    }
+    assert_eq!(outs[0], outs[1], "native and wasm differ");
+}
+
+/// net.unix-path-unscoped (C-393): a socket path in a directory no test
+/// author named, outside the grant, is refused on both targets before any
+/// socket file is made; the same fresh name inside the grant binds.
+#[test]
+fn novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused() {
+    let mut outs = Vec::new();
+    for args in [&[][..], &["--target", "wasm"][..]] {
+        let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+        let dir = novel::ident("sockdir");
+        std::fs::create_dir_all(proj.join("..").join(&dir)).expect("mkdir");
+        std::fs::create_dir_all(proj.join("data").join(&dir)).expect("mkdir");
+        let src = format!(
+            "import unix\n\nfn show[T](label: String, r: Result[T, String]) -> Unit = match r {{\n  ok(_) => println(\"${{label}}: ok\"),\n  err(e) => println(\"${{label}}: err ${{e}}\"),\n}}\n\neffect fn main() -> Unit = {{\n  show(\"listen\", unix.listen(\"../{dir}/s.sock\"))\n  show(\"connect\", unix.connect(\"../{dir}/s.sock\"))\n  show(\"inside\", unix.listen(\"data/{dir}/s.sock\"))\n}}\n"
+        );
+        std::fs::write(proj.join("main.almd"), src).expect("write");
+        let out = run(&proj, args);
+        assert!(!proj.join("..").join(&dir).join("s.sock").exists(), "{args:?}: a socket file was made outside the grant");
+        let want = format!(
+            "listen: err fs: \"../{dir}/s.sock\" is outside [permissions] fs\nconnect: err fs: \"../{dir}/s.sock\" is outside [permissions] fs\ninside: ok\n"
+        );
+        assert_eq!(out, want, "{args:?}");
+        outs.push(out.replace(&dir, "<dir>"));
+    }
+    assert_eq!(outs[0], outs[1], "native and wasm differ");
 }

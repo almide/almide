@@ -8,7 +8,7 @@ impl Checker {
     pub(crate) fn check_concurrent_var_reach(&mut self, program: &ast::Program) {
         use crate::concurrent_reach::{Analyzer, World};
         let module = self.current_module_prefix.as_deref().map(sym);
-        let (findings, closure) = {
+        let (findings, closure, escapes) = {
             let env = &self.env;
             let aliases = &env.import_table.aliases;
             let direct = &env.import_table.direct;
@@ -38,6 +38,10 @@ impl Checker {
         }
         for f in closure {
             let d = served_app_closure_diagnostic(&f, self.source_file.clone());
+            self.diagnostics.push(d);
+        }
+        for f in escapes {
+            let d = escape_diagnostic(&f, self.source_file.clone());
             self.diagnostics.push(d);
         }
     }
@@ -123,6 +127,45 @@ fn concurrent_reach_diagnostic(
         }
     };
     let mut d = Diagnostic::error(message, hint, context).with_code("E008");
+    d.file = file;
+    if let Some(s) = f.span {
+        d.line = Some(s.line);
+        d.col = Some(s.col);
+        d.end_col = Some(s.end_col);
+    }
+    d
+}
+
+/// E008, #4903: a fn with a concurrent slot named other than as a callee.
+fn escape_diagnostic(f: &crate::concurrent_reach::EscapeFinding, file: Option<String>) -> Diagnostic {
+    let name = f.name.as_str();
+    let surface = f.surface.as_str();
+    let message = format!("{name} runs an argument concurrently ({surface}), so it can only be called directly");
+    let why = "A call made through a value cannot be resolved, so a `var` reached from its concurrent \
+               argument would escape the check that keeps `var`s out of concurrent bodies.";
+    // The rewrite is the same whatever the value position was: make the call
+    // where the fn argument is known, instead of handing the fn on.
+    let (hint, try_snippet) = if name == "this lambda" {
+        (
+            format!(
+                "this lambda hands its parameter on to {surface}. Call the parameter itself instead of passing it \
+                 on — `(next) => (x) => next(x)!` rather than `(next) => w(next, …)` — or bind the lambda with \
+                 `let run = (f) => …` and call `run(g)` by that name. {why}"
+            ),
+            "(next) => (x) => next(x)!".to_string(),
+        )
+    } else {
+        (
+            format!(
+                "call `{name}` directly with the fn it should run — `{name}(f)`, or `let g = {name}` then `g(f)` — \
+                 at the place `f` is known, instead of passing `{name}` itself as an argument, a list or record \
+                 element, or a `var` to be called later. {why}"
+            ),
+            format!("{name}(f)"),
+        )
+    };
+    let context = format!("a fn whose argument runs in {surface}, used as a value");
+    let mut d = Diagnostic::error(message, hint, context).with_code("E008").with_try(try_snippet);
     d.file = file;
     if let Some(s) = f.span {
         d.line = Some(s.line);

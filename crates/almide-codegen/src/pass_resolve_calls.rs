@@ -67,7 +67,7 @@ impl NanoPass for ResolveCallsPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let symbols = SymbolTable::build(&program);
 
-        struct Rewriter<'a> { symbols: &'a SymbolTable }
+        struct Rewriter<'a> { symbols: &'a SymbolTable, minted: Vec<(almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym))> }
         impl<'a> IrMutVisitor for Rewriter<'a> {
             fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
                 walk_expr_mut(self, expr);
@@ -105,6 +105,7 @@ impl NanoPass for ResolveCallsPass {
                                 m.replace('.', "_"),
                                 f.replace('.', "_"),
                             );
+                            self.minted.push((sym(&mangled), (*module, *func)));
                             *target = CallTarget::Named { name: sym(&mangled) };
                         }
                     }
@@ -114,7 +115,7 @@ impl NanoPass for ResolveCallsPass {
                 walk_stmt_mut(self, stmt);
             }
         }
-        let mut rw = Rewriter { symbols: &symbols };
+        let mut rw = Rewriter { symbols: &symbols, minted: Vec::new() };
         for func in &mut program.functions {
             rw.visit_expr_mut(&mut func.body);
         }
@@ -139,6 +140,7 @@ impl NanoPass for ResolveCallsPass {
                 program.modules[mi].top_lets[ti].value = val;
             }
         }
+        program.codegen_annotations.minted_call_symbols.extend(rw.minted);
         PassResult { program, changed: true }
     }
 }

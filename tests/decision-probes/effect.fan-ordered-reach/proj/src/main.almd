@@ -28,4 +28,7 @@ effect fn main() -> Unit = {
   }
   println("${x} ${y}")
   fs.remove_all(d)!
+  // A threaded fan reads `old`: fail the run, so `bench` (which only checks
+  // that every run prints the same) refuses it too.
+  assert_eq(y, "new")
 }

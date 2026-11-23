@@ -3,12 +3,12 @@
 diff --git a/src/cli/check.rs b/src/cli/check.rs
 --- a/src/cli/check.rs
 +++ b/src/cli/check.rs
-@@ -394,7 +394,7 @@
+@@ -492,7 +492,7 @@
+             None => clean = false,
+         }
      }
-     // #4857: `--target wasm` — the wasm route's verdict (E081 / E082 / E083),
-     // the same pipeline `check --target wasm` runs, reported as JSON rows.
--    if clean && wasm_target {
-+    if clean && wasm_target && file.is_empty() {
+-    if clean && target == CheckTarget::Wasm {
++    if clean && target == CheckTarget::Wasm && file.is_empty() {
          let (built, refusals) = super::wasm_compile::capturing_route_refusals(|| {
              super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false)
          });

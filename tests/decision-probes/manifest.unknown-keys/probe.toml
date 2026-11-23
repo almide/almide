@@ -1,0 +1,2 @@
+# The probe of manifest.unknown-keys: a misspelled [package] key (`verison`) in the governing almide.toml.
+expect = "unknown key `verison` in [package] is refused"

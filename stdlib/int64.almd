@@ -136,6 +136,7 @@ fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
 fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.__from_int64(x), radix)
 
 /// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+@sized_by(s)
 fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
   ok(n) => ok(int.__to_int64(n)),
   err(e) => err(e),

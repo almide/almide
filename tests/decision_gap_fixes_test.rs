@@ -83,3 +83,35 @@ fn novel_e119_judges_every_export_target() {
     let good = format!("import ffi\n\n@export({target}, \"{f}\")\nfn {f}(r: Region) -> Int = 0\n\neffect fn main() -> Unit = ()\n");
     assert!(!check(&good).contains("[E119]"), "control: a non-escaping @export({target}) fn was refused with E119:\n{good}");
 }
+
+fn run_on(prog: &str, target: Option<&str>) -> String {
+    let td = tempfile::TempDir::new().unwrap();
+    let f = td.path().join("main.almd");
+    std::fs::write(&f, prog).unwrap();
+    let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
+    c.arg("run").arg(&f);
+    if let Some(t) = target {
+        c.arg("--target").arg(t);
+    }
+    let o = c.current_dir(td.path()).output().expect("almide runs");
+    format!("exit {:?}\n{}{}", o.status.code(), String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+}
+
+/// ownership.e087-scoped-callee (c1, C-364 amended): a stdlib call inside a
+/// scoped region is admitted by its declared SIGNATURE — effect-free, every
+/// argument and the result a scalar — never by its module's name. A fresh
+/// scoped fn over `datetime` (a module the old `int`/`float`/`math`/`bool`
+/// list never named) is admitted and runs the same on native and wasm; a fresh one
+/// over `int.to_string` (a module the old list admitted, a String result) is
+/// refused.
+#[test]
+fn novel_e087_a_stdlib_call_admitted_by_its_signature() {
+    let (f, g) = (novel::ident("hrs"), novel::ident("same"));
+    let good = format!("scoped fn {f}(n: Int) -> Int = datetime.hour(datetime.add_hours(n, 5))\n\neffect fn main() -> Unit = println(int.to_string(scoped {{\n  {f}(0)\n}}))\n");
+    admitted(&good);
+    for t in [None, Some("wasm")] {
+        let out = run_on(&good, t);
+        assert!(out.contains("exit Some(0)") && out.contains("\n5\n"), "the admitted scoped program did not print 5 on {t:?}:\n{good}\n{out}");
+    }
+    refused("E087", &format!("scoped fn {g}(n: Int) -> Bool = int.to_string(n) == \"7\"\n\neffect fn main() -> Unit = println(bool.to_string(scoped {{\n  {g}(7)\n}}))\n"));
+}

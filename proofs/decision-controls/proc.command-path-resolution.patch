@@ -1,0 +1,25 @@
+# Negative control of proc.command-path-resolution (proofs/decision-sites.toml): a bare command name is spawned through the PATH the program last set again (the #4844 shape).
+# control_test: tests/decision_launch_path_novel_test.rs::novel_a_name_planted_on_a_path_the_program_set_is_not_found
+diff --git a/crates/almide-rt-core/src/launch_core.rs b/crates/almide-rt-core/src/launch_core.rs
+index 7b9c86645c..e95c5ca286 100644
+--- a/crates/almide-rt-core/src/launch_core.rs
++++ b/crates/almide-rt-core/src/launch_core.rs
+@@ -69,17 +69,5 @@ fn almide_rt_launch_is_program(p: &std::path::Path) -> bool {
+ /// `PATH` set on the child, so the platform's lookup — and its not-found
+ /// error — runs over the launch `PATH`, not the one `env.set` wrote.
+ pub fn almide_rt_launch_command(cmd: &str) -> std::process::Command {
+-    let program = almide_rt_launch_program(cmd);
+-    let mut command = std::process::Command::new(&program);
+-    if program.as_os_str() == std::ffi::OsStr::new(cmd) && !cmd.contains('/') {
+-        match almide_rt_launch_path() {
+-            Some(p) => {
+-                command.env("PATH", p);
+-            }
+-            None => {
+-                command.env_remove("PATH");
+-            }
+-        }
+-    }
+-    command
++    std::process::Command::new(cmd)
+ }

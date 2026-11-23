@@ -1,0 +1,15 @@
+# Negative control of ownership.e087-scoped-callee (c1, C-364 amended): a stdlib call in a scoped region is admitted by its module's name again, not by its signature
+# control_test: tests/decision_gap_fixes_test.rs::novel_e087_a_stdlib_call_admitted_by_its_signature
+diff --git a/crates/almide-frontend/src/check/scoped.rs b/crates/almide-frontend/src/check/scoped.rs
+--- a/crates/almide-frontend/src/check/scoped.rs
++++ b/crates/almide-frontend/src/check/scoped.rs
+@@ -604,7 +604,8 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
+             && !almide_lang::stdlib_info::is_signals_process_stdlib_fn(m, field);
+         let scalar = self.checker.type_map.get(&call.id).is_some_and(is_scalar_value_ty)
+             && args.iter().all(|a| self.checker.type_map.get(&a.id).is_some_and(is_scalar_value_ty));
+-        if effect_free && scalar {
++        let _ = (effect_free, scalar);
++        if ["int", "float", "math", "bool"].contains(&m) {
+             return true;
+         }
+         let detail = match self.checker.type_map.get(&call.id) {

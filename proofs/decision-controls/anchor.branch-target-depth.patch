@@ -1,13 +1,14 @@
-# Negative control of anchor.branch-target-depth (proofs/decision-sites.toml): the checker validates under every proposal again: a legacy `try` decodes as if it did not branch.
-# control_test: crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_a_legacy_try_in_a_fresh_function_is_refused
+# Negative control of anchor.branch-target-depth (proofs/decision-sites.toml): the control table no longer refuses the operators it does not follow, so try_table, throw, br_on_null and call_ref decode as if they did not branch.
+# control_test: crates/almide-anchor-check/tests/unclassified_control_flow.rs::novel_every_control_operator_is_classified_or_refused
 diff --git a/crates/almide-anchor-check/src/decode.rs b/crates/almide-anchor-check/src/decode.rs
 --- a/crates/almide-anchor-check/src/decode.rs
 +++ b/crates/almide-anchor-check/src/decode.rs
-@@ -65,7 +65,6 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
-     // among them), so a module that holds one does not validate here and is
-     // not judged.
-     let followed = WasmFeatures::all()
--        - UNCLASSIFIED_PROPOSALS
-         - WasmFeatures::THREADS
-         - WasmFeatures::SHARED_EVERYTHING_THREADS;
-     let mut v = Validator::new_with_features(followed);
+@@ -133,7 +133,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
+         let off = r.original_position();
+         let op = r.read().map_err(|e| e.to_string())?;
+         let i = ops.len();
+-        if control(&op) == Control::Refused {
++        if control(&op) == Control::Refused && false {
+             return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
+         }
+         // A loop typed by a function type may take parameters, and a branch to

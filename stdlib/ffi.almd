@@ -60,6 +60,7 @@ fn is_writable(r: Region) -> Bool = r.writable
 
 /// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
 @memory_unsafe
+@sized_by(r)
 effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
   if n < 0 then err("ffi.read: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
@@ -67,6 +68,7 @@ effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
 
 /// Writes b at off; err if the region is read-only or b does not fit.
 @memory_unsafe
+@sized_by(r, b)
 effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
   if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
   else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
@@ -81,6 +83,7 @@ effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, r.off
 
 /// A read-only view of n bytes at off inside r; err unless 0 <= off and off + n <= len(r).
 @memory_unsafe
+@sized_by(r)
 fn slice(r: Region, off: Int, n: Int) -> Result[Region, String] =
   if n < 0 then err("ffi.slice: negative count ${n}")
   else if off < 0 or off > r.len - n then err("ffi.slice: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")

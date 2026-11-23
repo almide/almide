@@ -1,0 +1,14 @@
+# Negative control of net.permissions-unknown-key (c2, proofs/decision-sites.toml): an unknown [permissions] key is accepted (the bound it misspells stays unset)
+# control_test: tests/manifest_unknown_key_test.rs::novel_a_fresh_key_in_every_declared_section_is_refused
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -1168,7 +1168,7 @@
+         for (site, table) in section_tables(&manifest.spans, section.at) {
+             for (k, _) in table.iter() {
+                 let key = k.get_ref().as_ref();
+-                if declared.contains(&key) {
++                if declared.contains(&key) || site == "[permissions]" {
+                     continue;
+                 }
+                 let near = declared.iter().find(|d| within_one_edit(&key.to_ascii_lowercase(), d));

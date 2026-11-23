@@ -763,14 +763,12 @@ pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
     ordered_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
-/// True if the runtime symbol (`almide_rt_env___set`) is the intrinsic of an
-/// `@ordered` stdlib fn — the shape a lowered stdlib call has in codegen.
+/// True if the runtime symbol (`almide_rt_env___set`) is the declared
+/// `@intrinsic` of an `@ordered` stdlib fn — the shape a lowered intrinsic call
+/// has in codegen. A bodied fn's call symbol is not read here: codegen records
+/// the fn it names where the symbol is minted (`minted_call_symbols`).
 pub fn is_ordered_runtime_symbol(symbol: &str) -> bool {
-    // An intrinsic answers by its symbol; a bodied stdlib fn (`env.set` over
-    // `__set`, #4200) by the `almide_rt_<module>_<fn>` name codegen gives it.
-    ordered_stdlib_fns()
-        .iter()
-        .any(|(m, f, i)| i.as_deref() == Some(symbol) || (i.is_none() && symbol == format!("almide_rt_{m}_{f}")))
+    ordered_stdlib_fns().iter().any(|(_, _, i)| i.as_deref() == Some(symbol))
 }
 
 #[cfg(test)]
@@ -785,7 +783,7 @@ mod ordered_tests {
         assert!(super::is_ordered_stdlib_fn("process", "start"));
         assert!(super::is_ordered_stdlib_fn("io", "read"));
         assert!(super::is_ordered_runtime_symbol("almide_rt_env___set"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"), "env.set's bodied wrapper");
+        assert!(!super::is_ordered_runtime_symbol("almide_rt_env_set"), "a bodied fn's minted symbol is not a declared intrinsic");
         assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
         // A shared-memory file is state a sibling arm reads (#4618).
         assert!(super::is_ordered_stdlib_fn("unix", "shm_write"));

@@ -359,82 +359,8 @@ impl Checker {
     }
 
     pub(crate) fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
-        // A COLLECTION literal against an annotated element type pins each
-        // ELEMENT: `let bs: List[Int8] = [1, 256]` narrows every element to i8 in
-        // codegen, so `256` must face the Int8 range check here — it did not, and
-        // rustc rejected `256i8` after `check` accepted (differential-fuzz, seed
-        // 1784965680755102000; the same check-vs-build gap #626/index 92 closed for
-        // scalar bindings). Recurses so a nested annotation reaches through.
-        if let ExprKind::Paren { expr } = &value.kind {
-            self.record_int_literal_context(expr, declared);
+        if self.record_int_literal_through(value, declared) {
             return;
-        }
-        // #1521: BRANCH-RESULT positions carry the annotation too — `let b:
-        // Int8 = if c then 300 else 1` narrows each branch tail in codegen
-        // (`300i8`, rejected by rustc while wasm ran and printed 300: a parity
-        // hole AND a divergence in one shape), but this walk stopped at the
-        // `if`. Same for match-arm bodies and a block's tail expression. A MAP
-        // literal against `Map[K, V]` pins each entry's key AND value — the
-        // VALUE slot was the unchecked one (`["k": 300]` into Map[String,
-        // Int8] was check-green, rustc E0308).
-        match &value.kind {
-            ExprKind::If { then, else_, .. } => {
-                self.record_int_literal_context(then, declared);
-                self.record_int_literal_context(else_, declared);
-                return;
-            }
-            ExprKind::Match { arms, .. } => {
-                for arm in arms {
-                    self.record_int_literal_context(&arm.body, declared);
-                }
-                return;
-            }
-            ExprKind::Block { expr: Some(tail), .. } => {
-                self.record_int_literal_context(tail, declared);
-                return;
-            }
-            // #3060: carrier payloads and a lambda body narrow in lowering
-            // against the declared slot, so they face its range check here.
-            ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } => {
-                use almide_lang::types::constructor::TypeConstructorId as TC;
-                let slot = match (&value.kind, declared) {
-                    (ExprKind::Some { .. }, Ty::Applied(TC::Option, a)) if a.len() == 1 => a.first(),
-                    (ExprKind::Ok { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.first(),
-                    (ExprKind::Err { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.get(1),
-                    _ => None,
-                };
-                if let Some(slot) = slot.cloned() {
-                    self.record_int_literal_context(expr, &slot);
-                }
-                return;
-            }
-            ExprKind::Lambda { body, .. } => {
-                if let Ty::Fn { ret, is_effect: false, .. } = declared {
-                    self.record_int_literal_context(body, ret);
-                }
-                return;
-            }
-            ExprKind::MapLiteral { entries } => {
-                use almide_lang::types::constructor::TypeConstructorId as TC;
-                if let Ty::Applied(TC::Map, args) = declared {
-                    if let [k_ty, v_ty] = args.as_slice() {
-                        for (k, v) in entries {
-                            self.record_int_literal_context(k, k_ty);
-                            self.record_int_literal_context(v, v_ty);
-                        }
-                        return;
-                    }
-                }
-            }
-            _ => {}
-        }
-        if let Some(elem_ty) = Self::annotated_element_ty(declared) {
-            if let ExprKind::List { elements, .. } = &value.kind {
-                for e in elements {
-                    self.record_int_literal_context(e, &elem_ty);
-                }
-                return;
-            }
         }
         // A TUPLE literal against an annotated tuple type pins each component,
         // and a RECORD literal against a declared record pins each field BY
@@ -453,6 +379,87 @@ impl Checker {
             }
             return;
         }
+        self.record_int_literal_leaf(value, declared);
+    }
+
+    /// The positions [`Self::record_int_literal_context`] carries the
+    /// annotation inward through; `true` iff `value` is one of them (it was
+    /// handled), `false` to fall through to the component / literal cases.
+    fn record_int_literal_through(&mut self, value: &ast::Expr, declared: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        match &value.kind {
+            ExprKind::Paren { expr } => self.record_int_literal_context(expr, declared),
+            // #1521: BRANCH-RESULT positions carry the annotation too — `let b:
+            // Int8 = if c then 300 else 1` narrows each branch tail in codegen
+            // (`300i8`, rejected by rustc while wasm ran and printed 300: a parity
+            // hole AND a divergence in one shape), but this walk stopped at the
+            // `if`. Same for match-arm bodies and a block's tail expression. A MAP
+            // literal against `Map[K, V]` pins each entry's key AND value — the
+            // VALUE slot was the unchecked one (`["k": 300]` into Map[String,
+            // Int8] was check-green, rustc E0308).
+            ExprKind::If { then, else_, .. } => {
+                self.record_int_literal_context(then, declared);
+                self.record_int_literal_context(else_, declared);
+            }
+            ExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    self.record_int_literal_context(&arm.body, declared);
+                }
+            }
+            ExprKind::Block { expr: Some(tail), .. } => {
+                self.record_int_literal_context(tail, declared)
+            }
+            // #3060: carrier payloads and a lambda body narrow in lowering
+            // against the declared slot, so they face its range check here.
+            ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } => {
+                self.record_int_literal_carrier(value, expr, declared)
+            }
+            ExprKind::Lambda { body, .. } => {
+                if let Ty::Fn { ret, is_effect: false, .. } = declared {
+                    self.record_int_literal_context(body, ret);
+                }
+            }
+            ExprKind::MapLiteral { entries } => {
+                let Ty::Applied(TC::Map, args) = declared else { return false };
+                let [k_ty, v_ty] = args.as_slice() else { return false };
+                for (k, v) in entries {
+                    self.record_int_literal_context(k, k_ty);
+                    self.record_int_literal_context(v, v_ty);
+                }
+            }
+            // A COLLECTION literal against an annotated element type pins each
+            // ELEMENT: `let bs: List[Int8] = [1, 256]` narrows every element to i8 in
+            // codegen, so `256` must face the Int8 range check here — it did not, and
+            // rustc rejected `256i8` after `check` accepted (differential-fuzz, seed
+            // 1784965680755102000; the same check-vs-build gap #626/index 92 closed for
+            // scalar bindings). Recurses so a nested annotation reaches through.
+            ExprKind::List { elements, .. } => {
+                let Some(elem_ty) = Self::annotated_element_ty(declared) else { return false };
+                for e in elements {
+                    self.record_int_literal_context(e, &elem_ty);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// A `some` / `ok` / `err` payload against the declared carrier's slot.
+    fn record_int_literal_carrier(&mut self, value: &ast::Expr, payload: &ast::Expr, declared: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let slot = match (&value.kind, declared) {
+            (ExprKind::Some { .. }, Ty::Applied(TC::Option, a)) if a.len() == 1 => a.first(),
+            (ExprKind::Ok { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.first(),
+            (ExprKind::Err { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.get(1),
+            _ => None,
+        };
+        if let Some(slot) = slot.cloned() {
+            self.record_int_literal_context(payload, &slot);
+        }
+    }
+
+    /// The literal itself: pin the annotated context onto its range-check site.
+    fn record_int_literal_leaf(&mut self, value: &ast::Expr, declared: &Ty) {
         // Reaches through any paren/unary-minus chain, so `let m: Int8 = -(300)`
         // and `let m: Int8 = --300` face the same range check `-300` does. The
         // NET sign comes from the same walk; the `Unary` inference writes it onto
@@ -526,6 +533,24 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// [`Self::check_fn_visibility`] for a resolved key whose module is not
+    /// spelled at the use (a method call, #4904): the declaring module is the
+    /// one registration recorded. A restricted fn whose module is not known is
+    /// judged against its key's prefix — a wrong owner refuses, never admits.
+    pub(super) fn check_key_visibility(&mut self, key: &str) {
+        let k = sym(key);
+        if !self.env.fn_visibility.contains_key(&k) {
+            return;
+        }
+        let owner = self.env.fn_decl_spans.get(&k).and_then(|s| s.module).map(|m| m.to_string());
+        let Some(owner) = owner.or_else(|| key.rsplit_once('.').map(|(m, _)| m.to_string())) else {
+            // A bare key is the entry program's own: no other module can name it.
+            return;
+        };
+        let field = key.strip_prefix(&format!("{owner}.")).unwrap_or(key).to_string();
+        self.check_fn_visibility(&owner, &field, key);
     }
 
     /// Reject cross-module access to `mod fn` / `local fn` functions.

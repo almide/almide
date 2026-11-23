@@ -1,0 +1,2 @@
+# The probe of scope.e420-local-fn: the entry names another module's `local fn` as a value (#4904).
+expect = "function 'm.secret' is not accessible"

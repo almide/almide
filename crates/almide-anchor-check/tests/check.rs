@@ -190,11 +190,21 @@ fn a_check_after_its_access_is_refused() {
 }
 
 #[test]
-fn a_kill_carries_no_anchor_and_an_unlocated_event_is_counted() -> Result<(), String> {
-    let r = bounds(READ, "c0 a0 s0;c0 a0", "1:8 1:18 -;- -")?;
-    assert_eq!(r.bounds_unlocated, 2);
+fn a_kill_carries_no_anchor_and_an_unlocated_event_is_refused() -> Result<(), String> {
+    let r = bounds(READ, "c0 a0 s0", "1:8 1:18 -")?;
+    assert_eq!((r.bounds_checks, r.bounds_accesses, r.bounds_unlocated), (1, 1, 0));
     assert!(bounds(READ, "c0 a0 s0", "1:8 1:18 1:18").is_err());
+    // A check or an access the anchor file does not place in the bytes is
+    // not counted and passed over: the same witness with its second
+    // stretch left unlocated is refused.
+    assert!(bounds(READ, "c0 a0 s0;c0 a0", "1:8 1:18 -;- -").unwrap_err().contains("carries no anchor"));
+    assert!(bounds(READ, "c0 a0", "1:8 -").unwrap_err().contains("carries no anchor"));
     Ok(())
+}
+
+#[test]
+fn an_init_site_with_no_anchor_is_refused() {
+    assert!(init(SITE, SITE_W, "- - -").unwrap_err().contains("carries no anchor"));
 }
 
 // ── bounds: the guard's operands ───────────────────────────────────────────

@@ -466,12 +466,21 @@ pub(crate) fn check_through_link(file: &str) -> Result<(), String> {
 }
 
 fn compile_to_linked_ir(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
-    compile_to_linked_ir_with_source(file, no_check, t).map(|(ir, outside, _, _)| (ir, outside))
+    compile_to_linked_ir_with_source(file, no_check, t).map(|(ir, outside, _, _, _)| (ir, outside))
 }
 
-fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>, Option<NativeInput>, String), String> {
+#[allow(clippy::type_complexity)]
+fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTimer) -> Result<(Option<almide::ir::IrProgram>, Vec<String>, Option<NativeInput>, String, std::collections::HashSet<String>), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
     t.lap("parse+resolve");
+    // The modules the program's own sources declare (#2865), read before
+    // checking takes the sources: the wasm route's `package` rule.
+    let package: std::collections::HashSet<String> = resolved
+        .modules
+        .iter()
+        .map(|(name, ..)| name.clone())
+        .filter(|name| resolved.sources.contains_key(name))
+        .collect();
     let mut native_input = None;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
@@ -490,7 +499,7 @@ fn compile_to_linked_ir_with_source(file: &str, no_check: bool, t: &cli::PhaseTi
     let permissions_project = parsed_project;
     optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
     t.lap("optimize+link");
-    Ok((ir_program, outside_guarantee, native_input, source_text))
+    Ok((ir_program, outside_guarantee, native_input, source_text, package))
 }
 
 /// Each dependency package's capability set (#4093, `almide deps`): the

@@ -1,0 +1,14 @@
+# Negative control of proc.native-no-runtime-list (c2, proofs/decision-sites.toml): a call reaching a spawn is not judged against [permissions] proc, so a native build spawns it unbounded
+# control_test: tests/decision_batch1a_test.rs::novel_check_judges_a_fresh_module_against_the_entrys_manifest
+diff --git a/src/cli/mod.rs b/src/cli/mod.rs
+--- a/src/cli/mod.rs
++++ b/src/cli/mod.rs
+@@ -226,7 +226,7 @@
+                             "{module}.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                         ));
+                     }
+-                    if let Some(at) = proc_spawn::spawning().get(&(module.to_string(), func.to_string())) {
++                    if let Some(at) = proc_spawn::spawning().get(&(module.to_string(), func.to_string())).filter(|_| false) {
+                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
+                         match at.as_ref().and_then(|at| proc_command_literal(at, args)) {
+                             Some(value) if self.allow.iter().any(|c| c == value) => {}

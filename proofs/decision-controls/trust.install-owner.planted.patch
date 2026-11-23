@@ -1,0 +1,15 @@
+# Negative control of trust.install-owner, its planted-directory half (proofs/decision-sites.toml): a spec naming an existing directory is read as local again, skipping the trust check (the #4864 shape).
+# control_test: tests/decision_deps_novel_test.rs::novel_install_a_planted_directory_named_like_a_fresh_source_is_not_installed
+diff --git a/src/cli/install.rs b/src/cli/install.rs
+index 3ba6766cfd..a5c4cd8fcb 100644
+--- a/src/cli/install.rs
++++ b/src/cli/install.rs
+@@ -330,7 +330,7 @@ pub struct InstallGrants<'a> {
+ /// as a source and goes through the trust check, whatever happens to exist
+ /// on disk under that name.
+ fn spelled_local(spec: &str) -> bool {
+-    matches!(spec, "." | "..") || spec.starts_with("./") || spec.starts_with("../") || Path::new(spec).is_absolute()
++    matches!(spec, "." | "..") || spec.starts_with("./") || spec.starts_with("../") || Path::new(spec).is_absolute() || Path::new(spec).is_dir()
+ }
+ 
+ fn spec_source(spec: &str) -> Option<Result<crate::git_source::GitSource, String>> {

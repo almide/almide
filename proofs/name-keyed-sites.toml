@@ -229,11 +229,6 @@ class = "legacy"
 names = 31
 
 [[site]]
-id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_SIZED_CTORS::table"
-class = "legacy"
-names = 8
-
-[[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::CAPABILITY_GRANTS::table"
 class = "legacy"
 names = 11
@@ -269,17 +264,7 @@ class = "legacy"
 names = 21
 
 [[site]]
-id = "crates/almide-frontend/src/check/scoped.rs::SCOPED_SCALAR_MODULES::table"
-class = "legacy"
-names = 4
-
-[[site]]
 id = "crates/almide-frontend/src/check/static_dispatch.rs::resolve_module_call_member::or-chain"
-class = "legacy"
-names = 2
-
-[[site]]
-id = "crates/almide-frontend/src/concurrent_reach.rs::FAN_OPS::table"
 class = "legacy"
 names = 2
 

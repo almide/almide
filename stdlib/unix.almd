@@ -38,6 +38,7 @@ effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String
 effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+@sized_by(xs)
 effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
   let raw = xs |> list.map((f) => __raw(f))
   let ready = unix.__os_wait(raw, timeout_ms)!
@@ -57,6 +58,7 @@ effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
 @ordered
+@sized_by(data)
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
   __raw(fd),
   offset,
@@ -119,6 +121,7 @@ effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String
 effect fn __os_close(fd: Int) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_create")
+@fs_shm_dir
 effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_resize")

@@ -1,0 +1,6 @@
+[package]
+name = "sockprobe"
+version = "0.1.0"
+
+[permissions]
+fs = ["./data"]

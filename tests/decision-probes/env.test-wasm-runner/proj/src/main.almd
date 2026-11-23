@@ -1,0 +1,3 @@
+import fs
+
+effect fn main() -> Unit = println(fs.read_text("secret.txt") ?? "refused")
