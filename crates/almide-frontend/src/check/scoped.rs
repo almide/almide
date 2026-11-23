@@ -591,6 +591,36 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
         }
     }
 
+    /// A call into a stdlib module inside a scoped region (`check_call`).
+    fn check_stdlib_call(&mut self, call: &ast::Expr, args: &[ast::Expr], m0: &str, m: &str, field: &str) -> bool {
+        // C-364 (amended 2026-11-20): admitted by its declared
+        // SIGNATURE, never by its module name — no effect and no
+        // effect-bearing attribute, and every argument and the
+        // result (as the checker instantiated them) a scalar. An
+        // unknown signature or type is refused.
+        let effect_free = crate::stdlib::lookup_sig(m, field).is_some_and(|sig| !sig.is_effect)
+            && !almide_lang::stdlib_info::is_ordered_stdlib_fn(m, field)
+            && !almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, field)
+            && !almide_lang::stdlib_info::is_signals_process_stdlib_fn(m, field);
+        let scalar = self.checker.type_map.get(&call.id).is_some_and(is_scalar_value_ty)
+            && args.iter().all(|a| self.checker.type_map.get(&a.id).is_some_and(is_scalar_value_ty));
+        if effect_free && scalar {
+            return true;
+        }
+        let detail = match self.checker.type_map.get(&call.id) {
+            Some(t) if !effect_free => format!(" (`{m}.{field}` is an effect, returns `{}`)", t.display()),
+            Some(t) if !is_scalar_value_ty(t) => format!(" (returns `{}`)", t.display()),
+            _ => String::new(),
+        };
+        self.refuse(
+            &format!("`{m0}.{field}`"),
+            &format!("its signature is not scalar and effect-free{detail}"),
+            "compute with scalar operators and `scoped fn` helpers inside the scope",
+            call.span,
+        );
+        false
+    }
+
     /// The callee rule. Returns whether the call itself was admitted (so the
     /// caller judges its result type; a refused call is reported once).
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) -> bool {
@@ -638,32 +668,7 @@ impl<'a, 'c> ScopedCx<'a, 'c> {
                 let m = resolved.as_str();
                 let field = field.as_str();
                 if almide_lang::stdlib_info::is_any_stdlib(m) {
-                    // C-364 (amended 2026-11-20): admitted by its declared
-                    // SIGNATURE, never by its module name — no effect and no
-                    // effect-bearing attribute, and every argument and the
-                    // result (as the checker instantiated them) a scalar. An
-                    // unknown signature or type is refused.
-                    let effect_free = crate::stdlib::lookup_sig(m, field).is_some_and(|sig| !sig.is_effect)
-                        && !almide_lang::stdlib_info::is_ordered_stdlib_fn(m, field)
-                        && !almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, field)
-                        && !almide_lang::stdlib_info::is_signals_process_stdlib_fn(m, field);
-                    let scalar = self.checker.type_map.get(&call.id).is_some_and(is_scalar_value_ty)
-                        && args.iter().all(|a| self.checker.type_map.get(&a.id).is_some_and(is_scalar_value_ty));
-                    if effect_free && scalar {
-                        return true;
-                    }
-                    let detail = match self.checker.type_map.get(&call.id) {
-                        Some(t) if !effect_free => format!(" (`{m}.{field}` is an effect, returns `{}`)", t.display()),
-                        Some(t) if !is_scalar_value_ty(t) => format!(" (returns `{}`)", t.display()),
-                        _ => String::new(),
-                    };
-                    self.refuse(
-                        &format!("`{m0}.{field}`"),
-                        &format!("its signature is not scalar and effect-free{detail}"),
-                        "compute with scalar operators and `scoped fn` helpers inside the scope",
-                        call.span,
-                    );
-                    return false;
+                    return self.check_stdlib_call(call, args, m0, m, field);
                 }
                 let retained = self.retained_arg(args);
                 let reason = format!("may retain {retained} outside the allocation region (a call across the module boundary)");
