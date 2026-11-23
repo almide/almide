@@ -22,7 +22,9 @@
 # A row is STAMPED only when all four hold, and the judge recomputes each from
 # the row's evidence:
 #   c1  it decides from declarations, types or reach — not names, prefixes,
-#       suffixes, parameter names or Debug/Display text  (`from`);
+#       suffixes, parameter names or Debug/Display text  (`from`; a
+#       `mixed:` of two or more of declaration / type / reach counts, one
+#       with any other part does not — owner ruling 2026-11-23);
 #   c2  an unknown item is refused, and a test adds a NOVEL item and sees it
 #       refused  (`unknown = "refuse"`, `novel = "<test file>::<fn>"`, the test
 #       calling a tests/support/novel.rs generator);
@@ -44,7 +46,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "104"
+# unstamped_ceiling     = "103"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "163"
 # failopen_ceiling      = "25"
@@ -158,6 +160,8 @@
 #   2026-11-23  C-460 (76dbf40d2f): fsscope.native-guard-map / -wrap-calls / -inject / -v1-native-plan stamped;
 #               bounded.shape-rules re-observed (14 routes refuse) but held unstamped on c1 (a mixed `from`);
 #               unstamped 108 -> 104, fail-open 29 -> 25, skipped 175 -> 163.
+#   2026-11-23  bounded.shape-rules stamped on 85aa318625 after the judge's c1 admitted a mixed
+#               declaration / type / reach source (owner ruling 2026-11-23); unstamped 104 -> 103.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -846,8 +850,7 @@ tests = [
 ]
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
 issues = [4855, 4871, 4883]
-status = "UNSTAMPED"
-reasons = ["c1: from = mixed:declaration+type — no name in it, but the judge's c1 takes exactly one of declaration | type | reach (E071/E077 decide by type, E075 by the @sized_by declaration); owner ruling asked"]
+status = "STAMPED"
 note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates). The probe holds a callee allocation in a counted loop (E071) and a declared amplifier, string.repeat (@sized_by(s, n)), handed a run-time Int (E075); E075 observed refused on all 14 routes inside and outside the project (2026-11-23 ds-2), E071 on 2026-11-20."
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
@@ -857,6 +860,7 @@ control_extra_seen = "ds-2 2026-11-22 (tree = d5b126c67e + @sized_by): base gree
 novel = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
 control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871): base green, patched red (scripts/run-decision-controls.sh); the #4871 hunk alone turns novel_a_callee_allocation_is_followed_by_reach red; 2026-11-20 ds-2 (tree = 03f7cb5877 + ADR-0038 stage 1): base green, patched red, and the ADR-0038 hunk alone (ty_has_sink_writer -> true) turns novel_an_output_line_of_scalars_is_admitted_by_its_hole_types red"
 probe = "tests/decision-probes/bounded.shape-rules"
+stamp = "85aa318625 2026-11-23"
 
 [[site]]
 id = "critical.entry-scope"
