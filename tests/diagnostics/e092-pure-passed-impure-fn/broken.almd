@@ -1,0 +1,11 @@
+// #4928: a fn named as a value is judged like a lambda when it is passed to
+// a `@pure` fn.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn noisy(x: Int) -> Int = {
+  println("side effect")
+  x + 1
+}
+
+fn main() -> Unit = println("${apply(noisy, 2)}")

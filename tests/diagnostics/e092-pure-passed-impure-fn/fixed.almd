@@ -1,0 +1,7 @@
+// #4928: a fn without output may be passed.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn quiet(x: Int) -> Int = x + 1
+
+fn main() -> Unit = println("${apply(quiet, 2)}")

@@ -1,0 +1,12 @@
+// #4928: a function handed to a `@pure` fn runs inside its promise, so a
+// plain caller may not pass it a lambda that prints.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let n = apply((y) => {
+    println("side effect")
+    y + 1
+  }, 2)
+  println("${n}")
+}
