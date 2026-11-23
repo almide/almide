@@ -5,6 +5,9 @@
 //! here are fresh (a module, symbols and parameter names no stdlib file
 //! has), so a rule keyed on today's names fails them.
 
+#[path = "../../../tests/support/novel.rs"]
+mod novel;
+
 use almide_codegen::fs_scope::{fs_category_symbols_from, fs_runtime_guards_from, fs_scope_refusals, FsScope};
 use std::collections::HashSet;
 
@@ -17,23 +20,34 @@ fn bundled() -> Vec<(&'static str, &'static str)> {
 
 #[test]
 fn novel_an_fs_category_call_with_no_path_mark_is_refused() {
-    let src = "@intrinsic(\"almide_rt_novelmod_touch\")\n@category(\"FS.write\")\neffect fn touch(n: Int) -> Result[Unit, String] = _\n\n\
-               @intrinsic(\"almide_rt_novelmod_peek\")\n@category(\"Net.fetch\", \"FS.read\")\neffect fn peek(at: String) -> Result[Int, String] = _\n\n\
-               @intrinsic(\"almide_rt_novelmod_seen\")\n@fs_path(at)\n@category(\"FS.read\")\neffect fn seen(at: String) -> Bool = _\n\n\
-               @intrinsic(\"almide_rt_novelmod_tick\")\n@category(\"Time\")\neffect fn tick() -> Int = _\n";
-    let sources = [("unix", src)];
+    let [touch, peek, seen, tick] = std::array::from_fn(|_| novel::runtime_symbol());
+    let [ft, fp, fs, fk] = std::array::from_fn(|_| novel::ident("f"));
+    let (n, at) = (novel::ident("n"), novel::ident("at"));
+    let src = format!(
+        "@intrinsic(\"{touch}\")\n@category(\"FS.write\")\neffect fn {ft}({n}: Int) -> Result[Unit, String] = _\n\n\
+         @intrinsic(\"{peek}\")\n@category(\"Net.fetch\", \"FS.read\")\neffect fn {fp}({at}: String) -> Result[Int, String] = _\n\n\
+         @intrinsic(\"{seen}\")\n@fs_path({at})\n@category(\"FS.read\")\neffect fn {fs}({at}: String) -> Bool = _\n\n\
+         @intrinsic(\"{tick}\")\n@category(\"Time\")\neffect fn {fk}() -> Int = _\n"
+    );
+    // A module the stdlib has (its row is read for an undeclared fn); the
+    // declarations, symbols and parameter names in it are fresh.
+    let sources = [("unix", src.as_str())];
     let syms = fs_category_symbols_from(&sources).expect("declarations read");
-    assert!(!syms.contains("almide_rt_novelmod_tick"), "a Time call is not a file call: {syms:?}");
-    let reached: HashSet<&str> = ["almide_rt_novelmod_touch", "almide_rt_novelmod_peek", "almide_rt_novelmod_seen", "almide_rt_novelmod_tick"].into_iter().collect();
+    assert!(!syms.contains(&tick), "a Time call is not a file call: {syms:?}");
+    let reached: HashSet<&str> = [touch.as_str(), peek.as_str(), seen.as_str(), tick.as_str()].into_iter().collect();
+    let mut refused = vec![peek.clone(), touch.clone()];
+    refused.sort();
     assert_eq!(
         fs_scope_refusals(&sources, &reached).unwrap(),
-        vec!["almide_rt_novelmod_peek".to_string(), "almide_rt_novelmod_touch".to_string()],
+        refused,
         "the unmarked FS calls are refused, the marked one and the Time call are not"
     );
     // A module whose row is FS makes an undeclared intrinsic an FS call.
-    let fs_row = [("fs", "@intrinsic(\"almide_rt_fs_novelpeek\")\neffect fn novelpeek(n: Int) -> Int = _\n")];
-    let reached: HashSet<&str> = ["almide_rt_fs_novelpeek"].into_iter().collect();
-    assert_eq!(fs_scope_refusals(&fs_row, &reached).unwrap(), vec!["almide_rt_fs_novelpeek".to_string()]);
+    let (sym, f) = (format!("almide_rt_fs_{}", novel::ident("peek")), novel::ident("f"));
+    let fs_src = format!("@intrinsic(\"{sym}\")\neffect fn {f}(n: Int) -> Int = _\n");
+    let fs_row = [("fs", fs_src.as_str())];
+    let reached: HashSet<&str> = [sym.as_str()].into_iter().collect();
+    assert_eq!(fs_scope_refusals(&fs_row, &reached).unwrap(), vec![sym.clone()]);
     // The bundled stdlib has none: every FS call carries its mark.
     let all: HashSet<String> = fs_category_symbols_from(&bundled()).unwrap();
     assert!(all.len() > 30, "{all:?}");
@@ -44,12 +58,14 @@ fn novel_an_fs_category_call_with_no_path_mark_is_refused() {
 
 #[test]
 fn novel_a_guarded_fn_named_as_a_value_refuses_the_scope() {
-    let roots = vec!["/novel-root-4825".to_string()];
+    let roots = vec![format!("/{}", novel::path_segment())];
+    let (f, g, xs) = (novel::ident("f"), novel::ident("g"), novel::ident("xs"));
     for calls in [
-        "let f = almide_rt_fs_write;\nf(p, c)",
-        "let g = almide_rt_fs_exists as fn(&str) -> bool;",
-        "xs.iter().map(almide_rt_unix___os_listen)",
+        format!("let {f} = almide_rt_fs_write;\n{f}(p, c)"),
+        format!("let {g} = almide_rt_fs_exists as fn(&str) -> bool;"),
+        format!("{xs}.iter().map(almide_rt_unix___os_listen)"),
     ] {
+        let calls = calls.as_str();
         let scope = FsScope::new(&roots, "", "", calls).expect("a scope");
         let r = scope.wrap_calls(calls);
         assert!(r.as_ref().is_err_and(|e| e.contains("named other than as a direct call")), "{calls}: {r:?}");
@@ -66,5 +82,5 @@ fn novel_every_fs_category_call_makes_the_scope_apply() {
     for s in &syms {
         assert!(FsScope::applies_to(&format!("let r = {s}(p);")), "`{s}` does not make the scope apply");
     }
-    assert!(!FsScope::applies_to("let r = almide_rt_string_len(p);"));
+    assert!(!FsScope::applies_to(&format!("let r = {}(p);", novel::runtime_symbol())));
 }
