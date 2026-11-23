@@ -15,8 +15,9 @@ rows), never from its filename.
 
 Three columns per hole, each re-derived from source on every run:
 
-  native    1 if the declaration carries `@intrinsic("...")` within the three
-            lines above it (the native target's Rust runtime body), else 0.
+  native    1 if the declaration's attribute block (the contiguous `@` and
+            comment lines directly above it) carries `@intrinsic("...")`
+            (the native target's Rust runtime body), else 0.
   emitter   the number of `fn lower_<module>_<name>(` and
             `fn lower_<module>_<name>_<suffix>(` definitions in
             crates/almide-wasm/src — the structural wasm leg's hand-written
@@ -104,7 +105,14 @@ def enumerate_holes(stdlib_dir, owners):
             m = HOLE.match(line)
             if not m:
                 continue
-            window = lines[max(0, i - 3):i]
+            # The declaration's whole attribute block: every contiguous
+            # `@...` / comment line directly above it, however many
+            # attributes it stacks (a fixed three-line window went blind to
+            # `@intrinsic` four lines up under `@reuse @consume @sized_by`).
+            j = i
+            while j > 0 and (lines[j - 1].startswith("@") or lines[j - 1].startswith("//")):
+                j -= 1
+            window = lines[j:i]
             native = 1 if any(INTRINSIC.match(w) for w in window) else 0
             found.append((m.group(1), native))
         if not found:
