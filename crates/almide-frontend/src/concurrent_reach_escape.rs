@@ -21,7 +21,7 @@ use almide_lang::ast::{Expr, ExprKind, Span};
 
 /// A use of a fn with a concurrent slot other than as a callee.
 #[derive(Clone, Debug)]
-pub struct EscapeFinding {
+pub(crate) struct EscapeFinding {
     /// The fn, as written (`w`, `m.w`, `fan.map`), or `this lambda`.
     pub name: String,
     /// The concurrent surface its slot flows into (`fan.map`, `http.serve`).
