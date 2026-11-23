@@ -40,7 +40,7 @@ mod shape;
 pub use shape::may_have_sites;
 #[path = "concurrent_reach_escape.rs"]
 mod escape;
-pub use escape::EscapeFinding;
+pub(crate) use escape::EscapeFinding;
 
 /// The surface a `fan.<op>` call is written as: `__any_block` is the
 /// parser's spelling of `fan.any { … }`. Every `fan.<op>` is a concurrency
@@ -277,7 +277,7 @@ impl<'a> Analyzer<'a> {
 
     /// Run slot inference to a fixpoint, then collect every site that
     /// reaches a `var`, and every `http.serve` app that reads a local.
-    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>, Vec<EscapeFinding>) {
+    pub(crate) fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>, Vec<EscapeFinding>) {
         if !self.shape.may_have_sites {
             // No site: nothing to infer and nothing to record (`Shape`).
             // `http.serve` has a declared slot, so its call is a site too.
