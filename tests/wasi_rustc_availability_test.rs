@@ -47,7 +47,7 @@ const ENV_ONLY: &str = r#"import env
 
 effect fn main() -> Unit = {
   env.sleep_ms(1)
-  println("args ${list.len(env.args())} cwd ${env.cwd() ?? "?"} home ${option.is_some(env.get("ALMIDE_4913_UNSET"))}")
+  println("args ${list.len(env.args())} cwd ${env.cwd() ?? "?"} home ${option.is_some(env.get("NO_SUCH_VAR_4913_UNSET"))}")
 }
 "#;
 
