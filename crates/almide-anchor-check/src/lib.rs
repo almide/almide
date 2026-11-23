@@ -39,9 +39,11 @@
 //! loaded); a `w` is a store; a slot's located events lie in one function,
 //! in byte order (a `c` before the access it guards).
 //!
-//! A located event that fails any of these REJECTS. An event anchored `-`
-//! (a kill, which no instruction carries; or one in a body that did not ship)
-//! is counted, not checked.
+//! A located event that fails any of these REJECTS. A kill carries no
+//! instruction and is anchored `-`. Any other event anchored `-` REJECTS too:
+//! an event the anchor file does not place in the shipped bytes is one this
+//! check cannot hold to an instruction, and counting it would let a producer
+//! that stops locating its events be judged on fewer of them.
 //!
 //! BOUNDS, the operands (operands.rs): each located `a` / `w` is held to its
 //! slot's latest located `c` — the compare tests this access's index against
@@ -102,7 +104,9 @@ pub(crate) fn parse_at(t: &str) -> Result<Option<At>, String> {
     }
 }
 
-/// What a check saw.
+/// What a check saw. The three `*_unlocated` counts stay 0: an event the
+/// anchor file leaves unlocated is refused, not counted (they keep their
+/// place in the printed verdict, which the structural wall reads).
 #[derive(Default, Debug)]
 pub struct Report {
     pub init_sites: usize,

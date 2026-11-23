@@ -277,9 +277,10 @@ pub fn check_fields(bodies: &[Body<'_>], imports: u32, alloc: u32, fields: &str,
             }
             continue;
         }
+        // An item with no anchor is one this check cannot hold to the bytes:
+        // REFUSED, not counted (bounds.rs `stretch`).
         if g.iter().all(Option::is_none) {
-            rep.field_unlocated += 1;
-            continue;
+            return Err(what("carries no anchor".into()));
         }
         fx.item(&t, &g, &mut flows, rep).map_err(what)?;
     }
