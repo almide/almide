@@ -1,10 +1,10 @@
 // `let` alone on its line, the bindings below it, a closing `in`
 // (Haskell / OCaml layout).
-fn width(s: String) -> Int =
+fn total() -> Int =
   let
-    a = string.len(s)
-    b = 2
+    quantity = 40
+    unit_price = 2
   in
-    a * b
+    quantity * unit_price
 
-fn main() -> Unit = println(int.to_string(width("abc")))
+fn main() -> Unit = println(int.to_string(total()))
