@@ -24,6 +24,9 @@ pub(crate) struct PendingRust {
     /// carried with it, never read back from the process-wide copy another
     /// file's check may have set meanwhile.
     pub(crate) fs_scope: Option<Vec<String>>,
+    /// The modules the program's own sources declare (#2865): a call into
+    /// one is the package's fn, whatever its key spells.
+    pub(crate) package: std::collections::HashSet<String>,
 }
 
 impl PendingRust {
@@ -49,6 +52,11 @@ impl PendingRust {
     /// this text holds for it (#4640).
     pub(crate) fn host_source(&self) -> HostSource {
         host_source(&self.ir, &self.opts, &self.native_text)
+    }
+
+    /// The checked, lowered and linked program.
+    pub(crate) fn ir(&self) -> &almide::ir::IrProgram {
+        &self.ir
     }
 
     /// The standard codegen's Rust (Codegen v3: Nanopass + Templates).
@@ -92,11 +100,11 @@ pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostS
 /// [`try_compile_reporting`] up to, not including, the codegen.
 pub(crate) fn try_compile_pending(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(PendingRust, Option<almide::ir::IrProgram>, Vec<String>), String> {
     let t = cli::PhaseTimer::start();
-    let (ir_program, outside_guarantee, native_input, source) = compile_to_linked_ir_with_source(file, no_check, &t)?;
+    let (ir_program, outside_guarantee, native_input, source, package) = compile_to_linked_ir_with_source(file, no_check, &t)?;
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     let ir = ir_program.expect("IR required for codegen");
     let native_text = cli::native_rust_text(file);
     let fs_scope = cli::fs_scope_for(file);
-    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input, native_text, fs_scope }, metered, outside_guarantee))
+    Ok((PendingRust { ir, opts: codegen_opts.clone(), source, native_input, native_text, fs_scope, package }, metered, outside_guarantee))
 }
 

@@ -117,7 +117,7 @@ fn dispatch_check(args: CheckCmd) {
     if critical.is_some() {
         refuse_build_switches_under_critical();
     }
-    let wasm_target = check_wasm_target(target.as_deref());
+    let check_target = check_target_route(target.as_deref());
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
     // same entries in the same order (#2253): every row already names its
@@ -128,8 +128,8 @@ fn dispatch_check(args: CheckCmd) {
         Some(entries) => entries[0].clone(),
         None => resolve_file(file),
     };
-    if wasm_target && effects {
-        eprintln!("error: --target wasm is not supported with --effects");
+    if check_target != cli::CheckTarget::Native && effects {
+        eprintln!("error: --target {} is not supported with --effects", target.as_deref().unwrap_or_default());
         std::process::exit(1);
     }
     if effects {
@@ -140,13 +140,13 @@ fn dispatch_check(args: CheckCmd) {
         cli::cmd_check_effects(&file);
     } else if json {
         match &package_entries {
-            Some(entries) => cli::cmd_check_json_package(entries, critical.as_deref(), wasm_target),
-            None => cli::cmd_check_json(&file, critical.as_deref(), wasm_target),
+            Some(entries) => cli::cmd_check_json_package(entries, critical.as_deref(), check_target),
+            None => cli::cmd_check_json(&file, critical.as_deref(), check_target),
         }
     } else if let Some(entries) = package_entries {
-        cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
+        cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), check_target);
     } else {
-        cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
+        cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref(), check_target);
     }
 }
 
@@ -200,14 +200,15 @@ fn refuse_build_switches_under_critical() {
     }
 }
 
-/// `almide check --target`: `wasm` adds the wasm build route's verdicts;
-/// nothing else is accepted.
-fn check_wasm_target(target: Option<&str>) -> bool {
+/// `almide check --target`: `wasm` adds the wasm build route's verdicts,
+/// `wasi` the rustc wasm32-wasip1 route's (#4913); nothing else is accepted.
+fn check_target_route(target: Option<&str>) -> cli::CheckTarget {
     match target {
-        None => false,
-        Some("wasm") => true,
+        None => cli::CheckTarget::Native,
+        Some("wasm") => cli::CheckTarget::Wasm,
+        Some("wasi") => cli::CheckTarget::Wasi,
         Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm` (got `{other}`) — the native target is what `almide check` already judges");
+            eprintln!("error: `almide check --target` accepts only `wasm` or `wasi` (got `{other}`) — the native target is what `almide check` already judges");
             std::process::exit(1);
         }
     }
