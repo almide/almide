@@ -1,0 +1,2 @@
+expects_error = "is OCaml/F# syntax"
+hint_substring = "There is no `with`"

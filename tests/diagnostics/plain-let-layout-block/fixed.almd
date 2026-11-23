@@ -1,0 +1,9 @@
+// `let` alone on its line, the bindings below it, a closing `in`
+// (Haskell / OCaml layout).
+fn width(s: String) -> Int = {
+  let a = string.len(s)
+  let b = 2
+  a * b
+}
+
+fn main() -> Unit = println(int.to_string(width("abc")))

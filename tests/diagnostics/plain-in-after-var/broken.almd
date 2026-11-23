@@ -1,0 +1,8 @@
+// An `in` after a binding that is not a single-line `let` (here a `var`):
+// no `let ... in` detection sits in front of it.
+fn double(n: Int) -> Int = {
+  var a = n
+  in a * 2
+}
+
+fn main() -> Unit = println(int.to_string(double(3)))

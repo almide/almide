@@ -1,0 +1,5 @@
+// A `let ... in` where a value is expected (an `if` arm).
+fn pick(n: Int) -> Int =
+  if n > 0 then let m = n * 2 in m else 0
+
+fn main() -> Unit = println(int.to_string(pick(3)))

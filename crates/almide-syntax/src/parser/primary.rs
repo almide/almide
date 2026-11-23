@@ -242,12 +242,30 @@ impl Parser {
         {
             return Err(error);
         }
-        // `let x = expr in body` — ML-style let-in expression
+        // `let x = expr in body` — ML-style let-in expression. The hint says
+        // what a `let` IS and where a temporary goes; it used to open with
+        // advice about list concatenation, which the reader had not asked for
+        // and then acted on.
         if tok.token_type == TokenType::Let {
             let msg = "'let' is not an expression in Almide";
-            let hint = "Lists are immutable — use `+` to build a new list: `some(stack + [item])`. \
-                        If you need a temporary binding, use a block: `{ let x = expr; body }`";
-            let diag = self.diag_error(msg, hint, "let-in");
+            let hint = "A `let` is a statement, and Almide has no `let ... in`. To bind a temporary \
+                        where a value is expected, use a block — its last expression is its value: \
+                        `{ let x = expr; body }`";
+            let diag = self.diag_error(msg, hint, "let-in").with_try("{\n    let x = 1\n    x + 1\n}");
+            self.errors.push(diag);
+            return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
+        }
+
+        // An `in` where an expression starts: the tail of a `let ... in`
+        // whose head was not a single-line `let x = expr` (a `var`, a layout
+        // block of bindings, a binding that itself failed to parse). Named
+        // here, or the reader is told only "Expected expression (got In)".
+        if tok.token_type == TokenType::In {
+            let msg = "`in` does not start an expression: `let ... in <expr>` is OCaml/Haskell syntax";
+            let hint = "Almide has no `in`. Bindings are statements — one `let x = expr` per line \
+                        inside a block `{ ... }` — and the block's last expression is its value. \
+                        Delete the `in` and keep what follows it as the last line.";
+            let diag = self.diag_error(msg, hint, "let ... in").with_try("{\n    let x = 1\n    let y = 2\n    x + y\n}");
             self.errors.push(diag);
             return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
         }
