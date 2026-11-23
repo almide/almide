@@ -1,0 +1,8 @@
+import fs
+
+test "a path outside the grant is refused" {
+  match fs.read_text("/almide-probe-outside.txt") {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "fs: \"/almide-probe-outside.txt\" is outside [permissions] fs"),
+  }
+}

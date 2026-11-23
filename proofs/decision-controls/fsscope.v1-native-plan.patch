@@ -1,0 +1,16 @@
+# Negative control of fsscope.v1-native-plan (proofs/decision-sites.toml): the certified native render never installs the scope.
+# control_test: tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets
+diff --git a/crates/almide-mir/src/native_fs_scope.rs b/crates/almide-mir/src/native_fs_scope.rs
+--- a/crates/almide-mir/src/native_fs_scope.rs
++++ b/crates/almide-mir/src/native_fs_scope.rs
+@@ -22,7 +22,9 @@
+ /// symbol prefix (#4825) — `Ok(None)` when none is reached or no scope is
+ /// set; `Err` when one reached cannot be bounded.
+ pub(crate) fn plan(used: &[&str], bodies: &str) -> Result<Option<almide_codegen::fs_scope::FsScope>, String> {
+-    let Some(roots) = ROOTS.with(|r| r.borrow().clone()) else { return Ok(None) };
++    let Some(_roots) = ROOTS.with(|r| r.borrow().clone()) else { return Ok(None) };
++    if true { return Ok(None) }
++    let roots = _roots;
+     let mut calls = bodies.to_owned();
+     for shim in used.iter().filter(|s| !crate::native_floor::is_runtime_text(s)) {
+         calls.push_str(shim);

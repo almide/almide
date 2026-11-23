@@ -1,1 +1,4 @@
-expect = "E071"
+# The probe of bounded.shape-rules: a callee allocation in a counted loop
+# (E071) and a declared amplifier handed a run-time Int (E075); every route
+# must print the amplifier refusal.
+expect = "E075"

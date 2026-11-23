@@ -10,6 +10,12 @@ fn shape() -> Int = {
   n
 }
 
+// The declared-amplifier case (E075, owner ruling 2026-11-22): `string.repeat`
+// declares `@sized_by(s, n)`, so a run-time `n` sizes its result.
+@bounded
+fn widen(s: String, n: Int) -> Int = string.len(string.repeat(s, n))
+
 test "a bounded fn allocates per iteration through a callee" {
   assert_eq(shape(), 8)
+  assert_eq(widen("ab", 3), 6)
 }

@@ -44,10 +44,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "108"
+# unstamped_ceiling     = "104"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "175"
-# failopen_ceiling      = "29"
+# skipped_route_ceiling = "163"
+# failopen_ceiling      = "25"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -155,6 +155,9 @@
 #               manifest.package-name refused by parse_toml (STAMPED); #4904 E420
 #               on the value and method routes (scope.e420-local-fn closed, c1
 #               prefix stays). 49 stamped, 108 not, 175 skipped, 30 fail-open.
+#   2026-11-23  C-460 (76dbf40d2f): fsscope.native-guard-map / -wrap-calls / -inject / -v1-native-plan stamped;
+#               bounded.shape-rules re-observed (14 routes refuse) but held unstamped on c1 (a mixed `from`);
+#               unstamped 108 -> 104, fail-open 29 -> 25, skipped 175 -> 163.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -826,7 +829,7 @@ decides = "E070 unbounded loops, E071 alloc in loop, E072 break/continue, E073 r
 from = "mixed:declaration+type"
 unknown = "refuse"
 unknown_note = "E071 / E077 judge a member from its checked types (a heap result or a mut heap parameter allocates; a Float result computes; an unknown type counts as both). E075 (owner ruling 2026-11-22): a stdlib fn declaring `@sized_by(p, ...)` is refused when a named Int parameter gets a run-time Int; an UNDECLARED heap-returning stdlib fn handed a heap input and a run-time Int is refused (only its body could tell an index from a multiplier); every other call keeps the type rule (a collection from a run-time Int with no heap input, #4855). BOUNDED_SIZED_CTORS is gone; 118 stdlib fns declare @sized_by (21 amplifiers). @sized_by outside the stdlib is E085"
-routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = [
   "tests/decision_batch1a_test.rs::novel_recursion_through_every_direct_call_form_is_refused",
   "tests/diagnostics/e070-*",
@@ -844,8 +847,8 @@ tests = [
 control_note = "tests/diagnostics/e07x-bounded-* broken.almd fixtures"
 issues = [4855, 4871, 4883]
 status = "UNSTAMPED"
-reasons = ["c3: re-observe the 14 routes on the @sized_by tree (the probe allocates only through a @bounded callee; add a declared-amplifier case)"]
-note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates); the probe allocates only through a @bounded callee in a counted loop, observed refused on all 14 routes inside and outside the project (2026-11-20 ds-2)."
+reasons = ["c1: from = mixed:declaration+type — no name in it, but the judge's c1 takes exactly one of declaration | type | reach (E071/E077 decide by type, E075 by the @sized_by declaration); owner ruling asked"]
+note = "Grouped: every E070-E078 arm. Resource bounds, not capabilities. #4871: E071 follows a callee by reach (callee_allocates). The probe holds a callee allocation in a counted loop (E071) and a declared amplifier, string.repeat (@sized_by(s, n)), handed a run-time Int (E075); E075 observed refused on all 14 routes inside and outside the project (2026-11-23 ds-2), E071 on 2026-11-20."
 control_patch = "proofs/decision-controls/bounded.shape-rules.patch"
 control_test = "tests/decision_bounded_shape_test.rs::novel_unlisted_members_are_judged_by_their_types"
 control_extra = "proofs/decision-controls/bounded.shape-rules.sized-by.patch"
@@ -1081,16 +1084,21 @@ items = [
 ]
 keys = []
 decides = "which public almide_rt_fs_* runtime fn gets which scope guard macro (bool/two/glob/temp/root/path), or none"
-from = "param-name"
-unknown = "allow"
-unknown_note = "a new runtime fs fn whose path parameter is named e.g. `file`/`p`/`from,to`, or a 3-param src/dst, hits `_ => continue`: no guard, not twinned, so its std::fs calls run unbounded (bounded only if some guarded call already installed the global scope AND the fn uses almide_sfs)"
-routes = { check = "n.a.: no code", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs (bin and cdylib)", test = "runs: #4833 shared scope", bench = "skipped: #4831", native = "runs", wasm = "n.a.: host_fs_scope instead", wasi = "skipped: #4816 (cmd_build_wasi_rustc never injects)", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test child", emit = "skipped: #4843 --target rust prints no guards (probe p1)" }
-tests = ["crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions", "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "src/compile_driver_native_tests.rs::checked_native_empty_fs_scope_denies_write_only_program"]
-control_note = "NONE"
-issues = [4825, 4831, 4833, 4816]
-status = "UNSTAMPED"
-reasons = ["c1: the guard is chosen by parameter name (fs_scope.rs:72-83)", "c2: `_ => continue` leaves a fn with any other parameter name unguarded (fs_scope.rs:82, #4825)", "c2: no novel test", "c3: skipped bench #4831, emit #4843", "c4: no control"]
-note = "fs_scope.rs:64-87. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). No evidence written (c1 / c2 need #4825)."
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the guard is read off the declaration's path mark (@fs_path / @fs_glob / @fs_temp / @fs_root / @fs_shm_dir, #4825); a reached call whose declaration carries an FS leaf (C-460) or a string-taking fs runtime fn that no mark guards refuses the scoped build (FsScope::new); a runtime fn that touches a file entry but whose declaration carries no FS leaf (and is not Proc) fails the gate every_file_touching_runtime_fn_declares_an_fs_category, which enumerates them from the runtime source"
+routes = { check = "n.a.: the scope bounds run-time calls; check runs no program", check_json = "n.a.: check only", check_effects = "n.a.: check only", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "n.a.: the embedded host judges at its fs import (fsscope.scoped-admits), not through this native site; observed refused", wasi = "n.a.: a wasm artifact refuses [permissions] fs before it is written (#4816); observed refused", component = "n.a.: as wasi; observed refused", lsp = "n.a.: lsp checks only", mcp = "n.a.: the MCP almide_check tool checks only", emit = "runs: the emitted Rust wraps the call in its guard" }
+tests = ["crates/almide-codegen/tests/fs_category_scope_test.rs::novel_an_fs_category_call_with_no_path_mark_is_refused", "crates/almide-codegen/src/fs_scope.rs::tests::every_file_touching_runtime_fn_declares_an_fs_category", "crates/almide-codegen/src/fs_scope.rs::tests::a_path_parameter_is_guarded_by_its_mark_not_its_name", "tests/fs_category_test.rs::a_call_that_reaches_a_file_needs_its_fs_leaf_on_every_route", "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets"]
+control_note = "the FS leaf no longer makes a call judged (control_patch)"
+issues = [4825, 4831, 4833, 4816, 4843, 4916]
+status = "STAMPED"
+note = "C-460 (almide/als#271): every call whose declaration carries an FS leaf is judged and must carry a path mark. fs_scope.rs fs_category_symbols_from / fs_scope_refusals. Route cells observed 2026-11-23 ds-2 with the shared probe (bench, test and emit now run: #4831, #4833, #4843 are no longer skips)."
+probe = "tests/decision-probes/fsscope.native-guard-map"
+stamp = "76dbf40d2f 2026-11-23"
+control_seen = "76dbf40d2f 2026-11-23 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+novel = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_an_fs_category_call_with_no_path_mark_is_refused"
+control_patch = "proofs/decision-controls/fsscope.native-guard-map.patch"
+control_test = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_an_fs_category_call_with_no_path_mark_is_refused"
 
 [[site]]
 id = "fsscope.native-wrap-calls"
@@ -1100,24 +1108,21 @@ items = [
 ]
 keys = []
 decides = "which call sites in the user half of the emitted Rust are rewritten into a guard macro: an identifier in the guard map, not after `fn `, followed by `(` (optional turbofish)"
-from = "name"
-unknown = "allow"
-unknown_note = "a runtime fs fn named without a following `(` (a fn pointer, a `use` alias spelled differently) is copied unwrapped; today codegen eta-expands fn values (probe p1), so no such spelling is emitted"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs: #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843 (probe p1)" }
-tests = [
-  "crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions",
-  "tests/fs_scope_test.rs::scoped_calls_do_not_rewrite_host_names_inside_user_strings",
-]
-control_note = "NONE"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "a guarded runtime fn named in the user half other than as a direct call or its own definition (a fn value, a cast, a map argument) is refused (wrap_fs_calls Err): the scope cannot judge a call it cannot see"
+routes = { check = "n.a.: the scope bounds run-time calls; check runs no program", check_json = "n.a.: check only", check_effects = "n.a.: check only", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "n.a.: the embedded host judges at its fs import (fsscope.scoped-admits), not through this native site; observed refused", wasi = "n.a.: a wasm artifact refuses [permissions] fs before it is written (#4816); observed refused", component = "n.a.: as wasi; observed refused", lsp = "n.a.: lsp checks only", mcp = "n.a.: the MCP almide_check tool checks only", emit = "runs: the emitted Rust wraps the call in its guard" }
+tests = ["crates/almide-codegen/tests/fs_category_scope_test.rs::novel_a_guarded_fn_named_as_a_value_refuses_the_scope", "crates/almide-codegen/src/fs_scope.rs::tests::scope_guards_do_not_rewrite_literals_comments_or_definitions", "tests/fs_scope_test.rs::scoped_calls_do_not_rewrite_host_names_inside_user_strings"]
+control_note = "a guarded fn named as a value is copied unwrapped again (control_patch)"
 issues = [4825]
-status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed",
-  "c2:fail-open",
-  "c2:no-novel-test",
-  "c4:no-control",
-]
-note = "fs_scope.rs:146-180: a match whose next token is not `(` falls to the `_` arm and is copied as-is. Only user code after RT_BOUNDARY_MARKER is scanned (build.rs:500-512)."
+status = "STAMPED"
+note = "fs_scope.rs wrap_fs_calls: only user code after RT_BOUNDARY_MARKER is scanned (build.rs inject_fs_scope; render_native.rs render_items). Literals and comments are not identifiers (rust_idents)."
+probe = "tests/decision-probes/fsscope.native-guard-map"
+stamp = "76dbf40d2f 2026-11-23"
+control_seen = "76dbf40d2f 2026-11-23 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+novel = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_a_guarded_fn_named_as_a_value_refuses_the_scope"
+control_patch = "proofs/decision-controls/fsscope.native-wrap-calls.patch"
+control_test = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_a_guarded_fn_named_as_a_value_refuses_the_scope"
 
 [[site]]
 id = "fsscope.native-inject"
@@ -1127,16 +1132,21 @@ items = [
 ]
 keys = []
 decides = "whether a native program is built with the scope at all: no roots -> unchanged; no identifier starting `almide_rt_fs_` -> unchanged; already carries SCOPE_MARKER -> unchanged"
-from = "prefix"
-unknown = "allow"
-unknown_note = "a program whose only host fs reach is outside the almide_rt_fs_ prefix (unix.__os_listen/connect, shm_create's temp file, process `dir`) gets no scope at all"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (run.rs:66)", build = "runs (build.rs:359, before the cdylib split)", test = "runs (test_native.rs:367) with the process-global SCOPE: #4833", bench = "skipped: bench.rs:47-65 #4831", native = "runs", wasm = "n.a.", wasi = "skipped: build.rs:317-322 wasi rustc route #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843 emit.rs:121 codegen_with, no inject (probe p1) \u2014 no issue" }
-tests = ["tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets"]
-control_note = "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets (manifest removed -> outside read succeeds, assertion fails)"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the scope applies when the program reaches a guarded call or one the scope must judge (an FS-category call, a string-taking fs runtime fn; FsScope::applies_to), read off the declarations, not an identifier prefix; a judged call no mark guards then refuses the build"
+routes = { check = "n.a.: the scope bounds run-time calls; check runs no program", check_json = "n.a.: check only", check_effects = "n.a.: check only", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "n.a.: the embedded host judges at its fs import (fsscope.scoped-admits), not through this native site; observed refused", wasi = "n.a.: a wasm artifact refuses [permissions] fs before it is written (#4816); observed refused", component = "n.a.: as wasi; observed refused", lsp = "n.a.: lsp checks only", mcp = "n.a.: the MCP almide_check tool checks only", emit = "runs: the emitted Rust wraps the call in its guard" }
+tests = ["crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply", "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "tests/fs_scope_test.rs::almide_test_is_bounded_by_permissions_fs_on_both_targets", "tests/fs_scope_test.rs::unix_socket_paths_are_bounded_by_permissions_fs_on_both_targets"]
+control_note = "no call makes the scope apply (control_patch)"
 issues = [4831, 4833, 4816, 4832, 4843]
-status = "UNSTAMPED"
-reasons = ["c1: decided by the `almide_rt_fs_` identifier prefix (build.rs:508)", "c2: host fs reach outside that prefix gets no scope (#4831, #4832)", "c3: skipped bench #4831, emit #4843"]
-note = "build.rs:505-529. a wasm or wasi build of a project with [permissions] fs is refused now (build.rs:246-251, #4816), so its wasi cell is an n.a. candidate (VM). No evidence written."
+status = "STAMPED"
+note = "build.rs inject_fs_scope asks FsScope::applies_to; the certified render asks the same through native_fs_scope::plan (fsscope.v1-native-plan)."
+probe = "tests/decision-probes/fsscope.native-guard-map"
+stamp = "76dbf40d2f 2026-11-23"
+control_seen = "76dbf40d2f 2026-11-23 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+novel = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply"
+control_patch = "proofs/decision-controls/fsscope.native-inject.patch"
+control_test = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply"
 
 [[site]]
 id = "fsscope.v1-native-plan"
@@ -1146,23 +1156,21 @@ items = [
 ]
 keys = []
 decides = "whether the certified v1 native render installs the scope: roots set AND some used runtime item's host module text is `fs` (native_floor_resolve.rs::carries_fs_host)"
-from = "name"
-unknown = "allow"
-unknown_note = "a v1-rendered host item of another module that touches files (unix socket path, shm temp file) does not trigger the scope; its guards come from fsscope.native-guard-map"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (render_v1_native_or_fallback, mod.rs:456)", build = "runs", test = "runs (compile_driver_native.rs:80) #4833", bench = "skipped: #4831", native = "runs", wasm = "n.a.", wasi = "skipped: #4816", component = "n.a.", lsp = "n.a.", mcp = "runs via almide_test", emit = "skipped: #4843" }
-tests = [
-  "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets",
-  "src/compile_driver_native_tests.rs::checked_native_scope_bounds_reads_writes_and_predicates_before_artifact_binding",
-]
-control_note = "NONE"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the certified native render installs the scope when the bodies or glue reach a call FsScope::applies_to names (read off the declarations: path marks and FS categories), and a judged call no mark guards is a wall (the build falls back to the v0 inject, which refuses it)"
+routes = { check = "n.a.: the scope bounds run-time calls; check runs no program", check_json = "n.a.: check only", check_effects = "n.a.: check only", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "n.a.: the embedded host judges at its fs import (fsscope.scoped-admits), not through this native site; observed refused", wasi = "n.a.: a wasm artifact refuses [permissions] fs before it is written (#4816); observed refused", component = "n.a.: as wasi; observed refused", lsp = "n.a.: lsp checks only", mcp = "n.a.: the MCP almide_check tool checks only", emit = "runs: the emitted Rust wraps the call in its guard" }
+tests = ["tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets", "src/compile_driver_native_tests.rs::checked_native_scope_bounds_reads_writes_and_predicates_before_artifact_binding", "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply"]
+control_note = "the certified render never installs the scope (control_patch): 7 of the 11 fs_scope_test tests go red"
 issues = [4825, 4832]
-status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed",
-  "c2:fail-open",
-  "c4:no-control",
-]
-note = "native_fs_scope.rs:20-28; native_floor_resolve.rs:245-270 host_module_of_text(text) == Some(\"fs\")."
+status = "STAMPED"
+note = "native_fs_scope.rs plan -> FsScope::applies_to / FsScope::new (fs_scope.rs)."
+probe = "tests/decision-probes/fsscope.native-guard-map"
+stamp = "76dbf40d2f 2026-11-23"
+control_seen = "76dbf40d2f 2026-11-23 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+novel = "crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply"
+control_patch = "proofs/decision-controls/fsscope.v1-native-plan.patch"
+control_test = "tests/fs_scope_test.rs::permissions_fs_bounds_every_fs_call_alike_on_both_targets"
 
 [[site]]
 id = "fsscope.scope-source"
@@ -1449,7 +1457,7 @@ note = "Fixed by #4832 (marks + shared gate); the bench route failed to compile 
 control_patch = "proofs/decision-controls/net.unix-path-unscoped.patch"
 control_test = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
 novel = "tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused"
-control_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh); patch re-derived against the C-460 declarations (mark and FS leaf dropped together): 76dbf40d2f 2026-11-23 ds-2 base green, patched red"
 
 [[site]]
 id = "net.shm-create-tempfile"
@@ -1475,7 +1483,7 @@ note = "C-393 amended in almide/als#270 (the directory of a shared-memory region
 control_patch = "proofs/decision-controls/net.shm-create-tempfile.patch"
 control_test = "crates/almide-rt-core/tests/net_shm_backing.rs::novel_shm_backing_file_has_no_name_in_a_fresh_directory"
 novel = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
-control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run-decision-controls.sh); patch re-derived against the C-460 declarations (mark and FS leaf dropped together): 76dbf40d2f 2026-11-23 ds-2 base green, patched red"
 control_extra = "proofs/decision-controls/net.shm-create-tempfile.scope.patch"
 control_extra_test = "tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets"
 control_extra_seen = "30b1fac0fb 2026-11-21 ds-2 (+ this change): base green, patched red (scripts/run-decision-controls.sh)"
