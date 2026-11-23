@@ -102,15 +102,66 @@ pub(crate) fn parse_size(s: &str) -> Option<Option<u64>> {
 /// Is `root`'s size sweep due (not run within [`SIZE_SWEEP_INTERVAL`])?
 /// Stamps the root when it is, so concurrent processes mostly skip.
 fn claim_size_sweep(root: &Path) -> bool {
-    let stamp = root.join(SIZE_STAMP_FILE);
-    let due = match std::fs::metadata(&stamp).and_then(|m| m.modified()) {
+    claim_size_sweep_by(&root.join(SIZE_STAMP_FILE))
+}
+
+/// [`claim_size_sweep`] on an explicit stamp file.
+fn claim_size_sweep_by(stamp: &Path) -> bool {
+    let due = match std::fs::metadata(stamp).and_then(|m| m.modified()) {
         Ok(t) => SystemTime::now().duration_since(t).map(|since| since >= SIZE_SWEEP_INTERVAL).unwrap_or(true),
         Err(_) => true,
     };
     if due {
-        let _ = std::fs::File::create(&stamp);
+        let _ = std::fs::File::create(stamp);
     }
     due
+}
+
+/// The stamp of the rlib-dir size sweep, in the temp dir beside the dirs it
+/// bounds (they are siblings there, not children of one cache root).
+const RTLIB_SIZE_STAMP_FILE: &str = ".almide-rtlib-size-stamp";
+
+/// Bound the prebuilt-runtime rlib dirs (`<temp>/almide-rtlib-*`) to `cap`
+/// bytes in total, least recently used first (#4911). A v1 runtime rlib is
+/// keyed by the runtime SUBSET its program reaches, so the dirs grow with the
+/// number of distinct programs built: the week-long age sweep alone let them
+/// reach 65 GB within a day of generated-program campaigns. Each victim is
+/// emptied to its lockfile under its own lock, the age sweep's protocol;
+/// `in_use` (the dir this build links) is never chosen. Returns how many
+/// dirs were emptied.
+pub(crate) fn bound_rtlib_dirs(temp: &Path, in_use: &Path, cap: u64) -> usize {
+    if !claim_size_sweep_by(&temp.join(RTLIB_SIZE_STAMP_FILE)) {
+        return 0;
+    }
+    bound_rtlib_dirs_now(temp, in_use, cap, SystemTime::now())
+}
+
+/// [`bound_rtlib_dirs`] without the rate limit, at a given `now`.
+pub(crate) fn bound_rtlib_dirs_now(temp: &Path, in_use: &Path, cap: u64, now: SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(temp) else { return 0 };
+    let dirs: Vec<(PathBuf, SystemTime, u64)> = entries
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(super::build_dir::RTLIB_DIR_PREFIX))
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| {
+            let dir = e.path();
+            // An emptied dir (only its lockfile) has no last use and no bytes.
+            let used = last_used(&dir)?;
+            let bytes = dir_bytes(&dir);
+            Some((dir, used, bytes))
+        })
+        .collect();
+    let mut emptied = 0;
+    for dir in lru_victims(&dirs, cap, now, EVICT_GRACE) {
+        if dir == in_use {
+            continue;
+        }
+        let seen = dirs.iter().find(|(d, ..)| *d == dir).map(|(_, used, _)| *used);
+        if super::build_dir::clear_build_dir_if_idle(&dir, || last_used(&dir) <= seen) {
+            emptied += 1;
+        }
+    }
+    emptied
 }
 
 /// The LRU decision, kept pure so it is testable without a filesystem: the
@@ -400,6 +451,41 @@ mod tests {
         assert_eq!(bound_build_artifacts_now(&dir, 3_000, SystemTime::now()), 2);
         assert!(!old_mod.exists() && !old_sum.exists() && new_bin.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An rlib dir shaped like the real ones: lockfile, `lib.rs`, the rlib.
+    fn rtlib(root: &Path, key: &str, bytes: usize, secs_ago: u64) -> PathBuf {
+        let d = root.join(format!("{}v1-{key}", super::super::build_dir::RTLIB_DIR_PREFIX));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::File::create(d.join(super::super::build_dir::BUILD_LOCK_FILE)).unwrap();
+        write_aged(&d.join("lib.rs"), 10, secs_ago);
+        write_aged(&d.join("libalmide_v1_rt.rlib"), bytes, secs_ago);
+        d
+    }
+
+    #[test]
+    fn rtlib_dirs_are_bounded_least_recently_used_first_and_nothing_else_is_touched() {
+        let root = scratch("rtlib");
+        let a = rtlib(&root, "aaaa", 4_000, 30_000);
+        let b = rtlib(&root, "bbbb", 4_000, 20_000);
+        let c = rtlib(&root, "cccc", 4_000, 10_000);
+        let in_use = rtlib(&root, "dddd", 4_000, 0);
+        // Not an rlib dir: older and larger, never counted or touched.
+        let other = root.join("run");
+        write_aged(&other.join("target/debug/deps/libbulk.rlib"), 50_000, 90_000);
+        // Control: at a bound the dirs fit under, nothing is emptied.
+        assert_eq!(bound_rtlib_dirs_now(&root, &in_use, 16_100, SystemTime::now()), 0);
+        // ~16 KB against 9,000 bytes: `a` then `b` go; `c` fits; the dir in use stays.
+        assert_eq!(bound_rtlib_dirs_now(&root, &in_use, 9_000, SystemTime::now()), 2);
+        for gone in [&a, &b] {
+            let left: Vec<_> = std::fs::read_dir(gone).unwrap().flatten().map(|e| e.file_name()).collect();
+            assert_eq!(left, vec![std::ffi::OsString::from(super::super::build_dir::BUILD_LOCK_FILE)]);
+        }
+        for kept in [&c, &in_use] {
+            assert!(kept.join("libalmide_v1_rt.rlib").exists());
+        }
+        assert!(other.join("target/debug/deps/libbulk.rlib").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
