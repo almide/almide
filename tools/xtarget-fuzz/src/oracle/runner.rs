@@ -37,6 +37,13 @@ pub struct ProcResult {
     /// The sandbox tree after the run ([`super::sandbox::snapshot`]), for a
     /// leg that ran in one; `None` for a build or check.
     pub tree: Option<String>,
+    /// The signal that terminated the child (unix), `None` when it exited
+    /// with a code. Read from the wait status, never from stderr.
+    pub signal: Option<i32>,
+    /// How far the host kernel's out-of-memory kill counter (`oom_kill` in
+    /// `/proc/vmstat`) advanced while the child ran; `None` where the
+    /// counter cannot be read (not Linux, or no procfs).
+    pub host_oom_kills: Option<u64>,
 }
 
 impl ProcResult {
@@ -59,6 +66,39 @@ pub const NATIVE_MEMORY_CAP_BYTES: u64 = 4 << 30;
 pub fn native_hit_memory_cap(run: &ProcResult) -> bool {
     let stderr = String::from_utf8_lossy(&run.stderr);
     stderr.contains("memory allocation of ") && stderr.contains(" bytes failed")
+}
+
+/// Was this run killed by the HOST running out of memory (#4587)? A child
+/// the kernel's out-of-memory killer picks dies by SIGKILL with no line of
+/// its own: under memory pressure from the runner as a whole (parallel
+/// workers, a cgroup limit below the 4 GiB cap) a program the cap would
+/// have let finish is cut, while its sibling leg completes. That is a host
+/// resource event, not a program observable.
+///
+/// Decided from the wait status and the kernel's own counter, never from
+/// stderr: the child was killed by SIGKILL (or reports exit 137, the
+/// 128+SIGKILL form a wrapper passes on), the harness did NOT send that kill
+/// itself (a timeout kill is the hang family), and the host's `oom_kill`
+/// counter advanced during the run. Without that counter evidence a kill
+/// stays a finding, exactly as before; any other signal (SIGSEGV, SIGBUS,
+/// SIGILL, SIGABRT without the alloc-error line) is a crash and is reported.
+pub fn killed_by_host_oom(run: &ProcResult) -> bool {
+    const SIGKILL: i32 = 9;
+    if run.timed_out || run.spawn_failed {
+        return false;
+    }
+    let killed = run.signal == Some(SIGKILL) || run.exit_code == Some(128 + SIGKILL);
+    killed && run.host_oom_kills.is_some_and(|n| n > 0)
+}
+
+/// The host kernel's cumulative out-of-memory kill count (`oom_kill` in
+/// `/proc/vmstat`, Linux 4.13+), or `None` where it cannot be read.
+fn host_oom_kill_count() -> Option<u64> {
+    let vmstat = std::fs::read_to_string("/proc/vmstat").ok()?;
+    vmstat
+        .lines()
+        .find_map(|l| l.strip_prefix("oom_kill "))
+        .and_then(|n| n.trim().parse().ok())
 }
 
 /// Locations of the external tools the ladder drives, plus this worker's
@@ -383,6 +423,7 @@ impl Toolchain {
             cmd.process_group(0);
         }
 
+        let oom_before = host_oom_kill_count();
         let started = Instant::now();
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -395,6 +436,8 @@ impl Toolchain {
                     spawn_failed: true,
                     duration: Duration::ZERO,
                     tree: None,
+                    signal: None,
+                    host_oom_kills: None,
                 };
             }
         };
@@ -452,7 +495,18 @@ impl Toolchain {
         // which the kill above guarantees).
         let stdout = out_handle.and_then(|h| h.join().ok()).unwrap_or_default();
         let stderr = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
-        let exit_code = child.wait().ok().and_then(|s| s.code());
+        let status = child.wait().ok();
+        let exit_code = status.and_then(|s| s.code());
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            status.and_then(|s| s.signal())
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        let host_oom_kills = oom_before
+            .zip(host_oom_kill_count())
+            .map(|(before, after)| after.saturating_sub(before));
 
         ProcResult {
             stdout,
@@ -462,6 +516,8 @@ impl Toolchain {
             spawn_failed: false,
             duration,
             tree: None,
+            signal,
+            host_oom_kills,
         }
     }
 
@@ -570,6 +626,8 @@ mod tests {
             spawn_failed: false,
             duration: Duration::ZERO,
             tree: None,
+            signal: None,
+            host_oom_kills: None,
         };
         assert!(native_hit_memory_cap(&run(
             "memory allocation of 4294967296 bytes failed\n"
@@ -578,5 +636,64 @@ mod tests {
             "thread 'main' panicked at 'index out of bounds'\n"
         )));
         assert!(!native_hit_memory_cap(&run("")));
+    }
+
+    fn killed(signal: Option<i32>, exit: Option<i32>, oom: Option<u64>) -> ProcResult {
+        ProcResult {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: exit,
+            timed_out: false,
+            spawn_failed: false,
+            duration: Duration::ZERO,
+            tree: None,
+            signal,
+            host_oom_kills: oom,
+        }
+    }
+
+    /// #4587: a SIGKILL while the host's oom_kill counter advanced is a host
+    /// memory event — and every neighbouring shape is not.
+    #[test]
+    fn a_host_oom_kill_is_recognised_by_signal_and_counter_only() {
+        // The #4587 shape: SIGKILL, no stderr, counter advanced.
+        assert!(killed_by_host_oom(&killed(Some(9), None, Some(1))));
+        // A wrapper's 128+SIGKILL form, same counter evidence.
+        assert!(killed_by_host_oom(&killed(None, Some(137), Some(2))));
+        // Controls: no memory-pressure evidence keeps the kill a finding.
+        assert!(!killed_by_host_oom(&killed(Some(9), None, Some(0))));
+        assert!(!killed_by_host_oom(&killed(Some(9), None, None)));
+        assert!(!killed_by_host_oom(&killed(None, Some(137), None)));
+        // A real crash under the same memory pressure stays a crash.
+        assert!(!killed_by_host_oom(&killed(Some(11), None, Some(1))));
+        assert!(!killed_by_host_oom(&killed(Some(7), None, Some(1))));
+        assert!(!killed_by_host_oom(&killed(Some(6), None, Some(1))));
+        // A program's own exit code is not a kill.
+        assert!(!killed_by_host_oom(&killed(None, Some(1), Some(1))));
+        // The harness's own timeout kill is the hang family.
+        let mut hung = killed(Some(9), None, Some(1));
+        hung.timed_out = true;
+        assert!(!killed_by_host_oom(&hung));
+    }
+
+    /// The signal is read from the wait status of a real child: SIGKILL and
+    /// SIGSEGV come back as themselves, a plain exit as no signal.
+    #[cfg(unix)]
+    #[test]
+    fn the_terminating_signal_is_captured_from_the_wait_status() {
+        let sh = |script: &str| {
+            let mut cmd = Command::new("/bin/sh");
+            cmd.args(["-c", script]);
+            tc().spawn_timed(cmd)
+        };
+        let k = sh("kill -KILL $$");
+        assert_eq!((k.signal, k.exit_code), (Some(libc::SIGKILL), None));
+        let s = sh("kill -SEGV $$");
+        assert_eq!((s.signal, s.exit_code), (Some(libc::SIGSEGV), None));
+        assert!(!killed_by_host_oom(&s));
+        let e = sh("exit 3");
+        assert_eq!((e.signal, e.exit_code), (None, Some(3)));
+        #[cfg(target_os = "linux")]
+        assert!(k.host_oom_kills.is_some(), "the counter is readable on Linux");
     }
 }

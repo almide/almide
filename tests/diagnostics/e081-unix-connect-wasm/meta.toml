@@ -1,0 +1,4 @@
+check_target = "wasm"
+expects_code = "E081"
+expects_error = "`unix.connect` is not available on --target wasm"
+hint_substring = "the same program builds with --target rust"

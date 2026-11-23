@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
-index 70f5ae9b3..d85685810 100644
+index ca892dcf51..3fac253159 100644
 --- a/crates/almide-wasm/src/exit_plan.rs
 +++ b/crates/almide-wasm/src/exit_plan.rs
-@@ -215,6 +215,11 @@ impl Emitter<'_> {
+@@ -248,6 +248,11 @@ impl Emitter<'_> {
              if omit_first && k == 0 {
                  continue;
              }
@@ -14,7 +14,7 @@ index 70f5ae9b3..d85685810 100644
              let dec = self.dec_fn_of_local(idx);
              self.f.instructions().local_get(idx).call(dec);
          }
-@@ -286,6 +291,8 @@ impl Emitter<'_> {
+@@ -322,6 +327,8 @@ impl Emitter<'_> {
  
  /// The negative-test switch: when set, `emit_exit` skips the first release
  /// of every plan. Process-wide; tests/exit_validation.rs is its one user.
@@ -23,23 +23,24 @@ index 70f5ae9b3..d85685810 100644
  static OMIT_FIRST_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Test hook (E083 negative half): make the emitter omit the first release
-@@ -679,7 +686,10 @@ pub(crate) fn validate_exits(
+@@ -734,6 +741,12 @@ pub(crate) fn validate_exits(
      drop_fns: &[u32],
      name_of: impl Fn(u32) -> String,
  ) -> Result<(), EmitError> {
--    if ledger.is_empty() {
 +    // RE-INJECTED (#4277 drill): the producer's own exit validator is part of
 +    // the producer the byte check does not trust — off, as a producer bug would
 +    // leave it.
-+    if ledger.is_empty() || true {
-         return Ok(());
-     }
++    if true {
++        return Ok(());
++    }
      let d = Defects { function };
+     let ops = read_ops(f, &d)?;
+     // Windows may nest (an early exit lowered inside a later-started
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index ebfb6f6b1..28e464795 100644
+index a849af46a8..71556e6463 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -300,6 +300,14 @@ impl Emitter<'_> {
+@@ -311,6 +311,14 @@ impl Emitter<'_> {
                  }
              }
              self.f.instructions().local_set(idx);

@@ -589,6 +589,54 @@ mod classification_gate {
         }
     }
 
+    /// The fns of `prog`, a source of stdlib `module`, that reach a floor
+    /// host op (#4827). A host op's own declaration is the floor, not a reach.
+    fn host_reaching_fns(module: &str, prog: &almide_lang::ast::Program) -> Vec<String> {
+        prog.decls.iter().filter(|d| !crate::host_reach::is_host_op(d)).map(fn_name).filter(|f| !f.is_empty())
+            .filter(|f| crate::host_reach::fn_reaches_host(prog, module, f)).map(str::to_string).collect()
+    }
+
+    /// #4827: a `Pure` module charges nothing, so no fn of one — plain or
+    /// `effect`, declared in its source or served under its name by a
+    /// self-host body — may reach a host op the floor declares
+    /// (`@prim_op(host)`), directly or through what it calls. The floor's
+    /// own host-op declarations are the ops themselves, not a reach.
+    #[test]
+    fn a_pure_module_reaches_no_declared_host_op() {
+        let mut bad = Vec::new();
+        for (m, e) in STDLIB_MODULE_EFFECTS {
+            if *e != ModuleEffects::Pure { continue; }
+            if let Some(prog) = almide_lang::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached) {
+                bad.extend(host_reaching_fns(m, prog).into_iter().map(|f| format!("{m}.{f}")));
+            }
+        }
+        for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
+            let Some(prog) = almide_lang::parse_cached(src) else { continue };
+            for (imp, call) in rows.iter() {
+                let Some((m, _)) = call.split_once('.') else { continue };
+                if module_effects(m) == Some(ModuleEffects::Pure) && crate::host_reach::fn_reaches_host(prog, m, imp) {
+                    bad.push(call.to_string());
+                }
+            }
+        }
+        bad.sort();
+        bad.dedup();
+        assert!(bad.is_empty(), "fns of a module classified Pure reach a host op: {bad:?} — classify the module or the fn");
+    }
+
+    /// The gate's fixture and control: a plain fn added to a `Pure` module
+    /// whose body writes a file through the floor is refused; the module's
+    /// own source is not.
+    #[test]
+    fn a_plain_fn_writing_a_file_in_a_pure_module_is_refused() {
+        let real = almide_lang::stdlib_info::bundled_source("string").expect("string has a source");
+        let control = almide_lang::parse_cached(real).expect("string parses");
+        assert!(host_reaching_fns("string", control).is_empty(), "control: string reaches no host op");
+        let injected = format!("{real}\nfn sneaky(p: String) -> Int = prim.write_text_file(p, p)\n");
+        let prog = almide_lang::parse_cached(Box::leak(injected.into_boxed_str())).expect("injected source parses");
+        assert_eq!(host_reaching_fns("string", prog), vec!["sneaky".to_string()]);
+    }
+
     /// The two routes into a stdlib function — the source call `m.f` and the
     /// runtime call its `@intrinsic` symbol lowers to — classify alike, for
     /// every intrinsic in the stdlib.

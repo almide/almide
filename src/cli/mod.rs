@@ -67,7 +67,7 @@ pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};
-pub use check::{cmd_check, cmd_check_package, cmd_check_json, cmd_check_json_package, cmd_check_effects};
+pub use check::{cmd_check, cmd_check_package, cmd_check_json, cmd_check_json_package, cmd_check_effects, CheckTarget};
 pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_update_snapshots};
 pub use test_wasm::cmd_test_wasm;
 pub use fmt_command::{cmd_fmt, FmtMode};
@@ -406,6 +406,34 @@ fn incremental_cache_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(".almide/cache")
 }
 
+/// The native v1 render of `pending`'s checked input — or of its source when
+/// it carries none — with the certificates of the MIR it renders from, in the
+/// native route's own family (native-calls with its runtime blocks, bounds).
+/// The one render both the build ([`render_v1_native_or_fallback`]) and
+/// `verify --mir` (#4909) take, so the certificates are of the MIR that ships.
+/// Returns the source text it took from `pending` and the callbacks scope,
+/// which must outlive whatever else is generated from `pending`.
+#[allow(clippy::type_complexity)]
+pub(crate) fn render_v1_native_certified(
+    pending: &mut crate::compile_driver::PendingRust,
+) -> (
+    almide_mir::native_callbacks::Scope,
+    String,
+    Result<(String, Vec<(String, String, String)>), almide_mir::lower::LowerError>,
+) {
+    let source_text = std::mem::take(&mut pending.source);
+    let native_input = pending.native_input.take();
+    let fs_scope = pending.fs_scope.clone();
+    let host = pending.host_source();
+    let callbacks = almide_mir::native_callbacks::Scope::enter(std::mem::take(&mut pending.native_text)).with_host_source(host);
+    let rendered = match native_input {
+        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, fs_scope),
+        // A caller without checked IR retains the standalone source route.
+        None => almide_mir::pipeline::try_render_rust_source_certified(&source_text),
+    };
+    (callbacks, source_text, rendered)
+}
+
 /// The v1 MIR trust-spine render used by `--verified`/`--native-verified`:
 /// try `almide_mir::pipeline::try_render_rust_source`, falling back to the v0
 /// `rs_code` on any WALL — a v1-rendered program is never wrong, so a wall
@@ -427,11 +455,7 @@ pub(crate) fn render_v1_native_or_fallback(
     metered: Option<almide::ir::IrProgram>,
     opts: &crate::codegen::CodegenOptions,
 ) -> String {
-    let source_text = std::mem::take(&mut pending.source);
-    let native_input = pending.native_input.take();
-    let fs_scope = pending.fs_scope.clone();
-    let host = pending.host_source();
-    let _callbacks = almide_mir::native_callbacks::Scope::enter(std::mem::take(&mut pending.native_text)).with_host_source(host);
+    let (_callbacks, source_text, rendered) = render_v1_native_certified(&mut pending);
     let rs_code = move || pending.generate();
     // ALMIDE_FORCE_METER_CODEGEN=1 meters the program in the standard
     // codegen even when the whole program renders — the differential that
@@ -446,13 +470,7 @@ pub(crate) fn render_v1_native_or_fallback(
     // whole program renders — the differential that holds the two routes'
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
-    let rendered = match native_input {
-        Some((ir, checker)) => almide_mir::pipeline::try_render_rust_checked_scoped_certified(&source_text, ir, checker, fs_scope)
-            .map(|(rust, _)| rust),
-        // A caller without checked IR retains the standalone source route.
-        None => almide_mir::pipeline::try_render_rust_source(&source_text),
-    };
-    match rendered {
+    match rendered.map(|(rust, _)| rust) {
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)

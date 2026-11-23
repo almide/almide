@@ -325,6 +325,12 @@ pub fn cmd_build(args: BuildArgs) {
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
         join_probe();
+        // #4913: a runtime fn wasm32-wasip1 has no implementation for aborts
+        // the module at run time; its declared `rustc-wasip1` leg refuses
+        // the build here instead (E081, as `check --target wasi` does).
+        if super::wasm_compile::check_wasi_rustc_availability(pending.ir(), &pending.package).is_err() {
+            std::process::exit(1);
+        }
         let rs_code = pending.generate();
         let rs_code = match heap_cap {
             Some(n) => inject_heap_cap(&rs_code, n),

@@ -1,0 +1,9 @@
+// process.pid on `--target wasi`: a wasm32-wasip1 module has no process id,
+// so the rustc route refuses the call (#4913) instead of building a module
+// that aborts when it reaches it.
+import process
+
+effect fn main() -> Unit = {
+  let p = process.pid()
+  println("pid > 0: ${p > 0}")
+}

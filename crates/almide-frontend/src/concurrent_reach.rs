@@ -40,7 +40,7 @@ mod shape;
 pub use shape::may_have_sites;
 #[path = "concurrent_reach_escape.rs"]
 mod escape;
-pub use escape::EscapeFinding;
+pub(crate) use escape::EscapeFinding;
 
 /// The surface a `fan.<op>` call is written as: `__any_block` is the
 /// parser's spelling of `fan.any { … }`. Every `fan.<op>` is a concurrency
@@ -277,7 +277,7 @@ impl<'a> Analyzer<'a> {
 
     /// Run slot inference to a fixpoint, then collect every site that
     /// reaches a `var`, and every `http.serve` app that reads a local.
-    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>, Vec<EscapeFinding>) {
+    pub(crate) fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>, Vec<EscapeFinding>) {
         if !self.shape.may_have_sites {
             // No site: nothing to infer and nothing to record (`Shape`).
             // `http.serve` has a declared slot, so its call is a site too.
@@ -398,54 +398,60 @@ impl<'a> Analyzer<'a> {
         match &callee.kind {
             ExprKind::Paren { expr } => self.resolve_callee_at(expr, scope, depth + 1),
             ExprKind::Lambda { .. } => Callee::Lambda(callee.id.0),
-            ExprKind::Ident { name } => {
-                if let Some(b) = lookup(scope, *name) {
-                    match b {
-                        Bind::Let { init, .. } => self.resolve_alias(init, scope, depth + 1),
-                        _ => Callee::Value,
-                    }
-                } else if self.fns.contains_key(name) {
-                    Callee::Local(*name)
-                } else if let Some(init) = self.top_lets.get(name).copied() {
-                    self.resolve_alias(init, &Vec::new(), depth + 1)
-                } else if let Some(m) = self.w.direct.get(name) {
-                    self.module_callee(*m, *name)
-                } else {
-                    Callee::Unknown
-                }
-            }
-            ExprKind::Member { object, field } => {
-                if let ExprKind::Ident { name } = &object.kind {
-                    if lookup(scope, *name).is_none() && !self.fns.contains_key(name) {
-                        if name.as_str() == "fan" {
-                            return Callee::Fan(*field);
-                        }
-                        if let Some(m) = self.module_of_alias(*name) {
-                            return self.module_callee(m, *field);
-                        }
-                        if almide_lang::stdlib_info::is_stdlib_module(name.as_str()) {
-                            return Callee::Stdlib(*name, *field);
-                        }
-                    }
-                }
-                if let Some(path) = Self::member_path(object) {
-                    if let Some(m) = self.module_of_alias(sym(&path)) {
-                        return self.module_callee(m, *field);
-                    }
-                }
-                // A method call on a value (UFCS): a local fn of that name,
-                // whose first argument is the receiver, else a stdlib method.
-                match self.method_fn(*field) {
-                    Some(f) => Callee::Ufcs(f),
-                    // A stdlib fn of that name declaring `@concurrent`, called
-                    // as a method: its slots count from the receiver.
-                    None => match stdlib_method_module(field.as_str()) {
-                        Some(m) => Callee::StdlibMethod(sym(m), *field),
-                        None => Callee::Method,
-                    },
-                }
-            }
+            ExprKind::Ident { name } => self.resolve_ident_callee(*name, scope, depth),
+            ExprKind::Member { object, field } => self.resolve_member_callee(object, *field, scope),
             _ => Callee::Unknown,
+        }
+    }
+
+    /// `resolve_callee_at` for a bare name.
+    fn resolve_ident_callee(&self, name: Sym, scope: &Scope<'a>, depth: u32) -> Callee {
+        if let Some(b) = lookup(scope, name) {
+            match b {
+                Bind::Let { init, .. } => self.resolve_alias(init, scope, depth + 1),
+                _ => Callee::Value,
+            }
+        } else if self.fns.contains_key(&name) {
+            Callee::Local(name)
+        } else if let Some(init) = self.top_lets.get(&name).copied() {
+            self.resolve_alias(init, &Vec::new(), depth + 1)
+        } else if let Some(m) = self.w.direct.get(&name) {
+            self.module_callee(*m, name)
+        } else {
+            Callee::Unknown
+        }
+    }
+
+    /// `resolve_callee_at` for `object.field`.
+    fn resolve_member_callee(&self, object: &Expr, field: Sym, scope: &Scope<'a>) -> Callee {
+        if let ExprKind::Ident { name } = &object.kind {
+            if lookup(scope, *name).is_none() && !self.fns.contains_key(name) {
+                if name.as_str() == "fan" {
+                    return Callee::Fan(field);
+                }
+                if let Some(m) = self.module_of_alias(*name) {
+                    return self.module_callee(m, field);
+                }
+                if almide_lang::stdlib_info::is_stdlib_module(name.as_str()) {
+                    return Callee::Stdlib(*name, field);
+                }
+            }
+        }
+        if let Some(path) = Self::member_path(object) {
+            if let Some(m) = self.module_of_alias(sym(&path)) {
+                return self.module_callee(m, field);
+            }
+        }
+        // A method call on a value (UFCS): a local fn of that name,
+        // whose first argument is the receiver, else a stdlib method.
+        match self.method_fn(field) {
+            Some(f) => Callee::Ufcs(f),
+            // A stdlib fn of that name declaring `@concurrent`, called
+            // as a method: its slots count from the receiver.
+            None => match stdlib_method_module(field.as_str()) {
+                Some(m) => Callee::StdlibMethod(sym(m), field),
+                None => Callee::Method,
+            },
         }
     }
 
@@ -594,7 +600,7 @@ impl<'a> Analyzer<'a> {
     fn walk_kind(&mut self, e: &'a Expr, scope: &mut Scope<'a>, mode: Mode) {
         match &e.kind {
             ExprKind::Ident { name } | ExprKind::TypeName { name } => self.name_ref(*name, e.span, scope, mode),
-            ExprKind::Lambda { params, body } => self.lambda(e.id.0, params, body, scope, mode, false),
+            ExprKind::Lambda { .. } => self.lambda(e, scope, mode, false),
             ExprKind::Call { callee, args, named_args, .. } => {
                 let args: Vec<&'a Expr> = args.iter().chain(named_args.iter().map(|(_, a)| a)).collect();
                 self.call(callee, &args, scope, mode);
@@ -827,7 +833,9 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    fn lambda(&mut self, id: u32, params: &'a [ast::LambdaParam], body: &'a Expr, scope: &mut Scope<'a>, mode: Mode, folded: bool) {
+    fn lambda(&mut self, lam: &'a Expr, scope: &mut Scope<'a>, mode: Mode, folded: bool) {
+        let ExprKind::Lambda { params, body } = &lam.kind else { return };
+        let id = lam.id.0;
         let mark = scope.len();
         for (i, p) in params.iter().enumerate() {
             scope.push((p.name, Bind::Param { index: Some(i), fn_typed: false, lam: Some(id) }));
@@ -888,11 +896,11 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
             match (&a.kind, self.folds(&resolved, i)) {
-                (ExprKind::Lambda { params, body }, true) => {
+                (ExprKind::Lambda { .. }, true) => {
                     if matches!(mode, Mode::Discover) && self.record {
                         self.check_escape(a, scope);
                     }
-                    self.lambda(a.id.0, params, body, scope, mode, true)
+                    self.lambda(a, scope, mode, true)
                 }
                 _ => self.walk(a, scope, mode),
             }

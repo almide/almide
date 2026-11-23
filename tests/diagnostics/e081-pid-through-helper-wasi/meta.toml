@@ -1,0 +1,4 @@
+check_target = "wasi"
+expects_code = "E081"
+expects_error = "`process.pid` is not available on --target wasi"
+hint_substring = "drop the call from a program meant for a wasip1 runtime"
