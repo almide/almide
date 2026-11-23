@@ -6,6 +6,6 @@ import process
 effect fn instance_id() -> Int = process.pid()
 
 effect fn main() -> Unit = {
-  let id = instance_id()
+  let id = instance_id()!
   println("instance > 0: ${id > 0}")
 }

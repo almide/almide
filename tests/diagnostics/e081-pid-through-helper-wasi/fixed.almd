@@ -7,6 +7,6 @@ import env
 effect fn instance_id() -> String = env.get("ALMIDE_INSTANCE_ID") ?? "local"
 
 effect fn main() -> Unit = {
-  let id = instance_id()
+  let id = instance_id()!
   println("instance ${id}")
 }
