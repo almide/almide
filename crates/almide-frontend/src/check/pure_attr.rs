@@ -17,6 +17,15 @@
 //! fn-typed parameter or local is transparent (ADR-0026 D1): the argument is
 //! judged where it is written.
 //!
+//! A function handed to a `@pure` fn runs inside its promise (#4928): the
+//! promise is the `@pure` fn's DECLARATION, so a call that passes it a
+//! function — a lambda, or a fn named as a value — is judged against it
+//! whoever the caller is. Each lambda's calls are also recorded under a key of
+//! its own (the enclosing fn's key and the lambda's expression id), and every
+//! function-valued argument of a call to a user fn is kept as an obligation;
+//! post-solve, an obligation whose callee is `@pure` and whose argument
+//! reaches an effect is E092 at the argument.
+//!
 //! The entry program and its modules are inferred in an order the source does
 //! not show, so — as for #2496 — a `@pure` fn stays pending and is re-judged
 //! at every program's post-solve. A violation becomes visible while the file
@@ -62,6 +71,14 @@ struct PendingPure {
 pub(crate) struct PurityFacts {
     calls: HashMap<Sym, Vec<(PurityCallee, Site)>>,
     pending: Vec<PendingPure>,
+    /// The lambdas being inferred, innermost last: a call is recorded under
+    /// each of them as well as under the enclosing fn.
+    lambdas: Vec<Sym>,
+    /// Every `@pure` fn declared so far, with where it was declared.
+    declared: HashMap<Sym, (Sym, Site)>,
+    /// A function passed to a user fn, not yet judged: `(caller, callee,
+    /// argument, site)`.
+    passed: Vec<(Sym, Sym, PurityCallee, Site)>,
 }
 
 /// The chain from a `@pure` fn to the first impure thing it reaches.
@@ -94,7 +111,82 @@ impl Checker {
         let Some((caller, _)) = &self.current_fn else { return };
         let caller = *caller;
         let site = Site { file: self.source_file.clone(), span };
+        for lambda in self.purity.lambdas.clone() {
+            self.purity.calls.entry(lambda).or_default().push((callee.clone(), site.clone()));
+        }
         self.purity.calls.entry(caller).or_default().push((callee, site));
+    }
+
+    /// The key a lambda's own calls are recorded under.
+    fn lambda_key(&self, id: ast::ExprId) -> Option<Sym> {
+        let (caller, _) = self.current_fn.as_ref()?;
+        Some(sym(&format!("{caller}::<lambda#{}>", id.0)))
+    }
+
+    /// Entering a lambda's body: its calls are recorded under its own key too.
+    pub(crate) fn enter_purity_lambda(&mut self, id: ast::ExprId) -> bool {
+        if self.env.pure_fns_absent {
+            return false;
+        }
+        let Some(key) = self.lambda_key(id) else { return false };
+        self.purity.lambdas.push(key);
+        true
+    }
+
+    pub(crate) fn exit_purity_lambda(&mut self, entered: bool) {
+        if entered {
+            self.purity.lambdas.pop();
+        }
+    }
+
+    /// A call to `callee` with `args` (`receiver` first for a method-form
+    /// call): every argument that is a function — a lambda, or a fn named as a
+    /// value — is an obligation, judged post-solve if `callee` is `@pure`.
+    pub(crate) fn record_purity_args(&mut self, callee: &ast::Expr, receiver: Option<&ast::Expr>, args: &[ast::Expr]) {
+        if self.env.pure_fns_absent || self.current_fn.is_none() {
+            return;
+        }
+        let name = match &callee.kind {
+            ast::ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_none() => name.to_string(),
+            ast::ExprKind::Member { object, field } => match &object.kind {
+                ast::ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_none() => format!("{name}.{field}"),
+                // `x.f(g)`: the method form of `f(x, g)`.
+                _ => field.to_string(),
+            },
+            _ => return,
+        };
+        let PurityCallee::User(key) = self.purity_callee(&name) else { return };
+        let caller = self.current_fn.as_ref().map(|(k, _)| *k).expect("checked above");
+        let receiver = match &callee.kind {
+            ast::ExprKind::Member { object, .. } if !name.contains('.') => Some(&**object),
+            _ => receiver,
+        };
+        for arg in receiver.into_iter().chain(args) {
+            if let Some(passed) = self.passed_function(arg) {
+                let site = Site { file: self.source_file.clone(), span: arg.span };
+                self.purity.passed.push((caller, key, passed, site));
+            }
+        }
+    }
+
+    /// The function an argument expression is, when it is one.
+    fn passed_function(&self, arg: &ast::Expr) -> Option<PurityCallee> {
+        let name = match &arg.kind {
+            ast::ExprKind::Lambda { .. } => return self.lambda_key(arg.id).map(PurityCallee::User),
+            ast::ExprKind::Paren { expr } => return self.passed_function(expr),
+            ast::ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_none() => name.to_string(),
+            ast::ExprKind::Member { object, field } => match &object.kind {
+                ast::ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_none() => format!("{name}.{field}"),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        if let Some((b, _)) = OUTPUT_ABORT_BUILTINS.iter().find(|(b, _)| *b == name) {
+            return Some(PurityCallee::Builtin(b));
+        }
+        // A name that is not a fn (a constant, a constructor) reaches no
+        // recorded call, so it is never reported.
+        Some(self.purity_callee(&name))
     }
 
     /// The callee a resolved name names: a stdlib fn or a user fn's key,
@@ -133,6 +225,7 @@ impl Checker {
                 format!("`@pure` cannot be checked on `@inline_rust` fn `{name}`: its body is foreign")
             } else {
                 let key = self.fn_decl_key(name);
+                self.purity.declared.insert(key, (*name, at.clone()));
                 self.purity.pending.push(PendingPure { key, name: *name, at });
                 continue;
             };
@@ -145,6 +238,64 @@ impl Checker {
                 _ => self.purity.pending.push(p),
             }
         }
+        let passed = std::mem::take(&mut self.purity.passed);
+        for (caller, callee, arg, site) in passed {
+            // A `@pure` caller's own reach already holds what it passes (the
+            // lambda's calls and the named fn are recorded under it).
+            if self.purity.declared.contains_key(&caller) {
+                continue;
+            }
+            if !self.report_impure_argument(callee, &arg, &site) {
+                self.purity.passed.push((caller, callee, arg, site));
+            }
+        }
+    }
+
+    /// E092 at a function passed to a `@pure` fn that reaches an effect.
+    /// `false` while the callee is not known to be `@pure`, the argument
+    /// reaches nothing impure yet, or the site is in another file.
+    fn report_impure_argument(&mut self, callee: Sym, arg: &PurityCallee, site: &Site) -> bool {
+        let Some((name, at)) = self.purity.declared.get(&callee).cloned() else { return false };
+        if site.file != self.source_file || site.span.is_none() {
+            return false;
+        }
+        let (passed, what, does) = match self.impure_callee(arg) {
+            Some((what, does)) => (format!("`{what}`"), what, does),
+            None => {
+                let PurityCallee::User(k) = arg else { return false };
+                let Some(w) = self.purity_witness(*k) else { return false };
+                let passed = if self.purity.calls.contains_key(k) && k.as_str().contains("::<lambda#") {
+                    "a lambda".to_string()
+                } else {
+                    format!("`{k}`")
+                };
+                (passed, w.what, w.does)
+            }
+        };
+        let named = if at.file == self.source_file {
+            format!("`{name}`")
+        } else {
+            format!("`{name}` ({}:{})", at.file.as_deref().unwrap_or("?"), at.span.map_or(0, |s| s.line))
+        };
+        let message = if passed == format!("`{what}`") {
+            format!("`@pure` fn {named} is passed `{what}`, which {does}")
+        } else {
+            format!("`@pure` fn {named} is passed {passed} that calls `{what}`, which {does}")
+        };
+        let mut d = super::err(message, PASSED_HINT, "@pure").with_code("E092");
+        d.file = self.source_file.clone();
+        if let Some(s) = site.span {
+            d.line = Some(s.line);
+            d.col = Some(s.col);
+            d.end_col = Some(s.end_col);
+        }
+        if at.file == self.source_file
+            && let Some(a) = at.span
+        {
+            d = d.with_secondary(a.line, Some(a.col), "`@pure` declared here".to_string());
+        }
+        self.diagnostics.push(d);
+        true
     }
 
     /// Report `p` at the first site of its chain that lies in the file being
@@ -224,6 +375,10 @@ impl Checker {
 const PURE_HINT: &str = "`@pure` promises the empty effect set: no effect category, no output (`println`, \
     `eprintln`) and no `panic` / `assert*`, in the fn and everything it calls. Move that call to a caller, \
     or remove `@pure`.";
+
+const PASSED_HINT: &str = "A function passed to a `@pure` fn runs inside its promise of the empty effect set, \
+    so it may not print, abort or carry an effect category. Pass a function without that call (do the output \
+    in the caller, around the `@pure` call), or remove `@pure` from the callee.";
 
 fn pure_diagnostic(message: String, at: Option<Span>, decl: Option<Span>, file: Option<String>) -> Diagnostic {
     let mut d = super::err(message, PURE_HINT, "@pure").with_code("E092");
