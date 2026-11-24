@@ -393,3 +393,95 @@ fn novel_install_a_planted_directory_named_like_a_fresh_source_is_not_installed(
     let o = almide(td.path(), &home, &["tool", "install", &format!("./{spec}"), "--bin-dir", bin, "--target", "wasm"]);
     assert!(o.status.success(), "control: the planted directory spelled as a path did not install:\n{}", text(&o));
 }
+
+/// manifest.temp-entry-walkup (#4835): a file the compiler writes itself —
+/// `almide deps`'s import list, `almide compile <stdlib module>`'s staged
+/// source — is governed by the manifest the command declares for it, never by
+/// an `almide.toml` found above its location. Both sit under TMPDIR; a
+/// manifest planted above TMPDIR names a fresh dependency (the same fresh name
+/// the project depends on) that reads a file, and is unparseable for the
+/// second writer. Neither decides anything.
+#[test]
+fn novel_a_manifest_planted_above_the_temp_dir_governs_no_generated_entry() {
+    let td = tempfile::TempDir::new().unwrap();
+    let root = td.path().canonicalize().unwrap();
+    let home = home(&td);
+    let dep = novel::module();
+    let planted = root.join(novel::path_segment());
+    write(root.join("almide.toml"), &format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ path = \"{}\" }}\n", novel::ident("planter"), planted.display()));
+    write(planted.join("almide.toml"), &format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"));
+    write(planted.join("src/mod.almd"), "import fs\n\npub effect fn x() -> String = fs.read_text(\"/etc/hosts\") ?? \"\"\n");
+    let proj = root.join(novel::path_segment());
+    write(proj.join("almide.toml"), &format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ path = \"../{dep}\" }}\n", novel::ident("victim")));
+    write(proj.join("src/main.almd"), &format!("import {dep}\n\neffect fn main() -> Unit = println(int.to_string({dep}.x()))\n"));
+    write(root.join(&dep).join("almide.toml"), &format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"));
+    write(root.join(&dep).join("src/mod.almd"), "pub fn x() -> Int = 1\n");
+    let tmp = root.join(novel::path_segment());
+    std::fs::create_dir_all(&tmp).unwrap();
+    let run = |dir: &Path, args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_almide")).args(args).current_dir(dir).env("HOME", &home).env("TMPDIR", &tmp).output().expect("spawn almide")
+    };
+    let o = run(&proj, &["deps"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    assert!(t.contains("capabilities: none"), "`almide deps` did not measure the project's own pure `{dep}`:\n{t}");
+    assert!(!t.contains("FS.read"), "`almide deps` measured the `{dep}` the planted manifest names:\n{t}");
+    // The second writer: a planted manifest that does not parse would refuse
+    // the staged stdlib source if it governed it.
+    write(root.join("almide.toml"), &format!("[package\nname = \"{}\"\n", novel::ident("broken")));
+    let o = run(&proj, &["compile", "list"]);
+    let t = text(&o);
+    assert!(o.status.success() && t.contains("compiled") && !t.contains("almide.toml"), "`almide compile list` read the manifest planted above TMPDIR:\n{t}");
+}
+
+/// A source file the native-code scan cannot read to its end: a fresh
+/// `@extern(rust, …)` fn followed by a fn that does not parse (the parser
+/// recovers past it, so a scan that took the recovered program would see
+/// only what survived).
+fn unscannable_module(f: &str, m: &str) -> String {
+    format!("@extern(rust, \"crate::{m}\", \"{f}\")\nfn {f}() -> Int = _\n\nfn {}( -> = \n", novel::ident("broken"))
+}
+
+/// native.grant-survey / native.install-allow-native: a dependency (or an
+/// installed package) holding a source file the scan cannot parse is refused
+/// as native code, naming the file; it is never read as bringing nothing.
+#[test]
+fn novel_a_dependency_file_the_native_scan_cannot_parse_is_refused_as_native_code() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let (dep, f, m, file) = (novel::ident("nat"), novel::ident("number"), novel::ident("natmod"), novel::module());
+    let d = td.path().join(&dep);
+    write(d.join("almide.toml"), &format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"));
+    write(d.join("src/mod.almd"), "pub fn hello() -> String = \"hi\"\n");
+    write(d.join(format!("src/{file}.almd")), &unscannable_module(&f, &m));
+    let a = app(&td.path().join("app"), &format!("{dep} = {{ path = \"../{dep}\" }}"), "", &dep);
+    let o = almide(&a, &home, &["emit", "src/main.almd", "--target", "rust"]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains(&format!("dependency `{dep}`")) && t.contains("brings native code") && t.contains("not scannable") && t.contains(&format!("{file}.almd")), "the unparseable file was read as bringing nothing:\n{t}");
+    // Control: the same dependency without the unparseable file emits.
+    std::fs::remove_file(d.join(format!("src/{file}.almd"))).unwrap();
+    let o = almide(&a, &home, &["emit", "src/main.almd", "--target", "rust"]);
+    assert!(o.status.success(), "control: the scannable dependency did not emit:\n{}", text(&o));
+}
+
+#[test]
+fn novel_an_installed_package_file_the_native_scan_cannot_parse_needs_allow_native() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let (tool, f, m, file) = (novel::ident("tool"), novel::ident("number"), novel::ident("natmod"), novel::module());
+    let p = td.path().join(&tool);
+    write(p.join("almide.toml"), &format!("[package]\nname = \"{tool}\"\nversion = \"0.1.0\"\n"));
+    write(p.join("src/main.almd"), "effect fn main() -> Unit = println(\"hi\")\n");
+    write(p.join(format!("src/{file}.almd")), &unscannable_module(&f, &m));
+    let bin = td.path().join("bin");
+    let bin = bin.to_str().unwrap();
+    let o = almide(td.path(), &home, &["tool", "install", &format!("./{tool}"), "--bin-dir", bin, "--target", "wasm"]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains("compiles native code") && t.contains("not scannable") && t.contains(&format!("{file}.almd")), "the unparseable file was read as bringing nothing:\n{t}");
+    // Control: without the file the package installs with no flag.
+    std::fs::remove_file(p.join(format!("src/{file}.almd"))).unwrap();
+    let o = almide(td.path(), &home, &["tool", "install", &format!("./{tool}"), "--bin-dir", bin, "--target", "wasm"]);
+    assert!(o.status.success(), "control: the scannable package did not install:\n{}", text(&o));
+}
