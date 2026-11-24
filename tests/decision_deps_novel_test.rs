@@ -485,3 +485,37 @@ fn novel_an_installed_package_file_the_native_scan_cannot_parse_needs_allow_nati
     let o = almide(td.path(), &home, &["tool", "install", &format!("./{tool}"), "--bin-dir", bin, "--target", "wasm"]);
     assert!(o.status.success(), "control: the scannable package did not install:\n{}", text(&o));
 }
+
+/// deps.mvs-identity (#4865, E121): a fresh name that is both a module of the
+/// project and a `[dependencies]` key is refused, for `import name` (a local
+/// file) and for `import name.sub` (a local directory), instead of either one
+/// silently answering the import.
+#[test]
+fn novel_a_fresh_name_meaning_a_local_module_and_a_dependency_is_refused() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let name = novel::module();
+    let d = td.path().join(&name);
+    write(d.join("almide.toml"), &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"));
+    write(d.join("src/mod.almd"), "pub fn hello() -> String = \"DEP\"\n");
+    write(d.join("src/sub.almd"), "pub fn hello() -> String = \"DEP sub\"\n");
+    let a = app(&td.path().join("app"), &format!("{name} = {{ path = \"../{name}\" }}"), "", "");
+    for (local, import, call) in [
+        (format!("src/{name}.almd"), name.clone(), format!("{name}.hello()")),
+        (format!("src/{name}/sub.almd"), format!("{name}.sub"), "sub.hello()".to_string()),
+    ] {
+        write(a.join(&local), "pub fn hello() -> String = \"LOCAL\"\n");
+        write(a.join("src/main.almd"), &format!("import {import}\n\neffect fn main() -> Unit = println({call})\n"));
+        for args in [&["check", "src/main.almd"][..], &["emit", "src/main.almd", "--target", "rust"][..]] {
+            let o = almide(&a, &home, args);
+            let t = text(&o);
+            assert!(!o.status.success() && t.contains("E121") && t.contains(&format!("the dependency `{name}`")), "`import {import}` with a local {local} was answered by one of the two:\n{t}");
+        }
+        // Control: with the local module (file or directory) gone the
+        // dependency answers.
+        let top = a.join(format!("src/{name}"));
+        if top.is_dir() { std::fs::remove_dir_all(&top).unwrap() } else { std::fs::remove_file(a.join(&local)).unwrap() }
+        let o = almide(&a, &home, &["check", "src/main.almd"]);
+        assert!(o.status.success(), "control: `import {import}` did not resolve to the dependency:\n{}", text(&o));
+    }
+}

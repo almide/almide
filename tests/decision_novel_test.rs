@@ -308,3 +308,26 @@ fn novel_a_fresh_dependency_chain_past_the_depth_budget_is_refused() {
     let o = run(&app, &["check", "src/main.almd"]);
     assert!(o.status.success(), "control: a chain within the budget did not check:\n{}", text(&o));
 }
+
+/// effect.e109-value-gate: a pure fn with a fresh name that runs a fresh
+/// effect fn of a fresh module only through a value (a record field `main`
+/// filled with a closure) is
+/// E109 on every route that judges the program, check --effects included
+/// (#4847); calling the same effect fn from an effect fn checks.
+#[test]
+fn novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused() {
+    let (m, eff, pure) = (novel::module(), novel::ident("eff"), novel::ident("pure"));
+    let module = format!("import fs\n\npub effect fn {eff}(p: String) -> Result[String, String] = fs.read_text(p)\n");
+    let main = |caller: &str| {
+        format!(
+            "import self.{m}\n\ntype Reader = {{ read: (String) -> Result[String, String] }}\n\nfn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f(\"s.txt\")\n\n{caller} {pure}(r: Reader) -> Result[String, String] = call_it(r.read)\n\neffect fn main() -> Unit = {{\n  let r = Reader {{ read: (p) => {m}.{eff}(p) }}\n  println({pure}(r) ?? \"none\")\n}}\n"
+        )
+    };
+    let (_td, proj) = project(&[(&format!("src/{m}.almd"), module.clone()), ("src/main.almd", main("fn"))]);
+    for args in [&["check", "src/main.almd"][..], &["check", "--effects", "src/main.almd"][..], &["check", "--json", "src/main.almd"][..], &["run", "src/main.almd", "--target", "wasm"][..], &["emit", "src/main.almd", "--target", "rust"][..]] {
+        refused_with(&run(&proj, args), "E109", &format!("{pure} via `almide {}`", args.join(" ")));
+    }
+    let (_td2, proj2) = project(&[(&format!("src/{m}.almd"), module), ("src/main.almd", main("effect fn"))]);
+    let o = run(&proj2, &["check", "src/main.almd"]);
+    assert!(o.status.success(), "control: an effect fn running it through a value did not check:\n{}", text(&o));
+}
