@@ -3,7 +3,7 @@
 //! Over a BORROWED `x` (a parameter, a local still read after) the node takes
 //! the share a construction would (data.rs `lower_err_raise`); without it the
 //! callee's epilogue released the parameter the caller received, and the
-//! wasm leg trapped (`unreachable`) once the block was reused. The node is
+//! wasm leg trapped (`unreachable`) once the block was reused (#4936). The node is
 //! certified: the share is the carrier's share-out, so the program runs
 //! without `--allow-incomplete-verification`.
 
