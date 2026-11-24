@@ -661,6 +661,52 @@ impl<T: Clone> IntoIterator for AlmideList<T> {
 }
 
 impl<T: Clone> AlmideList<T> {
+    /// `self.into_iter().enumerate().map(|(i, x)| f(i, x)).collect()`: [`Self::extend_indexed`] into a block at its
+    /// final capacity.
+    pub fn map_indexed<U: Clone, F: FnMut(usize, T) -> U>(self, f: F) -> AlmideList<U> {
+        let mut out = AlmideList::<U>::with_capacity(self.len());
+        out.extend_indexed(self, f);
+        out
+    }
+
+    /// Appends `f(i, x)` for each element `x` of `src` at index `i`, in one counted fill: `src`'s length is the
+    /// count and the room is reserved up front, so no element store is checked against the room (an `extend` over
+    /// an iterator it cannot trust checks every one). Elements move out of a unique `src` and are cloned from a
+    /// shared one, the choice made once.
+    pub fn extend_indexed<S: Clone, F: FnMut(usize, S) -> T>(&mut self, src: AlmideList<S>, mut f: F) {
+        let n = src.len();
+        if n == 0 {
+            return;
+        }
+        self.reserve_unique(n);
+        let base = self.len();
+        // SAFETY: the block is unique with room for `n` more, so slots `base..base + n` are uninitialised.
+        let to = unsafe { self.data().add(base) };
+        let mut set = AlmideListSetLen { block: self.ptr, len: base };
+        // `src` as its by-value iterator: on a panic in `f` it drops (or releases) what was not taken.
+        let mut src = src.into_iter();
+        let from = src.list.data();
+        let mut i = 0;
+        if src.unique {
+            while i < n {
+                src.next = i + 1;
+                // SAFETY: slot `i < n` of the unique source is initialised and taken once (`next` is past it, so the
+                // iterator's drop skips it); destination slot `i` is uninitialised room.
+                unsafe { to.add(i).write(f(i, std::ptr::read(from.add(i)))) };
+                i += 1;
+                set.len = base + i;
+            }
+        } else {
+            while i < n {
+                src.next = i + 1;
+                // SAFETY: a shared source keeps its `n` elements initialised; destination slot `i` is as above.
+                unsafe { to.add(i).write(f(i, (*from.add(i)).clone())) };
+                i += 1;
+                set.len = base + i;
+            }
+        }
+    }
+
     /// `self.into_iter().map(f).collect()`. A unique block whose element layout `U` shares is rewritten in place,
     /// as std's `Vec` collects `into_iter().map(f)` into its source buffer: no second block.
     pub fn map_owned<U: Clone, F: FnMut(T) -> U>(self, mut f: F) -> AlmideList<U> {
@@ -669,7 +715,7 @@ impl<T: Clone> AlmideList<T> {
             && std::mem::align_of::<T>() == std::mem::align_of::<U>()
             && std::mem::size_of::<T>() > 0;
         if len == 0 || !fits || !self.is_unique() {
-            return self.into_iter().map(f).collect();
+            return self.map_indexed(|_, x| f(x));
         }
         /// Unwinding out of `f` at element `done`: the `done` elements already written are `U`s, the one `f` was
         /// handed is gone, the rest are `T`s. Drop each as what it is, then free the block.
@@ -747,6 +793,29 @@ impl<T: Clone> Iterator for AlmideListIntoIter<T> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = self.end - self.next;
         (n, Some(n))
+    }
+    /// The whole rest in one loop per mode, so the move-or-clone choice is made once, not per element.
+    #[inline]
+    fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
+        let data = self.list.data();
+        let mut acc = init;
+        if self.unique {
+            while self.next < self.end {
+                let i = self.next;
+                // `next` moves first: a panic in `f` leaves the rest for the iterator's drop.
+                self.next += 1;
+                // SAFETY: as `element`: `i` is in `next..end`, taken once, and the block no longer drops it.
+                acc = f(acc, unsafe { std::ptr::read(data.add(i)) });
+            }
+        } else {
+            while self.next < self.end {
+                let i = self.next;
+                self.next += 1;
+                // SAFETY: a shared block keeps every element initialised; `i < end <= len`.
+                acc = f(acc, unsafe { (*data.add(i)).clone() });
+            }
+        }
+        acc
     }
 }
 
@@ -946,35 +1015,58 @@ struct AlmideListSetLen {
 }
 
 impl Drop for AlmideListSetLen {
+    // Inline: an out-of-line drop takes the guard's address, and then every element store through the block's raw
+    // pointer may alias `len`, so a fill loop stores and reloads it per element.
+    #[inline]
     fn drop(&mut self) {
         // SAFETY: the block is the unique heap block being filled; `len` counts its initialised elements.
         unsafe { (*self.block.as_ptr()).len = self.len };
     }
 }
 
+/// [`Extend::extend`] past its reserved room: writes `len` back, makes room for one more in the (still unique) block
+/// and returns its new header, data pointer and capacity.
+#[cold]
+#[inline(never)]
+fn almide_list_extend_grow<T: Clone>(list: &mut AlmideList<T>, len: usize) -> (NonNull<AlmideListHeader>, *mut T, usize) {
+    // SAFETY: the block is the unique heap block being filled and `len` counts its initialised elements.
+    unsafe { (*list.ptr.as_ptr()).len = len };
+    list.reserve_unique(1);
+    (list.ptr, list.data(), list.capacity())
+}
+
 impl<T: Clone> Extend<T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, it: I) {
         let mut it = it.into_iter();
         let hint = it.size_hint().0;
-        // The reserved room fills with the length in a local; anything past it goes through `push`.
-        if hint > 0 {
-            self.reserve_unique(hint);
-            let data = self.data();
-            let cap = self.capacity();
-            let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
-            while set.len < cap {
-                let x = match it.next() {
-                    Some(x) => x,
-                    None => return,
-                };
-                // SAFETY: the block is unique (after `reserve_unique`) and slot `set.len < cap` is uninitialised.
-                unsafe { data.add(set.len).write(x) };
-                set.len += 1;
+        if hint == 0 {
+            for x in it {
+                self.push(x);
             }
+            return;
         }
-        for x in it {
-            self.push(x);
-        }
+        // The reserved room fills with the length, data pointer and capacity in locals, driven by the iterator's own
+        // `fold` (an iterator that yields more than its hint grows the block in `almide_list_extend_grow`, out of line,
+        // which takes none of the locals' addresses).
+        self.reserve_unique(hint);
+        let mut data = self.data();
+        let mut cap = self.capacity();
+        let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
+        let list = &mut *self;
+        // `move`: the closure owns the locals and the guard, which writes the length back when the closure is
+        // dropped (also on a panic), so they stay in registers across the loop. The guard is named whole: a move
+        // closure naming only its `Copy` fields would capture copies of them, and the guard would write back the
+        // length it started with.
+        it.for_each(move |x| {
+            let set = &mut set;
+            if set.len == cap {
+                (set.block, data, cap) = almide_list_extend_grow(list, set.len);
+            }
+            // SAFETY: the block is unique (after `reserve_unique` or the grow) and slot `set.len < cap` is
+            // uninitialised.
+            unsafe { data.add(set.len).write(x) };
+            set.len += 1;
+        });
     }
 }
 
