@@ -143,7 +143,7 @@ fn templated_scalar_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::String => ("type_string", "AlmideString"),
         Ty::Bool => ("type_bool", "bool"),
         Ty::Unit | Ty::Never => ("type_unit", "()"),
-        Ty::Bytes => ("type_bytes", "AlmideRcCow<Vec<u8>>"),
+        Ty::Bytes => ("type_bytes", "AlmideRcCow<AlmideList<u8>>"),
         Ty::Matrix => ("type_matrix", "AlmideRcCow<AlmideMatrix>"),
         _ => return None,
     })
@@ -184,7 +184,7 @@ fn render_type_applied(ctx: &RenderContext, id: &TypeConstructorId, args: &[Ty])
         (TypeConstructorId::List, [inner]) => {
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_list", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Vec<{}>", inner_s))
+                .unwrap_or_else(|| format!("AlmideList<{}>", inner_s))
         }
         (TypeConstructorId::Map, [k, v]) => {
             let key_s = render_type(ctx, k);

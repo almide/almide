@@ -151,7 +151,7 @@ fn a_stored_by_reference_param_owns_by_type_and_a_carried_borrow_stays() {
     let out = lower(vt, vec![xs, s, t, b], body, |_| {});
     let IrExprKind::Block { stmts, .. } = &out.kind else { panic!("block") };
     let value = |i: usize| match &stmts[i].kind { IrStmtKind::Bind { value, .. } => value, _ => panic!("bind") };
-    assert_eq!(method_of(value(0)), Some("to_vec"), "a `&[T]` param owns into its let by `.to_vec()`");
+    assert!(matches!(value(0).kind, IrExprKind::ToVec { .. }), "a `&[T]` param owns into its let by the `ToVec` node, rendered `.to_list()` (ADR-0037)");
     assert_eq!(method_of(value(1)), Some("to_string"), "a `&str` param owns by `.to_string()` even when already Clone-wrapped");
     assert!(matches!(value(2).kind, IrExprKind::Clone { .. }), "a `&T` record param owns by `.clone()`");
     assert!(matches!(value(3).kind, IrExprKind::Var { id } if id == pb), "a carried borrow lowers to the bare param, never to an owning read");

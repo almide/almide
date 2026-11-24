@@ -48,8 +48,8 @@ pub fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
 /// Errors are `url`'s classified texts. Whether a response that ENDED is whole
 /// is the caller's question (`http_parse_response`), because it depends on
 /// the request method.
-pub fn read_response_tolerant(stream: &mut impl std::io::Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
-    let mut response = Vec::new();
+pub fn read_response_tolerant(stream: &mut impl std::io::Read, url: &str, max: Option<usize>) -> Result<std::vec::Vec<u8>, String> {
+    let mut response = std::vec::Vec::new();
     let mut buf = [0u8; 8192];
     let mut head_whole = false;
     loop {
@@ -132,7 +132,7 @@ pub fn http_final_head(resp: &[u8]) -> Option<(usize, usize)> {
 
 /// The field lines of a head (after its status line): wire order, repeats
 /// kept, names in their wire spelling.
-fn http_head_fields(head: &str) -> Vec<(String, String)> {
+fn http_head_fields(head: &str) -> std::vec::Vec<(String, String)> {
     head.lines()
         .skip(1)
         .filter_map(|line| {
@@ -210,9 +210,9 @@ pub fn chunked_body_terminated(body: &[u8]) -> bool {
 /// so is a body that ends before its terminating 0-chunk — a size line cut
 /// short, a chunk shorter than its size, a chunk without its CRLF (C-408,
 /// #4137: these used to return what had arrived as a whole body).
-pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decode_chunked_bytes(body: &[u8]) -> Result<std::vec::Vec<u8>, String> {
     let incomplete = || "incomplete chunked body".to_string();
-    let mut result = Vec::new();
+    let mut result = std::vec::Vec::new();
     let mut pos = 0usize;
     loop {
         let line_end = match body[pos..].windows(2).position(|w| w == b"\r\n") {
@@ -266,11 +266,11 @@ pub fn make_tls_stream(
 /// is EVERY field line in wire order — names keep their wire spelling, and a
 /// repeated field (`Set-Cookie`) keeps every occurrence (#1791); the
 /// accessors do the case-insensitive matching.
-pub type HttpTextResponse = (i64, Vec<(String, String)>, String);
+pub type HttpTextResponse = (i64, std::vec::Vec<(String, String)>, String);
 
 /// A parsed response with its body still bytes: `(status_code, headers,
 /// transfer-decoded body)`.
-pub type HttpRawResponse = (i64, Vec<(String, String)>, Vec<u8>);
+pub type HttpRawResponse = (i64, std::vec::Vec<(String, String)>, std::vec::Vec<u8>);
 
 /// Split a response that ended into status, fields and the transfer-decoded
 /// body bytes, past any 1xx interim heads, or refuse it as incomplete (C-408,
@@ -290,7 +290,7 @@ pub fn http_parse_response(response: &[u8], head_request: bool) -> Result<HttpRa
     let fields = http_head_fields(&head);
     let body = &response[idx + 4..];
     if head_request || code == 204 || code == 304 {
-        return Ok((code, fields, Vec::new()));
+        return Ok((code, fields, std::vec::Vec::new()));
     }
     let body = if http_fields_chunked(&fields) {
         decode_chunked_bytes(body)?
@@ -307,7 +307,7 @@ pub fn http_parse_response(response: &[u8], head_request: bool) -> Result<HttpRa
 }
 
 /// Write the prepared request and read the whole response.
-pub fn http_exchange_raw(stream: &mut (impl std::io::Read + std::io::Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
+pub fn http_exchange_raw(stream: &mut (impl std::io::Read + std::io::Write), url: &str, request: &[u8]) -> Result<std::vec::Vec<u8>, String> {
     stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
     read_response_tolerant(stream, url, client_max_response_bytes())
 }
@@ -379,7 +379,7 @@ pub fn request_response_bytes(
 /// repeats kept, values as sent, and the fields the client manages
 /// (`HTTP_FORBIDDEN_HEADERS`, C-370) left out — the form a stock wasi:http
 /// host's `fields` hand a guest.
-pub fn http_response_fields(mut h: Vec<(String, String)>) -> Vec<(String, String)> {
+pub fn http_response_fields(mut h: std::vec::Vec<(String, String)>) -> std::vec::Vec<(String, String)> {
     h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
     h.iter_mut().for_each(|(k, _)| k.make_ascii_lowercase());
     h

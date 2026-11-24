@@ -55,6 +55,19 @@ const fn almide_list_align<T>() -> usize {
     if a > ALMIDE_LIST_STATIC_ALIGN { a } else { ALMIDE_LIST_STATIC_ALIGN }
 }
 
+/// The block's layout for `cap` elements, or `None` when it would overflow.
+fn almide_list_try_layout<T>(cap: usize) -> Option<Layout> {
+    let elems = std::mem::size_of::<T>().checked_mul(cap)?;
+    let size = almide_list_offset::<T>().checked_add(elems)?;
+    Layout::from_size_align(size, almide_list_align::<T>()).ok()
+}
+
+/// A `TryReserveError` to return: std builds one only inside its own reserve, so ask it for a capacity that cannot fit.
+#[cold]
+fn almide_list_reserve_error() -> std::collections::TryReserveError {
+    Vec::<u8>::new().try_reserve_exact(usize::MAX).expect_err("usize::MAX bytes never fit")
+}
+
 fn almide_list_layout<T>(cap: usize) -> Layout {
     let elems = std::mem::size_of::<T>().checked_mul(cap).expect("AlmideList capacity overflow");
     let size = almide_list_offset::<T>().checked_add(elems).expect("AlmideList capacity overflow");
@@ -161,15 +174,19 @@ impl<T> AlmideList<T> {
         }
         let cap = if extra == 0 { len } else { need.max(len.saturating_mul(2)).max(4) };
         let fresh = AlmideList::<T> { ptr: almide_list_alloc::<T>(cap), _elems: PhantomData };
-        for (i, x) in self.as_slice().iter().enumerate() {
-            // SAFETY: slot `i < len <= cap` of the fresh block is uninitialised; `len` is bumped after each write, so a
-            // panicking `clone` leaves the fresh block holding exactly the elements written so far.
-            unsafe {
-                fresh.data().add(i).write(x.clone());
-                (*fresh.ptr.as_ptr()).len = i + 1;
-            }
-        }
+        fresh.fill_fresh(self.as_slice());
         *self = fresh;
+    }
+
+    /// Fills this fresh, unique, empty block (capacity at least `src.len()`) with clones of `src`. A panicking `clone`
+    /// leaves the block holding exactly the elements written so far, so dropping it drops those.
+    fn fill_fresh(&self, src: &[T]) where T: Clone {
+        debug_assert!(self.is_unique() && self.is_empty() && self.capacity() >= src.len());
+        let mut set = AlmideListSetLen { block: self.ptr, len: 0 };
+        // SAFETY: the block is unique and empty with room for `src.len()` elements, so the slots are uninitialised and
+        // `src` (a live list's elements) cannot point into them.
+        let dst = unsafe { std::slice::from_raw_parts_mut(self.data().cast::<std::mem::MaybeUninit<T>>(), src.len()) };
+        almide_list_clone_into(dst, src, &mut set.len);
     }
 
     /// Grows a unique heap block so `need` elements fit. The capacity at least doubles.
@@ -189,16 +206,55 @@ impl<T> AlmideList<T> {
 
     /// The elements for writing. A shared or static block is copied first, so the write is never seen by another owner;
     /// the borrow of `self` keeps the list from being cloned while the slice is lent.
+    #[inline]
     pub fn make_mut(&mut self) -> &mut [T] where T: Clone {
-        if self.is_empty() {
+        let len = self.len();
+        if len == 0 {
             return &mut [];
         }
-        self.reserve_unique(0);
+        // The copy of a shared block stays out of line: an element write in a loop inlines only the count check.
+        if !self.is_unique() {
+            self.unshare();
+        }
         // SAFETY: the block is unique and holds `len` initialised elements; the borrow of `self` is the only access.
-        unsafe { std::slice::from_raw_parts_mut(self.data(), self.len()) }
+        unsafe { std::slice::from_raw_parts_mut(self.data(), len) }
     }
 
+    /// Replaces a shared block with a unique copy of its elements.
+    #[cold]
+    #[inline(never)]
+    fn unshare(&mut self) where T: Clone {
+        self.reserve_unique(0);
+    }
+
+    /// Appends `x`. The common case (a unique block with room) inlines; growing or copying a shared block is out of line.
+    #[inline]
     pub fn push(&mut self, x: T) where T: Clone {
+        let len = self.len();
+        if len < self.capacity() && self.is_unique() {
+            // SAFETY: the block is unique with room for `len + 1` elements; slot `len` is uninitialised.
+            unsafe {
+                self.data().add(len).write(x);
+                (*self.ptr.as_ptr()).len = len + 1;
+            }
+            return;
+        }
+        self.push_slow(x);
+    }
+
+    /// An appender for a loop that only pushes to this list (ADR-0037 implementation notes: appends in loops). It
+    /// keeps the data pointer, length and capacity in locals and writes the length back when dropped, so the loop
+    /// does not reload the block header (and recheck its owner count) after every element store. The first push
+    /// makes the block unique with room, exactly where `push` would copy a shared or static block.
+    #[inline]
+    pub fn pusher(&mut self) -> AlmideListPusher<'_, T> where T: Clone {
+        AlmideListPusher { data: self.data(), len: 0, cap: 0, list: self }
+    }
+
+    /// `push` when the block is shared, static or full.
+    #[cold]
+    #[inline(never)]
+    fn push_slow(&mut self, x: T) where T: Clone {
         self.reserve_unique(1);
         let len = self.len();
         // SAFETY: the block is unique with room for `len + 1` elements; slot `len` is uninitialised.
@@ -243,11 +299,28 @@ impl<T> AlmideList<T> {
         self.truncate(0);
     }
 
+    /// Appends clones of `xs`. The length is counted in a local and written back once (and on a panicking `clone`,
+    /// for the elements written so far), so the copy loop does not reload the header per element.
     pub fn extend_from_slice(&mut self, xs: &[T]) where T: Clone {
-        self.reserve_unique(xs.len());
-        for x in xs {
-            self.push(x.clone());
+        if xs.is_empty() {
+            return;
         }
+        self.reserve_unique(xs.len());
+        let len = self.len();
+        let mut set = AlmideListSetLen { block: self.ptr, len };
+        // SAFETY: the block is unique with room for `xs.len()` more elements, and slots `len..len + xs.len()` are
+        // uninitialised; `xs` cannot point into them (it is a shared borrow, and they hold no element yet).
+        let spare = unsafe {
+            std::slice::from_raw_parts_mut(self.data().add(len).cast::<std::mem::MaybeUninit<T>>(), xs.len())
+        };
+        almide_list_clone_into(spare, xs, &mut set.len);
+    }
+
+    /// Another owner of the same block (ADR-0037 D4): the `Vec::to_vec` spelling of an owned copy, O(1) here.
+    /// The copy is made by the first write while the block is shared.
+    #[inline]
+    pub fn to_vec(&self) -> AlmideList<T> where T: Clone {
+        self.clone()
     }
 
     /// The elements as a `Vec`: moved out when this handle is the only owner, cloned otherwise.
@@ -308,27 +381,98 @@ impl<T> AlmideList<T> {
         }
     }
 
-    /// The list's elements as a `Vec` for an edit `Vec` already has, then back: moved through when unique.
-    fn edit_as_vec<R>(&mut self, f: impl FnOnce(&mut Vec<T>) -> R) -> R where T: Clone {
-        let mut v = std::mem::take(self).into_vec();
-        let r = f(&mut v);
-        *self = AlmideList::from(v);
-        r
+    /// Keeps the elements `keep` accepts, in order. `keep` sees the last element kept so far (`None` before the
+    /// first) and the candidate. A unique block is compacted in place (no allocation, as `Vec::retain`); a shared
+    /// one is left to its other owners and only the kept elements are cloned. A panic in `keep` or in a dropped
+    /// element's `drop` leaves the list holding the elements kept so far and then the ones not yet looked at.
+    fn compact(&mut self, mut keep: impl FnMut(Option<&T>, &T) -> bool) where T: Clone {
+        let len = self.len();
+        if len == 0 {
+            return;
+        }
+        if !self.is_unique() {
+            let mut out = AlmideList::new();
+            for x in self.as_slice() {
+                if keep(out.last(), x) {
+                    out.push(x.clone());
+                }
+            }
+            *self = out;
+            return;
+        }
+        struct Compacting<T> {
+            block: NonNull<AlmideListHeader>,
+            data: *mut T,
+            read: usize,
+            kept: usize,
+            len: usize,
+        }
+        impl<T> Drop for Compacting<T> {
+            fn drop(&mut self) {
+                // SAFETY: slots `..kept` and `read..len` hold the live elements, each once; the unread ones move down
+                // to follow the kept ones (overlapping, hence `copy`), and `len` counts both.
+                unsafe {
+                    if self.kept != self.read {
+                        std::ptr::copy(self.data.add(self.read), self.data.add(self.kept), self.len - self.read);
+                    }
+                    (*self.block.as_ptr()).len = self.kept + (self.len - self.read);
+                }
+            }
+        }
+        let mut c = Compacting { block: self.ptr, data: self.data(), read: 0, kept: 0, len };
+        while c.read < len {
+            // SAFETY: the block is unique (the borrow of `self` is the only access); slot `read` is live and distinct
+            // from slot `kept - 1` (kept <= read), the last element kept.
+            unsafe {
+                let cur = c.data.add(c.read);
+                let last = if c.kept == 0 { None } else { Some(&*c.data.add(c.kept - 1)) };
+                if keep(last, &*cur) {
+                    if c.kept != c.read {
+                        std::ptr::copy_nonoverlapping(cur, c.data.add(c.kept), 1);
+                    }
+                    c.kept += 1;
+                    c.read += 1;
+                } else {
+                    // Counted as gone before its drop runs, so a panicking drop is never repeated.
+                    c.read += 1;
+                    std::ptr::drop_in_place(cur);
+                }
+            }
+        }
     }
 
-    /// Keeps the elements `f` accepts, in order, as `Vec::retain`.
-    pub fn retain(&mut self, f: impl FnMut(&T) -> bool) where T: Clone {
-        self.edit_as_vec(|v| v.retain(f));
+    /// Keeps the elements `f` accepts, in order, as `Vec::retain` (in place when the block is unique).
+    pub fn retain(&mut self, mut f: impl FnMut(&T) -> bool) where T: Clone {
+        self.compact(|_, x| f(x));
     }
 
-    /// Removes consecutive repeated elements, as `Vec::dedup`.
+    /// Removes consecutive repeated elements, as `Vec::dedup` (in place when the block is unique).
     pub fn dedup(&mut self) where T: Clone + PartialEq {
-        self.edit_as_vec(|v| v.dedup());
+        self.compact(|last, x| last.is_none_or(|l| !(x == l)));
     }
 
-    /// Splits the list at `at`, keeping `..at` and returning `at..`, as `Vec::split_off`.
+    /// Splits the list at `at`, keeping `..at` and returning `at..`, as `Vec::split_off`. A unique block moves the
+    /// tail into the new list; a shared one clones it.
     pub fn split_off(&mut self, at: usize) -> AlmideList<T> where T: Clone {
-        self.edit_as_vec(|v| AlmideList::from(v.split_off(at)))
+        let len = self.len();
+        assert!(at <= len, "`at` split index (is {at}) should be <= len (is {len})");
+        if at == len {
+            return AlmideList::new();
+        }
+        let out = AlmideList::<T> { ptr: almide_list_alloc::<T>(len - at), _elems: PhantomData };
+        if !self.is_unique() {
+            out.fill_fresh(&self.as_slice()[at..]);
+            self.truncate(at);
+            return out;
+        }
+        // SAFETY: both blocks are unique; `at..len` is initialised here and `out` has room for it. The elements move:
+        // this list's `len` drops to `at`, so each is owned exactly once.
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.data().add(at), out.data(), len - at);
+            (*out.ptr.as_ptr()).len = len - at;
+            (*self.ptr.as_ptr()).len = at;
+        }
+        out
     }
 
     /// Moves every element of `other` onto the end of this list, as `Vec::append`.
@@ -337,9 +481,90 @@ impl<T> AlmideList<T> {
         self.extend(moved);
     }
 
-    /// Removes the elements in `range` and returns them, as `Vec::drain` (collected: the list is edited at once).
-    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> std::vec::IntoIter<T> where T: Clone {
-        self.edit_as_vec(|v| v.drain(range).collect::<Vec<T>>().into_iter())
+    /// Removes the elements in `range` and yields them, as `Vec::drain`: in place in a unique block (a shared one is
+    /// copied first), with no allocation. The elements not taken are dropped and the tail moves down when the drain is
+    /// dropped; while it lives the list holds only `..start`, so forgetting it leaks the rest and is still sound.
+    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> impl DoubleEndedIterator<Item = T> + ExactSizeIterator + std::iter::FusedIterator + '_ where T: Clone {
+        use std::ops::Bound;
+        let len = self.len();
+        let start = match range.start_bound() {
+            Bound::Included(&s) => s,
+            Bound::Excluded(&s) => s.checked_add(1).expect("attempted to index slice from after maximum usize"),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&e) => e.checked_add(1).expect("attempted to index slice up to maximum usize"),
+            Bound::Excluded(&e) => e,
+            Bound::Unbounded => len,
+        };
+        assert!(start <= end, "slice index starts at {start} but ends at {end}");
+        assert!(end <= len, "range end index {end} out of range for slice of length {len}");
+        if start < end {
+            self.reserve_unique(0);
+            // SAFETY: the block is unique (non-empty, so never the static one).
+            unsafe { (*self.ptr.as_ptr()).len = start };
+        }
+        AlmideListDrain { block: self.ptr, data: self.data(), next: start, end, start, tail: end, tail_len: len - end, _list: PhantomData }
+    }
+
+    /// Room for exactly `extra` more elements in a unique block, as `Vec::try_reserve_exact`: an allocation the system
+    /// refuses is an `Err`, never an abort, so a caller can report it in its own words.
+    pub fn try_reserve_exact(&mut self, extra: usize) -> Result<(), std::collections::TryReserveError> where T: Clone {
+        let len = self.len();
+        let Some(need) = len.checked_add(extra) else { return Err(almide_list_reserve_error()) };
+        if self.is_unique() && need <= self.capacity() {
+            return Ok(());
+        }
+        let Some(layout) = almide_list_try_layout::<T>(need) else { return Err(almide_list_reserve_error()) };
+        if self.is_unique() {
+            // SAFETY: the only owner of a heap block allocated with its capacity's layout; realloc keeps the alignment.
+            let raw = unsafe { realloc(self.ptr.as_ptr().cast(), almide_list_layout::<T>(self.capacity()), layout.size()) };
+            let Some(block) = NonNull::new(raw.cast::<AlmideListHeader>()) else { return Err(almide_list_reserve_error()) };
+            self.ptr = block;
+            // SAFETY: the block is unique and live.
+            unsafe { (*self.ptr.as_ptr()).cap = need };
+            return Ok(());
+        }
+        // SAFETY: the layout's size is at least the header's, so it is non-zero.
+        let raw = unsafe { alloc(layout) };
+        let Some(block) = NonNull::new(raw.cast::<AlmideListHeader>()) else { return Err(almide_list_reserve_error()) };
+        // SAFETY: the block is freshly allocated, sized and aligned for the header.
+        unsafe { block.as_ptr().write(AlmideListHeader { rc: AlmideListCount::new(1), len: 0, cap: need }) };
+        let fresh = AlmideList::<T> { ptr: block, _elems: PhantomData };
+        fresh.fill_fresh(self.as_slice());
+        *self = fresh;
+        Ok(())
+    }
+
+    /// As [`Self::try_reserve_exact`] (`Vec::try_reserve` may round up; this block does not need to).
+    pub fn try_reserve(&mut self, extra: usize) -> Result<(), std::collections::TryReserveError> where T: Clone {
+        self.try_reserve_exact(extra)
+    }
+
+    /// Grows to `n` elements with clones of `x`, or truncates to `n`, as `Vec::resize`.
+    pub fn resize(&mut self, n: usize, x: T) where T: Clone {
+        self.resize_with(n, || x.clone());
+    }
+
+    /// Grows to `n` elements made by `f`, or truncates to `n`, as `Vec::resize_with`.
+    pub fn resize_with(&mut self, n: usize, mut f: impl FnMut() -> T) where T: Clone {
+        let len = self.len();
+        if n <= len {
+            self.truncate(n);
+            return;
+        }
+        self.reserve_unique(n - len);
+        for _ in len..n {
+            self.push(f());
+        }
+    }
+
+    /// Removes the element at `i`, moving the last one into its place, as `Vec::swap_remove`.
+    pub fn swap_remove(&mut self, i: usize) -> T where T: Clone {
+        let len = self.len();
+        assert!(i < len, "swap_remove index (is {i}) should be < len (is {len})");
+        self.make_mut().swap(i, len - 1);
+        self.pop().expect("a non-empty list")
     }
 
     /// The last owner: drops the elements and frees the block.
@@ -356,10 +581,20 @@ impl<T> AlmideList<T> {
 }
 
 impl<T> Drop for AlmideList<T> {
+    /// The static empty block (what `new`, `Default` and `std::mem::take` leave) inlines to one load and compare;
+    /// releasing a heap block stays out of line.
+    #[inline]
     fn drop(&mut self) {
-        if self.is_static() {
-            return;
+        if !self.is_static() {
+            self.release();
         }
+    }
+}
+
+impl<T> AlmideList<T> {
+    /// Gives up this handle's count on a heap block, freeing the block (and dropping its elements) at the last one.
+    #[inline(never)]
+    fn release(&mut self) {
         if self.header().rc.fetch_sub(1, AtomicOrdering::Release) != 1 {
             return;
         }
@@ -411,27 +646,428 @@ impl<T: Clone> std::ops::DerefMut for AlmideList<T> {
 /// The elements by value: moved out when this handle is the only owner, cloned otherwise.
 impl<T: Clone> IntoIterator for AlmideList<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = AlmideListIntoIter<T>;
+    /// No allocation: a unique block hands its elements out by move, a shared one by clone.
     fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+        let end = self.len();
+        let unique = end > 0 && self.is_unique();
+        if unique {
+            // SAFETY: the block is unique; with its `len` at 0 it no longer drops the elements, which the
+            // iterator now owns: it moves each one out once and drops those it never yields.
+            unsafe { (*self.ptr.as_ptr()).len = 0 };
+        }
+        AlmideListIntoIter { list: self, next: 0, end, unique }
     }
+}
+
+impl<T: Clone> AlmideList<T> {
+    /// Appends `f(i, x)` for each element `x` of `src` at index `i`, in one counted fill: `src`'s length is the
+    /// count and the room is reserved up front, so no element store is checked against the room (an `extend` over
+    /// an iterator it cannot trust checks every one). Elements move out of a unique `src` and are cloned from a
+    /// shared one, the choice made once.
+    pub fn extend_indexed<S: Clone, F: FnMut(usize, S) -> T>(&mut self, src: AlmideList<S>, mut f: F) {
+        let n = src.len();
+        if n == 0 {
+            return;
+        }
+        self.reserve_unique(n);
+        let base = self.len();
+        // SAFETY: the block is unique with room for `n` more, so slots `base..base + n` are uninitialised.
+        let to = unsafe { self.data().add(base) };
+        let mut set = AlmideListSetLen { block: self.ptr, len: base };
+        // `src` as its by-value iterator: on a panic in `f` it drops (or releases) what was not taken.
+        let mut src = src.into_iter();
+        let from = src.list.data();
+        let mut i = 0;
+        if src.unique {
+            while i < n {
+                src.next = i + 1;
+                // SAFETY: slot `i < n` of the unique source is initialised and taken once (`next` is past it, so the
+                // iterator's drop skips it); destination slot `i` is uninitialised room.
+                unsafe { to.add(i).write(f(i, std::ptr::read(from.add(i)))) };
+                i += 1;
+                set.len = base + i;
+            }
+        } else {
+            while i < n {
+                src.next = i + 1;
+                // SAFETY: a shared source keeps its `n` elements initialised; destination slot `i` is as above.
+                unsafe { to.add(i).write(f(i, (*from.add(i)).clone())) };
+                i += 1;
+                set.len = base + i;
+            }
+        }
+    }
+
+    /// `self.into_iter().map(f).collect()`. A unique block whose element layout `U` shares is rewritten in place,
+    /// as std's `Vec` collects `into_iter().map(f)` into its source buffer: no second block.
+    pub fn map_owned<U: Clone, F: FnMut(T) -> U>(self, mut f: F) -> AlmideList<U> {
+        let len = self.len();
+        let fits = std::mem::size_of::<T>() == std::mem::size_of::<U>()
+            && std::mem::align_of::<T>() == std::mem::align_of::<U>()
+            && std::mem::size_of::<T>() > 0;
+        if len == 0 || !fits || !self.is_unique() {
+            // One block at its final capacity, filled by the source's count.
+            let mut out = AlmideList::<U>::with_capacity(len);
+            out.extend_indexed(self, |_, x| f(x));
+            return out;
+        }
+        /// Unwinding out of `f` at element `done`: the `done` elements already written are `U`s, the one `f` was
+        /// handed is gone, the rest are `T`s. Drop each as what it is, then free the block.
+        struct Unwind<T, U> {
+            ptr: NonNull<AlmideListHeader>,
+            done: usize,
+            len: usize,
+            _elems: PhantomData<(T, U)>,
+        }
+        impl<T, U> Drop for Unwind<T, U> {
+            fn drop(&mut self) {
+                // SAFETY: the block is unique with its `len` at 0, so freeing it drops no element; the ranges below are
+                // exactly the initialised `U`s and `T`s described above, each dropped once.
+                unsafe {
+                    let data = self.ptr.as_ptr().cast::<u8>().add(almide_list_offset::<U>());
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(data.cast::<U>(), self.done));
+                    let rest = self.len - self.done - 1;
+                    std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(data.cast::<T>().add(self.done + 1), rest));
+                    drop(AlmideList::<U> { ptr: self.ptr, _elems: PhantomData });
+                }
+            }
+        }
+        let me = std::mem::ManuallyDrop::new(self);
+        let data = me.data();
+        // SAFETY: the block is unique; with `len` at 0 nothing else reads or drops its elements while they change type.
+        unsafe { (*me.ptr.as_ptr()).len = 0 };
+        let mut guard = Unwind::<T, U> { ptr: me.ptr, done: 0, len, _elems: PhantomData };
+        while guard.done < len {
+            // SAFETY: slot `done` holds a `T` not yet read; `U` has `T`'s size and alignment, so the `U` written
+            // back fits the slot exactly, and the offset of the elements is the same for both.
+            unsafe {
+                let x = std::ptr::read(data.add(guard.done));
+                let y = f(x);
+                std::ptr::write(data.cast::<U>().add(guard.done), y);
+            }
+            guard.done += 1;
+        }
+        let ptr = guard.ptr;
+        std::mem::forget(guard);
+        // SAFETY: every slot now holds a `U`; the block's capacity in elements is unchanged because the sizes agree.
+        unsafe { (*ptr.as_ptr()).len = len };
+        AlmideList { ptr, _elems: PhantomData }
+    }
+}
+
+/// The by-value iterator of an `AlmideList`: owns the block for its lifetime.
+pub struct AlmideListIntoIter<T: Clone> {
+    list: AlmideList<T>,
+    next: usize,
+    end: usize,
+    unique: bool,
+}
+
+impl<T: Clone> AlmideListIntoIter<T> {
+    fn element(&self, i: usize) -> T {
+        if self.unique {
+            // SAFETY: `i` is in `next..end`, each index is taken once, and the block no longer drops them.
+            unsafe { std::ptr::read(self.list.data().add(i)) }
+        } else {
+            self.list.as_slice()[i].clone()
+        }
+    }
+}
+
+impl<T: Clone> Iterator for AlmideListIntoIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        let i = self.next;
+        self.next += 1;
+        Some(self.element(i))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.next;
+        (n, Some(n))
+    }
+    /// The whole rest in one loop per mode, so the move-or-clone choice is made once, not per element.
+    #[inline]
+    fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
+        let data = self.list.data();
+        let mut acc = init;
+        if self.unique {
+            while self.next < self.end {
+                let i = self.next;
+                // `next` moves first: a panic in `f` leaves the rest for the iterator's drop.
+                self.next += 1;
+                // SAFETY: as `element`: `i` is in `next..end`, taken once, and the block no longer drops it.
+                acc = f(acc, unsafe { std::ptr::read(data.add(i)) });
+            }
+        } else {
+            while self.next < self.end {
+                let i = self.next;
+                self.next += 1;
+                // SAFETY: a shared block keeps every element initialised; `i < end <= len`.
+                acc = f(acc, unsafe { (*data.add(i)).clone() });
+            }
+        }
+        acc
+    }
+}
+
+impl<T: Clone> DoubleEndedIterator for AlmideListIntoIter<T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        self.end -= 1;
+        Some(self.element(self.end))
+    }
+}
+
+impl<T: Clone> Clone for AlmideListIntoIter<T> {
+    /// The elements not yet yielded, cloned into a block of their own (as `vec::IntoIter` clones its rest).
+    fn clone(&self) -> Self {
+        // SAFETY: `next..end` holds initialised elements in either mode: none of them has been moved out.
+        let rest: &[T] = unsafe { std::slice::from_raw_parts(self.list.data().add(self.next), self.end - self.next) };
+        AlmideList::from(rest).into_iter()
+    }
+}
+
+impl<T: Clone> ExactSizeIterator for AlmideListIntoIter<T> {}
+impl<T: Clone> std::iter::FusedIterator for AlmideListIntoIter<T> {}
+
+/// The iterator of [`AlmideList::drain`]: yields `start..end` by value out of a unique block. On drop it drops the
+/// elements not taken and moves the tail `tail..tail + tail_len` down to `start`.
+pub(crate) struct AlmideListDrain<'a, T> {
+    block: NonNull<AlmideListHeader>,
+    data: *mut T,
+    next: usize,
+    end: usize,
+    start: usize,
+    tail: usize,
+    tail_len: usize,
+    _list: PhantomData<&'a mut AlmideList<T>>,
+}
+
+impl<T> Iterator for AlmideListDrain<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        let i = self.next;
+        self.next += 1;
+        // SAFETY: `i` is in the drained range of a unique block, taken once; the list no longer counts it.
+        Some(unsafe { self.data.add(i).read() })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.next;
+        (n, Some(n))
+    }
+}
+
+impl<T> DoubleEndedIterator for AlmideListDrain<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.next == self.end {
+            return None;
+        }
+        self.end -= 1;
+        // SAFETY: as `next`.
+        Some(unsafe { self.data.add(self.end).read() })
+    }
+}
+
+impl<T> ExactSizeIterator for AlmideListDrain<'_, T> {}
+impl<T> std::iter::FusedIterator for AlmideListDrain<'_, T> {}
+
+impl<T> Drop for AlmideListDrain<'_, T> {
+    fn drop(&mut self) {
+        if self.start == self.tail {
+            // Nothing was drained: the list (possibly the static block) was not touched.
+            return;
+        }
+        /// Moves the tail down even when an element's drop below panics.
+        struct MoveTail<T> {
+            block: NonNull<AlmideListHeader>,
+            data: *mut T,
+            start: usize,
+            tail: usize,
+            tail_len: usize,
+        }
+        impl<T> Drop for MoveTail<T> {
+            fn drop(&mut self) {
+                // SAFETY: the block is unique; `tail..tail + tail_len` is live and moves (overlapping, hence `copy`) to
+                // `start`, where every drained slot has been taken or dropped.
+                unsafe {
+                    std::ptr::copy(self.data.add(self.tail), self.data.add(self.start), self.tail_len);
+                    (*self.block.as_ptr()).len = self.start + self.tail_len;
+                }
+            }
+        }
+        let _tail = MoveTail { block: self.block, data: self.data, start: self.start, tail: self.tail, tail_len: self.tail_len };
+        let (next, end) = (self.next, self.end);
+        self.next = end;
+        // SAFETY: `next..end` were never taken; each is dropped once here.
+        unsafe { std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(self.data.add(next), end - next)) };
+    }
+}
+
+impl<T: Clone> Drop for AlmideListIntoIter<T> {
+    fn drop(&mut self) {
+        if self.unique && self.next < self.end {
+            // SAFETY: the elements in `next..end` were never moved out; the block does not drop them.
+            unsafe {
+                std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(self.list.data().add(self.next), self.end - self.next));
+            }
+        }
+    }
+}
+
+/// Writes clones of `src` into the uninitialised `dst` (the same length), counting each one into `len` as it lands so a
+/// panicking `clone` leaves `len` covering the elements written so far. The two slices arrive as distinct borrows, so
+/// the backend knows they do not overlap: for an element whose clone is a plain copy the loop becomes one `memcpy`
+/// (the shape of `MaybeUninit::write_clone_of_slice`, which is newer than the workspace's minimum Rust).
+#[inline]
+fn almide_list_clone_into<T: Clone>(dst: &mut [std::mem::MaybeUninit<T>], src: &[T], len: &mut usize) {
+    let n = dst.len();
+    let src = &src[..n];
+    for i in 0..n {
+        dst[i].write(src[i].clone());
+        *len += 1;
+    }
+}
+
+/// See [`AlmideList::pusher`]. `cap == 0` means no push has made the block unique yet: the next push takes the slow
+/// path, which does. While `cap > 0` the block is unique (the `&mut` borrow keeps any other owner from being made),
+/// `len` counts its initialised elements and the header's length is stale until [`Self::commit`].
+pub struct AlmideListPusher<'a, T: Clone> {
+    list: &'a mut AlmideList<T>,
+    data: *mut T,
+    len: usize,
+    cap: usize,
+}
+
+impl<'a, T: Clone> AlmideListPusher<'a, T> {
+    /// Appends `x`.
+    #[inline]
+    pub fn push(&mut self, x: T) {
+        if self.len == self.cap {
+            self.refill();
+        }
+        // SAFETY: `cap > 0` after `refill`, so the block is unique with room for `len + 1`; slot `len` is uninitialised.
+        unsafe { self.data.add(self.len).write(x) };
+        self.len += 1;
+    }
+
+    /// Writes the length back, makes the block unique with room for one more, and reloads the locals.
+    #[cold]
+    #[inline(never)]
+    fn refill(&mut self) {
+        self.commit();
+        self.list.reserve_unique(1);
+        self.data = self.list.data();
+        self.len = self.list.len();
+        self.cap = self.list.capacity();
+    }
+
+    #[inline]
+    fn commit(&mut self) {
+        if self.cap != 0 {
+            // SAFETY: `cap > 0` means the block is the unique heap block this pusher has been filling.
+            unsafe { (*self.list.ptr.as_ptr()).len = self.len };
+        }
+    }
+}
+
+impl<'a, T: Clone> Drop for AlmideListPusher<'a, T> {
+    #[inline]
+    fn drop(&mut self) {
+        self.commit();
+    }
+}
+
+// `push_lane` appends an `Int` lane as one element, converted by Rust's `as` cast as the native render converts
+// that lane to the element type: `Bytes` keeps the low 8 bits, a `List[Int]` takes the lane as it is.
+impl AlmideListPusher<'_, u8> {
+    #[inline]
+    pub fn push_lane(&mut self, x: i64) {
+        self.push(x as u8);
+    }
+}
+
+impl AlmideListPusher<'_, i64> {
+    #[inline]
+    pub fn push_lane(&mut self, x: i64) {
+        self.push(x);
+    }
+}
+
+/// The length of a unique heap block being filled, counted in a local and written back when dropped (also when a
+/// `clone` or an iterator panics, for the elements written so far).
+struct AlmideListSetLen {
+    block: NonNull<AlmideListHeader>,
+    len: usize,
+}
+
+impl Drop for AlmideListSetLen {
+    // Inline: an out-of-line drop takes the guard's address, and then every element store through the block's raw
+    // pointer may alias `len`, so a fill loop stores and reloads it per element.
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: the block is the unique heap block being filled; `len` counts its initialised elements.
+        unsafe { (*self.block.as_ptr()).len = self.len };
+    }
+}
+
+/// [`Extend::extend`] past its reserved room: writes `len` back, makes room for one more in the (still unique) block
+/// and returns its new header, data pointer and capacity.
+#[cold]
+#[inline(never)]
+fn almide_list_extend_grow<T: Clone>(list: &mut AlmideList<T>, len: usize) -> (NonNull<AlmideListHeader>, *mut T, usize) {
+    // SAFETY: the block is the unique heap block being filled and `len` counts its initialised elements.
+    unsafe { (*list.ptr.as_ptr()).len = len };
+    list.reserve_unique(1);
+    (list.ptr, list.data(), list.capacity())
 }
 
 impl<T: Clone> Extend<T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, it: I) {
         let it = it.into_iter();
-        self.reserve_unique(it.size_hint().0);
-        for x in it {
-            self.push(x);
+        let hint = it.size_hint().0;
+        if hint == 0 {
+            for x in it {
+                self.push(x);
+            }
+            return;
         }
+        // The reserved room fills with the length, data pointer and capacity in locals, driven by the iterator's own
+        // `fold` (an iterator that yields more than its hint grows the block in `almide_list_extend_grow`, out of line,
+        // which takes none of the locals' addresses).
+        self.reserve_unique(hint);
+        let mut data = self.data();
+        let mut cap = self.capacity();
+        let mut set = AlmideListSetLen { block: self.ptr, len: self.len() };
+        let list = &mut *self;
+        // `move`: the closure owns the locals and the guard, which writes the length back when the closure is
+        // dropped (also on a panic), so they stay in registers across the loop. The guard is named whole: a move
+        // closure naming only its `Copy` fields would capture copies of them, and the guard would write back the
+        // length it started with.
+        it.for_each(move |x| {
+            let set = &mut set;
+            if set.len == cap {
+                (set.block, data, cap) = almide_list_extend_grow(list, set.len);
+            }
+            // SAFETY: the block is unique (after `reserve_unique` or the grow) and slot `set.len < cap` is
+            // uninitialised.
+            unsafe { data.add(set.len).write(x) };
+            set.len += 1;
+        });
     }
 }
 
 impl<'a, T: Clone + 'a> Extend<&'a T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, it: I) {
-        for x in it {
-            self.push(x.clone());
-        }
+        self.extend(it.into_iter().cloned());
     }
 }
 
@@ -439,14 +1075,6 @@ impl<T: Clone> From<AlmideList<T>> for Vec<T> {
     fn from(l: AlmideList<T>) -> Vec<T> {
         l.into_vec()
     }
-}
-
-/// `almide_list![a, b, c]`, `almide_list![]` and `almide_list![x; n]`: the `vec!` forms, building an `AlmideList`.
-#[macro_export]
-macro_rules! almide_list {
-    () => { AlmideList::new() };
-    ($x:expr; $n:expr) => { AlmideList::from(vec![$x; $n]) };
-    ($($x:expr),+ $(,)?) => { AlmideList::from(vec![$($x),+]) };
 }
 
 impl<T> AsRef<[T]> for AlmideList<T> {
@@ -461,13 +1089,45 @@ impl<T> Borrow<[T]> for AlmideList<T> {
     }
 }
 
-impl<T: Clone> From<Vec<T>> for AlmideList<T> {
-    fn from(v: Vec<T>) -> Self {
-        let mut out = AlmideList::with_capacity(v.len());
-        for x in v {
-            out.push(x);
+impl<T> From<Vec<T>> for AlmideList<T> {
+    fn from(mut v: Vec<T>) -> Self {
+        let len = v.len();
+        let out = AlmideList::<T>::with_capacity(len);
+        if len > 0 {
+            // SAFETY: the fresh block is unique with room for `len` elements; they are moved out of `v` bit for bit,
+            // and `v`'s length is set to 0 first so it frees only its buffer.
+            unsafe {
+                v.set_len(0);
+                std::ptr::copy_nonoverlapping(v.as_ptr(), out.data(), len);
+                (*out.ptr.as_ptr()).len = len;
+            }
         }
         out
+    }
+}
+
+impl<T, const N: usize> From<[T; N]> for AlmideList<T> {
+    /// A literal's elements moved into one block of exactly `N` (`almide_list![a, b, ..]`): one allocation, where
+    /// going through `vec!` allocated the `Vec` buffer and then the block.
+    fn from(a: [T; N]) -> Self {
+        let out = AlmideList::<T>::with_capacity(N);
+        if N > 0 {
+            let a = std::mem::ManuallyDrop::new(a);
+            // SAFETY: the fresh block is unique with room for `N` elements; they are moved out of `a` bit for bit,
+            // and `a` is never dropped, so each element has exactly one owner.
+            unsafe {
+                std::ptr::copy_nonoverlapping(a.as_ptr(), out.data(), N);
+                (*out.ptr.as_ptr()).len = N;
+            }
+        }
+        out
+    }
+}
+
+impl<T: Clone> From<&AlmideList<T>> for AlmideList<T> {
+    /// Another owner of the block, O(1) (ADR-0037 D4): `Vec::from(&v)` is a copy in std's spelling.
+    fn from(xs: &AlmideList<T>) -> Self {
+        xs.clone()
     }
 }
 
@@ -479,13 +1139,12 @@ impl<T: Clone> From<&[T]> for AlmideList<T> {
     }
 }
 
-impl<T: Clone> FromIterator<T> for AlmideList<T> {
+// The full path: `FromIterator` is only in the 2021 prelude (see almide_str.rs).
+impl<T: Clone> std::iter::FromIterator<T> for AlmideList<T> {
     fn from_iter<I: IntoIterator<Item = T>>(it: I) -> Self {
         let it = it.into_iter();
         let mut out = AlmideList::with_capacity(it.size_hint().0);
-        for x in it {
-            out.push(x);
-        }
+        out.extend(it);
         out
     }
 }
@@ -501,6 +1160,15 @@ impl<'a, T> IntoIterator for &'a AlmideList<T> {
 impl<T: PartialEq> PartialEq for AlmideList<T> {
     fn eq(&self, o: &Self) -> bool {
         self.as_slice() == o.as_slice()
+    }
+}
+
+// A borrowed list (`*xs` of a `&[T]` param) compared with a list value, the
+// way `[T] == Vec<T>` holds for std vectors. Only this direction: a second
+// `PartialEq` on `AlmideList` would make `list == iter.collect()` ambiguous.
+impl<T: PartialEq> PartialEq<AlmideList<T>> for [T] {
+    fn eq(&self, o: &AlmideList<T>) -> bool {
+        self == o.as_slice()
     }
 }
 
@@ -535,3 +1203,189 @@ impl<T: fmt::Debug> fmt::Debug for AlmideList<T> {
 unsafe impl<T: Send + Sync> Send for AlmideList<T> {}
 // SAFETY: as for `Send`: `&AlmideList<T>` only reads the elements or clones (an atomic increment).
 unsafe impl<T: Send + Sync> Sync for AlmideList<T> {}
+
+/// A runtime call's string list as the list block of `AlmideStr` (ADR-0037): the list itself when it already is one
+/// (every runtime list of strings), element by element otherwise. A rendered call converted every result element by
+/// element, a full pass and a fresh list for a list it already had.
+pub trait AlmideIntoStrList {
+    fn into_str_list(self) -> AlmideList<AlmideStr>;
+}
+
+impl AlmideIntoStrList for AlmideList<AlmideStr> {
+    #[inline(always)]
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        self
+    }
+}
+
+impl AlmideIntoStrList for AlmideList<String> {
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        self.as_slice().iter().map(|s| AlmideStr::from(s.as_str())).collect()
+    }
+}
+
+impl AlmideIntoStrList for AlmideList<&str> {
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        self.as_slice().iter().map(|s| AlmideStr::from(*s)).collect()
+    }
+}
+
+impl AlmideIntoStrList for Vec<AlmideStr> {
+    #[inline(always)]
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        AlmideList::from(self)
+    }
+}
+
+impl AlmideIntoStrList for Vec<String> {
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+impl AlmideIntoStrList for Vec<&str> {
+    fn into_str_list(self) -> AlmideList<AlmideStr> {
+        self.into_iter().map(AlmideStr::from).collect()
+    }
+}
+
+/// [`AlmideIntoStrList::into_str_list`] as a function, so a call site needs no trait in scope.
+#[inline(always)]
+pub fn almide_str_list<L: AlmideIntoStrList>(l: L) -> AlmideList<AlmideStr> {
+    l.into_str_list()
+}
+
+/// The owned list of a borrowed slice, `to_vec`'s job in std's spelling (ADR-0037): a copy of the elements.
+/// An `AlmideList` receiver answers with its own inherent `to_list`, another owner of the same block, O(1).
+pub trait AlmideToList<T> {
+    fn to_list(&self) -> AlmideList<T>;
+}
+
+impl<T: Clone> AlmideToList<T> for [T] {
+    fn to_list(&self) -> AlmideList<T> {
+        AlmideList::from(self)
+    }
+}
+
+impl<T: Clone> AlmideList<T> {
+    /// Another owner of the same block, O(1): what a slice's `to_list` copies, a list shares.
+    #[inline]
+    pub fn to_list(&self) -> AlmideList<T> {
+        self.clone()
+    }
+}
+
+/// A fresh heap block of `n > 0` elements whose bytes are all zero (`alloc_zeroed`, so the
+/// allocator may hand back untouched pages): only the header is written.
+fn almide_list_alloc_zeroed<T>(n: usize) -> NonNull<AlmideListHeader> {
+    let layout = almide_list_layout::<T>(n);
+    // SAFETY: the layout's size is at least the header's, so it is non-zero.
+    let raw = unsafe { std::alloc::alloc_zeroed(layout) }.cast::<AlmideListHeader>();
+    let block = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+    // SAFETY: the block is freshly allocated, sized and aligned for the header; the
+    // caller guarantees all-zero bytes are `n` valid elements.
+    unsafe { block.as_ptr().write(AlmideListHeader { rc: AlmideListCount::new(1), len: n, cap: n }) };
+    block
+}
+
+impl<T> AlmideList<T> {
+    /// `n` clones of `x` (`vec![x; n]`): one block at its final capacity, filled in place;
+    /// the last element is `x` itself.
+    pub(crate) fn from_elem(x: T, n: usize) -> Self where T: Clone {
+        if n == 0 {
+            return Self::new();
+        }
+        let out = Self::with_capacity(n);
+        let data = out.data();
+        for i in 0..n - 1 {
+            // SAFETY: the block is unique with room for `n` elements; `len` follows each
+            // write, so a panicking clone drops exactly the elements written.
+            unsafe {
+                data.add(i).write(x.clone());
+                (*out.ptr.as_ptr()).len = i + 1;
+            }
+        }
+        // SAFETY: as above, the last slot.
+        unsafe {
+            data.add(n - 1).write(x);
+            (*out.ptr.as_ptr()).len = n;
+        }
+        out
+    }
+}
+
+/// An element type whose value is its bytes and whose all-zero bytes are a value: a
+/// `Copy` type with no padding and no invalid bit pattern at zero. `almide_list![x; n]`
+/// with an all-zero `x` of such a type allocates its block zeroed.
+///
+/// # Safety
+/// Every byte of a value must be initialized (no padding), and the all-zero bit
+/// pattern must be a valid value. A clone of a value is then its bytes.
+pub unsafe trait AlmideZeroValid: Copy {}
+// SAFETY: the primitive scalars have no padding, and zero is a valid value of each
+// (`0`, `0.0`, `false`, `'\0'`).
+unsafe impl AlmideZeroValid for i8 {}
+unsafe impl AlmideZeroValid for i16 {}
+unsafe impl AlmideZeroValid for i32 {}
+unsafe impl AlmideZeroValid for i64 {}
+unsafe impl AlmideZeroValid for i128 {}
+unsafe impl AlmideZeroValid for isize {}
+unsafe impl AlmideZeroValid for u8 {}
+unsafe impl AlmideZeroValid for u16 {}
+unsafe impl AlmideZeroValid for u32 {}
+unsafe impl AlmideZeroValid for u64 {}
+unsafe impl AlmideZeroValid for u128 {}
+unsafe impl AlmideZeroValid for usize {}
+unsafe impl AlmideZeroValid for f32 {}
+unsafe impl AlmideZeroValid for f64 {}
+unsafe impl AlmideZeroValid for bool {}
+unsafe impl AlmideZeroValid for char {}
+
+/// `almide_list![x; n]`'s element. The macro calls `(&&AlmideListElem::new(x)).almide_list_fill(n)`:
+/// method lookup tries the `&&` receiver first, which only an [`AlmideZeroValid`] element
+/// has, and otherwise derefs to the general fill. The cell lets either fill move `x` out
+/// through the shared receiver, so the list holds `x` and `n - 1` clones, as `vec!` does.
+pub struct AlmideListElem<T>(std::cell::Cell<Option<T>>);
+
+impl<T> AlmideListElem<T> {
+    #[inline]
+    pub fn new(x: T) -> Self {
+        AlmideListElem(std::cell::Cell::new(Some(x)))
+    }
+
+    #[inline]
+    fn take(&self) -> T {
+        self.0.take().expect("an almide_list! element is filled once")
+    }
+}
+
+/// The fill an element type that is valid when zeroed takes: a zero value allocates the block zeroed.
+pub trait AlmideListFillZeroed<T> {
+    fn almide_list_fill(self, n: usize) -> AlmideList<T>;
+}
+
+impl<T: AlmideZeroValid> AlmideListFillZeroed<T> for &&AlmideListElem<T> {
+    #[inline]
+    fn almide_list_fill(self, n: usize) -> AlmideList<T> {
+        let x = self.take();
+        // SAFETY: `AlmideZeroValid` promises every byte of `x` is initialized.
+        let bytes = unsafe { std::slice::from_raw_parts((&x as *const T).cast::<u8>(), std::mem::size_of::<T>()) };
+        if n == 0 || bytes.iter().any(|&b| b != 0) {
+            return AlmideList::from_elem(x, n);
+        }
+        // The zeroed block holds `n` copies of `x`: its bytes are `x`'s, and a copy of `x` is its bytes.
+        AlmideList { ptr: almide_list_alloc_zeroed::<T>(n), _elems: PhantomData }
+    }
+}
+
+/// The general fill: `n` clones written into one block.
+pub trait AlmideListFill<T> {
+    fn almide_list_fill(self, n: usize) -> AlmideList<T>;
+}
+
+impl<T: Clone> AlmideListFill<T> for &AlmideListElem<T> {
+    #[inline]
+    fn almide_list_fill(self, n: usize) -> AlmideList<T> {
+        AlmideList::from_elem(self.take(), n)
+    }
+}

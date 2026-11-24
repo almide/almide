@@ -24,6 +24,15 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     // bounds are bound once so the reservation and the range read the same
     // values.
     let reserved = counted.is_some() && matches!(collector, IterCollector::Collect) && steps_keep_length(steps);
+    // One `map` over a list the chain consumes, collected: the block is
+    // rewritten in place when it is unique and the element layouts agree, the
+    // way std's `Vec` collects `into_iter().map(f)` into its source buffer.
+    if let [IterStep::Map { lambda }] = steps {
+        let list_source = matches!(source.ty, Ty::Applied(almide_lang::types::TypeConstructorId::List, _));
+        if consume && counted.is_none() && list_source && matches!(collector, IterCollector::Collect) {
+            return format!("AlmideList::map_owned({}, {})", src, render_expr(ctx, lambda));
+        }
+    }
     let mut chain = if let Some((s, e)) = &counted {
         if reserved { "(__almide_rs..__almide_re)".to_string() } else { format!("({s}..{e})") }
     } else if consume {
@@ -49,7 +58,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     }
     if let (true, Some((s, e))) = (reserved, &counted) {
         return format!(
-            "{{ let __almide_rs: i64 = {s}; let __almide_re: i64 = {e}; let mut __almide_cv = Vec::new(); \
+            "{{ let __almide_rs: i64 = {s}; let __almide_re: i64 = {e}; let mut __almide_cv = AlmideList::new(); \
              if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort_oom(); }} \
              __almide_cv.extend({chain}); __almide_cv }}"
         );
@@ -84,7 +93,7 @@ fn steps_keep_length(steps: &[IterStep]) -> bool {
 
 fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
-        IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
+        IterCollector::Collect => format!("{}.collect::<AlmideList<_>>()", chain),
         // #3555: a Bytes / Matrix accumulator is an `AlmideRcCow`, and rustc
         // infers `fold`'s accumulator type from the expected type first — as
         // a by-reference argument that is the raw `Vec<u8>`, which the init
@@ -635,7 +644,7 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         "clone" | "to_string"
         // Vec<T>
         | "len" | "push" | "pop" | "insert" | "remove" | "contains"
-        | "iter" | "into_iter" | "collect" | "is_empty" | "to_vec" | "get"
+        | "iter" | "into_iter" | "collect" | "is_empty" | "get"
         // HashMap<K,V>
         | "keys" | "values" | "contains_key" | "entry" | "or_insert"
         // String
@@ -815,14 +824,14 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
         // `x`'s type to the surrounding call, and a generic runtime result
         // (`almide_rt_option_unwrap_or_else(…)`) then has nothing to fix it
         // (E0282, found by the inspection's parity campaign).
-        Ty::Bytes => format!("AlmideRcCow::<Vec<u8>>::from({expr_str})"),
+        Ty::Bytes => format!("AlmideRcCow::<AlmideList<u8>>::from({expr_str})"),
         Ty::Matrix => format!("AlmideRcCow::<AlmideMatrix>::from({expr_str})"),
         Ty::Applied(TC::Matrix, _) => {
             format!("AlmideRcCow::from({expr_str})")
         }
         Ty::Applied(TC::List, args) => {
             let inner = rc_cow_result_glue("__e".to_string(), &args[0]);
-            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<Vec<_>>()")
+            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<AlmideList<_>>()")
         }
         Ty::Applied(TC::Option, args) => {
             let inner = rc_cow_result_glue("__e".to_string(), &args[0]);
@@ -880,7 +889,7 @@ pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
         }
         Ty::Applied(TC::List, args) => {
             let inner = rc_cow_unglue("__e".to_string(), &args[0]);
-            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<Vec<_>>()")
+            format!("{expr_str}.into_iter().map(|__e| {inner}).collect::<AlmideList<_>>()")
         }
         Ty::Applied(TC::Option, args) => {
             let inner = rc_cow_unglue("__e".to_string(), &args[0]);
@@ -920,7 +929,7 @@ pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
 /// so the rewrite is total and unambiguous).
 pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
     ty_str
-        .replace("AlmideRcCow<Vec<u8>>", "Vec<u8>")
+        .replace("AlmideRcCow<AlmideList<u8>>", "AlmideList<u8>")
         .replace("AlmideRcCow<AlmideMatrix>", "AlmideMatrix")
 }
 
@@ -1185,7 +1194,7 @@ fn render_call_with_taken_global_places(
             // placeholder: nothing is allocated for the call.
             let (read, back) = if suffix.is_empty() && matches!(ty, Ty::Bytes) {
                 (
-                    format!("AlmideRcCow::<Vec<u8>>::from_rc({static_name}.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())))"),
+                    format!("AlmideRcCow::<AlmideList<u8>>::from_rc({static_name}.with(|__almide_gc| std::mem::replace(&mut *__almide_gc.borrow_mut(), almide_empty_bytes_rc())))"),
                     format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = (__almide_gp{k}).into_rc());"),
                 )
             } else if suffix.is_empty() {
@@ -1365,7 +1374,7 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             }
             _ => "_".to_string(),
         };
-        format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+        format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<AlmideList<_>>()")
     } else {
         render_expr_owned(ctx, a)
     }

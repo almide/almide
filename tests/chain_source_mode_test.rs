@@ -109,12 +109,14 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
     // mapped value, collected by a filter — keeps the source consumed: the
     // caller's last use moves the list and each element moves out for free.
     for (name, sig) in [
-        ("shouted", "pub fn shouted(ws: Vec<AlmideString>)"),
-        ("echo", "pub fn echo(ws: Vec<AlmideString>)"),
-        ("long", "pub fn long(ws: Vec<AlmideString>)"),
+        ("shouted", "pub fn shouted(ws: AlmideList<AlmideString>)"),
+        ("echo", "pub fn echo(ws: AlmideList<AlmideString>)"),
+        ("long", "pub fn long(ws: AlmideList<AlmideString>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
-        assert!(s.starts_with(sig) && s.contains("(ws).into_iter()"), "{name}:\n{s}");
+        // One `map` collected consumes through `map_owned`, which rewrites a
+        // unique block in place as std's in-place collect did.
+        assert!(s.starts_with(sig) && (s.contains("(ws).into_iter()") || s.contains("AlmideList::map_owned(ws, ")), "{name}:\n{s}");
     }
 
     // A `for` loop is the same iteration: a body that only reads its binder
@@ -122,7 +124,7 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
     let s = fn_sig_and_body(&rust, "loop_len");
     assert!(s.starts_with("pub fn loop_len(ws: &[AlmideString])") && s.contains("for w in ws.iter() {"), "{s}");
     let s = fn_sig_and_body(&rust, "joined");
-    assert!(s.starts_with("pub fn joined(ws: Vec<AlmideString>)"), "{s}");
+    assert!(s.starts_with("pub fn joined(ws: AlmideList<AlmideString>)"), "{s}");
 
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();

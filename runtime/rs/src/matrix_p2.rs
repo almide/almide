@@ -1,8 +1,8 @@
 
-pub fn almide_rt_matrix_to_bytes_f64_le(m: &AlmideMatrix) -> Vec<u8> {
+pub fn almide_rt_matrix_to_bytes_f64_le(m: &AlmideMatrix) -> AlmideList<u8> {
     let rows = m.len();
     let cols = if rows == 0 { 0 } else { m[0].len() };
-    let mut out: Vec<u8> = Vec::with_capacity(rows * cols * 8);
+    let mut out: AlmideList<u8> = AlmideList::with_capacity(rows * cols * 8);
     for row in m.iter() {
         for v in row {
             out.extend_from_slice(&v.to_le_bytes());
@@ -11,10 +11,10 @@ pub fn almide_rt_matrix_to_bytes_f64_le(m: &AlmideMatrix) -> Vec<u8> {
     out.into()
 }
 
-pub fn almide_rt_matrix_to_bytes_f32_le(m: &AlmideMatrix) -> Vec<u8> {
+pub fn almide_rt_matrix_to_bytes_f32_le(m: &AlmideMatrix) -> AlmideList<u8> {
     let rows = m.len();
     let cols = if rows == 0 { 0 } else { m[0].len() };
-    let mut out: Vec<u8> = Vec::with_capacity(rows * cols * 4);
+    let mut out: AlmideList<u8> = AlmideList::with_capacity(rows * cols * 4);
     for row in m.iter() {
         for v in row {
             out.extend_from_slice(&(*v as f32).to_le_bytes());
@@ -53,15 +53,15 @@ fn almide_f64_to_f16_bits(x: f64) -> u16 {
 }
 
 // to_bytes_f16_le (R-matrix): row-major half floats, 2 bytes each, rounded.
-pub fn almide_rt_matrix_to_bytes_f16_le(m: &AlmideMatrix) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::with_capacity(m.data.len() * 2);
+pub fn almide_rt_matrix_to_bytes_f16_le(m: &AlmideMatrix) -> AlmideList<u8> {
+    let mut out: AlmideList<u8> = AlmideList::with_capacity(m.data.len() * 2);
     for v in m.data.iter() {
         out.extend_from_slice(&almide_f64_to_f16_bits(*v).to_le_bytes());
     }
     out.into()
 }
 
-pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
+pub fn almide_rt_matrix_from_bytes_f64_le(data: &AlmideList<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // #1503: negative dims clamp to the empty matrix (C-034/C-161), a negative
     // offset is OOB by definition, and the window is judged buffer-side
     // (C-341) — same discipline as the f32/f16 loaders in matrix.rs.
@@ -70,11 +70,11 @@ pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64
     if !almide_rt_matrix_window_fits(data.len(), offset, need) {
         return None;
     }
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
+    let mut result: AlmideList<AlmideList<f64>> = AlmideList::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
-        let mut row: Vec<f64> = Vec::with_capacity(c);
+        let mut row: AlmideList<f64> = AlmideList::with_capacity(c);
         let row_base = i * c * 8;
         for j in 0..c {
             let p = row_base + j * 8;
@@ -87,11 +87,11 @@ pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64
 }
 
 pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &[i64]) -> AlmideMatrix {
-    if m.is_empty() { return vec![].into(); }
+    if m.is_empty() { return almide_list![].into(); }
     let cols = m[0].len();
     indices.iter().map(|&idx| {
         let i = idx as usize;
-        if i < m.len() { m[i].to_vec() } else { vec![0.0f64; cols] }
+        if i < m.len() { m[i].to_vec() } else { ::std::vec![0.0f64; cols] }
     }).collect()
 }
 
@@ -116,9 +116,9 @@ pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> Almid
     // Row-wise concat needs one width: a different one left the flat store
     // ragged (its assertion panic, exit 101).
     almide_rt_matrix_shape_eq(b.cols, a.cols);
-    let mut out = Vec::<Vec<f64>>::with_capacity(a.len() + b.len());
-    out.extend(a.iter().map(|r| r.to_vec()));
-    out.extend(b.iter().map(|r| r.to_vec()));
+    let mut out = AlmideList::<AlmideList<f64>>::with_capacity(a.len() + b.len());
+    out.extend(a.iter().map(|r| AlmideList::from(r)));
+    out.extend(b.iter().map(|r| AlmideList::from(r)));
     out.into()
 }
 
@@ -132,11 +132,11 @@ pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> Almid
 // each non-empty member's width is checked against it and its rows appended.
 pub fn almide_rt_matrix_concat_rows<M: std::ops::Deref<Target = AlmideMatrix>>(xs: &[M]) -> AlmideMatrix {
     let Some(first) = xs.iter().position(|m| !m.is_empty()) else {
-        return xs.last().map_or_else(|| mk(0, 0, Vec::new()), |m| (**m).clone());
+        return xs.last().map_or_else(|| mk(0, 0, std::vec::Vec::new()), |m| (**m).clone());
     };
     let cols = xs[first].cols;
     let rest = || xs[first + 1..].iter().filter(|m| !m.is_empty());
-    let mut data = Vec::with_capacity(xs[first].data.len() + rest().map(|m| m.data.len()).sum::<usize>());
+    let mut data = ::std::vec::Vec::with_capacity(xs[first].data.len() + rest().map(|m| m.data.len()).sum::<usize>());
     data.extend_from_slice(&xs[first].data);
     let mut rows = xs[first].rows;
     for m in rest() {

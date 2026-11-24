@@ -19,7 +19,7 @@ mod runtime_type_agreement_tests {
         assert_eq!(RuntimeType::of("HttpResponse"), Some(response));
         assert_eq!(RuntimeType::of("other.HttpResponse"), None);
         assert!(param_agrees(FloorParam::Runtime(response, true), "&AlmideHttpResponse"));
-        for wrong in ["&mut AlmideHttpResponse", "&AlmideHttpRequest", "Vec<AlmideString>"] {
+        for wrong in ["&mut AlmideHttpResponse", "&AlmideHttpRequest", "AlmideList<AlmideString>"] {
             assert!(!param_agrees(FloorParam::Runtime(response, true), wrong), "{wrong}");
         }
         let poll = FloorRet::RuntimeResult(response, true);
@@ -43,14 +43,14 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
         FloorParam::MapKey(_) | FloorParam::MapVal(_) => is_type_param(r.strip_prefix('&').unwrap_or(&r)),
         // A `Vec` of the pairs, or any iterable of them (an array literal's).
         FloorParam::MapPairs => r
-            .strip_prefix("Vec<(")
+            .strip_prefix("AlmideList<(")
             .or_else(|| r.strip_prefix("implIntoIterator<Item=("))
             .and_then(|x| x.strip_suffix(")>"))
             .and_then(|x| x.split_once(','))
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
         FloorParam::Elem(_) => is_type_param(&r) || r.strip_prefix('&').is_some_and(is_type_param),
         FloorParam::List(elem) => list_param_agrees(elem, &r),
-        FloorParam::ListOwned(elem) => r.starts_with("Vec<") && list_param_agrees(elem, &r),
+        FloorParam::ListOwned(elem) => r.starts_with("AlmideList<") && list_param_agrees(elem, &r),
         _ => runtime_param_agrees(p, &r),
     }
 }
@@ -60,8 +60,8 @@ fn param_agrees(p: FloorParam, rust: &str) -> bool {
 fn runtime_param_agrees(p: FloorParam, r: &str) -> bool {
     let bare = r.strip_prefix('&').unwrap_or(r);
     match p {
-        FloorParam::Bytes => r == "&Vec<u8>" || r == "&[u8]",
-        FloorParam::BytesMut => r == "&mutVec<u8>" || r == "&mut Vec<u8>",
+        FloorParam::Bytes => r == "&AlmideList<u8>" || r == "&[u8]",
+        FloorParam::BytesMut => r == "&mutAlmideList<u8>" || r == "&mut AlmideList<u8>",
         FloorParam::Value(_) => bare == "AlmideValue",
         FloorParam::Runtime(t, _) => bare == t.rust(),
         FloorParam::Matrix(_) => bare == "AlmideMatrix",
@@ -76,8 +76,8 @@ fn list_param_agrees(elem: ListElem, r: &str) -> bool {
     let inner = r
         .strip_prefix("&[")
         .and_then(|x| x.strip_suffix(']'))
-        .or_else(|| r.strip_prefix("&Vec<").and_then(|x| x.strip_suffix('>')))
-        .or_else(|| r.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')));
+        .or_else(|| r.strip_prefix("&AlmideList<").and_then(|x| x.strip_suffix('>')))
+        .or_else(|| r.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')));
     match (elem, inner) {
         (ListElem::Int, Some(i)) => i == "i64" || is_type_param(i),
         (ListElem::Str, Some(i)) => i == "AlmideString" || is_type_param(i),
@@ -85,7 +85,7 @@ fn list_param_agrees(elem: ListElem, r: &str) -> bool {
         (ListElem::StrValuePairs, Some(i)) => i == "(AlmideString,AlmideValue)",
         (ListElem::Float, Some(i)) => i == "f64",
         (ListElem::Bool, Some(i)) => i == "bool",
-        (ListElem::FloatRows, Some(i)) => i == "Vec<f64>",
+        (ListElem::FloatRows, Some(i)) => i == "AlmideList<f64>",
         (ListElem::Matrix, Some(i)) => i == "AlmideMatrix",
         // The render lends `&[&Vec<u8>]` (native_floor_tail.rs `list_arg`),
         // which only a type-parameter element accepts.
@@ -122,12 +122,12 @@ fn ret_agrees(r: FloorRet, rust: &str) -> bool {
         FloorRet::Bool => t == "bool" || t == "i64",
         FloorRet::Float => t == "f64",
         FloorRet::Str => is_rust_string(&t),
-        FloorRet::ListInt => t == "Vec<i64>",
-        FloorRet::ListStr => t == "Vec<String>" || t == "Vec<AlmideString>",
+        FloorRet::ListInt => t == "AlmideList<i64>",
+        FloorRet::ListStr => t == "AlmideList<String>" || t == "AlmideList<AlmideString>",
         FloorRet::Opt(Scalar::Int) => t == "Option<i64>",
         FloorRet::Opt(Scalar::Bool) => t == "Option<bool>",
         FloorRet::Opt(Scalar::Float) => t == "Option<f64>",
-        FloorRet::Bytes => t == "Vec<u8>",
+        FloorRet::Bytes => t == "AlmideList<u8>",
         FloorRet::Value => t == "AlmideValue",
         FloorRet::Runtime(rt) => t == rt.rust(),
         FloorRet::RuntimeResult(rt, optional) => {
@@ -147,10 +147,10 @@ fn runtime_ret_agrees(r: FloorRet, t: &str) -> bool {
     match r {
         FloorRet::Matrix => t == "AlmideMatrix",
         FloorRet::OptMatrix => t == "Option<AlmideMatrix>",
-        FloorRet::ListMatrix => t == "Vec<AlmideMatrix>",
-        FloorRet::FloatRows => t == "Vec<Vec<f64>>",
+        FloorRet::ListMatrix => t == "AlmideList<AlmideMatrix>",
+        FloorRet::FloatRows => t == "AlmideList<AlmideList<f64>>",
         FloorRet::Set => is_generic_set(t),
-        FloorRet::SetElems => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::SetElems => t.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         _ => false,
     }
 }
@@ -167,11 +167,11 @@ fn compound_ret_agrees(r: FloorRet, t: &str) -> bool {
     match r {
         FloorRet::Elem(ElemRet::Value) => is_type_param(t),
         FloorRet::Elem(ElemRet::Opt) => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
-        FloorRet::Elem(ElemRet::List) => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::Elem(ElemRet::List) => t.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::MapOptVal => t.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
-        FloorRet::MapKeys | FloorRet::MapVals => t.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
+        FloorRet::MapKeys | FloorRet::MapVals => t.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')).is_some_and(is_type_param),
         FloorRet::MapEntries => t
-            .strip_prefix("Vec<(")
+            .strip_prefix("AlmideList<(")
             .and_then(|x| x.strip_suffix(")>"))
             .and_then(|x| x.split_once(','))
             .is_some_and(|(a, b)| is_type_param(a) && is_type_param(b)),
@@ -185,20 +185,20 @@ fn result_ret_agrees(r: FloorRet, t: &str) -> bool {
     let string = is_rust_string;
     match r {
         FloorRet::ResValue => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideValue" && string(err)),
-        FloorRet::ResStrValuePairs => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<(AlmideString,AlmideValue)>" && string(err)),
-        FloorRet::ResListValue => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<AlmideValue>" && string(err)),
+        FloorRet::ResStrValuePairs => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideList<(AlmideString,AlmideValue)>" && string(err)),
+        FloorRet::ResListValue => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideList<AlmideValue>" && string(err)),
         FloorRet::ResListStr => result_parts(t).is_some_and(|(ok, err)| {
-            ok.strip_prefix("Vec<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
+            ok.strip_prefix("AlmideList<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
-        FloorRet::ResBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<u8>" && string(err)),
-        FloorRet::ResListInt => result_parts(t).is_some_and(|(ok, err)| ok == "Vec<i64>" && string(err)),
+        FloorRet::ResBytes => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideList<u8>" && string(err)),
+        FloorRet::ResListInt => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideList<i64>" && string(err)),
         FloorRet::ResProcessStatus => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideProcessStatus" && string(err)),
-        FloorRet::ResBytesStrInt => result_parts(t).is_some_and(|(ok, err)| ok == "(Vec<u8>,AlmideString,i64)" && string(err)),
+        FloorRet::ResBytesStrInt => result_parts(t).is_some_and(|(ok, err)| ok == "(AlmideList<u8>,AlmideString,i64)" && string(err)),
         FloorRet::ResFileStat => result_parts(t).is_some_and(|(ok, err)| ok == "AlmideFileStat" && string(err)),
         FloorRet::ResOptListStr => result_parts(t).is_some_and(|(ok, err)|
-            ok.strip_prefix("Option<Vec<").and_then(|x| x.strip_suffix(">>"))
+            ok.strip_prefix("Option<AlmideList<").and_then(|x| x.strip_suffix(">>"))
                 .is_some_and(string) && string(err)),
-        FloorRet::ResOptBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Option<Vec<u8>>" && string(err)),
+        FloorRet::ResOptBytes => result_parts(t).is_some_and(|(ok, err)| ok == "Option<AlmideList<u8>>" && string(err)),
         FloorRet::ResOptStr => result_parts(t).is_some_and(|(ok, err)| {
             ok.strip_prefix("Option<").and_then(|x| x.strip_suffix('>')).is_some_and(string) && string(err)
         }),
@@ -259,10 +259,10 @@ mod optional_bytes_tests {
 
     #[test]
     fn optional_lines_and_metadata_require_their_exact_runtime_abi() {
-        assert!(ret_agrees(FloorRet::ResOptListStr, "Result<Option<Vec<AlmideString>>, AlmideString>"));
+        assert!(ret_agrees(FloorRet::ResOptListStr, "Result<Option<AlmideList<AlmideString>>, AlmideString>"));
         assert!(ret_agrees(FloorRet::ResFileStat, "Result<AlmideFileStat, AlmideString>"));
-        for wrong in ["Result<Option<Vec<u8>>,AlmideString>", "Result<Vec<AlmideString>,AlmideString>",
-            "Result<Option<Vec<AlmideString>>,i64>"] {
+        for wrong in ["Result<Option<AlmideList<u8>>,AlmideString>", "Result<AlmideList<AlmideString>,AlmideString>",
+            "Result<Option<AlmideList<AlmideString>>,i64>"] {
             assert!(!ret_agrees(FloorRet::ResOptListStr, wrong));
         }
         assert!(!ret_agrees(FloorRet::ResFileStat, "Result<FileStat,AlmideString>"));
@@ -279,10 +279,10 @@ mod optional_bytes_tests {
 
     #[test]
     fn optional_bytes_requires_exact_payload_and_error_types() {
-        assert!(result_ret_agrees(FloorRet::ResOptBytes, "Result<Option<Vec<u8>>,AlmideString>"));
-        for wrong in ["Result<Option<Vec<i64>>,AlmideString>",
-            "Result<Option<String>,AlmideString>", "Result<Vec<u8>,AlmideString>",
-            "Result<Option<Vec<u8>>,i64>"] {
+        assert!(result_ret_agrees(FloorRet::ResOptBytes, "Result<Option<AlmideList<u8>>,AlmideString>"));
+        for wrong in ["Result<Option<AlmideList<i64>>,AlmideString>",
+            "Result<Option<String>,AlmideString>", "Result<AlmideList<u8>,AlmideString>",
+            "Result<Option<AlmideList<u8>>,i64>"] {
             assert!(!result_ret_agrees(FloorRet::ResOptBytes, wrong), "{wrong}");
         }
     }
@@ -431,11 +431,11 @@ mod aggregate_host_abi_tests {
     #[test]
     fn record_and_tuple_results_require_exact_payloads_and_fields() {
         assert!(ret_agrees(FloorRet::ResProcessStatus, "Result<AlmideProcessStatus, AlmideString>"));
-        assert!(ret_agrees(FloorRet::ResBytesStrInt, "Result<(Vec<u8>,AlmideString,i64), AlmideString>"));
+        assert!(ret_agrees(FloorRet::ResBytesStrInt, "Result<(AlmideList<u8>,AlmideString,i64), AlmideString>"));
         for bad in ["Result<ProcessStatus,AlmideString>", "Result<AlmideProcessStatus,i64>"] {
             assert!(!ret_agrees(FloorRet::ResProcessStatus, bad));
         }
-        for bad in ["Result<(Vec<i64>,AlmideString,i64),AlmideString>", "Result<(Vec<u8>,i64,AlmideString),AlmideString>"] {
+        for bad in ["Result<(AlmideList<i64>,AlmideString,i64),AlmideString>", "Result<(AlmideList<u8>,i64,AlmideString),AlmideString>"] {
             assert!(!ret_agrees(FloorRet::ResBytesStrInt, bad));
         }
         let good = "type ProcessStatus = { code: Int, stdout: String, stderr: String }";

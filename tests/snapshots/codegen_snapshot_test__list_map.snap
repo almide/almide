@@ -2,6 +2,6 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
-pub fn doubles(xs: &[i64]) -> Vec<i64> {
-    (xs).iter().cloned().map(|x| (x).wrapping_mul(2i64)).collect::<Vec<_>>()
+pub fn doubles(xs: &[i64]) -> AlmideList<i64> {
+    (xs).iter().cloned().map(|x| (x).wrapping_mul(2i64)).collect::<AlmideList<_>>()
 }

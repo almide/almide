@@ -219,7 +219,7 @@ fn a_field_accumulator_takes_the_field_and_extends_it() {
     let fields = body(&rust, "fields");
     assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from(\"ab\")"),
         "`b.text = b.text + \"ab\"` must take the field:\n{fields}");
-    assert!(fields.contains("b.xs = AlmideConcat::concat(std::mem::take(&mut b.xs), vec![i])"),
+    assert!(fields.contains("b.xs = AlmideConcat::concat(std::mem::take(&mut b.xs), almide_list![i])"),
         "`b.xs = b.xs + [i]` must take the field:\n{fields}");
     assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from_fmt(format_args!(\"-{}\", i)))"),
         "`b.text = \"${{b.text}}-${{i}}\"` must append to the taken field:\n{fields}");

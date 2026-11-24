@@ -611,6 +611,8 @@ fn my_max(a: Int, b: Int) -> Int = if a > b then a else b // 他ターゲット�
 
 戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。生成コードの文字列は共有バッファ `AlmideString`（ADR-0013）だが、ホストは `String` のままでよい: ラッパが境界で変換する（`String` を含む `List` / `Set` / `Map` / `Option` / `Result` / タプルの引数はホスト側の `String` 形に複製して渡し、`mut` 引数は呼び出し後に書き戻し、戻り値は `AlmideString` 形に複製する。`AlmideString` をそのまま返すホストも受け付ける）。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
 
+レコード・バリアントはプログラム自身の型なので、その `List` フィールドは生成コードの共有リスト `AlmideList<T>`（ADR-0037）のままホストに見える。`@extern(rust)` 本体でも、ホストが Almide パッケージの関数を呼ぶコールバック側でも同じで、ホストがそのレコードを作るときはフィールドを `vec![..].into()` で作る。関数の引数・戻り値そのものに現れる `List`（最上位や `Option` / `Result` / タプル / リスト要素の位置）は上の表どおり `&[T]` / `Vec<T>` のままで、境界で複製される。
+
 ```rust
 // native/host.rs
 use crate::*;

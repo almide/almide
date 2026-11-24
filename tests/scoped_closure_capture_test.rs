@@ -140,12 +140,12 @@ fn a_non_escaping_read_only_bound_closure_borrows_what_it_captures() {
     // The closure escapes, or its capture cannot stay borrowed: the owned
     // `move` capture stays, and so does the owned param.
     for (name, sig) in [
-        ("returned", "pub fn returned(xs: Vec<i64>)"),
-        ("stored_list", "pub fn stored_list(xs: Vec<i64>)"),
-        ("stored_record", "pub fn stored_record(xs: Vec<i64>)"),
-        ("fanned", "pub fn fanned(xs: Vec<i64>)"),
-        ("mutating", "pub fn mutating(xs: Vec<i64>)"),
-        ("moved_after", "pub fn moved_after(xs: Vec<i64>)"),
+        ("returned", "pub fn returned(xs: AlmideList<i64>)"),
+        ("stored_list", "pub fn stored_list(xs: AlmideList<i64>)"),
+        ("stored_record", "pub fn stored_record(xs: AlmideList<i64>)"),
+        ("fanned", "pub fn fanned(xs: AlmideList<i64>)"),
+        ("mutating", "pub fn mutating(xs: AlmideList<i64>)"),
+        ("moved_after", "pub fn moved_after(xs: AlmideList<i64>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig), "{name}:\n{s}");
@@ -188,7 +188,7 @@ fn the_ablation_restores_the_owned_capture() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let rust = String::from_utf8_lossy(&out.stdout).into_owned();
     let s = fn_sig_and_body(&rust, "via_closure");
-    assert!(s.starts_with("pub fn via_closure(xs: Vec<i64>, n: i64)") && s.contains("move |"), "{s}");
+    assert!(s.starts_with("pub fn via_closure(xs: AlmideList<i64>, n: i64)") && s.contains("move |"), "{s}");
 }
 
 /// The perf cell: a 200k-element list, the closure called through `N` and

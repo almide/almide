@@ -48,7 +48,7 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
         if let Some(t) = t {
             tys.insert(*dst, t);
             let empty = if matches!(t, NTy::Rec(i) if crate::render_native_rec::map_kinds(i).is_some()
-                || crate::render_native_rec::set_elem(i).is_some()) { "Default::default()" } else { "Vec::new()" };
+                || crate::render_native_rec::set_elem(i).is_some()) { "Default::default()" } else { "AlmideList::new()" };
             line!("let mut {}: {} = {empty};", var(*dst), crate::render_native_rec::owned_ty(t));
             return Some(true);
         }
@@ -84,11 +84,11 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
                 })
                 .collect();
             line!(
-                "static {k}: std::sync::LazyLock<Vec<AlmideString>> = std::sync::LazyLock::new(|| vec![{}]);",
+                "static {k}: std::sync::LazyLock<AlmideList<AlmideString>> = std::sync::LazyLock::new(|| almide_list![{}]);",
                 elems.join(", "),
                 k = format!("ALMD_TABLE_{}", var(*dst))
             );
-            line!("let {}: &Vec<AlmideString> = &*ALMD_TABLE_{};", var(*dst), var(*dst));
+            line!("let {}: &AlmideList<AlmideString> = &*ALMD_TABLE_{};", var(*dst), var(*dst));
             Some(true)
         }
         _ => None,
@@ -101,7 +101,7 @@ fn const_or_empty_alloc(op: &Op, s: AddrSink<'_>) -> Option<bool> {
 /// otherwise it is reserved and pushed onto. The line the alloc renders as.
 fn whole_str_list(st: &mut AddrState, dst: &ValueId, len: &ValueId) -> String {
     let Some(n) = st.consts.get(len).and_then(|n| usize::try_from(*n).ok()) else {
-        return format!("let mut {}: Vec<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
+        return format!("let mut {}: AlmideList<AlmideString> = {};", var(*dst), reserved_vec(&var(*len)));
     };
     st.literal.insert(*dst, (n, 0));
     let what = if crate::native_map_entries::defer_pair(*dst) { "a map entry, its key and value bound one by one" } else { "built whole at its last element" };
@@ -127,7 +127,7 @@ fn alloc_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         return true;
     }
     line!(
-        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
+        "let mut {}: AlmideList<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
         var(*dst),
         var(*len)
     );
@@ -161,7 +161,7 @@ fn alloc_rec_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> Result<bool,
         return Ok(true);
     }
     if st.consts.get(len) == Some(&0) {
-        line!("let mut {}: {} = Vec::new();", var(*dst), crate::render_native_rec::struct_name(i));
+        line!("let mut {}: {} = AlmideList::new();", var(*dst), crate::render_native_rec::struct_name(i));
         return Ok(true);
     }
     if !crate::render_native_rec::list_elem(i).is_some_and(crate::render_native_rec::has_default) {
@@ -219,7 +219,7 @@ fn alloc_typed_str_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
         return true;
     }
     line!(
-        "let mut {}: Vec<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
+        "let mut {}: AlmideList<AlmideString> = (0..{}.max(0)).map(|_| AlmideString::new()).collect();",
         var(*dst),
         var(*len)
     );
@@ -237,10 +237,10 @@ fn alloc_scalar_list(s: AddrSink<'_>, dst: &ValueId, len: &ValueId) -> bool {
     }
     tys.insert(*dst, NTy::Vec);
     if st.pushed.contains(dst) {
-        line!("let mut {}: Vec<i64> = {};", var(*dst), reserved_vec(&var(*len)));
+        line!("let mut {}: AlmideList<i64> = {};", var(*dst), reserved_vec(&var(*len)));
         return true;
     }
-    line!("let mut {}: Vec<i64> = vec![0i64; {}.max(0) as usize];", var(*dst), var(*len));
+    line!("let mut {}: AlmideList<i64> = almide_list![0i64; {}.max(0) as usize];", var(*dst), var(*len));
     true
 }
 
@@ -295,7 +295,7 @@ fn const_list_elems(
 /// `Vec::with_capacity`'s capacity-overflow panic. Since #4006's direct range
 /// source the length can be a range's span, which no machine may hold.
 pub(crate) fn reserved_vec(len: &str) -> String {
-    format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({len}.max(0) as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} r }}")
+    format!("{{ let mut r = AlmideList::new(); if r.try_reserve_exact({len}.max(0) as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} r }}")
 }
 
 // Materialize a singleton only when it cannot be appended directly.
@@ -312,5 +312,5 @@ pub(crate) fn single_push(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, 
     if tys.get(&s) == Some(&NTy::VecStr) && func.ret != Some(d) && crate::render_native_append::touches(func, d) == 2 {
         return Some((format!("{}.push({}_e0);", var(s), var(x)), true));
     }
-    Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(x)), false))
+    Some((format!("let mut {x}: AlmideList<AlmideString> = almide_list![{x}_e0];", x = var(x)), false))
 }
