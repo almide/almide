@@ -26,6 +26,16 @@ fn almide_bin() -> String {
     "almide".to_string()
 }
 
+/// C-462: the corpus runs whose wasm certificate is still INCOMPLETE, as
+/// proofs/incomplete-verification.toml lists them for `route` — those carry
+/// `--allow-incomplete-verification`, every other run is refused if it is.
+fn incomplete_allowed(route: &str) -> Vec<String> {
+    let ledger = Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/incomplete-verification.toml");
+    let text = std::fs::read_to_string(&ledger).expect("proofs/incomplete-verification.toml");
+    let prefix = format!("entry = \"{route} ");
+    text.lines().filter_map(|l| l.strip_prefix(prefix.as_str())?.strip_suffix('"').map(str::to_string)).collect()
+}
+
 fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
@@ -38,6 +48,7 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
         panic!("wasmtime required");
     }
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
+    let incomplete = incomplete_allowed("run");
     let mut checked = 0usize;
     let mut diverged: Vec<String> = Vec::new();
     let mut refused: Vec<String> = Vec::new();
@@ -80,7 +91,17 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
             _ => {}
         }
         let native = run(&[]);
-        let wasm = run(&["--target", "wasm"]);
+        let rel = format!("spec/embedded_cross/{}", path.file_name().expect("name").to_string_lossy());
+        let wasm = if incomplete.contains(&rel) {
+            let out = run(&["--target", "wasm", "--allow-incomplete-verification"]);
+            // A listed run that certifies now is a stale row (C-462).
+            if !String::from_utf8_lossy(&out.stderr).contains("warning[verification-incomplete]") {
+                refused.push(format!("{name}: listed in proofs/incomplete-verification.toml but its run is no longer INCOMPLETE — delete the row and lower the ceiling"));
+            }
+            out
+        } else {
+            run(&["--target", "wasm"])
+        };
         if native.stdout != wasm.stdout || native.status.code() != wasm.status.code() {
             diverged.push(format!(
                 "{}: native exit={:?} vs wasm exit={:?}\n  native: {}\n  wasm:   {}",

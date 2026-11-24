@@ -164,6 +164,16 @@ varies = "#1490 landing (2026-08-28): the list.md run-fence pinned output 3 -> 4
 blind = "UNMAPPED"
 
 [[gate]]
+path = "scripts/check-incomplete-verification.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml, scripts/check-memory-traps.sh"
+class = "NEGATIVE_TESTED"
+evidence = "C-462 landing (2026-11-24, decision-sites): with --full a listed test program the log does not warn about (a stale row) exits 1 naming it; a forged log line warning[verification-incomplete] for spec/lang/novel_x_test.almd (not in proofs/incomplete-verification.toml) exits 1 naming it; the same check over a log whose only warning is the listed spec/lang/list_rest_pattern_test.almd exits 0, and that log read for route `run` (the program is listed for `test` only) exits 1"
+measures = "the set of programs a directory run with --allow-incomplete-verification warned INCOMPLETE that proofs/incomplete-verification.toml does not list for the route, and (--full, a whole-corpus run) the listed programs of that route it did not warn about, read from the run's log"
+varies = "C-462 landing (2026-11-24): 0 unlisted on the census log of ds-2 (56 listed pairs, 30 of them test lanes), 1 on the forged log"
+blind = "a listed run program that became CERTIFIED (a stale row) -> tests/embedded_cross_test.rs; a listed spec/wasm_host_js build that became CERTIFIED -> scripts/check-js-host.sh; a listed perf build that became CERTIFIED -> research/benchmark/perf/bench.py; a listed bench program that became CERTIFIED -> scripts/check-wasm-runtime-ratio.sh; a corpus run made one file per command, which carries the flag only when listed and so refuses an unlisted program by itself -> tests/verify_incomplete_refused_test.rs"
+
+[[gate]]
 path = "scripts/check-js-host.sh"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
@@ -1655,6 +1665,10 @@ blind = "a downstream whose output changes while every command still exits 0 and
 [[not_a_gate]]
 path = "scripts/lib/ci-slice.sh"
 reason = "the CI slice's selection library (sourced by the sliced gates and the cross-target spec step); it picks fixtures and judges nothing — every verdict is the sourcing gate's, and crates/almide-corpus pins it to the Rust twin (bash_twin_selects_what_rust_selects)"
+
+[[not_a_gate]]
+path = "scripts/lib/incomplete-verification.sh"
+reason = "the C-462 ledger reader (sourced by scripts/check-memory-traps.sh, scripts/check-js-host.sh, scripts/check-wasm-runtime-ratio.sh and the cross-target per-file loop): it prints --allow-incomplete-verification for a (route, file) proofs/incomplete-verification.toml lists and judges nothing — the compiler refuses an unlisted INCOMPLETE program, and scripts/check-incomplete-verification.sh judges a directory run's log"
 
 [[not_a_gate]]
 path = "scripts/lib/wasm-skip.sh"

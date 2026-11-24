@@ -1,0 +1,310 @@
+# INCOMPLETE-VERIFICATION LEDGER (C-462, ALS-I5; owner ruling 2026-11-24).
+#
+# A wasm module whose own certificate is INCOMPLETE — every witness accepted,
+# some function the producer could not certify — is refused by default on
+# every route that makes one (build, run, test, bench, the core module of a
+# component). `--allow-incomplete-verification` lets it through with a
+# warning naming each uncertified function. The repository's own corpus
+# carries that flag ONLY for the programs listed here: one row per (route,
+# program), `entry = "<test|run|build|bench> <path>"`, with the producer's reasons
+# as measured. Fixing a row means certifying the construct in the producer
+# (crates/almide-wasm: witness_gate*.rs and the hooks), never raising a
+# verifier limit; then delete the row and lower the ceiling.
+#
+# Shrink-only: tests/incomplete_verification_ledger_test.rs holds the row
+# count to the ceiling (above: refused; below: lower the ceiling in the same
+# change), each entry well formed, unique and naming a file;
+# scripts/check-incomplete-verification.sh refuses an INCOMPLETE warning, in a
+# directory run's log, from a program not listed. A listed program found
+# CERTIFIED (run its route without the flag) is a stale row: delete it.
+#
+# History:
+#   2026-11-24  seeded by the census on decision-sites (ds-2): 86 (route,
+#               program) pairs were INCOMPLETE before the producer fixes of
+#               the same change (list.find_index / list.partition predicate
+#               activations, the audited fallback for any other callback
+#               argument); 56 after. `almide verify` (the program build) saw
+#               32 of 2102 corpus files; test lanes and the embedded run lane
+#               build other modules, hence the different set.
+#
+# ceiling = "56"
+
+[[program]]
+entry = "test spec/integration/clone_opt_test.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "test spec/lang/annotated_result_branch_value_test.almd"
+uncertified = 1
+reasons = ["bind:view-result"]
+
+[[program]]
+entry = "test spec/lang/effect_fn_value_test.almd"
+uncertified = 1
+reasons = ["tail:Unwrap"]
+
+[[program]]
+entry = "test spec/lang/fallible_lambda_test.almd"
+uncertified = 3
+reasons = ["call-arg:Lambda:list.map:propagating"]
+
+[[program]]
+entry = "test spec/lang/fan_map_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/lang/fan_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/lang/index_access_test.almd"
+uncertified = 4
+reasons = ["rhs:RuntimeCall:almide_rt_bytes_slice", "rhs:RuntimeCall:almide_rt_list_slice"]
+
+[[program]]
+entry = "test spec/lang/list_rest_pattern_test.almd"
+uncertified = 1
+reasons = ["pattern:list-rest"]
+
+[[program]]
+entry = "test spec/lang/option_tuple_drop_test.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "test spec/lang/region_window_test.almd"
+uncertified = 8
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "test spec/lang/result_option_matrix_test.almd"
+uncertified = 2
+reasons = ["bind:view-result"]
+
+[[program]]
+entry = "test spec/lang/type_system_test.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "test spec/lang/unwrap_operators_test.almd"
+uncertified = 1
+reasons = ["tail:view-result"]
+
+[[program]]
+entry = "test spec/lang/variant_part_reread_test.almd"
+uncertified = 1
+reasons = ["assign:spends-var"]
+
+[[program]]
+entry = "test spec/stdlib/bigint_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/bounded_profile_test.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "test spec/stdlib/codec_field_matrix_test.almd"
+uncertified = 8
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/fs_streaming_test.almd"
+uncertified = 1
+reasons = ["callback:Block"]
+
+[[program]]
+entry = "test spec/stdlib/http_router_test.almd"
+uncertified = 1
+reasons = ["!poison"]
+
+[[program]]
+entry = "test spec/stdlib/process_exec_status_test.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "test spec/stdlib/process_start_test.almd"
+uncertified = 9
+reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/process_timeout_test.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "test spec/stdlib/random_bytes_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/result_errjoin_effect_test.almd"
+uncertified = 1
+reasons = ["unwrap:err-joined"]
+
+[[program]]
+entry = "test spec/stdlib/url_form_resolve_test.almd"
+uncertified = 3
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/utf8_display_producers_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/stdlib/utf8_format_producers_test.almd"
+uncertified = 1
+reasons = ["branch-paths:cap"]
+
+[[program]]
+entry = "test spec/stdlib/value_string_payload_test.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/wasm_cross/ctor_if_payload.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "test spec/wasm_cross/ctor_var_copy_semantics.almd"
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "run spec/embedded_cross/append_bytes_past_read_bound.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/fan_mapper_effect_callback_forms.almd"
+uncertified = 1
+reasons = ["call-arg:Lambda:list.map:propagating"]
+
+[[program]]
+entry = "run spec/embedded_cross/fs_non_utf8_entry_names.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_call_handle_errs.almd"
+uncertified = 5
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_call_repr.almd"
+uncertified = 1
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_call_wait_body_bytes.almd"
+uncertified = 3
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_client_errs.almd"
+uncertified = 1
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_error_classes.almd"
+uncertified = 1
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_framed_errs.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_header_refusal.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_request_framing.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_response_header_names.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/http_url_redaction_dial.almd"
+uncertified = 1
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/process_kill_syscall.almd"
+uncertified = 4
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "run spec/embedded_cross/process_spawn_family.almd"
+uncertified = 12
+reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "run spec/embedded_cross/process_start_family.almd"
+uncertified = 10
+reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "run spec/embedded_cross/process_start_run_end_stops_children.almd"
+uncertified = 6
+reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+
+[[program]]
+entry = "run spec/embedded_cross/read_bound_fifo_and_cap.almd"
+uncertified = 2
+reasons = ["call:host-splice"]
+
+[[program]]
+entry = "build research/benchmark/perf/binarytrees/binarytrees.almd"
+uncertified = 2
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "build research/benchmark/perf/btrees/btrees.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "build research/benchmark/perf/treealloc/treealloc.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "build research/benchmark/perf/v1-shapes/tree_window.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "build spec/wasm_host_js/effect_export_scalar.almd"
+uncertified = 1
+reasons = ["tail:view-result"]
+
+[[program]]
+entry = "build spec/wasm_host_js/region_export_address.almd"
+uncertified = 1
+reasons = ["tail:view-result"]
+
+[[program]]
+entry = "build spec/wasm_host_js/region_export_lease.almd"
+uncertified = 1
+reasons = ["tail:view-result"]
+
+[[program]]
+entry = "build spec/wasm_host_js/region_export_push.almd"
+uncertified = 1
+reasons = ["tail:view-result"]

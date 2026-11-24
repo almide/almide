@@ -128,8 +128,25 @@ args_of() { # benchmark name -> its workload-size args (the row's args=, a polic
 row_args() { grep -oE 'args=[0-9]+' <<<"$1" | cut -d= -f2; }
 # bench_* NAME [ARGS]: an empty ARGS runs the program's default workload.
 bench_native() { "$BIN" bench "$(src_of "$1")" ${2:+-- $2} 2>&1 | tail -1; }
-bench_wasm()   { "$BIN" bench "$(src_of "$1")" --target wasm ${2:+-- $2} 2>&1 | tail -2; }
-bench_wasm_with() { "$1" bench "$(src_of "$2")" --target wasm --runs "$AB_RUNS" ${3:+-- $3} </dev/null 2>&1 | tail -2; }
+# C-462: a program whose wasm certificate is still INCOMPLETE carries
+# --allow-incomplete-verification (proofs/incomplete-verification.toml, route
+# `bench`) — on a binary that knows the flag (an A/B baseline may predate it,
+# and judged INCOMPLETE as a pass then).
+. "$(dirname "$0")/lib/incomplete-verification.sh"
+incomplete_for() { # BIN NAME -> the flag, when listed and BIN knows it
+  local f; f=$(incomplete_flag bench "$(src_of "$2")")
+  [ -n "$f" ] && "$1" bench --help 2>/dev/null | grep -q -- "$f" && printf '%s' "$f"
+}
+bench_wasm()   {
+  local flag out; flag=$(incomplete_for "$BIN" "$1")
+  out=$("$BIN" bench "$(src_of "$1")" --target wasm $flag ${2:+-- $2} 2>&1)
+  # A listed bench that certifies now is a stale row (C-462).
+  if [ -n "$flag" ] && ! grep -q 'warning\[verification-incomplete\]' <<<"$out"; then
+    echo "::error::$1: listed in proofs/incomplete-verification.toml but its wasm bench is no longer INCOMPLETE — delete the row and lower the ceiling" >&2; exit 1
+  fi
+  tail -2 <<<"$out"
+}
+bench_wasm_with() { "$1" bench "$(src_of "$2")" --target wasm --runs "$AB_RUNS" $(incomplete_for "$1" "$2") ${3:+-- $3} </dev/null 2>&1 | tail -2; }
 pymin() { python3 -c "import sys; v=[float(x) for x in sys.argv[1:] if x]; print(min(v) if v else '')" "$@"; }
 
 if [ "${1:-}" = "--measure" ]; then

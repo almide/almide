@@ -90,6 +90,9 @@ JS
 HAVE_JSPI=0
 node -e 'process.exit(typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function" ? 0 : 1)' && HAVE_JSPI=1
 
+# C-462: a fixture whose wasm certificate is still INCOMPLETE carries
+# --allow-incomplete-verification (proofs/incomplete-verification.toml).
+. "$(dirname "$0")/lib/incomplete-verification.sh"
 fail=0; n=0
 for f in "$FIXTURE_DIR"/*.almd; do
   [ -e "$f" ] || continue
@@ -100,6 +103,8 @@ for f in "$FIXTURE_DIR"/*.almd; do
   host="$dir/$stem.host.mjs"
   leg="$(sed -n 's|^// @leg: *||p' "$f" | head -1)"
   read -r -a hostflags <<< "$(sed -n 's|^// @host-flags: *||p' "$f" | head -1)"
+  incomplete=$(incomplete_flag build "spec/wasm_host_js/$stem.almd")
+  [ -n "$incomplete" ] && hostflags+=("$incomplete")
   if [ "$HAVE_JSPI" -eq 0 ] && grep -Eq '^@extern\(wasm, *"js",.*returns *[:=] *promise' "$f"; then
     if [ "${CI:-}" = "true" ]; then
       echo "FAIL $f: async imports need a node with JSPI (WebAssembly.Suspending), this one is $(node --version)"; fail=1; continue
@@ -161,8 +166,12 @@ for f in "$FIXTURE_DIR"/*.almd; do
     fi
   fi
   # 5. the module ships only what the surface needs.
-  if ! "$BIN" build "$f" --target wasm -o "$WORK/$stem.plain.wasm" > "$WORK/$stem.plain.build" 2>&1; then
+  if ! "$BIN" build "$f" --target wasm ${incomplete:+"$incomplete"} -o "$WORK/$stem.plain.wasm" > "$WORK/$stem.plain.build" 2>&1; then
     echo "FAIL $f: build without --host js"; sed 's/^/    /' "$WORK/$stem.plain.build"; fail=1; continue
+  fi
+  # C-462: a listed build that certifies now is a stale row.
+  if [ -n "$incomplete" ] && ! grep -q 'warning\[verification-incomplete\]' "$WORK/$stem.plain.build"; then
+    echo "FAIL $f: listed in proofs/incomplete-verification.toml but its build is no longer INCOMPLETE — delete the row and lower the ceiling"; fail=1; continue
   fi
   extra="$(comm -13 <(exports_of "$WORK/$stem.plain.wasm" | tr ' ' '\n') <(exports_of "$WORK/$stem.wasm" | tr ' ' '\n') | tr '\n' ' ' | sed 's/ $//')"
   if grep -q '^function allocString(' "$WORK/$stem.js"; then

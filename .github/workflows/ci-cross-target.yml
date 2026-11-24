@@ -128,6 +128,7 @@ jobs:
           # change touches; every other run, all of them.
           . scripts/lib/ci-slice.sh
           . scripts/lib/wasm-skip.sh
+          . scripts/lib/incomplete-verification.sh
           find spec/ -name '*_test.almd' -type f | sed 's#^spec//#spec/#' | sort | ci_slice_filter cross-target-spec > /tmp/xt-selected.txt
           selected=0
           for f in $(cat /tmp/xt-selected.txt); do
@@ -139,7 +140,8 @@ jobs:
             # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
             # bare non-zero command (the first exit 5) would end the whole loop.
             rust_code=0; $ALMIDE test "$f" > /dev/null 2>&1 || rust_code=$?
-            wasm_code=0; $ALMIDE test "$f" --target wasm > /dev/null 2>&1 || wasm_code=$?
+            # C-461: a listed INCOMPLETE program carries the flag (scripts/lib/incomplete-verification.sh).
+            wasm_code=0; $ALMIDE test "$f" --target wasm $(incomplete_flag test "$f") > /dev/null 2>&1 || wasm_code=$?
 
             if [ "$rust_code" -eq 0 ]; then rust_pass=$((rust_pass + 1)); else rust_fail=$((rust_fail + 1)); fi
             if [ "$wasm_code" -eq 0 ]; then wasm_pass=$((wasm_pass + 1)); else wasm_fail=$((wasm_fail + 1)); fi

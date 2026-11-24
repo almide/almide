@@ -1480,7 +1480,13 @@ jobs:
       - name: Almide spec tests (WASM target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          $ALMIDE test spec/ --target wasm
+          # C-461: a program whose wasm certificate is INCOMPLETE is refused
+          # by default; the corpus programs still INCOMPLETE are listed in
+          # proofs/incomplete-verification.toml and pass under the flag, and
+          # the log check refuses an INCOMPLETE program the ledger does not list.
+          set -o pipefail
+          $ALMIDE test spec/ --target wasm --allow-incomplete-verification 2>&1 | tee /tmp/wasm-spec.log
+          bash scripts/check-incomplete-verification.sh test /tmp/wasm-spec.log --full
 
   # ═══════════════════════════════════════════════
   # WASM on a WINDOWS host (#1066)
