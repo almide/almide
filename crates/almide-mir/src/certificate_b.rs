@@ -19,12 +19,15 @@ fn frame_has(fr: &BranchFrame, o: ValueId) -> bool {
     fr.else_ev.contains_key(&o)
 }
 
-/// order. Net-zero, divergence-marker-free arms flatten.
+/// order. Net-zero, divergence-marker-free arms flatten. The net is the
+/// arm's STRUCTURAL one ([`structured_net`]): an arm that holds an
+/// already-flushed inner region (an inner branch, a loop) counts that region
+/// once, as the checker executes it, never both of its arms (#4930).
 fn flat_concat_ok(t: &str, e: &str) -> bool {
-    if seg_net(t) != 0 {
+    if structured_net(t) != Some(0) {
         return false;
     }
-    if seg_net(e) != 0 {
+    if structured_net(e) != Some(0) {
         return false;
     }
     if t.contains(['x', 't']) {
@@ -67,6 +70,49 @@ fn seg_net(seg: &str) -> i64 {
             _ => 0, // b (+0), loop/branch delimiters
         })
         .sum()
+}
+
+/// The net count change of an event segment as the checker executes it
+/// (`exec_line`, crates/almide-verify/src/ownership.rs): a loop `(...)` or a
+/// conditional loop `[...|...]` preserves the count, so it adds 0 when its
+/// bodies are net 0; a one-shot branch `{t|e}` adds its arms' common net.
+/// `None` when the segment is not of that shape (a loop body that does not
+/// preserve the count, branch arms that disagree, a nested or unbalanced
+/// delimiter): such a segment never flattens. Without delimiters it equals
+/// [`seg_net`].
+fn structured_net(seg: &str) -> Option<i64> {
+    let mut net = 0i64;
+    let mut chars = seg.chars();
+    while let Some(c) = chars.next() {
+        let close = match c {
+            '(' => ')',
+            '{' => '}',
+            '[' => ']',
+            ')' | '}' | ']' | '|' => return None,
+            c => {
+                net += seg_net(c.encode_utf8(&mut [0u8; 4]));
+                continue;
+            }
+        };
+        // The checker's grouped items hold flat events only.
+        let mut arms: Vec<String> = vec![String::new()];
+        loop {
+            match chars.next()? {
+                x if x == close => break,
+                '|' if close != ')' && arms.len() == 1 => arms.push(String::new()),
+                '(' | ')' | '{' | '}' | '[' | ']' | '|' => return None,
+                x => arms.last_mut()?.push(x),
+            }
+        }
+        let nets: Vec<i64> = arms.iter().map(|a| seg_net(a)).collect();
+        match close {
+            ')' if nets == [0] => {}
+            ']' if nets == [0, 0] => {}
+            '}' if nets.len() == 2 && nets[0] == nets[1] => net += nets[0],
+            _ => return None,
+        }
+    }
+    Some(net)
 }
 
 impl Streams {
@@ -763,3 +809,32 @@ impl CertScan {
 
 include!("certificate_b_merge.rs");
 include!("certificate_b_tail.rs");
+
+#[cfg(test)]
+mod structured_net_tests {
+    use super::{flat_concat_ok, structured_net};
+
+    /// #4930: an arm holding a flushed loop and inner branch counts each
+    /// once, as the checker executes it. `onebrc.almd`'s `generate` (its
+    /// error slot, born in the else arm of the first `!`) was poisoned to
+    /// `{i|}` because both arms of `{m|d}` were summed.
+    #[test]
+    fn an_inner_region_counts_once() {
+        assert_eq!(structured_net("i(id){m|d}"), Some(0));
+        assert!(flat_concat_ok("", "i(id){m|d}"));
+        assert_eq!(structured_net("ii{d|d}"), Some(1));
+        assert_eq!(structured_net("i[id|b]d"), Some(0));
+        assert_eq!(structured_net("ibd"), Some(0));
+    }
+
+    /// A shape the checker would not execute as written never flattens.
+    #[test]
+    fn a_malformed_or_disagreeing_region_never_flattens() {
+        assert_eq!(structured_net("i{d|}"), None); // arms disagree
+        assert_eq!(structured_net("(i)"), None); // a loop that grows
+        assert_eq!(structured_net("i{(d)|d}"), None); // nested
+        assert_eq!(structured_net("i{d|d"), None); // unclosed
+        assert_eq!(structured_net("d}"), None); // stray close
+        assert!(!flat_concat_ok("", "i{d|}"));
+    }
+}
