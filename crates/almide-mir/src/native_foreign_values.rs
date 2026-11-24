@@ -28,6 +28,14 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
     let nested = |e: &str, t: &Ty, k| convert_value(e, t, k, to_host, depth + 1, host_uses_almide_types);
     match ty {
         Ty::Unit if kind == NTy::I64 => Ok(if to_host { "()" } else { "0i64" }.into()),
+        // A `Handle` rides the i64 lane as its exposed address: the host's
+        // `*mut u8` is exposed on the way in and rebuilt from the exposed
+        // provenance on the way out, so the same pointer comes back (C-452).
+        Ty::RawPtr if kind == NTy::I64 => Ok(if to_host {
+            format!("std::ptr::with_exposed_provenance_mut::<u8>(*({e}) as usize)")
+        } else {
+            format!("{{ let __foreign_ptr{depth}: *mut u8 = *({e}); __foreign_ptr{depth}.expose_provenance() as i64 }}")
+        }),
         Ty::String if kind == NTy::Str => Ok(if to_host && !host_uses_almide_types {
             format!("({e}).to_string()")
         } else { format!("AlmideString::from(({e}).as_str())") }),

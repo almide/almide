@@ -105,7 +105,7 @@ pub(crate) fn check_decl(f: &IrFunction, kind: NativeExtern) -> Result<(), Lower
 }
 
 fn check_value_type(ty: &Ty) -> Result<(), LowerError> {
-    if scalar_host_type(ty).is_some() || matches!(ty, Ty::Unit | Ty::String | Ty::Bytes) || crate::render_native_rec::is_matrix_ty(ty) { return Ok(()); }
+    if scalar_host_type(ty).is_some() || matches!(ty, Ty::Unit | Ty::String | Ty::Bytes | Ty::RawPtr) || crate::render_native_rec::is_matrix_ty(ty) { return Ok(()); }
     match ty {
         Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, args) => args.iter().try_for_each(check_value_type),
         Ty::Tuple(args) => args.iter().try_for_each(check_value_type),
