@@ -1,0 +1,12 @@
+// E117 (ADR-0032, closed table): `http.typed` serves the standard non-script
+// media types its stdlib table lists; a script such as JavaScript is not one
+// of them, and nothing else is admitted unless almide.toml grants it to the
+// application itself.
+import http
+
+fn script(src: String) -> HttpResponse = http.response(
+  200,
+  http.typed("text/javascript", bytes.from_string(src)),
+)
+
+fn main() -> Unit = println(http.body(script("alert(1)")))
