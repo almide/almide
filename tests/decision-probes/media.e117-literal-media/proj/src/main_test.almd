@@ -1,0 +1,6 @@
+import http
+
+test "probe" {
+  let r = http.response(200, http.typed("text/javascript", bytes.from_string("alert(1)")))
+  assert_eq(http.body(r), "alert(1)")
+}

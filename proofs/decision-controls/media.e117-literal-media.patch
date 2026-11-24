@@ -1,0 +1,15 @@
+# Negative control of media.e117-literal-media (proofs/decision-sites.toml): a well-formed media type outside the closed table and the application's own grant is admitted
+# control_test: tests/media_self_grant_test.rs::novel_an_unlisted_type_is_refused_until_the_application_grants_it
+diff --git a/crates/almide-frontend/src/check/body_rules.rs b/crates/almide-frontend/src/check/body_rules.rs
+index 8e9832b004..d78f7f7655 100644
+--- a/crates/almide-frontend/src/check/body_rules.rs
++++ b/crates/almide-frontend/src/check/body_rules.rs
+@@ -117,7 +117,7 @@ fn media_refusal(value: &str, table: &[String], granted: &[String]) -> Option<St
+     if media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)) {
+         return Some(format!("`{essence}` runs script in a browser, so only a type that owns it may serve it: a package's safe type, granted in almide.toml `[trust] media` (ADR-0032 D7)"));
+     }
+-    if table.iter().any(|x| *x == t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
++    if true || table.iter().any(|x| *x == t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
+         return None;
+     }
+     Some(format!(

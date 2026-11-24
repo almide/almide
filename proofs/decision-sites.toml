@@ -46,10 +46,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "82"
+# unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "17"
+# failopen_ceiling      = "16"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -198,6 +198,11 @@
 #               verify.gate-build-incomplete-accepted (C-462, wasi skipped #4836) and
 #               media.e116-header-write (the writer refuses an owned name whatever its source,
 #               owner ruling 2026-11-24; c1 text, 3 cells not observed). 78 stamped, 82 not, 17 fail-open.
+#   2026-11-24  27th engineer (ds-2): witness.subset-gate's host-leaf name-prefix decline deleted (the
+#               leaves are audited arms, 81ac837f6c); media.e117-literal-media decided from the closed
+#               `@media_table` declaration and the application's `[trust] media` "self" grant
+#               (unknown = refuse, novel + probe on 14 columns + control red): STAMPED.
+#               79 stamped, 81 not, 16 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3550,9 +3555,9 @@ items = [
 ]
 keys = []
 decides = "which function bodies the structural recorder certifies; anything out of subset declines with `!decline:<reason>` (=> uncertified line)"
-from = "mixed:type+prefix"
+from = "mixed:type+name"
 unknown = "allow"
-unknown_note = "host-splice leaves are declined by a name-prefix list (__http_framed_/__http_call_/__http_serve_/__proc_, witness_gate.rs:533-538); the same lower_host_leaf path also intercepts __net_*/__unix_*/__shm_*/__net_udp_*/__net_lookup_host (net_call.rs:120, http_call.rs:115) which the list does not name, so those frames are admitted; a new leaf family is admitted the same way"
+unknown_note = "the host-leaf name-prefix decline is gone (27th engineer, 81ac837f6c): a bodyless host leaf (http_call.rs host_leaf) is audited like a module arm (every operand through lower_arg, witness_module_result, the arm window), so a leaf that lowered an operand any other way declines as module-arm:unaudited; what is still keyed by name is inline_callback_subset's arm table (witness_gate_callbacks.rs), whose fallback is the audited ordinary argument rule; a novel callback arm the table does not list is admitted only through that audit — not yet shown by a novel test with a control"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-wasm/tests/witness_*.rs",
@@ -3562,12 +3567,12 @@ control_note = "NONE"
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c1:prefix-keyed host-leaf decline",
-  "c2:fail-open novel host leaf",
+  "c1:name-keyed callback arm table (inline_callback_subset); the host-leaf prefix list is deleted",
+  "c2:fail-open until a novel callback arm is shown refused by the audit (test + control)",
   "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
-note = "NEW suspect, low: fs_call_two lowers both operands through lower_arg(Borrow) (fs.rs:165-171), so the argument hooks may fire for net leaves and the decline may be unnecessary for them; the point is that the admit/decline split is by spelling, not by the lowering route. Related to, not covered by, #4828."
+note = "Resolved suspect (27th): fs_call_two lowers both operands through lower_arg(Borrow), and the leaves now run under the module-call audit, so the prefix decline was removed rather than extended; measured on ds-2: host-splice declines 125 -> 0 across the root suite, REJECT 0."
 
 [[site]]
 id = "witness.call-modes-skip"
@@ -4405,16 +4410,22 @@ items = [
 keys = [
   "crates/almide-frontend/src/check/body_rules.rs::Checker::e117::S1::E117",
 ]
-decides = "a script-capable media type (text/html, ...) is served only through its owner; http.typed takes a literal media type"
-from = "mixed:declaration+text"
-unknown = "allow"
-status = "UNSTAMPED"
-reasons = ["c1:text (media literal match)", "c2:fail-open (an unlisted script-capable media type; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "a non-literal media type is refused; an unknown literal is admitted unless it matches the stdlib owner list or html's @script_capable set (media_owners.rs:73-81); only bundled callees are judged"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e117-typed-html"]
+decides = "a `@literal_media` builder (http.typed) takes its media type as a literal from the closed `@media_table` its result type's media fn declares (standard non-script types), or one the root manifest grants the application itself (`[trust] media` \"self\"); script-capable and stdlib-owned types are refused whatever the grant"
+from = "declaration"
+unknown = "refuse"
+status = "STAMPED"
+reasons = []
+unknown_note = "owner ruling 2026-11-24 (closed table): a well-formed type neither in the declared table (stdlib/http.almd `@media_table` on __typed_body_media_type, read through http.typed's declared result type) nor in the application's own grant is E117 (novel test); a builder whose result type declares no table refuses every type; a computed or malformed type, a script-capable one (html's `@script_capable`) or a stdlib-owned one (`@media_owns`) is E117 whatever the grant; a `\"self\"` entry naming one of those is E118 (media_grant.rs); only bundled callees are judged"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+tests = ["tests/diagnostics/e117-typed-html", "tests/diagnostics/e117-typed-unlisted-media", "tests/media_self_grant_test.rs"]
 issues = []
-note = "body_rules.rs:98-220."
+note = "body_rules.rs (media_refusal, literal_media_table); the grant reader is media_grant.rs::self_grants_for, registered in dispatch for every route (the lsp cell refuses; #4935, the editor also reporting the bundled http module's own lines, is a separate defect). Contract: almide/als#278 (mirror pending)."
+probe = "tests/decision-probes/media.e117-literal-media"
+novel = "tests/media_self_grant_test.rs::novel_an_unlisted_type_is_refused_until_the_application_grants_it"
+control_patch = "proofs/decision-controls/media.e117-literal-media.patch"
+control_test = "tests/media_self_grant_test.rs::novel_an_unlisted_type_is_refused_until_the_application_grants_it"
+control_seen = "6178571054 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/media_self_grant_test.rs:54, `an unlisted type was admitted`, the type a fresh novel::ident); probe observed refusing on all 14 columns inside and outside the project (27th engineer)"
+stamp = "6178571054 2026-11-24"
 
 [[site]]
 id = "ownership.e119-lent-region-escape"

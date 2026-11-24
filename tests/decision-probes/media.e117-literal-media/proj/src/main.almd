@@ -1,0 +1,6 @@
+import http
+
+effect fn main() -> Unit = {
+  let r = http.response(200, http.typed("text/javascript", bytes.from_string("alert(1)")))
+  println(http.body(r))
+}

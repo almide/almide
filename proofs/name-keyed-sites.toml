@@ -874,7 +874,7 @@ class = "legacy"
 names = 3
 
 [[site]]
-id = "crates/almide-wasm/src/http_call.rs::lower_http_call_leaf::or-pattern"
+id = "crates/almide-wasm/src/http_call.rs::host_leaf::or-pattern"
 class = "legacy"
 names = 2
 
