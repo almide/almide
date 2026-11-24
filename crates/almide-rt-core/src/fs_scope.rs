@@ -51,7 +51,7 @@ pub fn fs_scope_resolve_parts(path: &str) -> Option<(std::path::PathBuf, Option<
     use std::path::{Component, Path, PathBuf};
     let p = Path::new(path);
     let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().ok()?.join(p) };
-    let comps: Vec<Component> = abs.components().collect();
+    let comps: std::vec::Vec<Component> = abs.components().collect();
     let dotdot = comps.iter().enumerate().skip(1).filter(|(_, c)| matches!(c, Component::ParentDir)).find_map(|(j, _)| {
         let before: PathBuf = comps[..j].iter().collect();
         match std::fs::metadata(&before) {
@@ -96,7 +96,7 @@ pub fn fs_scope_admits(path: &str, roots: &[std::path::PathBuf]) -> bool {
 /// The directory a glob pattern reads: its segments before the first one
 /// holding a wildcard (`.` when the first does).
 pub fn fs_scope_glob_base(pattern: &str) -> String {
-    let segs: Vec<&str> = pattern.split('/').take_while(|s| !s.contains(['*', '?', '['])).collect();
+    let segs: std::vec::Vec<&str> = pattern.split('/').take_while(|s| !s.contains(['*', '?', '['])).collect();
     let base = segs.join("/");
     if base.is_empty() {
         if pattern.starts_with('/') { "/".to_string() } else { ".".to_string() }

@@ -36,13 +36,13 @@ pub fn almide_rt_test_assert_err<T: std::fmt::Debug, E: std::fmt::Debug>(r: &Res
 /// The libtest banner the child prints before the entry runs (`-q`).
 const ABORT_SITE_BANNER: &str = "\nrunning 1 test\n";
 
-pub fn almide_rt_test_abort_site_run(site: i64) -> Vec<AlmideString> {
+pub fn almide_rt_test_abort_site_run(site: i64) -> AlmideList<AlmideString> {
     almide_stdout_flush();
     // A child never starts a grandchild (E099 refuses the nesting at check
     // time; this bounds a direct call of the private fn).
     if std::env::var_os("ALMIDE_ABORT_SITE").is_some() {
         let why = "the abort-site child did not start: an abort site cannot start another";
-        return vec![AlmideString::from("-1".to_string()), AlmideString::from(String::new()), AlmideString::from(why.to_string())];
+        return almide_list![AlmideString::from("-1".to_string()), AlmideString::from(String::new()), AlmideString::from(why.to_string())];
     }
     // In the native test run's one binary (#4441) each test file's entry
     // carries its module's prefix, which the runner passes in
@@ -64,7 +64,7 @@ pub fn almide_rt_test_abort_site_run(site: i64) -> Vec<AlmideString> {
         }
         Err(e) => (-1, String::new(), format!("the abort-site child did not start: {e}")),
     };
-    vec![AlmideString::from(status.to_string()), AlmideString::from(stdout), AlmideString::from(stderr)]
+    almide_list![AlmideString::from(status.to_string()), AlmideString::from(stdout), AlmideString::from(stderr)]
 }
 
 /// The abort site this process was started to run, or -1.

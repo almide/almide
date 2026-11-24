@@ -10,6 +10,7 @@ mod declarations;
 pub(crate) mod key_encode;
 mod expressions;
 pub mod helpers;
+mod loop_appender;
 pub(crate) mod runtime_owned;
 mod statements;
 mod types;
@@ -342,7 +343,7 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
         (ParamBorrow::Ref | ParamBorrow::RefSlice, ty) => format!("&{}", render_type(ctx, ty)),
         // `&mut AlmideRcCow<T>` deref-coerces through `make_mut`: the host
         // writes the caller's binding copy-on-write, as a `mut` param means.
-        (ParamBorrow::RefMut, Ty::Bytes) => "&mut Vec<u8>".to_string(),
+        (ParamBorrow::RefMut, Ty::Bytes) => "&mut AlmideList<u8>".to_string(),
         (ParamBorrow::RefMut, ty) if extern_rust_is_rc_cow(ty) => "&mut AlmideMatrix".to_string(),
         (ParamBorrow::RefMut, ty) => format!("&mut {}", render_type(ctx, ty)),
     }
@@ -375,7 +376,16 @@ fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> Stri
     if almide_lang::types::extern_abi::is_region(&p.ty) {
         return format!("{name}.base.wrapping_add({name}.off.max(0) as usize), {name}.len.max(0) as usize");
     }
-    if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
+    // A borrowed value is copied into its host shape only when it holds a
+    // String; a borrowed List / Bytes is a slice on both sides. An owned or
+    // `mut` one is copied whenever its shapes differ (ADR-0037 ruling (A)).
+    let differs = extern_rust_host_differs(&p.ty);
+    let converts = match p.borrow {
+        ParamBorrow::RefStr => false,
+        ParamBorrow::Own | ParamBorrow::RefMut => differs,
+        _ => extern_rust_has_str(&p.ty),
+    };
+    if !converts {
         return name;
     }
     match p.borrow {
@@ -383,7 +393,9 @@ fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> Stri
         ParamBorrow::RefMut => {
             let h = format!("__host_{name}");
             before.push_str(&format!("    let mut {h} = {};\n", extern_rust_str_conv(&format!("&*{name}"), &p.ty, true, 0)));
-            after.push_str(&format!("    *{name} = {};\n", extern_rust_str_conv(&format!("&{h}"), &p.ty, false, 0)));
+            // A `mut` Bytes param is the list block itself (`&mut AlmideList<u8>`), not its handle.
+            let back = if matches!(p.ty, Ty::Bytes) { format!("AlmideList::<u8>::from({h})") } else { extern_rust_str_conv(&format!("&{h}"), &p.ty, false, 0) };
+            after.push_str(&format!("    *{name} = {back};\n"));
             format!("&mut {h}")
         }
         _ => format!("&{}", extern_rust_str_conv(&name, &p.ty, true, 0)),
@@ -409,29 +421,34 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             if !mut_prefix.is_empty() {
                 param_name = format!("{}{}", mut_prefix, param_name);
             }
-            let type_s = match p.borrow {
-                ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
-                // A fn-typed param the body only calls is a borrowed callable
-                // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
-                ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
-                    format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
-                }
-                ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
-                ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
-                ParamBorrow::RefStr => "&str".to_string(),
-                ParamBorrow::RefSlice => {
-                    if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
-                        if let Some(inner) = args.first() {
-                            format!("&[{}]", render_type_fn(fn_ctx, inner))
-                        } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
-                    } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
-                }
-            };
+            let type_s = fn_param_type_str(fn_ctx, p);
             fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("{}: {}", param_name, type_s))
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The Rust type a fn definition spells for the param `p`, from its borrow mode.
+fn fn_param_type_str(fn_ctx: &RenderContext, p: &IrParam) -> String {
+    match p.borrow {
+        ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
+        // A fn-typed param the body only calls is a borrowed callable
+        // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
+        ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
+            format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
+        }
+        ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
+        ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
+        ParamBorrow::RefStr => "&str".to_string(),
+        ParamBorrow::RefSlice => {
+            if let almide_lang::types::Ty::Applied(_, args) = &p.ty {
+                if let Some(inner) = args.first() {
+                    format!("&[{}]", render_type_fn(fn_ctx, inner))
+                } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+            } else { format!("&{}", render_type_fn(fn_ctx, &p.ty)) }
+        }
+    }
 }
 
 /// Function body: render Block contents directly (no IIFE wrapper).

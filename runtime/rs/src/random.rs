@@ -63,7 +63,7 @@ pub fn almide_rt_random_choice<T: Clone>(xs: &[T]) -> Option<T> {
     Some(xs[idx].clone())
 }
 
-pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
+pub fn almide_rt_random_shuffle<T: Clone>(mut xs: AlmideList<T>) -> AlmideList<T> {
     let n = xs.len();
     for i in (1..n).rev() {
         let j = (next_u64() as usize) % (i + 1);
@@ -97,11 +97,11 @@ mod almide_random_entropy {
 }
 pub use almide_random_entropy::*;
 
-pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
+pub fn almide_rt_random_bytes(n: i64) -> AlmideList<u8> {
     if n < 0 {
         almide_abort(format!("random.bytes: negative length {n}"));
     }
-    let mut v: Vec<u8> = Vec::new();
+    let mut v: AlmideList<u8> = AlmideList::new();
     if v.try_reserve_exact(n as usize).is_err() {
         almide_abort_oom();
     }

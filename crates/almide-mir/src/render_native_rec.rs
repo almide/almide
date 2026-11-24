@@ -174,7 +174,7 @@ pub(crate) fn is_scalar_instance(t: &almide_lang::types::Ty) -> bool {
 /// it joins, so no earlier index moves; the header is assembled after the
 /// bodies render, so a body may be the first user.
 pub(crate) fn bytes_index() -> u16 {
-    intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("Vec<u8>"), ..RecDecl::default() })
+    intern(&|d| d.name == BYTES_KEY, RecDecl { name: BYTES_KEY.into(), alias: Some("AlmideList<u8>"), ..RecDecl::default() })
 }
 
 pub(crate) fn runtime_type_index(t: crate::native_runtime_types::RuntimeType) -> u16 {
@@ -641,8 +641,8 @@ pub(crate) fn owned_ty(t: NTy) -> String {
         NTy::F32 => "f32".into(),
         NTy::Bool => "bool".into(),
         NTy::Str | NTy::StrRef => "AlmideString".into(),
-        NTy::Vec | NTy::VecRef => "Vec<i64>".into(),
-        NTy::VecStr | NTy::VecStrRef => "Vec<AlmideString>".into(),
+        NTy::Vec | NTy::VecRef => "AlmideList<i64>".into(),
+        NTy::VecStr | NTy::VecStrRef => "AlmideList<AlmideString>".into(),
         NTy::Res => "Result<i64, AlmideString>".into(),
         NTy::Opt => "Option<i64>".into(),
         NTy::ResStr => "Result<AlmideString, AlmideString>".into(),
@@ -659,7 +659,7 @@ pub(crate) fn owned_ty(t: NTy) -> String {
 pub(crate) fn runtime_default_impls() -> String {
     const IMPLS: [(&str, &str); 2] = [
         (VALUE_KEY, "impl Default for AlmideValue {\n    fn default() -> Self {\n        AlmideValue::Null\n    }\n}\n"),
-        (MATRIX_KEY, "impl Default for AlmideMatrix {\n    fn default() -> Self {\n        AlmideMatrix { rows: 0, cols: 0, data: Vec::new() }\n    }\n}\n"),
+        (MATRIX_KEY, "impl Default for AlmideMatrix {\n    fn default() -> Self {\n        AlmideMatrix { rows: 0, cols: 0, data: ::std::vec::Vec::new() }\n    }\n}\n"),
     ];
     RECS.with(|r| {
         let r = r.borrow();

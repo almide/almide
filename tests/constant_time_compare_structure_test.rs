@@ -476,7 +476,9 @@ fn native_constant_time_compare_has_no_data_dependent_branch() {
     let bytes_fn = cut_fn("runtime/rs/src/bytes.rs", "almide_rt_bytes_is_equal_constant_time");
     let string_fn = cut_fn("runtime/rs/src/string.rs", "almide_rt_string_is_equal_constant_time");
     assert!(bytes_fn.contains("black_box") && string_fn.contains("black_box"), "the runtime fns lost their barrier");
-    let ir = llvm_ir(&dir, &format!("#[no_mangle]\n{bytes_fn}\n#[no_mangle]\n{string_fn}\n"));
+    // The runtime's Bytes is the list block it ships (ADR-0037), spliced in as generated programs splice it.
+    let list = format!("#[allow(dead_code, unused_imports)]\nmod almide_str_block {{\n{}\n{}\n}}\nuse almide_str_block::AlmideList;\n", almide_str::SOURCE, almide_str::LIST_SOURCE);
+    let ir = llvm_ir(&dir, &format!("{list}#[no_mangle]\n{bytes_fn}\n#[no_mangle]\n{string_fn}\n"));
     for name in ["almide_rt_bytes_is_equal_constant_time", "almide_rt_string_is_equal_constant_time"] {
         let body = define_body(&ir, name);
         assert!(body.iter().any(|l| l.contains("load i8") || l.contains("load volatile i8")), "{name}: no byte load in the IR — the walk is not looking at the loop");

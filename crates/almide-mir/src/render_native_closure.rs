@@ -138,6 +138,8 @@ pub(crate) fn lambda_moves(f: &MirFunction) -> Vec<bool> {
 fn owned_copy(k: NativeSigKind, a: &str) -> String {
     match k {
         NativeSigKind::Str => format!("AlmideString::from({a})"),
+        // ADR-0037: a lent list slice becomes an owned list block.
+        NativeSigKind::ListI64 | NativeSigKind::ListStr => format!("AlmideToList::to_list({a})"),
         _ => format!("ToOwned::to_owned({a})"),
     }
 }

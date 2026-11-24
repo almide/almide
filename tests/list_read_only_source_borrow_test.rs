@@ -286,8 +286,8 @@ fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
             .unwrap_or_else(|| panic!("runtime/rs/src/list.rs has no `{head}`"));
         let first = line[line.find('(').unwrap() + 1..].split(',').next().unwrap();
         assert!(
-            first.contains(": Vec<") && !first.contains('&'),
-            "{owned} must take its source by value (`mut xs: Vec<T>`), not `{first}`"
+            first.contains(": AlmideList<") && !first.contains('&'),
+            "{owned} must take its source by value (`mut xs: AlmideList<T>`), not `{first}`"
         );
     }
 }

@@ -86,10 +86,10 @@ mod mutable_route_tests {
     #[test]
     fn mutable_runtime_loans_require_agreeing_declarations_and_owned_values() {
         let list = DTy::List(Box::new(DTy::Var("A".into())));
-        assert_eq!(declared_param_mode(&list, true, "&mutVec<A>"), Some(true));
-        assert_eq!(declared_param_mode(&list, false, "&mutVec<A>"), None);
-        assert_eq!(declared_param_mode(&list, true, "&Vec<A>"), None);
-        assert_eq!(declared_param_mode(&list, true, "Vec<A>"), None);
+        assert_eq!(declared_param_mode(&list, true, "&mutAlmideList<A>"), Some(true));
+        assert_eq!(declared_param_mode(&list, false, "&mutAlmideList<A>"), None);
+        assert_eq!(declared_param_mode(&list, true, "&AlmideList<A>"), None);
+        assert_eq!(declared_param_mode(&list, true, "AlmideList<A>"), None);
         assert_eq!(mutable_runtime_arg("xs", NTy::Vec), Some("&mut xs".into()));
         for view in [NTy::VecRef, NTy::VecStrRef, NTy::RecRef(0), NTy::StrRef] {
             assert_eq!(mutable_runtime_arg("xs", view), None);

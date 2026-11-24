@@ -39,22 +39,29 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
         Ty::String if kind == NTy::Str => Ok(if to_host && !host_uses_almide_types {
             format!("({e}).to_string()")
         } else { format!("AlmideString::from(({e}).as_str())") }),
-        Ty::Bytes if crate::render_native_rec::is_bytes(kind) => Ok(if to_host && host_uses_almide_types {
-            format!("AlmideRcCow::from(({e}).to_vec())")
-        } else { format!("({e}).to_vec()") }),
+        // ADR-0037 ruling (A): the host keeps std's `Vec<u8>`; the native side
+        // holds the list block. The copy is made here, at the boundary.
+        Ty::Bytes if crate::render_native_rec::is_bytes(kind) => Ok(if !to_host {
+            format!("AlmideList::<u8>::from(&({e})[..])")
+        } else if host_uses_almide_types && nominal() {
+            format!("AlmideRcCow::from(AlmideList::<u8>::from(&({e})[..]))")
+        } else if host_uses_almide_types {
+            format!("AlmideRcCow::from(({e})[..].to_vec())")
+        } else { format!("({e})[..].to_vec()") }),
         Ty::Applied(C::List, a) if a.len() == 1 => {
             let k = match kind {
                 NTy::Vec => Some(NTy::I64), NTy::VecStr => Some(NTy::Str),
                 NTy::Rec(i) => crate::render_native_rec::list_elem(i), _ => None,
             }.ok_or_else(|| wall("native: foreign list has no declared element kind"))?;
-            Ok(format!("({e}).iter().map(|{x}| {}).collect::<Vec<_>>()", nested(&x, &a[0], k)?))
+            let collection = if to_host && !(host_uses_almide_types && nominal()) { "Vec<_>" } else { "AlmideList<_>" };
+            Ok(format!("({e}).iter().map(|{x}| {}).collect::<{collection}>()", nested(&x, &a[0], k)?))
         }
         Ty::Applied(C::Set, a) if a.len() == 1 => {
             let k = match kind {
                 NTy::Vec => Some(NTy::I64),
                 NTy::Rec(i) => crate::render_native_rec::set_elem(i), _ => None,
             }.ok_or_else(|| wall("native: foreign Set has no declared element kind"))?;
-            let collection = if to_host || kind != NTy::Vec { "AlmideSet<_>" } else { "Vec<_>" };
+            let collection = if to_host || kind != NTy::Vec { "AlmideSet<_>" } else { "AlmideList<_>" };
             Ok(format!("({e}).iter().map(|{x}| {}).collect::<{collection}>()", nested(&x, &a[0], k)?))
         }
         Ty::Applied(C::Map, a) if a.len() == 2 => {
@@ -100,7 +107,7 @@ pub(crate) fn convert_value(e: &str, ty: &Ty, kind: NTy, to_host: bool, depth: u
             }
             Ok(if to_host { format!("({},)", parts.join(", ")) }
                 else if let NTy::Rec(i) = kind { format!("{} {{ {} }}", crate::render_native_rec::struct_name(i), parts.join(", ")) }
-                else { format!("vec![{}]", parts.join(", ")) })
+                else { format!("almide_list![{}]", parts.join(", ")) })
         }
         Ty::Named(..) | Ty::Record { .. } if host_uses_almide_types =>crate::native_callback_types::convert(e, ty, kind, to_host),
         _ => Err(wall(format!("native: no foreign value adapter for {ty:?} / {kind:?}"))),

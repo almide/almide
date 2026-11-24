@@ -118,9 +118,10 @@ fn wrap_metered_splice(items: &str, roots: &[String]) -> String {
     // ADR-0013: the regions share the host program's Almide String. A second
     // copy of the block inside the module would be a distinct `AlmideStr`
     // type, and every String crossing the splice would fail to type-check.
+    // ADR-0037: the same holds for the list block.
     let mut body = items.replacen(
         &crate::render_native_str::almide_string_alias(),
-        "use super::{AlmideStr, AlmideString};\n",
+        &format!("use super::{{AlmideStr, AlmideString, AlmideList, AlmideToList}};\n{}", crate::render_native_str::almide_list_macro()),
         1,
     );
     for r in roots {

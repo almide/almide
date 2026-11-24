@@ -114,11 +114,11 @@ pub fn fs_beneath_joined(dir: &str, rel: &str) -> String {
 /// - Where the build has no descriptor calls (neither Linux, macOS nor
 ///   Windows), the platform half refuses every call below the root
 ///   ([`fs_beneath_unsupported`]) instead of checking and then calling.
-fn fs_beneath_segments(rel: &str) -> Result<Vec<&str>, FsBeneathError> {
+fn fs_beneath_segments(rel: &str) -> Result<std::vec::Vec<&str>, FsBeneathError> {
     if rel.is_empty() {
-        return Ok(Vec::new());
+        return Ok(std::vec::Vec::new());
     }
-    let segs: Vec<&str> = rel.split('/').collect();
+    let segs: std::vec::Vec<&str> = rel.split('/').collect();
     if segs.iter().any(|s| s.is_empty() || *s == "." || *s == ".." || !fs_beneath_segment_is_one_name(s)) {
         return Err(FsBeneathError::Escape);
     }
@@ -138,7 +138,7 @@ fn fs_beneath_segment_is_one_name(seg: &str) -> bool {
 }
 
 /// The whole file `<root>/<rel>`.
-pub fn fs_beneath_read(dir: &str, rel: &str) -> Result<Vec<u8>, FsBeneathError> {
+pub fn fs_beneath_read(dir: &str, rel: &str) -> Result<std::vec::Vec<u8>, FsBeneathError> {
     fs_beneath_read_with(dir, rel, false, &mut |_| {})
 }
 
@@ -160,7 +160,7 @@ pub fn fs_beneath_write(dir: &str, rel: &str, data: &[u8]) -> Result<(), FsBenea
 }
 
 /// The sorted entry names of the directory `<root>/<rel>`.
-pub fn fs_beneath_list(dir: &str, rel: &str) -> Result<Vec<String>, FsBeneathError> {
+pub fn fs_beneath_list(dir: &str, rel: &str) -> Result<std::vec::Vec<String>, FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let mut names = fs_beneath_imp::list(dir, &segs)?;
     names.sort_unstable();
@@ -192,7 +192,7 @@ pub fn fs_beneath_remove(dir: &str, rel: &str) -> Result<(), FsBeneathError> {
 /// after the walk holds the directory of segment `i` (`0` = the root) and
 /// before it opens the next one — the window a concurrent rewrite would use.
 #[doc(hidden)]
-pub fn fs_beneath_read_with(dir: &str, rel: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
+pub fn fs_beneath_read_with(dir: &str, rel: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<std::vec::Vec<u8>, FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
         return almide_sfs::read_bounded(dir).map_err(FsBeneathError::Io);
@@ -265,7 +265,7 @@ mod fs_beneath_imp {
         cur.ok_or(FsBeneathError::Escape)
     }
 
-    pub fn read(dir: &str, parents: &[&str], last: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
+    pub fn read(dir: &str, parents: &[&str], last: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<std::vec::Vec<u8>, FsBeneathError> {
         let p = parent(dir, parents, walk_only, hook)?;
         // `Meta` is the O_NONBLOCK read-only open: a FIFO does not block it,
         // and the bounded read refuses it by its descriptor (#4201).
@@ -279,7 +279,7 @@ mod fs_beneath_imp {
         std::io::Write::write_all(&mut std::fs::File::from(fd), data).map_err(FsBeneathError::Io)
     }
 
-    pub fn list(dir: &str, segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
+    pub fn list(dir: &str, segs: &[&str]) -> Result<std::vec::Vec<String>, FsBeneathError> {
         let fd = match segs.split_last() {
             None => super::almide_sfs::open_dir(dir).map_err(FsBeneathError::Io)?,
             Some((last, parents)) => {
@@ -324,7 +324,7 @@ mod fs_beneath_imp {
         Err(FsBeneathError::Io(super::fs_beneath_unsupported()))
     }
 
-    pub fn read(_dir: &str, _parents: &[&str], _last: &str, _walk_only: bool, _hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
+    pub fn read(_dir: &str, _parents: &[&str], _last: &str, _walk_only: bool, _hook: &mut dyn FnMut(usize)) -> Result<std::vec::Vec<u8>, FsBeneathError> {
         refused()
     }
 
@@ -332,7 +332,7 @@ mod fs_beneath_imp {
         refused()
     }
 
-    pub fn list(_dir: &str, _segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
+    pub fn list(_dir: &str, _segs: &[&str]) -> Result<std::vec::Vec<String>, FsBeneathError> {
         refused()
     }
 

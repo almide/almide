@@ -70,7 +70,7 @@ fn finish_native_fn(
     }
     if borrowed_loop { out.push_str("    }\n"); }
     out.push_str("}\n");
-    let mut out = crate::render_native_loops::iterator_loops(drop_unread_static_strs(out));
+    let mut out = crate::render_native_appends::hoisted_appenders(crate::render_native_elem_slices::hoisted_slices(crate::render_native_loops::iterator_loops(drop_unread_static_strs(out))));
     let ret_nty = if is_main { None } else { ret_override.or_else(|| func.ret.map(|v| tys[&v])) };
     // T1-1: patch every strict-cut marker with the now-known typed default
     // (never observed — the region verdict is Err by the time a cut fires).
@@ -142,7 +142,7 @@ fn native_ret_expr(v: ValueId, t: NTy) -> String {
         NTy::I64 | NTy::F32 | NTy::Bool | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res | NTy::VecStr | NTy::Rec(_) | NTy::Opt | NTy::ResStr => var(v),
         NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
-        NTy::VecRef | NTy::VecStrRef => format!("{}.to_vec()", var(v)),
+        NTy::VecRef | NTy::VecStrRef => format!("{}.to_list()", var(v)),
     }
 }
 
@@ -780,11 +780,11 @@ pub(crate) fn render_dup(
         NTy::VecRef => {
             // Dup of a borrowed list param mints a fresh owned Vec.
             tys.insert(*dst, NTy::Vec);
-            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+            line!("let mut {} = {}.to_list();", var(*dst), var(*src));
         }
         NTy::VecStrRef => {
             tys.insert(*dst, NTy::VecStr);
-            line!("let mut {} = {}.to_vec();", var(*dst), var(*src));
+            line!("let mut {} = {}.to_list();", var(*dst), var(*src));
         }
         NTy::Rec(i) | NTy::RecRef(i) => {
             tys.insert(*dst, NTy::Rec(i));

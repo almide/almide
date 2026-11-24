@@ -222,14 +222,14 @@ fn render_first_join_value(
                 format!("AlmideString::from({})", var(v)),
             ),
             NTy::Vec => (
-                format!("let mut {}: Vec<i64>;", var(*d)),
+                format!("let mut {}: AlmideList<i64>;", var(*d)),
                 NTy::Vec,
                 format!("{}.clone()", var(v)),
             ),
             NTy::VecRef => (
-                format!("let mut {}: Vec<i64>;", var(*d)),
+                format!("let mut {}: AlmideList<i64>;", var(*d)),
                 NTy::Vec,
-                format!("{}.to_vec()", var(v)),
+                format!("{}.to_list()", var(v)),
             ),
             NTy::F64 => (
                 format!("let mut {}: f64 = 0.0;", var(*d)),
@@ -245,9 +245,9 @@ fn render_first_join_value(
                 format!("{}.clone()", var(v)),
             ),
             NTy::VecStr | NTy::VecStrRef => (
-                format!("let mut {}: Vec<AlmideString>;", var(*d)),
+                format!("let mut {}: AlmideList<AlmideString>;", var(*d)),
                 NTy::VecStr,
-                if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_vec()", var(v)) },
+                if t == NTy::VecStr { format!("{}.clone()", var(v)) } else { format!("{}.to_list()", var(v)) },
             ),
             // Declared unset: both arms assign it (a placeholder would be
             // built and dropped on every pass through the join).
@@ -401,10 +401,10 @@ fn end_if_copy_rhs(v: ValueId, t: NTy) -> String {
         NTy::Str => format!("{}.clone()", var(v)),
         NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::Vec => format!("{}.clone()", var(v)),
-        NTy::VecRef => format!("{}.to_vec()", var(v)),
+        NTy::VecRef => format!("{}.to_list()", var(v)),
         NTy::Res => format!("{}.clone()", var(v)),
         NTy::VecStr => format!("{}.clone()", var(v)),
-        NTy::VecStrRef => format!("{}.to_vec()", var(v)),
+        NTy::VecStrRef => format!("{}.to_list()", var(v)),
         NTy::Rec(_) | NTy::RecRef(_) => format!("{}.clone()", var(v)),
         NTy::Opt => var(v),
         NTy::ResStr => format!("{}.clone()", var(v)),
