@@ -28,6 +28,43 @@ PROGS="$(ls scripts/probe-emitter-kill/*.almd)"
 
 build() { cargo build -q --release --locked --bin almide 2> "$OUT/build.err"; }
 
+# INSPECT: programs (the ones above, and any contract programs named here)
+# whose module each compiler also builds and prints as text, so that what a
+# mutant changes in the emitted code can be read side by side.
+INSPECT="${INSPECT:-}"
+
+# inspect <dir>: <dir>/inspect/<name>.wasm and .wat per program.
+inspect() {
+  local d="$1/inspect" p n
+  [ -n "$INSPECT" ] || return 0
+  mkdir -p "$d"
+  for p in $INSPECT $PROGS; do
+    n="$(basename "$p" .almd)"
+    if timeout "$T_RUN" "$ALMIDE" build "$p" --target wasm -o "$d/$n.wasm" > "$d/$n.build" 2>&1 < /dev/null; then
+      wasm-tools print "$d/$n.wasm" > "$d/$n.wat" 2> "$d/$n.print.err" || echo "inspect: $n does not print"
+    else
+      echo "inspect: $n does not build"
+    fi
+  done
+}
+
+# inspect_diff <id>: which inspected modules the mutant changes, and how.
+inspect_diff() {
+  local id="$1" p n
+  [ -n "$INSPECT" ] || return 0
+  echo "== $id: inspected modules"
+  for p in $INSPECT $PROGS; do
+    n="$(basename "$p" .almd)"
+    if cmp -s "$OUT/base/inspect/$n.wasm" "$OUT/$id/inspect/$n.wasm"; then
+      echo "-- $n: module identical"
+    else
+      echo "-- $n: module differs ($(diff "$OUT/base/inspect/$n.wat" "$OUT/$id/inspect/$n.wat" | grep -c '^[<>]') changed line(s))"
+      diff -U 12 "$OUT/base/inspect/$n.wat" "$OUT/$id/inspect/$n.wat" > "$OUT/$id/inspect/$n.diff"
+      head -n 400 "$OUT/$id/inspect/$n.diff"
+    fi
+  done
+}
+
 # run_all <dir>: per program, <name>.embedded and <name>.stock hold stdout and
 # a last line `EXIT <code>`; a compile that fails leaves `COMPILE <code>`.
 run_all() {
@@ -56,6 +93,7 @@ echo "baseline build: $(( $(date +%s) - t0 )) s"
 "$ALMIDE" --version
 wasmtime --version
 run_all "$OUT/base"
+inspect "$OUT/base"
 echo "== the unmutated compiler"
 for p in $PROGS; do
   n="$(basename "$p" .almd)"
@@ -72,6 +110,8 @@ while IFS=$'\t' read -r -u 3 id file line genre name; do
   fi
   if build; then
     run_all "$OUT/$id"
+    inspect "$OUT/$id"
+    inspect_diff "$id"
     for p in $PROGS; do
       n="$(basename "$p" .almd)"
       for rt in embedded stock; do

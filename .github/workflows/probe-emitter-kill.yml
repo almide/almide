@@ -54,7 +54,16 @@ jobs:
           cargo mutants --list --json --package almide-wasm > "$RUNNER_TEMP/mutants/mutants.json"
           python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/mutants/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" 0 1 "$(paste -sd, scripts/probe-emitter-kill-ids.txt)"
           cat "$RUNNER_TEMP/pick/index.tsv" | cut -f1,2,3,5
+      - name: Install the module printer
+        run: |
+          cargo install --locked wasm-tools
+          wasm-tools --version
       - name: Measure
+        env:
+          # The two contract programs whose module the byte-level check
+          # rejected under this mutant: their text is printed for both
+          # compilers so the changed instructions can be read.
+          INSPECT: "spec/wasm_cross/json_many_keys.almd spec/wasm_cross/sql_highlight_tokens.almd"
         run: bash scripts/probe-emitter-kill.sh "$RUNNER_TEMP/kill" "$RUNNER_TEMP/pick"
       - name: Upload results
         if: always()
@@ -68,4 +77,6 @@ jobs:
             ${{ runner.temp }}/kill/m*/*.stock
             ${{ runner.temp }}/kill/m*/*.err
             ${{ runner.temp }}/kill/m*/*.build
+            ${{ runner.temp }}/kill/base/inspect
+            ${{ runner.temp }}/kill/m*/inspect
             ${{ runner.temp }}/pick/index.tsv
