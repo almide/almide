@@ -1,0 +1,4 @@
+check_target = "native"
+expects_code = "E081"
+expects_error = "has no implementation on the native target"
+hint_substring = "use a `List` and `list.contains`"

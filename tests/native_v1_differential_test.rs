@@ -377,9 +377,10 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // A C export outside the scalar rows still requires the standard
-        // codegen's wrapper (the scalar rows render: tests/export_c_abi_test.rs).
-        ("c_export", "@export(c, \"keep\")\nfn keep(h: Handle) -> Handle = h\nfn main() -> Unit = println(\"x\")\n"),
+        // A C export outside the rows the native adapters cover (a Region
+        // parameter) still walls (the scalar and Handle rows render:
+        // tests/export_c_abi_test.rs).
+        ("c_export", "import ffi\n\n@export(c, \"size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\nfn main() -> Unit = println(\"x\")\n"),
     ];
     for (name, src) in walls {
         let refusal = almide_mir::pipeline::try_render_rust_source(src)

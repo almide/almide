@@ -179,14 +179,15 @@ fn mir_emits_the_certificates_of_the_mir_the_native_route_ships() {
 #[test]
 fn a_program_the_native_route_walls_is_reported_uncertified() {
     // #4909: a shape the native render does not serve walls the whole
-    // program (here a Region a host fn returns, which no lent block can
-    // carry). The bundle names the wall and holds no witness, and the
-    // command fails — nothing falls back to another producer.
+    // program (here an `@export(c)` fn over a Region parameter, a row the
+    // native C adapters do not cover yet). The bundle names the wall and
+    // holds no witness, and the command fails — nothing falls back to
+    // another producer.
     let stage = Stage::new("mir-wall", true);
     let src = stage.dir.join("walled.almd");
     std::fs::write(
         &src,
-        "import ffi\n\n@extern(rust, \"host\", \"make\")\nfn make(n: Int) -> Region\n\neffect fn main() -> Unit = {\n  let r = make(4)\n  println(int.to_string(ffi.len(r)))\n}\n",
+        "import ffi\n\n@export(c, \"walled_size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\n\neffect fn main() -> Unit = println(\"walled\")\n",
     )
     .expect("source");
     let out = stage.dir.join("walled.bundle");

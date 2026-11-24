@@ -1,0 +1,4 @@
+check_target = "native"
+expects_code = "E090"
+expects_error = "returns a Region, which has no native form"
+hint_substring = "take its Region with `ffi.region(b)`"
