@@ -11,6 +11,3 @@
 #
 # class<TAB>program
 #
-# reject: the v1 render covers it, almide-verify rejects a witness (#4930).
-reject	research/benchmark/perf/native/cli_app.almd
-reject	research/benchmark/perf/onebrc/onebrc.almd
