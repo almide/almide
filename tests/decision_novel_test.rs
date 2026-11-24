@@ -331,3 +331,22 @@ fn novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused() {
     let o = run(&proj2, &["check", "src/main.almd"]);
     assert!(o.status.success(), "control: an effect fn running it through a value did not check:\n{}", text(&o));
 }
+
+/// verify.verify-command: `almide verify` pins its certificate to the module
+/// this build produces; a file of fresh bytes at the default output path of
+/// a fresh entry is refused as another module, never certified; with the
+/// file gone the bundle names no artifact (nothing is refused).
+#[test]
+fn novel_verify_refuses_a_fresh_file_that_is_not_the_built_module() {
+    let stem = novel::module();
+    let (_td, proj) = project(&[(&format!("{stem}.almd"), "effect fn main() -> Unit = println(\"hi\")\n".to_string())]);
+    let wasm = proj.join(format!("{stem}.wasm"));
+    std::fs::write(&wasm, format!("\0asm{}", novel::ident("bytes"))).unwrap();
+    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains("is not the module") && t.contains(&format!("{stem}.wasm")), "a file of fresh bytes was taken as the built module:\n{t}");
+    std::fs::remove_file(&wasm).unwrap();
+    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    assert!(!text(&o).contains("is not the module"), "control: with no file there is nothing to mismatch:\n{}", text(&o));
+}
