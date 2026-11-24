@@ -232,7 +232,7 @@ impl Emitter<'_> {
             // borrowed x (a parameter, a local still read after) takes its
             // share HERE, so the node hands its consumer one credit as a
             // construction would: without it the epilogue's release of x
-            // freed the block the caller received (a wasm trap). The share
+            // freed the block the caller received (a wasm trap, #4936). The share
             // is the carrier's share-out (#4278): its `rc_inc` lies in this
             // node's window, and x's line records `s`.
             // Read after lowering: a module call's ownership is the mark its
@@ -250,7 +250,7 @@ impl Emitter<'_> {
                     // recorder does not hold poisons.
                     let src = self.witness_src_local(expr);
                     if let Some(w) = self.witness.as_mut()
-                        && !w.arm_share_out(src)
+                        && !w.carrier_share_out(src)
                     {
                         w.poison();
                     }
