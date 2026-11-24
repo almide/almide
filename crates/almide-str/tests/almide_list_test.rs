@@ -605,9 +605,9 @@ fn an_extend_past_its_size_hint_grows_and_a_folded_extend_unwinds_cleanly() {
     assert_eq!(keep.len(), 3);
 }
 
-/// `map_indexed` and `extend_indexed` fill by the source's count: a unique source's elements move (no clone), a shared
-/// one's are cloned and its other owner keeps them, the fill appends after what the list holds, and a panic in `f`
-/// leaves every element, written or not, dropped exactly once.
+/// `extend_indexed` (and `map_owned` into a type of another layout, which takes it) fills by the source's count: a
+/// unique source's elements move (no clone), a shared one's are cloned and its other owner keeps them, the fill appends
+/// after what the list holds, and a panic in `f` leaves every element, written or not, dropped exactly once.
 #[test]
 fn an_indexed_fill_moves_or_clones_once_and_unwinds_cleanly() {
     let _window = MARKING_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
@@ -626,7 +626,8 @@ fn an_indexed_fill_moves_or_clones_once_and_unwinds_cleanly() {
     let (clones, drops) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
     let make = |n: i64| -> AlmideList<Counted> { (0..n).map(|k| Counted(clones.clone(), drops.clone(), k)).collect() };
 
-    let pairs: AlmideList<(i64, i64)> = make(4).map_indexed(|i, c| (i as i64, c.2 * 10));
+    let mut pairs: AlmideList<(i64, i64)> = AlmideList::new();
+    pairs.extend_indexed(make(4), |i, c| (i as i64, c.2 * 10));
     assert_eq!(pairs.as_slice(), &[(0, 0), (1, 10), (2, 20), (3, 30)]);
     assert_eq!((clones.get(), drops.get()), (0, 4), "a unique source moves each element once");
 
@@ -642,11 +643,13 @@ fn an_indexed_fill_moves_or_clones_once_and_unwinds_cleanly() {
 
     drops.set(0);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        make(5).map_indexed(|i, c| if i == 3 { panic!("f") } else { c })
+        make(5).map_owned(|c| if c.2 == 3 { panic!("f") } else { (c.2, c) })
     }));
     assert!(r.is_err());
     assert_eq!(drops.get(), 5, "three written, one handed to f, one never taken: each dropped once");
-    assert!(AlmideList::<i64>::new().map_indexed(|_, x| x).is_empty());
+    let mut empty: AlmideList<i64> = AlmideList::new();
+    empty.extend_indexed(AlmideList::<i64>::new(), |_, x| x);
+    assert!(empty.is_empty());
 }
 
 #[test]
