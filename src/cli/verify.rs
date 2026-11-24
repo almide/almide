@@ -197,26 +197,69 @@ fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Ve
     super::wasm_run_cache::reset_judged();
     almide_wasm::witness::start_collecting();
     let (bytes, rest) = make()?;
-    // A run-cache hit on this route is a module this verifier accepted
-    // before (entries are written only after acceptance, keyed by it).
+    // A run-cache hit on this route is a module this verifier CERTIFIED
+    // before (entries are written only after a certification, keyed by it).
     if super::wasm_run_cache::took_judged_hit() {
         let _ = almide_wasm::witness::take();
         return Ok((bytes, rest));
     }
-    if let Err(e) = gate_build(file, &bytes, &bytes, runner) {
-        err(&format!(
-            "error[certificate-rejected]: {file}: {e}\n  the module was not run: its own certificate does not hold, which is a compiler bug — please report it"
-        ));
-        std::process::exit(1);
+    match gate_build(file, &bytes, &bytes, runner) {
+        Ok(None) => super::wasm_run_cache::commit_judged(),
+        // C-462: an INCOMPLETE module let through by the flag is never
+        // cached as judged, so every run that reuses it warns again and a
+        // run without the flag refuses it.
+        Ok(Some(warning)) => err(&warning),
+        Err(e) => {
+            err(&format!("{}\n  the module was not run", refusal(file, &e)));
+            std::process::exit(1);
+        }
     }
-    super::wasm_run_cache::commit_judged();
     Ok((bytes, rest))
 }
 
+/// `--allow-incomplete-verification` (C-462): set once by the command line
+/// of `build`, `run`, `test` and `bench`, read by every [`gate_build`] the
+/// command makes (a test lane judges on its own thread, so not a
+/// thread-local).
+static ALLOW_INCOMPLETE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Record the command line's `--allow-incomplete-verification`.
+pub(crate) fn set_allow_incomplete(allow: bool) {
+    ALLOW_INCOMPLETE.store(allow, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn allow_incomplete() -> bool {
+    ALLOW_INCOMPLETE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The error a refused certificate prints: an INCOMPLETE one is the
+/// compiler declining to certify (not a bug report), a REJECTED one is a
+/// certificate that does not hold.
+pub(super) fn refusal(file: &str, e: &str) -> String {
+    if e.contains("judged this build's certificate INCOMPLETE") {
+        format!("error[certificate-incomplete]: {file}: {e}")
+    } else {
+        format!("error[certificate-rejected]: {file}: {e}\n  its own certificate does not hold, which is a compiler bug — please report it")
+    }
+}
+
+/// The warning an INCOMPLETE certificate let through by the flag prints,
+/// one line per uncertified function.
+fn incomplete_warning(file: &str, uncertified: &[(String, String)]) -> String {
+    format!(
+        "warning[verification-incomplete]: {file}: passed under {} with {} uncertified function(s):\n{}",
+        almide::certificate_gate::ALLOW_INCOMPLETE_FLAG,
+        uncertified.len(),
+        almide::certificate_gate::uncertified_lines(uncertified).iter().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n")
+    )
+}
+
 /// The judging verifier's identity for the run cache's judged entries: the
-/// linked `almide-verify` library's version and formats.
+/// linked `almide-verify` library's version and formats, and the policy the
+/// entries were judged under (since C-462 only CERTIFIED modules are stored;
+/// before it an INCOMPLETE one was too, so the older entries stay apart).
 pub(super) fn verifier_identity() -> String {
-    format!("linked almide-verify {} ({})", almide_verify::VERSION, almide_verify::FORMATS)
+    format!("linked almide-verify {} ({}); incomplete refused", almide_verify::VERSION, almide_verify::FORMATS)
 }
 
 /// The build gate (#4011, row 3 of the security table): the certificate of
@@ -224,14 +267,16 @@ pub(super) fn verifier_identity() -> String {
 /// to the exact bytes about to be written, judged by the `almide-verify`
 /// library linked into this binary (#4836, owner ruling 2026-11-24: a
 /// verifier that may be absent left the build unjudged — "not installed"
-/// cannot happen now). `Ok(())` when it CERTIFIES the bundle, or reports it
-/// INCOMPLETE (every witness accepted, some function declared uncertified —
-/// nothing is contradicted); `Err` with the verdict lines when it REJECTS a
-/// witness, the artifact's hash, or cannot read the bundle: the build then
-/// refuses to write the artifact. The verifier crate links no compiler crate
+/// cannot happen now). `Ok(None)` when it CERTIFIES the bundle; `Ok(Some(
+/// warning))` when it is INCOMPLETE (every witness accepted, some function
+/// declared uncertified) and `--allow-incomplete-verification` was given
+/// (C-462) — the warning names every uncertified function; `Err` with the
+/// verdict lines when it is INCOMPLETE without the flag, REJECTS a witness
+/// or the artifact's hash, or cannot read the bundle: the build then refuses
+/// to write the artifact. The verifier crate links no compiler crate
 /// (crates/almide-verify/Cargo.toml), so the judge stays independent code;
 /// `almide verify` still hands a bundle to the standalone binary.
-pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<(), String> {
+pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<Option<String>, String> {
     let allow = manifest_allow(file).map(|mut a| {
         a.extend(runner.iter().map(|g| g.to_string()));
         a
@@ -247,7 +292,10 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&
         &records,
         &uncertified,
     );
-    almide::certificate_gate::judge(text.as_bytes(), shipped)
+    match almide::certificate_gate::judge(text.as_bytes(), shipped, allow_incomplete())? {
+        almide::certificate_gate::Pass::Certified => Ok(None),
+        almide::certificate_gate::Pass::IncompleteAllowed(u) => Ok(Some(incomplete_warning(file, &u))),
+    }
 }
 
 /// One framing-safe line: a name or reason may not break the bundle's lines.
