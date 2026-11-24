@@ -1,0 +1,10 @@
+// The probe of verify.wasi-e081-availability: a call whose runtime reaches
+// std::process::id, which wasm32-wasip1 aborts on (E081, #4913 / #4918).
+import process
+
+effect fn who() -> Int = process.pid()
+
+effect fn main() -> Unit = {
+  let p = who()
+  println("pid ${p}")
+}
