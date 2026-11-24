@@ -661,3 +661,18 @@ mod runtime_visibility_tests {
         assert!(!output.contains("pub fn drop"));
     }
 }
+
+#[cfg(test)]
+mod const_generic_head_tests {
+    use super::*;
+    #[test]
+    fn a_const_generic_argument_block_stays_in_the_impl_head() {
+        let src = "impl<const D: i64> R<{ D }> { pub const M: i64 = D; } pub struct S; impl Tr<{ 1 }> for T<{ 2 }> where T<{ 2 }>: Copy, { fn f() -> Vec<u8> { vec![] } } fn g() -> Box<dyn Fn(i64) -> i64> { todo!() }";
+        let items = top_level_items(src);
+        let names: Vec<_> = items.iter().map(|(_, n, _, _)| *n).collect();
+        assert_eq!(names, ["R", "S", "T", "g"], "{:?}", items.iter().map(|i| i.2).collect::<Vec<_>>());
+        assert_eq!(items[0].2, "impl<const D: i64> R<{ D }> { pub const M: i64 = D; }");
+        assert!(items[2].2.ends_with("{ vec![] } }"));
+        assert!(items[3].2.ends_with("{ todo!() }"));
+    }
+}
