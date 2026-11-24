@@ -1,5 +1,7 @@
 // ── C FFI extern codegen ──────────────────────────────────────
 
+use almide_ir::annotations::HostFaceParam;
+
 /// Render `@extern(rust, "module", "function")` as a thin wrapper that
 /// delegates to `module::function(..)`.
 ///
@@ -429,13 +431,7 @@ fn render_lent_region(region_ty: &str, name: &str, writable: bool) -> String {
 /// from the generated one: a List or Bytes, or one inside an Option / Result /
 /// tuple / Set / Map. Strings are `AlmideString` on both sides.
 fn callback_host_differs(ty: &Ty) -> bool {
-    use almide_lang::types::TypeConstructorId as C;
-    match ty {
-        Ty::Bytes | Ty::Applied(C::List, _) => true,
-        Ty::Applied(C::Set | C::Option | C::Result | C::Map, args) => args.iter().any(callback_host_differs),
-        Ty::Tuple(elems) => elems.iter().any(callback_host_differs),
-        _ => false,
-    }
+    crate::pass_host_faces::host_spelling_differs(ty)
 }
 
 /// The host spelling of `ty`: std's `Vec` for a list in a structural position.
@@ -492,12 +488,18 @@ fn callback_face_ret(f: &IrFunction) -> Ty {
 
 /// Whether the pub module fn `f` gets a host face: a package's own fn, not
 /// generic, whose signature spells a list where the host passes or receives it.
-fn callback_face_applies(f: &IrFunction) -> bool {
+fn callback_face_applies(ctx: &RenderContext, f: &IrFunction) -> bool {
     let user_module = f.module_origin.as_deref().is_some_and(|o| !almide_lang::stdlib_info::is_any_stdlib(o));
     let plain = !f.is_test && f.extern_attrs.is_empty() && matches!(f.visibility, IrVisibility::Public)
         && f.generics.as_ref().is_none_or(|g| g.is_empty()) && f.ret_ty != Ty::Never;
-    let crosses = |p: &IrParam| !matches!(p.ty, Ty::Fn { .. }) && !matches!(p.borrow, ParamBorrow::RefStr) && callback_host_differs(&p.ty);
+    let crosses = |p: &IrParam| host_face_param(ctx, p) != HostFaceParam::Direct;
     user_module && plain && (f.params.iter().any(crosses) || callback_host_differs(&callback_face_ret(f)))
+}
+
+/// How `p` crosses the host face: `HostFacePass`'s verdict, published for
+/// every param of every fn.
+fn host_face_param(ctx: &RenderContext, p: &IrParam) -> HostFaceParam {
+    *ctx.ann.host_face_params.get(&p.var).expect("HostFacePass publishes every fn param's host-face conversion")
 }
 
 /// The face `pub fn <public>` in the host's spelling over the fn emitted as `inner`.
@@ -507,29 +509,30 @@ fn render_callback_face(ctx: &RenderContext, f: &IrFunction, public: &str, inner
     let (mut params, mut args, mut before, mut after) = (Vec::new(), Vec::new(), String::new(), String::new());
     for p in &f.params {
         let name = fn_ctx.param_ident(p);
-        if matches!(p.ty, Ty::Fn { .. }) || matches!(p.borrow, ParamBorrow::RefStr) || !callback_host_differs(&p.ty) {
+        let mode = host_face_param(ctx, p);
+        if mode == HostFaceParam::Direct {
             params.push(format!("{name}: {}", fn_param_type_str(&fn_ctx, p)));
             args.push(name);
             continue;
         }
         let host = callback_host_type(ctx, &p.ty);
         let local = format!("__almide_{name}");
-        match (p.borrow, &p.ty) {
-            (ParamBorrow::Own, Ty::Applied(C::List, a)) if !callback_host_differs(&a[0]) => {
+        match (mode, &p.ty) {
+            (HostFaceParam::OwnList, _) => {
                 params.push(format!("{name}: {host}"));
                 args.push(format!("AlmideList::from({name})"));
             }
-            (ParamBorrow::Own, _) => {
+            (HostFaceParam::OwnCopy, _) => {
                 params.push(format!("{name}: {host}"));
                 args.push(callback_face_conv(&format!("&{name}"), &p.ty, false, 0));
             }
-            (ParamBorrow::RefMut, _) => {
+            (HostFaceParam::MutCopyBack, _) => {
                 params.push(format!("{name}: &mut {host}"));
                 before.push_str(&format!("    let mut {local} = {};\n", callback_face_conv(&format!("&*{name}"), &p.ty, false, 0)));
                 after.push_str(&format!("    *{name} = {};\n", callback_face_conv(&format!("&{local}"), &p.ty, true, 0)));
                 args.push(format!("&mut {local}"));
             }
-            (ParamBorrow::RefSlice, Ty::Applied(_, a)) if !a.is_empty() => {
+            (HostFaceParam::SliceCopy, Ty::Applied(_, a)) => {
                 params.push(format!("{name}: &[{}]", callback_host_type(ctx, &a[0])));
                 before.push_str(&format!("    let {local}: AlmideList<_> = {name}.iter().map(|__x0| {}).collect();\n", callback_face_conv("__x0", &a[0], false, 1)));
                 args.push(format!("&{local}[..]"));
@@ -572,7 +575,7 @@ fn rename_ident(text: &str, from: &str, to: &str) -> String {
 /// appended under the public symbol.
 fn render_callback_faces(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
     let faces: Vec<(String, String, &IrFunction)> = program.functions.iter()
-        .filter(|f| callback_face_applies(f))
+        .filter(|f| callback_face_applies(ctx, f))
         .map(|f| {
             let public = module_fn_symbol(f.name.as_str(), f.module_origin.as_deref().unwrap_or_default());
             (format!("almd_{public}"), public, f)
