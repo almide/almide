@@ -46,10 +46,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "104"
+# unstamped_ceiling     = "103"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "163"
-# failopen_ceiling      = "26"
+# failopen_ceiling      = "25"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -169,6 +169,9 @@
 #               declaration / type / reach source (owner ruling 2026-11-23); unstamped 104 -> 103.
 #   2026-11-23  merge of develop (#4917): the C-460 / shape-rules lowering (103 / 163 / 25)
 #               plus verify.wasi-e081-availability (unstamped, fail-open) = 104 / 163 / 26.
+#   2026-11-24  #4918: verify.wasi-e081-availability decides from the declared row OR the
+#               derived runtime reach (unknown -> refuse) and is stamped; unstamped 104 -> 103,
+#               fail-open 26 -> 25.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3660,19 +3663,21 @@ keys = [
   "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S1::E081",
   "src/cli/wasm_compile.rs::check_wasi_rustc_availability::S3::ALMIDE_NO_AVAIL_CHECK",
 ]
-decides = "a reachable call to a stdlib fn whose proofs/target-availability.toml row declares the rustc-wasip1 leg is E081 on build / check --target wasi (#4913)"
-from = "name"
-unknown = "allow"
-unknown_note = "the same name-keyed table and reachable-body scan as verify.wasm-e081-availability (scan_unavailable); a runtime fn with no rustc-wasip1 row is admitted, and this route has no render wall behind it: the module builds and the call aborts at run time on wasip1"
-routes = { check = "runs: --target wasi only (check.rs check_one)", check_json = "runs: check --json --target wasi (wasi_rustc_refusals)", check_effects = "n.a.", run = "n.a.: native", build = "n.a.: native", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "n.a.: the embedded host answers it (stock-p1 / embedded legs are verify.wasm-e081-availability)", wasi = "runs", component = "n.a.: stock-p1 leg (verify.wasm-e081-availability)", lsp = "n.a.", mcp = "n.a.: almide_check offers target = wasm only", emit = "n.a." }
-tests = [
-  "tests/wasi_rustc_availability_test.rs",
-  "tests/diagnostics/e081-process-pid-wasi",
-  "tests/diagnostics/e081-pid-through-helper-wasi",
-]
+decides = "a reachable call to a stdlib fn whose proofs/target-availability.toml row declares the rustc-wasip1 leg, or whose runtime reaches a call wasm32-wasip1 aborts on, is E081 on build / check --target wasi (#4913, #4918)"
+from = "mixed:declaration+reach"
+unknown = "refuse"
+unknown_note = "a reachable call is refused when its proofs/target-availability.toml row declares the rustc-wasip1 leg (the declaration) OR when its @intrinsic runtime fn reaches, through the fns of its own runtime module, a std call wasm32-wasip1 implements as an abort (runtime_reach::WASIP1_ABORTING_CALLS: process::id, thread::spawn; #4918). A fn with no row is decided by that reach, so an unknown fn that would abort is refused; a call the platform answers with an err (Command::spawn, Builder::spawn) is served. Derived today: process.pid, unix.__os_shm_create (via unix.shm_create)"
+routes = { check = "runs: --target wasi only (check.rs check_one)", check_json = "runs: check --json --target wasi (wasi_rustc_refusals)", check_effects = "n.a.: --effects lists effects and takes no --target wasi", run = "n.a.: native", build = "n.a.: native", test = "n.a.: the test lanes are native and the embedded wasm host, never rustc-wasip1", bench = "n.a.: bench runs native or the embedded host, never rustc-wasip1", native = "n.a.: the native target has a pid and threads", wasm = "n.a.: the embedded host answers it (stock-p1 / embedded legs are verify.wasm-e081-availability)", wasi = "runs", component = "n.a.: stock-p1 leg (verify.wasm-e081-availability)", lsp = "n.a.: the LSP checks with no target, so no rustc-wasip1 leg", mcp = "n.a.: almide_check offers target = wasm only", emit = "n.a.: emit renders Rust source; the rustc-wasip1 compile is build --target wasi" }
+tests = ["tests/wasi_rustc_availability_test.rs", "tests/wasi_aborting_derivation_test.rs", "tests/diagnostics/e081-process-pid-wasi", "tests/diagnostics/e081-pid-through-helper-wasi"]
 issues = [4913, 4918]
-status = "UNSTAMPED"
-reasons = ["c1:name table (as verify.wasm-e081-availability)", "c2:unknown = allow (a fn with no rustc-wasip1 row builds and aborts at run time; #4918, closed before the final under ruling B)", "c3:cells not observed by the route matrix (no probe)", "c4:no control run (no build VM)"]
+status = "STAMPED"
+reasons = []
+novel = "tests/wasi_aborting_derivation_test.rs::novel_a_fresh_intrinsic_reaching_an_aborting_call_is_derived_unavailable"
+control_test = "tests/wasi_aborting_derivation_test.rs::every_derived_fn_is_refused_by_check_on_the_wasi_route"
+control_patch = "proofs/decision-controls/verify.wasi-e081-availability.patch"
+probe = "tests/decision-probes/verify.wasi-e081-availability"
+control_seen = "c47892ca13 2026-11-24 ds-2 (tree = c47892ca13 + this row, the probe fix): base green, patched red (scripts/run-decision-controls.sh); route matrix observed every runs cell refusing the probe"
+stamp = "c47892ca13 2026-11-24"
 
 [[site]]
 id = "verify.wasm-e082-wall"
