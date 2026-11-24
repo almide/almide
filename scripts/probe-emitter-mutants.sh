@@ -42,6 +42,11 @@ export BASE="$OUT/base"
 export T_EMIT="${T_EMIT:-60}"
 export T_CHECK="${T_CHECK:-60}"
 export T_RUN="${T_RUN:-30}"
+# Address space, in kB, that one compile or witness emission, and one checker,
+# may reserve. Four run at a time, so four times the larger of the two has to
+# fit in the machine. The checkers were not limited in the first runs.
+export V_EMIT="${V_EMIT:-6000000}"
+export V_CHECK="${V_CHECK:-unlimited}"
 # Seconds one mutant may take in all, after its build.
 T_MUTANT="${T_MUTANT:-1500}"
 # Of the first 40 programs, how many may time out in the compiler before the
@@ -62,9 +67,9 @@ emit() {
   local f="$1" d="$2" n rc=0
   n="$(name_of "$f")"
   rm -f "$d/$n".*
-  ( ulimit -v 6000000; timeout "$T_EMIT" "$ALMIDE" build "$f" --target wasm -o "$d/$n.wasm" > "$d/$n.cerr" 2>&1 < /dev/null ) || rc=$?
+  ( ulimit -v "$V_EMIT"; timeout "$T_EMIT" "$ALMIDE" build "$f" --target wasm -o "$d/$n.wasm" > "$d/$n.cerr" 2>&1 < /dev/null ) || rc=$?
   if [ "$rc" -eq 0 ]; then
-    ( ulimit -v 6000000; timeout "$T_EMIT" "$PRODUCER" "$f" --artifact "$d/$n.wasm" --anchors "$d/$n.anchors" > "$d/$n.bundle" 2> "$d/$n.perr" < /dev/null ) || rc=$((1000 + $?))
+    ( ulimit -v "$V_EMIT"; timeout "$T_EMIT" "$PRODUCER" "$f" --artifact "$d/$n.wasm" --anchors "$d/$n.anchors" > "$d/$n.bundle" 2> "$d/$n.perr" < /dev/null ) || rc=$((1000 + $?))
   fi
   echo "$rc" > "$d/$n.rc"
 }
@@ -76,9 +81,9 @@ export -f emit
 ask() {
   local f="$1" d="$2" n
   n="$(name_of "$f")"
-  timeout "$T_CHECK" "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1 < /dev/null
+  ( ulimit -v "$V_CHECK"; timeout "$T_CHECK" "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1 < /dev/null )
   echo $? > "$d/$n.vrc"
-  timeout "$T_CHECK" "$ANCHORCHECK" --census "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1 < /dev/null
+  ( ulimit -v "$V_CHECK"; timeout "$T_CHECK" "$ANCHORCHECK" --census "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1 < /dev/null )
   echo $? > "$d/$n.arc"
 }
 export -f ask
@@ -247,6 +252,7 @@ one_mutant() {
 
 while IFS=$'\t' read -r id file line genre name; do
   [ -n "$id" ] || continue
+  echo "-- $id: $(awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo) MB of memory available"
   one_mutant "$id" "$file" "$line" "$genre" "$name"
   if ! git diff --quiet -- crates; then
     echo "tree not clean after mutant $id; restoring"

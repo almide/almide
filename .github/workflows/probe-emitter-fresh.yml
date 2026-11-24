@@ -48,15 +48,28 @@ jobs:
           name: emitter-mutants-list
           path: ${{ runner.temp }}/mutants
 
+  # Shard 9 of the sixteen lost its runner while judging one mutant and
+  # uploaded nothing. Its thirty mutants are judged again here in three parts,
+  # that mutant alone in the first, with an address-space limit on every
+  # checker process as well (V_CHECK) so that a certificate a checker cannot
+  # read in bounded memory ends that one process and not the machine.
   shard:
-    name: Shard ${{ matrix.shard }}
+    name: Shard 9, part ${{ matrix.part }}
     needs: list
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    env:
+      V_CHECK: "3000000"
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        include:
+          - part: a
+            ids: "m0457"
+          - part: b
+            ids: "m0009,m0025,m0041,m0057,m0073,m0089,m0105,m0121,m0137,m0153,m0169,m0185,m0201,m0217,m0233"
+          - part: c
+            ids: "m0249,m0265,m0281,m0297,m0313,m0329,m0345,m0361,m0377,m0393,m0409,m0425,m0441,m0473"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -73,14 +86,14 @@ jobs:
           name: emitter-mutants-list
           path: ${{ runner.temp }}/list
       - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$ONLY_IDS"
+        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" 0 1 "${{ matrix.ids }}"
       - name: Measure
         run: bash scripts/probe-emitter-mutants.sh "$RUNNER_TEMP/emut" "$RUNNER_TEMP/pick"
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: emitter-mutants-${{ matrix.shard }}
+          name: emitter-mutants-9${{ matrix.part }}
           path: |
             ${{ runner.temp }}/emut/results.tsv
             ${{ runner.temp }}/emut/detail
