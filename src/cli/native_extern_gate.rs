@@ -12,6 +12,12 @@
 //! body natively. Plain `almide check` stays the language check every target
 //! shares, so a program written for the JS host checks clean; `--target wasm`
 //! / `--target wasi` judge their own routes.
+//!
+//! The same routes refuse, with their own diagnostics, the two shapes the
+//! verified native render has no form for (owner ruling 2026-11-24: before
+//! a wall became a build error, each known shape outside the corpus is
+//! rendered or refused here): an `@extern(rust)` fn returning a `Region`
+//! (E090) and a `Set` whose element holds a nested `Float` (E081).
 
 use almide::ir::{IrExprKind, IrFunction, IrProgram};
 
@@ -46,20 +52,141 @@ fn unbound(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
     top.chain(modules).collect()
 }
 
-/// The refusals for `ir` on the native target, one `error[E081]` text per fn.
-pub(crate) fn refusals(ir: &IrProgram, file: &str) -> Vec<(&'static str, String)> {
-    unbound(ir)
+/// The fns the native program reaches, as `(display name, fn, line in the
+/// entry file)`, in declaration order.
+fn reachable_fns(ir: &IrProgram) -> Vec<(String, &IrFunction, Option<usize>)> {
+    let reachable = almide::codegen::reachability::reachable_native_program(ir);
+    let is_reachable = |module: Option<&str>, name: &str| {
+        almide::codegen::reachability::registered_keys(module, name).iter().any(|k| reachable.contains(k))
+    };
+    let top = ir.functions.iter().filter(|f| is_reachable(None, f.name.as_str())).map(|f| (f.name.to_string(), f, f.body.span.map(|s| s.line)));
+    let modules = ir.modules.iter().flat_map(|m| {
+        let mname = m.name.to_string();
+        m.functions
+            .iter()
+            .filter(move |f| is_reachable(Some(&mname), f.name.as_str()))
+            .map(move |f| (format!("{}.{}", m.name.as_str(), f.name.as_str()), f, None))
+    });
+    top.chain(modules).collect()
+}
+
+/// #4006 (owner ruling 2026-11-24, the flip): a reachable `@extern(rust)` fn
+/// whose return carries a `Region`. The Rust host ABI lends a Region IN as its
+/// `(ptr, len)` for the call; nothing defines a Region coming OUT of a Rust
+/// host (whose allocation, which length, who frees it), so a native binary
+/// has no verified form for it. `@extern(c)` states those with
+/// `@region(len = …, release = "…")` (ADR-0031 D2).
+fn rust_region_returns(ir: &IrProgram) -> Vec<(String, Option<usize>)> {
+    use almide::types::extern_abi::{is_region, native_extern_kind, NativeExtern};
+    reachable_fns(ir)
         .into_iter()
-        .map(|(name, attrs, line)| {
-            let at = line.map(|l| format!("\n  --> {file}:{l}")).unwrap_or_default();
-            ("E081", format!(
-                "error[E081]: `{name}` has no implementation on the native target{at}\n  \
-                 reason: it is declared only {attrs} and has no Almide body, so a native binary has nothing to run when it is called\n  \
-                 try: build it for its host (`almide build {file} --target wasm --host js`), add an `@extern(rust, ...)` or `@extern(c, ...)` binding, or give the fn an Almide body the native build runs\n  \
-                 note: C-461; the wasm route (`almide check --target wasm`) binds the import"
-            ))
+        .filter(|(_, f, _)| {
+            f.extern_attrs.iter().find_map(|a| native_extern_kind(a.target.as_str())) == Some(NativeExtern::Rust)
+                && f.ret_ty.any_node(&mut |t| is_region(t))
+        })
+        .map(|(name, _, line)| (name, line))
+        .collect()
+}
+
+/// #4006 (owner ruling 2026-11-24, the flip): a `Set` whose element holds a
+/// `Float` below its top level (`Set[List[Float]]`, `Set[Option[Float]]`, a
+/// record or tuple with a Float field). Set membership is the element's `==`,
+/// IEEE on every Float inside it (`[0.0] == [-0.0]`, `[nan] != [nan]`); the
+/// native render carries a nested Float as its bits, so it has no element
+/// equality that agrees, and refuses the set. A top-level `Float` element is
+/// a real `f64` in the set and is served.
+fn inexact_sets(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
+    use almide::ir::{IrExpr, IrStmt, IrStmtKind, IrTypeDecl, IrTypeDeclKind, IrVariantKind, IrVisitor};
+    use almide::types::{Ty, TypeConstructorId};
+    let decls: Vec<&IrTypeDecl> = ir.type_decls.iter().chain(ir.modules.iter().flat_map(|m| &m.type_decls)).collect();
+    fn holds_float(t: &Ty, decls: &[&IrTypeDecl], seen: &mut Vec<String>) -> bool {
+        t.any_node(&mut |n| match n {
+            Ty::Float | Ty::Float32 | Ty::Float64 => true,
+            Ty::Named(name, _) if !seen.iter().any(|s| s == name.as_str()) => {
+                seen.push(name.to_string());
+                decls.iter().filter(|d| d.name == *name).any(|d| {
+                    let members: Vec<&Ty> = match &d.kind {
+                        IrTypeDeclKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+                        IrTypeDeclKind::Alias { target } => vec![target],
+                        IrTypeDeclKind::Variant { cases, .. } => cases.iter().flat_map(|c| match &c.kind {
+                            IrVariantKind::Unit => vec![],
+                            IrVariantKind::Tuple { fields } => fields.iter().collect(),
+                            IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+                        }).collect(),
+                    };
+                    members.into_iter().any(|m| holds_float(m, decls, seen))
+                })
+            }
+            _ => false,
+        })
+    }
+    let inexact = |t: &Ty| -> Option<Ty> {
+        let mut found = None;
+        t.any_node(&mut |n| {
+            if let Ty::Applied(TypeConstructorId::Set, a) = n {
+                if a.len() == 1 && !matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64) && holds_float(&a[0], &decls, &mut Vec::new()) {
+                    found = Some(n.clone());
+                    return true;
+                }
+            }
+            false
+        });
+        found
+    };
+    struct Types<'a, F: Fn(&Ty) -> Option<Ty>>(&'a F, Option<Ty>);
+    impl<F: Fn(&Ty) -> Option<Ty>> IrVisitor for Types<'_, F> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.1.is_none() { self.1 = (self.0)(&e.ty); }
+            almide::ir::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let (None, IrStmtKind::Bind { ty, .. }) = (&self.1, &s.kind) { self.1 = (self.0)(ty); }
+            almide::ir::walk_stmt(self, s);
+        }
+    }
+    reachable_fns(ir)
+        .into_iter()
+        .filter_map(|(name, f, line)| {
+            let sig = f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)).find_map(|t| inexact(t));
+            let ty = sig.or_else(|| {
+                let mut v = Types(&inexact, None);
+                v.visit_expr(&f.body);
+                v.1
+            })?;
+            Some((name, ty.display().to_string(), line))
         })
         .collect()
+}
+
+/// The refusals for `ir` on the native target, one error text per fn.
+pub(crate) fn refusals(ir: &IrProgram, file: &str) -> Vec<(&'static str, String)> {
+    let at = |line: Option<usize>| line.map(|l| format!("\n  --> {file}:{l}")).unwrap_or_default();
+    let unbound = unbound(ir).into_iter().map(|(name, attrs, line)| {
+        ("E081", format!(
+            "error[E081]: `{name}` has no implementation on the native target{}\n  \
+             reason: it is declared only {attrs} and has no Almide body, so a native binary has nothing to run when it is called\n  \
+             try: build it for its host (`almide build {file} --target wasm --host js`), add an `@extern(rust, ...)` or `@extern(c, ...)` binding, or give the fn an Almide body the native build runs\n  \
+             note: C-461; the wasm route (`almide check --target wasm`) binds the import",
+            at(line)
+        ))
+    });
+    let regions = rust_region_returns(ir).into_iter().map(|(name, line)| {
+        ("E090", format!(
+            "error[E090]: `@extern(rust)` fn `{name}` returns a Region, which has no native form{}\n  \
+             reason: a Rust host takes a Region as its `(ptr, len)` for the call; no ABI says how one comes back — whose allocation, which length, who frees it\n  \
+             try: return `Bytes` (the host's `Vec<u8>`) and take its Region with `ffi.region(b)`, or bind the C function with `@extern(c, ...)` and `@region(len = n, release = \"free_fn\")` (ADR-0031 D2)",
+            at(line)
+        ))
+    });
+    let sets = inexact_sets(ir).into_iter().map(|(name, ty, line)| {
+        ("E081", format!(
+            "error[E081]: fn `{name}` holds a `{ty}`, which has no implementation on the native target{}\n  \
+             reason: a Set's membership is its element's `==`, IEEE on every Float inside the element; the verified native render carries a nested Float as its bits and has no element equality that agrees\n  \
+             try: key the set by a value without a nested Float (an `Int` or `String` key), use a `List` and `list.contains`, or build it for wasm (`--target wasm`)",
+            at(line)
+        ))
+    });
+    unbound.chain(regions).chain(sets).collect()
 }
 
 /// Print `ir`'s native refusals; `Err` when there was one.

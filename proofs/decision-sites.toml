@@ -3494,6 +3494,32 @@ reasons = [
 note = "Documented honest-wall design (mod.rs:416-422, 490-498); recorded as a pass/fallback site, not a refusal: the verified render's refusal never refuses the build."
 
 [[site]]
+id = "witness.native-route-refusals"
+at = "src/cli/native_extern_gate.rs::refusals"
+items = [
+  "src/cli/native_extern_gate.rs::refusals",
+]
+keys = [
+  "src/cli/native_extern_gate.rs::refusals::S1::E081",
+  "src/cli/native_extern_gate.rs::refusals::S1::E090",
+]
+decides = "the native build route refuses, before any render, a reachable @extern fn with no native binding and no body (E081, C-461), an @extern(rust) fn returning a Region (E090, C-464) and a fn holding a Set whose element holds a nested Float (E081, C-464)"
+from = "mixed:declaration+type+reach"
+unknown = "refuse"
+unknown_note = "reachability is reachable_native_program (main, @export(c), top-level lets); a type the scan cannot resolve (an undeclared Named) is not refused here and walls in the render instead"
+routes = { check = "n.a.: plain check is the shared language check (owner ruling W1)", check_json = "runs: check --json --target native (check.rs check_json_one)", check_effects = "n.a.", run = "runs", build = "runs", test = "n.a.: the native test harness keeps a typed hole", bench = "runs (the v1 program)", native = "runs: build/run/bench/verify --mir and check --target native", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a.: --target rust is a declared unverified route (C-463)" }
+tests = [
+  "tests/diagnostics/e081-extern-no-native-binding/broken.almd",
+  "tests/diagnostics/e090-extern-rust-region-return/broken.almd",
+  "tests/diagnostics/e081-set-of-nested-floats/broken.almd",
+]
+control_note = "tests/diagnostic_harness_test.rs runs each broken.almd with check --target native"
+issues = [4006]
+status = "UNSTAMPED"
+reasons = ["c3: no control patch yet"]
+note = "C-461 (W1) and C-464 (owner ruling 2026-11-24: the shapes outside the corpus are rendered or refused before the flip)."
+
+[[site]]
 id = "witness.codegen-ownership-certifier"
 at = "crates/almide-codegen/src/lib.rs::codegen (certify_ownership block)"
 items = [
