@@ -46,7 +46,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "84"
+# unstamped_ceiling     = "83"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
 # failopen_ceiling      = "20"
@@ -2092,19 +2092,27 @@ items = [
 keys = [
   "crates/almide-codegen/src/pass.rs::Pipeline::run::S3::ALMIDE_SHUFFLE_PASSES",
 ]
-decides = "ALMIDE_SKIP_PASS skips the named codegen passes (comma list)"
-from = "text"
-unknown = "n.a."
-unknown_note = "pass names matched as text; an unknown name skips nothing. FanLowering (the @ordered serialization) and MeterCharge are skippable; the IR verifier is not. Ablation scope: ignored under the release lock unless --allow-switch names it"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "native", build = "native", test = "native", bench = "native", native = "runs", wasm = "unknown", wasi = "unknown", component = "unknown", lsp = "n.a.", mcp = "n.a.", emit = "runs" }
+decides = "ALMIDE_SKIP_PASS (Ablation, ignored under the release lock) skips the named codegen passes; a name that is no pass any target's pipeline declares is refused"
+from = "declaration"
+unknown = "refuse"
+unknown_note = "the names are read against the passes every target's pipeline declares (target.rs::every_pass_name, Rust and Wgsl, so a name valid for one target is not refused on the other); a name that is no declared pass panics at the read (pass.rs Pipeline::run) instead of skipping nothing (novel test with a fresh name, alone and after an empty item). The release lock (env.shuffle-passes' lock half) still holds it on a release build"
+routes = { check = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_json = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_effects = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", run = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", build = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", test = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", bench = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", native = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", wasm = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: run / build / test / bench --target wasm, no refusal)", wasi = "runs: the rustc wasi route renders through the codegen pipeline (observed 2026-11-24 on a09368d423, route matrix ds-2: refused inside and outside the project)", component = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: --component, no refusal)", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)" }
 tests = [
+  "tests/decision_skip_pass_novel_test.rs::novel_a_skip_pass_naming_no_declared_pass_is_refused",
   "tests/switch_lock_test.rs",
 ]
-control_note = "tests/switch_lock_test.rs (generic lock control)"
+control_note = "proofs/decision-controls/env.skip-pass.patch disables the unknown-name refusal; tests/switch_lock_test.rs (generic lock control)"
 issues = []
 status = "UNSTAMPED"
-reasons = ["c1:text (pass names)", "locked (Ablation); can skip FanLowering and MeterCharge", "c4:no-control (a neuter is located in the row's note; not run)"]
-note = "pass.rs:505-507; env.rs:226. ALMIDE_ONLY_PASS (optimize/mod.rs) and ALMIDE_DISABLE_OPT are the same class (Ablation, locked)."
+reasons = [
+  "c3: run / build / test / native read the switch only through the codegen fallback of a v1-walled program (#4006, owned elsewhere); a v1-rendered program never enters the codegen pipeline (observed 2026-11-24 ds-2: no refusal), so those cells are neither runs nor n.a.",
+]
+note = "pass.rs Pipeline::run (the read and the refusal), target.rs::every_pass_name; env.rs SWITCHES (Ablation). ALMIDE_ONLY_PASS (optimize/mod.rs) and ALMIDE_DISABLE_OPT are the same class (Ablation, locked). A warm build cache does not mask the switch (observed: the refusal on a second run of the same program)."
+novel = "tests/decision_skip_pass_novel_test.rs::novel_a_skip_pass_naming_no_declared_pass_is_refused"
+control_patch = "proofs/decision-controls/env.skip-pass.patch"
+control_test = "tests/decision_skip_pass_novel_test.rs::novel_a_skip_pass_naming_no_declared_pass_is_refused"
+control_seen = "a09368d423 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; panic at tests/decision_skip_pass_novel_test.rs:34, 'skipped nothing and emitted') (24th engineer)"
+probe = "tests/decision-probes/env.skip-pass"
 
 [[site]]
 id = "env.ci-slice"
@@ -2952,30 +2960,36 @@ items = [
   "src/native_grant.rs::native_code_of",
   "src/native_grant.rs::almd_files",
   "src/native_grant.rs::native_fns",
+  "src/native_grant.rs::is_granted",
+  "src/project.rs::NativeGrant::covers",
 ]
 keys = []
-decides = "a fetched dependency that brings native/ files, [native-deps] crates, @extern(rust|c) fns or @inline_rust/@intrinsic/@wasm_intrinsic fns is refused unless the root [permissions].native lists its name"
-from = "mixed:declaration+name"
+decides = "a fetched dependency that brings native/ files, [native-deps] crates, @extern(rust|c) fns or @inline_rust/@intrinsic/@wasm_intrinsic fns is refused unless a root [permissions].native entry covers its typed origin: a bare name covers the root's own dependency entry of that name (its origin), a git source covers that repository's packages (GitSource identity), a directory covers the path dependency there"
+from = "mixed:declaration+type"
 unknown = "refuse"
-unknown_note = "what a package brings is read from its declarations (native/ files, [native-deps], @extern targets the native build binds, the TEMPLATE_ATTRS attributes) over the resolver's own file enumeration (#4809 fixed). Since 2026-11-24 (23rd) the scan fails closed: a native/ directory it cannot list, an almide.toml that does not parse, or an .almd file it cannot read or that parses only with recovery is reported as `not scannable` native code and refused unless granted (NativeCode::unscanned; novel test). An attribute outside KNOWN_ATTRS only warns and nothing reads it (attr_vocab.rs:183-198), so it brings no code. The grant itself is still matched on the package name: for a direct dependency also on its origin (is_granted, #4834); for a dependency reached only transitively by name alone"
-routes = { check = "n.a.:no cargo", check_json = "n.a.", check_effects = "n.a.", run = "runs:cwd gate + backstop", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs:dispatch gate (graph property)", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs:children", emit = "runs: emit (not the AST / IR / dialect views) resolves and gates the dependencies as the build does (#4848)" }
+unknown_note = "what a package brings is read from its declarations (native/ files, [native-deps], @extern targets the native build binds, the TEMPLATE_ATTRS attributes) over the resolver's own file enumeration (#4809 fixed); the scan fails closed (NativeCode::unscanned: an unlistable native/, an unparseable almide.toml, an unreadable or recovered-parse .almd is native code; novel test). The grant is matched on the typed origin (project::NativeGrant::covers, owner ruling 2026-11-24 Q1): a package that declares a granted name but comes from another origin, or is reached only through another dependency, is not covered (novel test with a fresh transitive name; the refusal prints the origin entry). An attribute outside KNOWN_ATTRS only warns and nothing reads it (attr_vocab.rs:183-198), so it brings no code"
+routes = { check = "n.a.: check builds no native code; the grant gates the build (observed 2026-11-24 a09368d423: not refused)", check_json = "n.a.: check builds no native code; the grant gates the build (observed 2026-11-24 a09368d423: not refused)", check_effects = "n.a.: check builds no native code; the grant gates the build (observed 2026-11-24 a09368d423: not refused)", run = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", build = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", test = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", bench = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", native = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", wasm = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", wasi = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", component = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the LSP produces and runs no code, so no native dependency is built (observed 2026-11-24 a09368d423: the probe is not refused there)", mcp = "n.a.: almide_check runs `check`, which builds no native code (the check cells; observed 2026-11-24 a09368d423: not refused)", emit = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)" }
 tests = [
   "tests/native_grant_test.rs::an_ungranted_native_dependency_is_refused_on_every_command_and_target",
   "tests/native_grant_test.rs::a_transitive_ungranted_native_dependency_is_refused",
   "tests/native_grant_test.rs::an_extern_rust_fn_without_native_dir_and_native_deps_are_native_code",
   "tests/inline_rust_authority_test.rs",
+  "tests/decision_deps_novel_test.rs::novel_a_transitive_package_declaring_a_granted_fresh_name_is_not_granted",
 ]
 control_note = "row 15: refusal returning None fails 3 of 6 native_grant tests (exit 101); dropping template detection fails 1 inline_rust test"
 issues = [4809, 4834]
-status = "UNSTAMPED"
-reasons = [
-  "c1: the [permissions].native grant names a package; a transitive dependency (one the root does not depend on directly) is granted on its name alone, whatever its origin (native_grant.rs::is_granted; keying the grant by origin as [trust].media does is a manifest-language change: owner question, 23rd report)",
-  "c4: control not run yet (23rd engineer, 2026-11-24)",
-]
+status = "STAMPED"
+reasons = []
 novel = "tests/decision_deps_novel_test.rs::novel_a_dependency_file_the_native_scan_cannot_parse_is_refused_as_native_code"
 control_test = "tests/decision_deps_novel_test.rs::novel_a_dependency_file_the_native_scan_cannot_parse_is_refused_as_native_code"
 control_patch = "proofs/decision-controls/native.grant-survey.patch"
-note = "2026-11-24 (23rd): unknown allow -> refuse (fail-open -1) after the fail-closed scan. native_grant.rs:142-155 skip list; :202 `g == fd.pkg_id.name`; :162 TEMPLATE_ATTRS. bugs-final: almd_files walks resolve::source_entries (no name skips, no symlinks) + native_grant_test +25 lines -> closes #4809 part; name keying (#4834) remains."
+note = "native_grant.rs is_granted -> project.rs NativeGrant::covers; NativeGrant::parse reads an entry as a directory (./, ../, /), a git source (holds / : @, read by GitSource::parse, refused on its line otherwise) or a package name. 2026-11-24 (24th): c1 closed by keying the grant on the origin (Q1 ○). Spec: docs/specs/package-system.md §6.4, effect-system.md, CHEATSHEET, llms.txt."
+control_seen = "a09368d423 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; panic in the unscannable novel test) (24th engineer)"
+control_extra = "proofs/decision-controls/native.grant-survey.by-name.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_a_transitive_package_declaring_a_granted_fresh_name_is_not_granted"
+control_extra_seen = "a09368d423 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; panic at tests/decision_deps_novel_test.rs:546, 'a transitive package rode the root's bare-name grant', exit 0) (24th engineer)"
+probe = "tests/decision-probes/native.grant-survey"
+stamp = "a09368d423 2026-11-24"
 
 [[site]]
 id = "native.dispatch-gate"
