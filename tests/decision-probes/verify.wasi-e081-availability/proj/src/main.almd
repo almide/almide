@@ -5,6 +5,6 @@ import process
 effect fn who() -> Int = process.pid()
 
 effect fn main() -> Unit = {
-  let p = who()
+  let p = who()!
   println("pid ${p}")
 }
