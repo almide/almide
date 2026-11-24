@@ -46,10 +46,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "89"
+# unstamped_ceiling     = "85"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "98"
-# failopen_ceiling      = "22"
+# skipped_route_ceiling = "97"
+# failopen_ceiling      = "21"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -184,6 +184,12 @@
 #               critical.profile-arming, verify.e051-dialect-ahead, deps.graph-budget,
 #               manifest.allow-vocabulary. native.grant-survey unknown -> refuse (c1 left).
 #               71 stamped; unstamped 103 -> 89, skipped 163 -> 98, fail-open 25 -> 22.
+#   2026-11-24  23rd engineer, second batch: deps.mvs-identity (#4865 closed by E121 in the
+#               tree: unknown -> refuse, a second control for the local/dependency shadow),
+#               perm.manifest-lookup (#4833 fixed: both test lanes split by manifest),
+#               effect.e109-value-gate (#4847 fixed: check --effects runs E109) and
+#               env.ci-slice STAMPED with novel tests, probes and controls run on ds-2.
+#               75 stamped; unstamped 89 -> 85, skipped 98 -> 97, fail-open 22 -> 21.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -317,22 +323,23 @@ items = [
   "src/project.rs::permissions_project_for",
 ]
 keys = []
-decides = "which almide.toml's [permissions] govern an entry: nearest at/above the entry, else cwd; a manifest that does not parse is treated as none"
+decides = "which almide.toml's [permissions] govern an entry: the nearest one at or above the entry (manifest_for_entry), never the working directory; a file the compiler writes itself is governed by the manifest its command declares; a manifest that does not parse is refused"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "the nearest almide.toml at or above the entry, else ./almide.toml (manifest_for_entry, project.rs:907-919); one that does not parse is refused, never `None` (governing_manifest, project.rs:925-938, #4829). The wasm test lane reads each file's own project (test_wasm.rs:462-468, 791, #4816); the native test batch still judges every file by the first file's project (compile_driver.rs:856, #4833)"
-routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs: native batch uses first file (#4833); wasm lane per file (#4816 for fs)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
-tests = ["tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions", "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"]
+unknown_note = "the nearest almide.toml at or above the entry (manifest_for_entry, project.rs:913-952: never cwd, never a temp dir's parents); one that does not parse is refused, never `None` (governing_manifest, #4829). Both test lanes split a run by governing manifest (group_by_manifest: test_native.rs:103/287, test_wasm.rs:844; #4833 fixed 4812f9a974, #4816 b9027eede6), so each file is judged by its own project"
+routes = { check = "runs", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs", run = "runs", build = "runs", test = "runs: both lanes split the run by governing manifest (group_by_manifest, test_native.rs:287, test_wasm.rs:844; #4833 fixed 4812f9a974): tests/manifest_lookup_routes_test.rs::a_test_run_over_two_projects_judges_each_file_by_its_own_manifest, tests/fs_scope_routes_test.rs::a_native_test_run_over_two_projects_scopes_each_by_its_own_manifest", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor produces and runs no code; it reads its project through the same manifest_for_entry (lsp_code_actions.rs:382)", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs" }
+tests = ["tests/permissions_routes_test.rs::every_route_applies_the_entry_files_permissions", "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it", "tests/manifest_lookup_routes_test.rs::a_test_run_over_two_projects_judges_each_file_by_its_own_manifest", "tests/fs_scope_routes_test.rs::a_native_test_run_over_two_projects_scopes_each_by_its_own_manifest"]
 control_note = "NONE"
 issues = [4829, 4833, 4816]
-status = "UNSTAMPED"
-reasons = ["c3: the native test batch judges every file by the first file's project (compile_driver.rs:856, #4833 open)"]
+status = "STAMPED"
+reasons = []
 note = "#4829 closed (5129b9f467); #4816 closed for the wasm test lane (b9027eede6). unknown was `allow` (the parse failure); now `refuse` (failopen count -1)."
 novel = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"
 control_test = "tests/decision_batch1a_test.rs::novel_the_nearest_manifest_above_a_fresh_entry_governs_it"
 control_patch = "proofs/decision-controls/perm.manifest-lookup.patch"
 probe = "tests/decision-probes/perm.manifest-lookup"
-control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh); control patch regenerated for the merged tree"
+control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (control patch applied by hand, the failing assertion read in the test log); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
 id = "perm.check-route-gate"
@@ -576,7 +583,7 @@ decides = "a pure fn whose solved effect_flow set holds the effect bit concretel
 from = "reach"
 unknown = "refuse"
 unknown_note = "flow over every lowered fn; unresolved Named/Method calls contribute no bit (scan.rs:403-411, 447)"
-routes = { check = "runs", check_json = "runs (check.rs:385)", check_effects = "skipped: #4847 report-only route", run = "runs", build = "runs", test = "runs (test_wasm.rs:443)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: produces no code", mcp = "runs", emit = "runs (emit.rs:205)" }
+routes = { check = "runs", check_json = "runs (check.rs:385)", check_effects = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: E109 inside and outside the project; #4847 fixed 3fd6c3a0b3)", run = "runs", build = "runs", test = "runs (test_wasm.rs:443)", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.: the editor produces and runs no code", mcp = "runs", emit = "runs (emit.rs:205)" }
 tests = [
   "tests/effect_value_laundering_test.rs::a_pure_fn_cannot_reach_a_file_through_a_fn_value",
   "tests/diagnostics/e109-effect-fn-value-list-map",
@@ -586,11 +593,15 @@ tests = [
 ]
 control_note = "security-by-construction.md row 26: effect_value_laundering_test 0/3 on rc2"
 issues = [4847]
-status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped (check --effects prints a verdict without E109; LSP)",
-]
+status = "STAMPED"
+reasons = []
 note = "Arguably stampable if check --effects / LSP count as non-producing; recorded UNSTAMPED because check --effects prints 'Permissions OK'."
+novel = "tests/decision_novel_test.rs::novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused"
+control_test = "tests/decision_novel_test.rs::novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused"
+control_patch = "proofs/decision-controls/effect.e109-value-gate.patch"
+probe = "tests/decision-probes/effect.e109-value-gate"
+control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
 id = "pure.e092-decl"
@@ -2101,15 +2112,18 @@ decides = "corpus-iterating tests/scripts judge a 1-in-k slice and skip whole-co
 from = "declaration"
 unknown = "refuse"
 unknown_note = "Harness; not release-reachable; under CI=true without ALMIDE_CI_TOUCHED/BASE it panics (ci_slice.rs:110-113)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "cargo test harness only", bench = "n.a.", native = "n.a.", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", check_json = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", check_effects = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", run = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", build = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", test = "n.a.: a cargo-test harness switch read by the corpus-iterating Rust tests and scripts (ci_slice.rs:60-76), never by `almide test`; the harness half is driven by the novel test", bench = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", native = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", wasm = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", wasi = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", component = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", lsp = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", mcp = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it", emit = "n.a.: a cargo-test harness switch (crates/almide-corpus/src/ci_slice.rs); no almide command reads it" }
 tests = []
 control_note = "NONE"
 issues = []
-status = "UNSTAMPED"
-reasons = [
-  "c4:no-control",
-]
+status = "STAMPED"
+reasons = []
 note = "env.rs:102. A merge-queue judgement of a slice; full gates run elsewhere."
+novel = "crates/almide-corpus/tests/ci_slice_novel.rs::novel_a_fresh_fixture_the_change_touches_joins_the_slice"
+control_test = "crates/almide-corpus/tests/ci_slice_novel.rs::novel_a_fresh_fixture_the_change_touches_joins_the_slice"
+control_patch = "proofs/decision-controls/env.ci-slice.patch"
+control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
 id = "env.expect-tools"
@@ -2781,24 +2795,34 @@ control_seen = "4471812483 2026-11-19 ds-2: base green, patched red (scripts/run
 [[site]]
 id = "deps.mvs-identity"
 at = "src/project_fetch.rs::fetch_one_dep_recursive (PackageOrigin, #4834) + resolve.rs::find_module_file / find_package_src_dir"
-items = ["src/project_fetch.rs::fetch_one_dep_recursive", "src/project.rs::PackageOrigin::of", "src/resolve.rs::find_module_file", "src/resolve.rs::find_package_src_dir"]
+items = [
+  "src/project_fetch.rs::fetch_one_dep_recursive",
+  "src/project.rs::PackageOrigin::of",
+  "src/resolve.rs::find_module_file",
+  "src/resolve.rs::find_package_src_dir",
+  "src/resolve.rs::refuse_ambiguous_import",
+]
 keys = []
 decides = "which checkout answers `import <name>`: the one fetched package whose self-declared [package].name is <name>; two packages declaring one name from different origins (typed GitSource + subdir, or canonical path) are refused, naming both; within one origin MVS keeps the highest requested version"
 from = "declaration"
-unknown = "allow"
-unknown_note = "the import namespace is the package's DECLARED name; identity is its typed PackageOrigin, and a second origin for a declared name is refused at any depth and major (project_fetch.rs:1068-1085), so a transitive package can no longer take the root's place nor inherit its native grant. Residual: find_package_src_dir (an `import pkg.sub`) looks at <base_dir>/<pkg>/src before the dependency table, while find_module_file looks at the dependencies first (resolve.rs:832-855 vs 857-874)"
+unknown = "refuse"
+unknown_note = "the import namespace is the package's DECLARED name; identity is its typed PackageOrigin, and a second origin for a declared name is refused at any depth and major (project_fetch.rs:1068-1085), so a transitive package can no longer take the root's place nor inherit its native grant. The #4865 residual is closed (E121, C-458, resolve.rs:887-910): a first segment naming both a project module (file or directory) and a [dependencies] key is refused for `import pkg` and `import pkg.sub` alike (novel test with a fresh name, second control)"
 routes = { check = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", check_json = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", check_effects = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", run = "runs: inside, the dispatch gate (dispatch.rs:920-929); outside, the compile driver reads the entry's own manifest (compile_driver.rs:335)", build = "runs: inside, the dispatch gate (dispatch.rs:920-929); outside, the compile driver reads the entry's own manifest (compile_driver.rs:335)", test = "runs", bench = "runs: inside, the dispatch gate (dispatch.rs:920-929); outside, the compile driver reads the entry's own manifest (compile_driver.rs:335)", native = "runs: inside, the dispatch gate (dispatch.rs:920-929); outside, the compile driver reads the entry's own manifest (compile_driver.rs:335)", wasm = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", wasi = "runs: inside, the dispatch gate (dispatch.rs:920-929); outside, the compile driver reads the entry's own manifest (compile_driver.rs:335)", component = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the editor never fetches (#4128); the walk resolve_cached_deps runs refuses the same way and a refused walk resolves to no dependencies (lsp_code_actions.rs:412-415), so no package answers the import", mcp = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)", emit = "runs (observed 2026-11-24 on decision-sites e2769aa9dc, route matrix ds-2: refused inside and outside the project)" }
 tests = ["tests/dep_package_identity_test.rs::a_transitive_package_declaring_the_roots_name_from_another_path_is_refused", "tests/dep_package_identity_test.rs::a_same_named_git_package_from_another_source_is_refused_and_not_granted", "tests/dep_source_identity_test.rs::two_sources_sharing_a_name_and_tag_each_resolve_their_own_commit", "tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fresh_name_are_refused"]
 control_note = "NONE"
 issues = [4830, 4834, 4865]
-status = "UNSTAMPED"
-reasons = ["c2:fail-open (#4865, probed: `import pkg.sub` takes a local src/pkg before the dependency `pkg`)", "c3:route-skipped on check, check_json, check_effects, wasm, component, mcp, emit (#4830; observed 2026-11-19 by the route matrix)"]
+status = "STAMPED"
+reasons = []
 note = "project_fetch.rs:981-1116 (refusal :1068-1085); project.rs:54-83 PackageOrigin. The import-resolution half of #4834 is closed by this code; the media-grant key half is not (trust.media-grant-key)."
 novel = "tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fresh_name_are_refused"
 control_patch = "proofs/decision-controls/deps.mvs-identity.patch"
 control_test = "tests/decision_deps_novel_test.rs::novel_two_origins_declaring_one_fresh_name_are_refused"
 probe = "tests/decision-probes/deps.mvs-identity"
-control_seen = "127a0a6312 ds-2 2026-11-19: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (control patch applied by hand, the failing assertion read in the test log); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+control_extra = "proofs/decision-controls/deps.mvs-identity.local-shadow.patch"
+control_extra_test = "tests/decision_deps_novel_test.rs::novel_a_fresh_name_meaning_a_local_module_and_a_dependency_is_refused"
+stamp = "e2769aa9dc 2026-11-24"
+control_extra_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (the E121 assertion, tests/decision_deps_novel_test.rs:512)"
 
 [[site]]
 id = "deps.dep-manifest-swallow"
