@@ -79,4 +79,6 @@ jobs:
             ${{ runner.temp }}/kill/m*/*.build
             ${{ runner.temp }}/kill/base/inspect
             ${{ runner.temp }}/kill/m*/inspect
+            ${{ runner.temp }}/kill/base/judge
+            ${{ runner.temp }}/kill/m*/judge
             ${{ runner.temp }}/pick/index.tsv
