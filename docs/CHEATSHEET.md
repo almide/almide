@@ -45,6 +45,8 @@ import self.classifier as cls                   // alias
 ```
 **Do NOT** write `import x from "./x.almd"` — file paths aren't supported. Always use `import self.<sibling>`.
 
+A dependency that brings native code (`native/`, `[native-deps]`, `@extern`) builds only when the root `almide.toml` grants it in `[permissions] native`: a bare name (`"nat"`) grants your own `[dependencies]` entry of that name; a package pulled in by another dependency is granted by its git source or directory (`"https://github.com/alice/fastmath"`, `"../vendor/nat"`) — copy the entry the refusal's hint prints.
+
 ## Types
 ```
 type Name = { field: Type, ... }                     // record

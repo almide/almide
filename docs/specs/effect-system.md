@@ -727,11 +727,13 @@ Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_tes
 The categories above are inferred from Almide code. A dependency's native code
 (`native/*.rs`, `[native-deps]` crates and their `build.rs`, `@extern(rust|c)`
 fns) runs before and outside that inference, while cargo builds the program.
-`[permissions] native` lists the dependency packages allowed to bring it:
+`[permissions] native` lists the dependency packages allowed to bring it,
+each by its origin: a bare name for the root's own dependency entry, a git
+source or a directory for a package reached through another dependency:
 
 ```toml
 [permissions]
-native = ["nat"]
+native = ["nat", "https://github.com/alice/fastmath", "../vendor/zlibsys"]
 ```
 
 `build`, `run`, `test` and `bench` refuse an ungranted one on every target;

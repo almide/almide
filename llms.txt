@@ -59,7 +59,9 @@ read here is what the current compiler accepts.
   the user asked for that exact repository. Never invent a repository name:
   an invented name may be registered by an attacker. A dependency that brings
   native code (`native/`, `[native-deps]`, `@extern`) also needs
-  `[permissions] native = ["lib"]` (#4093).
+  `[permissions] native = ["lib"]` (#4093) — a bare name grants only your own
+  dependency entry; a package pulled in by another is granted by its git
+  source or directory, as the refusal's hint writes it (#4834).
 - Null is spelled `T?` (shorthand for `Option[T]`, valid in every type
   position — the canonical spelling, `almide fmt` normalizes to it; ADR-0010).
   `?` binds to the preceding type atom, never across `->`: `(A) -> B?` is a fn

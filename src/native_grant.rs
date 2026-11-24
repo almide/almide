@@ -14,7 +14,10 @@
 //!
 //! All of it runs before, and outside, every `[permissions]` check. So a
 //! dependency that brings any of it is refused unless the ROOT manifest names
-//! it in `[permissions] native = [...]`. The root package's own native code
+//! it in `[permissions] native = [...]` — by its typed origin
+//! (`project::NativeGrant`, #4834): a bare name covers only the root's own
+//! dependency entry of that name, a git source or a directory covers the
+//! package from there. The root package's own native code
 //! needs no grant: the developer wrote it. The rule is a property of the
 //! dependency graph, not of the target, so every `--target` refuses the same
 //! graph (as `[permissions]` itself is, #3275).
@@ -89,6 +92,10 @@ pub struct DepNative {
     pub direct: bool,
     pub code: NativeCode,
     pub granted: bool,
+    /// The `[permissions].native` entry that would grant it: its name when
+    /// the root depends on it directly, else its origin (a git source, or its
+    /// directory relative to the root).
+    pub grant_entry: String,
 }
 
 /// The native code of the package checked out at `package_dir`, whose
@@ -210,18 +217,46 @@ fn native_fns(file: &Path) -> Option<(Vec<(String, usize)>, Vec<(String, String,
     Some((externs, templates))
 }
 
-/// Every fetched dependency of `proj` with the native code it brings.
-/// Does the root's `[permissions] native` grant `fd`? The grant names a
-/// package; when the root manifest itself depends on a package of that name,
-/// the grant is for THAT origin only, so a same-named package from another
-/// source is not covered by it (#4834).
+/// Does the root's `[permissions] native` grant `fd`? Each grant names a
+/// dependency by its typed origin (`project::NativeGrant`; #4834, owner
+/// ruling 2026-11-24): a bare name covers only the root's own dependency
+/// entry of that name, so a same-named package from another source, or a
+/// transitive package that declares that name, is not covered.
 fn is_granted(proj: &Project, fd: &FetchedDep) -> bool {
-    proj.native_grants.iter().any(|g| *g == fd.pkg_id.name)
-        && proj
-            .dependencies
-            .iter()
-            .filter(|d| d.name == fd.pkg_id.name)
-            .all(|d| crate::project::PackageOrigin::of(d) == fd.origin)
+    proj.native_grants.iter().any(|(_, g)| g.covers(&proj.dependencies, &fd.origin))
+}
+
+/// `to` written relative to `from` (both absolute), `..` per step up.
+fn relative_to(from: &Path, to: &Path) -> PathBuf {
+    let (f, t): (Vec<_>, Vec<_>) = (from.components().collect(), to.components().collect());
+    let common = f.iter().zip(&t).take_while(|(a, b)| a == b).count();
+    let mut out = PathBuf::new();
+    for _ in common..f.len() {
+        out.push("..");
+    }
+    for c in &t[common..] {
+        out.push(c);
+    }
+    out
+}
+
+/// The entry that grants `fd`: see [`DepNative::grant_entry`].
+fn grant_entry(proj: &Project, fd: &FetchedDep, direct: bool) -> String {
+    match &fd.origin {
+        _ if direct => fd.pkg_id.name.clone(),
+        crate::project::PackageOrigin::Git { source, .. } => source.to_string(),
+        crate::project::PackageOrigin::Path(dir) => {
+            let root = std::fs::canonicalize(&proj.root).unwrap_or_else(|_| proj.root.clone());
+            let rel = relative_to(&root, dir);
+            let text = rel.display().to_string();
+            if text.starts_with("..") { text } else { format!("./{text}") }
+        }
+    }
+}
+
+/// Every fetched dependency of `proj` with the native code it brings.
+fn is_direct(proj: &Project, fd: &FetchedDep) -> bool {
+    proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin)
 }
 
 pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
@@ -235,9 +270,10 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
                 .map(|p| p.package.version)
                 .unwrap_or_else(|_| fd.version.clone()),
             package_dir: fd.package_dir.clone(),
-            direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
+            direct: is_direct(proj, fd),
             code: native_code_of(&fd.package_dir, &fd.source_dir),
             granted: is_granted(proj, fd),
+            grant_entry: grant_entry(proj, fd, is_direct(proj, fd)),
         })
         .collect()
 }
@@ -257,9 +293,16 @@ pub fn refusal(proj: &Project, deps: &[DepNative]) -> Option<String> {
             "error: dependency `{}`{} brings native code that {} does not grant\n  {} {} at {}\n  native code: {}\n",
             d.name, how, manifest.display(), d.name, d.version, d.package_dir.display(), d.code.describe()
         ));
+        let by_name = proj.native_grants.iter().any(|(_, g)| matches!(g, crate::project::NativeGrant::Direct(n) if *n == d.name));
+        if !d.direct && by_name {
+            msg.push_str(&format!(
+                "  note: the grant \"{}\" names only this manifest's own dependency of that name; a package reached through another dependency is granted by its origin, \"{}\"\n",
+                d.name, d.grant_entry
+            ));
+        }
     }
-    let mut names = proj.native_grants.clone();
-    names.extend(refused.iter().map(|d| d.name.clone()));
+    let mut names: Vec<String> = proj.native_grants.iter().map(|(entry, _)| entry.clone()).collect();
+    names.extend(refused.iter().map(|d| d.grant_entry.clone()));
     let line = format!("native = [{}]", names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", "));
     msg.push_str("  note: native code is compiled and run by cargo during the build, before and outside every [permissions] check\n");
     msg.push_str(&format!("  hint: if you trust {}, grant it in {}:\n    [permissions]\n    {}",

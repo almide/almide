@@ -51,6 +51,56 @@ pub struct MediaGrant {
     pub line: usize,
 }
 
+/// One `[permissions].native` grant (#4834; owner ruling 2026-11-24): the
+/// dependency it covers is named by its typed origin, the way `[trust].media`
+/// names one, never by the name a package declares for itself.
+///
+/// - a bare package name (`"nat"`) covers the ROOT manifest's own dependency
+///   entry of that name — the origin that entry names — and nothing else: a
+///   transitive dependency is never granted by its name;
+/// - a git source written as `[dependencies]` writes one
+///   (`"https://github.com/alice/fastmath"`) covers the packages of that
+///   repository, compared as typed sources (`GitSource` identity);
+/// - a directory (`"../vendor/nat"`, `"/abs/nat"`), anchored to the root,
+///   covers the path dependency there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeGrant {
+    Direct(String),
+    Git(crate::git_source::GitSource),
+    Path(PathBuf),
+}
+
+impl NativeGrant {
+    /// Read one written entry. An entry that starts with `.` or `/` is a
+    /// directory; one holding `/`, `:` or `@` is a git source and must read as
+    /// one; anything else is a package name.
+    pub fn parse(root: &Path, entry: &str) -> Result<NativeGrant, String> {
+        if entry.starts_with('.') || entry.starts_with('/') {
+            let p = root.join(entry);
+            return Ok(NativeGrant::Path(std::fs::canonicalize(&p).unwrap_or(p)));
+        }
+        if entry.contains(['/', ':', '@']) {
+            return crate::git_source::GitSource::parse(entry).map(NativeGrant::Git).map_err(|e| {
+                format!("[permissions].native entry \"{entry}\" is neither a package name, a directory (`./…`, `../…`, `/…`) nor a git source: {e}")
+            });
+        }
+        if entry.is_empty() {
+            return Err("a [permissions].native entry is empty".to_string());
+        }
+        Ok(NativeGrant::Direct(entry.to_string()))
+    }
+
+    /// Does this grant cover a package of origin `origin`, for a root whose
+    /// own dependency entries are `deps`?
+    pub fn covers(&self, deps: &[Dependency], origin: &PackageOrigin) -> bool {
+        match self {
+            NativeGrant::Direct(name) => deps.iter().any(|d| d.name == *name && PackageOrigin::of(d) == *origin),
+            NativeGrant::Git(src) => matches!(origin, PackageOrigin::Git { source, .. } if source == src),
+            NativeGrant::Path(dir) => *origin == PackageOrigin::Path(dir.clone()),
+        }
+    }
+}
+
 /// Where a package comes from (#4834): the typed git source and the
 /// directory in it, or the canonical local directory of a `path`
 /// dependency. Two packages with one declared name but different origins
@@ -166,8 +216,9 @@ pub struct Project {
     /// native code (`native/`, `[native-deps]`, `@extern(rust|c)` fns) the
     /// build may compile. A dependency that brings native code and is not
     /// named here is refused; the root package's own native code needs no
-    /// grant. See `crate::native_grant`.
-    pub native_grants: Vec<String>,
+    /// grant. Each entry names a dependency by its origin ([`NativeGrant`]).
+    /// See `crate::native_grant`.
+    pub native_grants: Vec<(String, NativeGrant)>,
     /// `[trust] owners = [...]` (#4093): the `host/owner`s this project
     /// fetches git dependencies from beyond `github.com/almide`, which is
     /// trusted by default. Only the root manifest's list is read. See
@@ -1261,11 +1312,16 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     };
     let permissions = names("allow")?;
     let proc_allow = names("proc")?;
-    let native_grants = names("native")?.unwrap_or_default();
     let trust_owners = manifest.trust_owners(path, &content)?;
     let media_grants = manifest.media_grants(path, &content)?;
 
     let root = project_root_from_toml_path(path);
+    let native_grants = manifest
+        .permission_list(path, &content, "native")?
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(entry, at)| NativeGrant::parse(&root, &entry).map(|g| (entry, g)).map_err(|e| located(path, &content, at, &e)))
+        .collect::<Result<Vec<_>, String>>()?;
     // Relative roots are the project's own directories: anchored to the
     // manifest, as relative dependency paths are.
     let fs_allow = names("fs")?.map(|l| l.iter().map(|d| anchor_fs_root(&root, d)).collect());

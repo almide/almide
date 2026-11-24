@@ -488,11 +488,37 @@ error: dependency `nat` brings native code that ./almide.toml does not grant
 native = ["nat"]
 ```
 
-The grant names a package, not a version, and covers only that package:
-granting a direct dependency does not grant the native code of what it pulls
-in. Only the root manifest's grants count; a dependency's own
-`[permissions] native` is not read. The root package's own `native/`,
-`[native-deps]` and `@extern` fns need no grant.
+A grant names a dependency by its origin, not by the name a package declares
+for itself (#4834), and not a version. An entry is one of:
+
+- a package name — `"nat"` — which covers the root manifest's OWN dependency
+  entry of that name (the origin that entry names), and nothing else;
+- a git source, written as `[dependencies]` writes one —
+  `"https://github.com/alice/fastmath"` — which covers the packages of that
+  repository (compared as sources: `.git`, case of the host and the default
+  port do not matter);
+- a directory — `"../vendor/nat"`, or an absolute path — anchored to the root
+  manifest's directory, which covers the path dependency there.
+
+So granting a direct dependency does not grant the native code of what it
+pulls in, and a package reached through another dependency is never granted
+by its name: a same-named package from anywhere else would otherwise inherit
+the grant. The refusal prints the entry that grants it — the name for a direct
+dependency, the git source or the directory (relative to the root) for one
+reached through another:
+
+```text
+error: dependency `nat` (required by another dependency) brings native code that ./almide.toml does not grant
+  ...
+  hint: if you trust `nat`, grant it in ./almide.toml:
+    [permissions]
+    native = ["mid", "../nat"]
+```
+
+An entry that holds `/`, `:` or `@` and is not a directory must read as a git
+source; one that does not is refused on its line. Only the root manifest's
+grants count; a dependency's own `[permissions] native` is not read. The root
+package's own `native/`, `[native-deps]` and `@extern` fns need no grant.
 
 Every native build prints one line for each granted dependency that brings
 native code:
