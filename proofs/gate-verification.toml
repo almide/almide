@@ -127,7 +127,11 @@
 # that is wrong) as UNCOMPENSATED: 44 -> 46, a newly mapped blind spot.
 # 2026-11-24: the shipped-routines gate maps two limits it does not cover (what
 # the imported exit function does before the trap that follows it, and what the
-# globals bound in the two roles hold) as UNCOMPENSATED: 50 -> 52.
+# globals bound in the two roles hold) as UNCOMPENSATED: 50 -> 52. Both limits
+# predate the gate (they sat unlisted under check-structural-bytes.sh's
+# UNMAPPED); naming them was ruled on 2026-11-24 to be the #4372 inventory
+# reading, a count that follows the mapping, not a relaxed ratchet. The second
+# is a candidate for a gate of its own.
 # uncompensated_blind_ceiling = "52"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
