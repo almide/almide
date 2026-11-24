@@ -202,7 +202,7 @@ fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> Str
             .unwrap_or_else(|| "while _ { }".to_string())
     };
     // #4906: a loop that only appends to a list keeps its length in a local.
-    super::loop_appender::with_appender(ctx, &[cond], body, rendered)
+    super::loop_appender::with_appender(ctx, cond, rendered)
 }
 
 /// `Member { object, field }` case of `render_expr`.
