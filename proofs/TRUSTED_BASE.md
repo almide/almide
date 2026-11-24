@@ -439,6 +439,38 @@ separator's split reads its lead byte after handing the string to
 `$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
 
+**The passes after the emitter.** A module ships after the stock-WASI
+transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
+imports and shims, calls are renumbered, and `i32.const 1; call proc_exit` is
+put in front of every `unreachable`) and the prune
+(`crates/almide-wasi/src/prune.rs`: dead functions and globals are dropped
+and the rest renumbered; it is the transform's last step). Both run after
+the emitter has recorded the witness's events, and after
+`proofs/check-structural-bytes.sh` compares the emitter's four runtime
+routines with the lists `StructuralDecode.v` transcribes. So the realization
+theorems are about bodies that do not all ship byte for byte: on the
+1059-fixture certified corpus `$free` ships as its list in every module that
+has it (1011), `$inc` in 498 of 827 (another global index in the other 329),
+and `$dec_flat` (1008) and `$alloc` (1002) in none, each with an exit call
+in front of every trap. What is checked on the shipped bytes:
+`almide-anchor-check` (proved.rs) reads the four lists out of the proof
+script and holds to them the function the anchor file names as `alloc`, the
+`rcfns` line's rc_inc, and the two routines its `proved` line names. It
+tolerates three differences: a function or a global index renumbered the
+same way at every place in the four bodies; any constant where the list has
+the out-of-memory report's address (the decode theorem already takes that
+address as a parameter); and the exit call in front of a trap when it names
+the imported `proc_exit`. Any other difference refuses the module, and so
+does an anchor file with an `rcfns` line and no `proved` line. TRUSTED: that
+the tolerated differences preserve what the realization theorems state (the
+inserted call runs on every path that ends in a trap and ends the process;
+nothing proves that it is harmless); and the two passes' effect on every
+function no located event names (a located event is carried through the
+transform's map and held to the instruction it then names, so a wrong
+relocation fails the anchor check; code no event names is not looked at).
+The direct component routes (`to_p2`, `to_p3`, `to_p3_service`) run their
+own transforms; what those do to the four routines has not been measured.
+
 **The native leg (#4006).** For the programs the verified native renderer
 renders (the grow-only `proofs/native-verified-floor.txt` subset of
 `spec/wasm_cross`), `proofs/native-wall.sh` judges per build the ownership
