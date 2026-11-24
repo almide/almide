@@ -74,7 +74,7 @@ fn almide_unix_retry<T>(mut f: impl FnMut() -> std::io::Result<T>) -> std::io::R
 // The descriptors this thread came to hold while an `http.serve` handler
 // runs on it (#4203) — per thread, as for tcp (net_core.rs).
 thread_local! {
-    static ALMIDE_UNIX_REQUEST: std::cell::RefCell<Option<Vec<i64>>> = const { std::cell::RefCell::new(None) };
+    static ALMIDE_UNIX_REQUEST: std::cell::RefCell<Option<std::vec::Vec<i64>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -88,7 +88,7 @@ fn almide_unix_note(fd: i64) {
 
 /// Start recording this thread's descriptors (a handler call begins).
 pub fn almide_unix_request_begin() {
-    ALMIDE_UNIX_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
+    ALMIDE_UNIX_REQUEST.with(|r| *r.borrow_mut() = Some(std::vec::Vec::new()));
 }
 
 /// Whether this thread is recording.
@@ -97,7 +97,7 @@ pub fn almide_unix_request_active() -> bool {
 }
 
 /// Stop recording; answers what this thread came to hold since the begin.
-pub fn almide_unix_request_end() -> Vec<i64> {
+pub fn almide_unix_request_end() -> std::vec::Vec<i64> {
     ALMIDE_UNIX_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
 }
 
@@ -191,7 +191,7 @@ impl AlmideUnixTables {
         for &f in fds {
             self.check("unix_send", f)?;
         }
-        let riders: Vec<_> = fds.iter().map(|f| self.borrow(*f)).collect();
+        let riders: std::vec::Vec<_> = fds.iter().map(|f| self.borrow(*f)).collect();
         let s = self.borrow(sock);
         let mut sent = almide_unix_retry(|| almide_unix_sys::send(&s, data, &riders)).map_err(|e| format!("unix_send: {e}"))?;
         while sent < data.len() {
@@ -206,15 +206,15 @@ impl AlmideUnixTables {
     /// most `MAX_FDS` per socket (#4124): one that arrives while that many
     /// wait untaken is closed on receipt and never held, so a peer cannot
     /// fill the program's descriptor table through a socket it only reads.
-    pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<Vec<u8>, String> {
+    pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<std::vec::Vec<u8>, String> {
         let sock = self.check("unix_recv", sock)?;
-        let mut buf = vec![0u8; (max.max(0) as usize).min(ALMIDE_UNIX_RECV_CHUNK)];
+        let mut buf = ::std::vec![0u8; (max.max(0) as usize).min(ALMIDE_UNIX_RECV_CHUNK)];
         let s = self.borrow(sock);
         let (n, fds) = almide_unix_retry(|| almide_unix_sys::recv(&s, &mut buf)).map_err(|e| format!("unix_recv: {e}"))?;
         let waiting = self.received.get(&sock).map_or(0, |q| q.len());
         let room = almide_unix_sys::MAX_FDS.saturating_sub(waiting);
         // `fds` beyond the room drop here: their OwnedFd closes them.
-        let got: Vec<i64> = fds.into_iter().take(room).map(|f| self.hold(f)).collect();
+        let got: std::vec::Vec<i64> = fds.into_iter().take(room).map(|f| self.hold(f)).collect();
         if !got.is_empty() {
             self.received.entry(sock).or_default().extend(got);
         }
@@ -224,8 +224,8 @@ impl AlmideUnixTables {
 
     /// The descriptors received on `sock` so far and not yet taken, oldest
     /// first; they stay held, now the program's to use and close.
-    pub fn unix_take_fds(&mut self, sock: i64) -> Vec<i64> {
-        self.received.remove(&sock).map(Vec::from).unwrap_or_default()
+    pub fn unix_take_fds(&mut self, sock: i64) -> std::vec::Vec<i64> {
+        self.received.remove(&sock).map(std::vec::Vec::from).unwrap_or_default()
     }
 
     /// Queue on `sock` the descriptors another table received for it, under
@@ -237,7 +237,7 @@ impl AlmideUnixTables {
     pub fn absorb_received(&mut self, sock: i64, fds: impl IntoIterator<Item = i64>) {
         let waiting = self.received.get(&sock).map_or(0, |q| q.len());
         let mut fds = fds.into_iter();
-        let keep: Vec<i64> = fds.by_ref().take(almide_unix_sys::MAX_FDS.saturating_sub(waiting)).collect();
+        let keep: std::vec::Vec<i64> = fds.by_ref().take(almide_unix_sys::MAX_FDS.saturating_sub(waiting)).collect();
         for n in fds {
             self.held.remove(&n);
         }
@@ -259,11 +259,11 @@ impl AlmideUnixTables {
 
     /// The descriptors among `fds` that have something to read within
     /// `timeout_ms` milliseconds, in the order given; empty when none did.
-    pub fn unix_wait(&mut self, fds: &[i64], timeout_ms: i64) -> Result<Vec<i64>, String> {
+    pub fn unix_wait(&mut self, fds: &[i64], timeout_ms: i64) -> Result<std::vec::Vec<i64>, String> {
         for &f in fds {
             self.check("unix_wait", f)?;
         }
-        let b: Vec<_> = fds.iter().map(|f| self.borrow(*f)).collect();
+        let b: std::vec::Vec<_> = fds.iter().map(|f| self.borrow(*f)).collect();
         let ready = almide_unix_retry(|| almide_unix_sys::readable(&b, almide_unix_timeout(timeout_ms)))
             .map_err(|e| format!("unix_wait: {e}"))?;
         Ok(fds.iter().zip(ready).filter(|(_, r)| *r).map(|(f, _)| *f).collect())
@@ -335,7 +335,7 @@ impl AlmideUnixTables {
     }
 
     /// Up to `len` bytes of the file `fd` from byte `offset` (fewer at its end).
-    pub fn shm_read(&mut self, fd: i64, offset: i64, len: i64) -> Result<Vec<u8>, String> {
+    pub fn shm_read(&mut self, fd: i64, offset: i64, len: i64) -> Result<std::vec::Vec<u8>, String> {
         self.check("shm_read", fd)?;
         if offset < 0 || len < 0 {
             return Err(format!("shm_read: negative offset or length ({offset}, {len})"));
@@ -402,9 +402,9 @@ const ALMIDE_UNIX_RECV_CHUNK: usize = 64 * 1024;
 /// has (#4123): allocating the program's `len` up front aborted the process
 /// on a huge one.
 #[cfg(unix)]
-fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-    let mut chunk = vec![0u8; len.min(ALMIDE_UNIX_RECV_CHUNK)];
-    let mut buf = Vec::new();
+fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Result<std::vec::Vec<u8>> {
+    let mut chunk = ::std::vec![0u8; len.min(ALMIDE_UNIX_RECV_CHUNK)];
+    let mut buf = std::vec::Vec::new();
     while buf.len() < len {
         let want = (len - buf.len()).min(chunk.len());
         match almide_unix_retry(|| std::os::unix::fs::FileExt::read_at(f, &mut chunk[..want], offset + buf.len() as u64))? {
@@ -427,13 +427,13 @@ impl AlmideUnixTables {
     pub fn unix_listen(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_listen") }
     pub fn unix_accept(&mut self, _: i64) -> Result<i64, String> { Self::unsupported("unix_accept") }
     pub fn unix_send(&mut self, _: i64, _: &[u8], _: &[i64]) -> Result<(), String> { Self::unsupported("unix_send") }
-    pub fn unix_recv(&mut self, _: i64, _: i64) -> Result<Vec<u8>, String> { Self::unsupported("unix_recv") }
-    pub fn unix_take_fds(&mut self, _: i64) -> Vec<i64> { Vec::new() }
+    pub fn unix_recv(&mut self, _: i64, _: i64) -> Result<std::vec::Vec<u8>, String> { Self::unsupported("unix_recv") }
+    pub fn unix_take_fds(&mut self, _: i64) -> std::vec::Vec<i64> { std::vec::Vec::new() }
     pub fn unix_poll(&mut self, _: i64, _: i64) -> Result<bool, String> { Self::unsupported("unix_poll") }
-    pub fn unix_wait(&mut self, _: &[i64], _: i64) -> Result<Vec<i64>, String> { Self::unsupported("unix_wait") }
+    pub fn unix_wait(&mut self, _: &[i64], _: i64) -> Result<std::vec::Vec<i64>, String> { Self::unsupported("unix_wait") }
     pub fn unix_close(&mut self, _: i64) -> Result<(), String> { Self::unsupported("unix_close") }
     pub fn shm_create(&mut self, _: i64) -> Result<i64, String> { Self::unsupported("shm_create") }
     pub fn shm_resize(&mut self, _: i64, _: i64) -> Result<(), String> { Self::unsupported("shm_resize") }
     pub fn shm_write(&mut self, _: i64, _: i64, _: &[u8]) -> Result<(), String> { Self::unsupported("shm_write") }
-    pub fn shm_read(&mut self, _: i64, _: i64, _: i64) -> Result<Vec<u8>, String> { Self::unsupported("shm_read") }
+    pub fn shm_read(&mut self, _: i64, _: i64, _: i64) -> Result<std::vec::Vec<u8>, String> { Self::unsupported("shm_read") }
 }

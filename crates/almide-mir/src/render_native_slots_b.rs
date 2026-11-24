@@ -51,10 +51,11 @@ pub(super) fn movable_loads(
     // value precedes them, so none can be rendered later than them (an
     // interpolation chain reads its pieces at its last step).
     let mut first = BTreeSet::new();
-    // The movable reads whose block the same straight run rebinds next (`r =
-    // { ...r, f: g(r.f) }`): nothing names the block whole before the rebind,
-    // so the field can leave by a plain move, no `Default` written back into
-    // a block that is about to be dropped.
+    // The movable reads that leave by a plain partial move: the block the same
+    // straight run rebinds next (`r = { ...r, f: g(r.f) }`), or one nothing
+    // names whole again — no `Default` written back into a block that is
+    // about to be dropped (an in-out or iteratively dropped record still takes,
+    // render_native_addr_op::field_move).
     let mut partial = BTreeSet::new();
     let mut since_bind: BTreeSet<(ValueId, usize)> = BTreeSet::new();
     let consts: BTreeMap<ValueId, i64> = func
@@ -110,9 +111,11 @@ pub(super) fn movable_loads(
             continue;
         }
         let Some(other_slot) = read.scan((i, end), &earlier) else { continue };
-        if rebound || rebound_in_block(func, i, b).is_some() {
-            partial.insert(*d);
-        }
+        // Not rebound either: the scan ran to the end of the fn and nothing
+        // after the read names the block whole (its drop renders as scope-end,
+        // which drops only the fields still in it), so the field leaves by a
+        // plain move too — no `Default` built for a block that is only dropped.
+        partial.insert(*d);
         out.insert(*d);
         if !other_slot && !rebound {
             last.insert(*d);

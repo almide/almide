@@ -28,7 +28,7 @@ pub(crate) fn struct_defs() -> String {
                 continue;
             }
             if let Some(e) = d.list_of {
-                out.push_str(&format!("/// list `{}`\ntype {} = Vec<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
+                out.push_str(&format!("/// list `{}`\ntype {} = AlmideList<{}>;\n\n", d.name, struct_name(i as u16), owned_ty(e)));
                 continue;
             }
             if let Some(cases) = &d.cases {

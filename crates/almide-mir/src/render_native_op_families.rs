@@ -630,7 +630,7 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                     // Borrowed only (crate::render_native_move::set_stack_lits).
                     line!("let mut {}: [i64; {}] = [{items}];", var(*dst), vs.len());
                 } else {
-                    line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                    line!("let mut {}: AlmideList<i64> = almide_list![{items}];", var(*dst));
                 }
             }
             other => {
@@ -660,7 +660,7 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // Borrowed only (crate::render_native_move::set_stack_lits).
                 line!("let mut {}: [i64; {n}] = [{items}];", var(*dst));
             } else {
-                line!("let mut {}: Vec<i64> = vec![{items}];", var(*dst));
+                line!("let mut {}: AlmideList<i64> = almide_list![{items}];", var(*dst));
             }
         }
         Op::SetLocal { local, src } => render_set_local(local, src, tys, out, indent)?,

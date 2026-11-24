@@ -26,7 +26,7 @@ fn test_real_ir_rust_walker() {
     assert!(output.contains("fn greet"), "should have greet function");
 
     // Type checks — are types rendered correctly?
-    assert!(output.contains("Vec<"), "should use Vec for List");
+    assert!(output.contains("AlmideList<"), "should use AlmideList for List (ADR-0037)");
     assert!(output.contains("i64"), "should use i64 for Int");
     assert!(output.contains("String"), "should use String type");
 
@@ -54,7 +54,7 @@ fn test_emit_end_to_end_rust() {
     // `list.find` with a lambda literal fuses into an iterator chain on the
     // Rust target (#2045); the runtime call is the unfused spelling.
     assert!(output.contains(".into_iter().find(") || output.contains("almide_rt_list_find"), "should have the find stage");
-    assert!(output.contains("Vec<Product>"), "should have Vec<Product>");
+    assert!(output.contains("AlmideList<Product>"), "should have AlmideList<Product>");
     assert!(output.contains("format!"), "should have format!");
 }
 

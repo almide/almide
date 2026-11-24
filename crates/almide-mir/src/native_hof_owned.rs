@@ -31,10 +31,10 @@ fn flat_map_array_route(
     // A callback whose adapter copies the lambda's list into a fresh Vec (a
     // Float element's parameter recode brings that copy with it) still
     // returns a Vec whatever the lambda returns: it keeps the Vec route.
-    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> Vec<i64>") && !r.contains("let mut __copy"))?;
+    let k = rendered.iter().position(|r| r.contains(&head) && r.contains("-> AlmideList<i64>") && !r.contains("let mut __copy"))?;
     rendered[k] = rendered[k]
         .replacen(&head, &format!("{}__arr(", crate::render_native::mangle(&lambda)), 1)
-        .replacen("-> Vec<i64>", &format!("-> [i64; {n}]"), 1);
+        .replacen("-> AlmideList<i64>", &format!("-> [i64; {n}]"), 1);
     side.shims.extend(items);
     STATE.with(|s| s.borrow_mut().array_twins.insert(lambda, (n, lit)));
     Some(ARR)
@@ -72,8 +72,8 @@ pub(crate) fn array_twins(texts: &BTreeMap<String, String>) -> Result<String, Lo
     for (lambda, (n, lit)) in twins {
         let mangled = crate::render_native::mangle(&lambda);
         let text = texts.get(&lambda).ok_or_else(|| wall(format!("native: no rendered body for the array twin of `{lambda}`")))?;
-        let lit_line = format!("let mut {}: Vec<i64> = vec![", var(lit));
-        let (head, ret) = (format!("fn {mangled}("), ") -> Vec<i64> {");
+        let lit_line = format!("let mut {}: AlmideList<i64> = almide_list![", var(lit));
+        let (head, ret) = (format!("fn {mangled}("), ") -> AlmideList<i64> {");
         if !(text.contains(&head) && text.contains(ret) && text.contains(&lit_line)) {
             return Err(wall(format!("native: `{lambda}` does not render as its array twin expects")));
         }

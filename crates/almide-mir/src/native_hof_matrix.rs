@@ -3,7 +3,7 @@
 // Matrix for that signature, without copying its data or changing its shape.
 fn matrix_ref_list(d: &DTy, rust: &str, symbol: &str, items: &[&str]) -> Option<bool> {
     if !matches!(d, DTy::List(e) if **e == DTy::Matrix) { return Some(false); }
-    if matches!(rust, "&[AlmideMatrix]" | "&Vec<AlmideMatrix>" | "Vec<AlmideMatrix>") {
+    if matches!(rust, "&[AlmideMatrix]" | "&AlmideList<AlmideMatrix>" | "AlmideList<AlmideMatrix>") {
         return Some(false);
     }
     let param = rust.strip_prefix("&[")?.strip_suffix(']')?;

@@ -286,53 +286,96 @@ fi
 
 echo
 echo "== KERNEL ORACLE (brick 6b): the Rocq KERNEL re-verifies the ENTIRE corpus witness set =="
-# One generated assertion file over ALL witnesses (ownership = one multi-line
+# Generated assertions over ALL witnesses (ownership = one multi-line
 # cert fold; names/caps/tcaps = forallb over the per-function witnesses), coqc'd
 # with vm_compute: the KERNEL itself certifies every verdict the extracted binary
 # just produced. Divergence fails the build — so the extraction pipeline (OCaml
 # codegen + ocamlopt) is a FAST PATH, no longer a trust root for the corpus gate
 # (TRUSTED_BASE §2, brick 6). Measured ~4 min on the full 27k-object corpus.
-KGEN="$(mktemp /tmp/KernelCorpus_XXXXXX).v"
+KDIR="$(mktemp -d /tmp/KernelCorpus_XXXXXX)"
 # CHUNKED goals (arc v1-join-completeness, C6): a Coq string literal is an
 # N-deep inductive spine (~10 constructor nodes per byte), and every Goal pays
 # for its literal at elaboration, vm_compute bytecode-compilation, Qed
 # re-checking, and .vo serialization. One goal over the WHOLE witness set made
 # the peak term multi-million-node (the 2026-07-27 oracle park). Chunking bounds
-# the peak per goal and lets coqc GC between goals; `check_xc` folds per LINE
-# and `forallb` distributes over ++, so per-chunk goals certify exactly the
-# same verdicts.
-python3 - "$OUTDIR" > "$KGEN" <<'PYEOF'
+# the peak per goal; `check_xc` folds per LINE and `forallb` distributes over
+# ++, so per-chunk goals certify exactly the same verdicts.
+#
+# SEVERAL FILES, one coqc each: chunking bounds one goal's peak and not the
+# total. A closed goal stays in the environment of the process that closed it,
+# so one coqc over every goal grew by about 2 GB a minute — measured 14.9 GB
+# resident at 442 s of a ~560 s step on the 16 GB CI machine (2026-11-24), past
+# its memory and into swap before the end; runs died there as a lost runner,
+# with no log. The same goals, each with the same `Qed`, are therefore written
+# across files of at most KERNEL_PART_BYTES of goal text, and each file is
+# compiled by its own process, KERNEL_JOBS at a time. The peak is then a few
+# files' worth whatever the corpus grows to. Any file that fails fails the wall.
+KERNEL_PART_BYTES="${KERNEL_PART_BYTES:-200000}"
+KERNEL_JOBS="${KERNEL_JOBS:-2}"
+python3 - "$OUTDIR" "$KDIR" "$KERNEL_PART_BYTES" <<'PYEOF'
 import sys, os
-out = sys.argv[1]
+out, kdir, budget = sys.argv[1], sys.argv[2], int(sys.argv[3])
 CHUNK = 500          # witnesses per names/caps/tcaps goal
 OWN_CHUNK = 4000     # ownership cert LINES per goal (whole lines only)
+HEADER = ("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach.\n"
+          "From Stdlib Require Import String List.\n"
+          "Import ListNotations.\n"
+          "Open Scope string_scope.\n")
+class Parts:
+    """The goals, in order, across files of at most `budget` bytes of goal text
+    (a goal larger than that has a file to itself). Never zero files: with no
+    goal at all there is still the header to compile, as before."""
+    def __init__(self):
+        self.files, self.goals, self.bytes, self.f, self.size = 0, 0, 0, None, 0
+    def start(self):
+        self.f = open(os.path.join(kdir, "Part%04d.v" % self.files), "w")
+        self.f.write(HEADER)
+        self.files, self.size = self.files + 1, 0
+    def goal(self, text):
+        if self.f is None:
+            self.start()
+        elif self.size and self.size + len(text) > budget:
+            self.f.close()
+            self.start()
+        self.f.write(text)
+        self.size, self.goals, self.bytes = self.size + len(text), self.goals + 1, self.bytes + len(text)
+    def close(self):
+        if self.f is None:
+            self.start()
+        self.f.close()
+parts = Parts()
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 def lines(name):
     return [l for l in open(os.path.join(out, name)).read().splitlines() if l.strip()]
 def chunked(xs, n):
     return [xs[i:i+n] for i in range(0, len(xs), n)] or [[]]
-print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach.")
-print("From Stdlib Require Import String List.")
-print("Import ListNotations.")
-print("Open Scope string_scope.")
 for chunk in chunked(lines('ownership.cert'), OWN_CHUNK):
-    print("Goal check_xc %s = true." % lit("\n".join(chunk) + "\n"))
-    print("Proof. vm_compute. reflexivity. Qed.")
+    parts.goal("Goal check_xc %s = true.\nProof. vm_compute. reflexivity. Qed.\n" % lit("\n".join(chunk) + "\n"))
 for name, fn in (('names.cert', 'check_names_cert'),
                  ('caps.cert', 'check_caps_cert'),
                  ('caps_graph.cert', 'check_prog_cert')):
     for chunk in chunked(lines(name), CHUNK):
-        print("Goal forallb %s [%s] = true." % (fn, ";".join(lit(w) for w in chunk)))
-        print("Proof. vm_compute. reflexivity. Qed.")
+        parts.goal("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (fn, ";".join(lit(w) for w in chunk)))
+parts.close()
+print("  kernel file: %d goal(s), %d byte(s) of goal text, in %d part(s) of at most %d byte(s)" % (parts.goals, parts.bytes, parts.files, budget))
 PYEOF
 KSTART=$(date +%s)
-if (cd "$ROOT/proofs" && "${COQC:-$(command -v coqc)}" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
-  echo "  KERNEL OK: all four corpus witness sets certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute)"
-  rm -f "$KGEN" "${KGEN%.v}.vo" "${KGEN%.v}.vos" "${KGEN%.v}.vok" "${KGEN%.v}.glob"
+KCOQC="${COQC:-$(command -v coqc)}"
+# One coqc per part. A part that fails ends xargs at once (exit 255), so the
+# wall stops at the first failure with a non-zero status; and the verdict is
+# OK only when every part written has its compiled file beside it.
+KRC=0
+(cd "$ROOT/proofs" && find "$KDIR" -name 'Part*.v' | sort \
+  | xargs -P "$KERNEL_JOBS" -I{} sh -c '"$0" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255' "$KCOQC" {}) || KRC=$?
+KPARTS="$(find "$KDIR" -name 'Part*.v' | wc -l | tr -d ' ')"
+KDONE="$(find "$KDIR" -name 'Part*.vo' | wc -l | tr -d ' ')"
+if [ "$KRC" -eq 0 ] && [ "$KPARTS" -ge 1 ] && [ "$KDONE" -eq "$KPARTS" ]; then
+  echo "  KERNEL OK: all four corpus witness sets certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute, $KPARTS part(s), $KERNEL_JOBS at a time)"
+  rm -rf "$KDIR"
 else
   echo "WALL GATE FAIL: the KERNEL rejected a corpus witness the binary accepted (extraction divergence)." >&2
-  rm -f "$KGEN"; exit 1
+  rm -rf "$KDIR"; exit 1
 fi
 
 # POISON RATCHET, the negative leg (#1147, #3229). The sweep above only shows

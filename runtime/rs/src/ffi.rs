@@ -12,19 +12,19 @@
 // An EMPTY buffer has no data region, so its address is NULL on both targets:
 // `Vec::as_ptr` of an empty Vec is a dangling sentinel, and a write through it
 // was UB (C-062).
-pub fn almide_rt_ffi_address(b: &Vec<u8>) -> *mut u8 {
+pub fn almide_rt_ffi_address(b: &AlmideList<u8>) -> *mut u8 {
     if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
 }
 
-pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> Vec<u8> {
-    if base.is_null() || n <= 0 || off < 0 { return Vec::new(); }
+pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> AlmideList<u8> {
+    if base.is_null() || n <= 0 || off < 0 { return AlmideList::new(); }
     // SAFETY: `ffi.read` checked `off + n <= len` for the Region `base` came
     // from, and the Region keeps its owner (or its foreign release guard)
     // alive while it is borrowed here (ADR-0031 D2).
-    unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize).to_vec() }
+    AlmideList::from(unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize) })
 }
 
-pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &Vec<u8>) {
+pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &AlmideList<u8>) {
     if base.is_null() || b.is_empty() || off < 0 { return; }
     // SAFETY: `ffi.write` checked the Region is writable (it came from
     // `ffi.alloc`, whose buffer no Almide value aliases, or from a foreign
@@ -45,17 +45,17 @@ pub struct AlmideFfiBlock(std::rc::Rc<[std::cell::Cell<u8>]>);
 
 // A block holding a copy of b: `ffi.region` views b read-only and `ffi.alloc`
 // hands a fresh zeroed buffer, so a copy observes the same bytes.
-pub fn almide_rt_ffi_block(b: &Vec<u8>) -> AlmideFfiBlock {
+pub fn almide_rt_ffi_block(b: &AlmideList<u8>) -> AlmideFfiBlock {
     AlmideFfiBlock(b.iter().map(|&x| std::cell::Cell::new(x)).collect())
 }
 
-pub fn almide_rt_ffi_block_load(base: &AlmideFfiBlock, off: i64, n: i64) -> Vec<u8> {
-    let (Ok(off), Ok(n)) = (usize::try_from(off), usize::try_from(n)) else { return Vec::new() };
+pub fn almide_rt_ffi_block_load(base: &AlmideFfiBlock, off: i64, n: i64) -> AlmideList<u8> {
+    let (Ok(off), Ok(n)) = (usize::try_from(off), usize::try_from(n)) else { return AlmideList::new() };
     off.checked_add(n).and_then(|end| base.0.get(off..end))
         .map(|cells| cells.iter().map(std::cell::Cell::get).collect()).unwrap_or_default()
 }
 
-pub fn almide_rt_ffi_block_store(base: &AlmideFfiBlock, off: i64, b: &Vec<u8>) -> Result<(), String> {
+pub fn almide_rt_ffi_block_store(base: &AlmideFfiBlock, off: i64, b: &AlmideList<u8>) -> Result<(), String> {
     let Ok(off) = usize::try_from(off) else { return Ok(()) };
     if let Some(cells) = off.checked_add(b.len()).and_then(|end| base.0.get(off..end)) {
         for (cell, &x) in cells.iter().zip(b) { cell.set(x); }

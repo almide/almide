@@ -20,7 +20,7 @@
 
 #[derive(Clone, Debug)]
 pub struct AlmideSet<T> {
-    items: Vec<Option<T>>,
+    items: std::vec::Vec<Option<T>>,
     dead: usize,
     lookup: AlmideKeyLookup,
 }
@@ -33,7 +33,7 @@ impl<T> Default for AlmideSet<T> {
 
 impl<T> AlmideSet<T> {
     pub fn new() -> Self {
-        AlmideSet { items: Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
+        AlmideSet { items: std::vec::Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
     }
     pub fn len(&self) -> usize {
         self.items.len() - self.dead
@@ -220,7 +220,7 @@ pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + PartialEq + Al
 where T: std::borrow::Borrow<Q> { s.contains(value) }
 pub fn almide_rt_set_len<T>(s: &AlmideSet<T>) -> i64 { s.len() as i64 }
 pub fn almide_rt_set_is_empty<T>(s: &AlmideSet<T>) -> bool { s.is_empty() }
-pub fn almide_rt_set_to_list<T: Clone>(s: &AlmideSet<T>) -> Vec<T> { s.iter().cloned().collect() }
+pub fn almide_rt_set_to_list<T: Clone>(s: &AlmideSet<T>) -> AlmideList<T> { s.iter().cloned().collect() }
 // union = a's order, then members of b not already in a (in b's order).
 pub fn almide_rt_set_union<T: PartialEq + Clone + 'static>(a: &AlmideSet<T>, b: &AlmideSet<T>) -> AlmideSet<T> {
     let mut r = a.clone();

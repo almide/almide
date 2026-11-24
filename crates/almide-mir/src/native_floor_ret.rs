@@ -96,7 +96,7 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
             let pair_name = crate::render_native_rec::struct_name(pair);
             let list = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(pair)));
             let result = crate::render_native_rec::result_type_of(list, NTy::Str);
-            (format!("({call}).map(|xs| xs.into_iter().map(|(k, v)| {pair_name} {{ f0: k, f1: v }}).collect::<Vec<{pair_name}>>()).map_err(AlmideString::from)"), Some(NTy::Rec(result)))
+            (format!("({call}).map(|xs| xs.into_iter().map(|(k, v)| {pair_name} {{ f0: k, f1: v }}).collect::<AlmideList<{pair_name}>>()).map_err(AlmideString::from)"), Some(NTy::Rec(result)))
         }
         FloorRet::ResListValue => {
             let l = NTy::Rec(crate::render_native_rec::list_type_of(NTy::Rec(crate::render_native_rec::value_index())));
@@ -112,7 +112,7 @@ fn carrier_ret_of(r: FloorRet, call: String) -> (String, Option<NTy>) {
         }
         FloorRet::ResOptListStr => {
             let o = NTy::Rec(crate::render_native_rec::option_type_of(NTy::VecStr));
-            (format!("({call}).map(|o| o.map(|xs| xs.into_iter().map(AlmideString::from).collect::<Vec<AlmideString>>())).map_err(AlmideString::from)"),
+            (format!("({call}).map(|o| o.map(|xs| xs.into_iter().map(AlmideString::from).collect::<AlmideList<AlmideString>>())).map_err(AlmideString::from)"),
                 Some(NTy::Rec(crate::render_native_rec::result_type_of(o, NTy::Str))))
         }
         FloorRet::ResOptBytes => {
@@ -159,8 +159,8 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             },
         },
         FloorRet::SetElems => match set_e.ok_or_else(mismatch)? {
-            NTy::F32 | NTy::F64 => (format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
-            NTy::Bool => (format!("({call}).into_iter().map(|x| x as i64).collect::<Vec<_>>()"), Some(NTy::Vec)),
+            NTy::F32 | NTy::F64 => (format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<AlmideList<_>>()"), Some(NTy::Vec)),
+            NTy::Bool => (format!("({call}).into_iter().map(|x| x as i64).collect::<AlmideList<_>>()"), Some(NTy::Vec)),
             NTy::I64 => (call, Some(NTy::Vec)),
             NTy::Str => (call, Some(NTy::VecStr)),
             e if crate::render_native_rec::native_set_element_kind(e) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(e)))),
@@ -175,7 +175,7 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(m))))
         }
         FloorRet::FloatRows => (
-            format!("({call}).into_iter().map(|r| r.into_iter().map(|x| x.to_bits() as i64).collect::<Vec<i64>>()).collect::<Vec<Vec<i64>>>()"),
+            format!("({call}).into_iter().map(|r| r.into_iter().map(|x| x.to_bits() as i64).collect::<AlmideList<i64>>()).collect::<AlmideList<AlmideList<i64>>>()"),
             Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::Vec))),
         ),
         _ => unreachable!("render_ret routes only Set and Matrix results here"),
@@ -232,12 +232,12 @@ fn map_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16>) -> R
                 return Err(mismatch());
             }
             let s = crate::render_native_rec::struct_name(pair);
-            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: {key}, f1: {value} }}).collect::<Vec<{s}>>()"), Some(NTy::Rec(list)))
+            (format!("({call}).into_iter().map(|(k, v)| {s} {{ f0: {key}, f1: {value} }}).collect::<AlmideList<{s}>>()"), Some(NTy::Rec(list)))
         }
         _ => {
             let (k, v) = cx.map_kv.ok_or_else(mismatch)?;
             let e = if r == FloorRet::MapKeys { k } else { v };
-            if e == NTy::F32 { return Ok((format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<Vec<_>>()"), Some(NTy::Vec))); }
+            if e == NTy::F32 { return Ok((format!("({call}).into_iter().map(|x| x.to_bits() as i64).collect::<AlmideList<_>>()"), Some(NTy::Vec))); }
             let t = match e {
                 NTy::I64 => NTy::Vec,
                 NTy::Str => NTy::VecStr,
@@ -327,7 +327,7 @@ fn file_stat_ret(call: String, declared: Option<u16>) -> (String, Option<NTy>) {
     let Some(record) = record else {
         let values = abi.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
         return (
-            format!("({call}).map(|s| vec![{values}]).map_err(AlmideString::from)"),
+            format!("({call}).map(|s| almide_list![{values}]).map_err(AlmideString::from)"),
             Some(NTy::Rec(rec::result_type_of(NTy::Vec, NTy::Str))),
         );
     };
@@ -366,7 +366,7 @@ mod file_stat_ret_tests {
         for other in [record(&["name", "n"], vec![NTy::Str, NTy::I64]), record(&["size", "is_dir", "is_file", "mtime"], vec![NTy::I64; 4])] {
             let _guard = install(vec![other]);
             let (code, kind) = file_stat_ret("c".into(), None);
-            assert!(code.contains("vec![s.size, s.is_dir as i64, s.is_file as i64, s.modified]"), "{code}");
+            assert!(code.contains("almide_list![s.size, s.is_dir as i64, s.is_file as i64, s.modified]"), "{code}");
             let result = kind.and_then(NTy::rec).expect("a generated result type");
             assert_eq!(crate::render_native_rec::result_payloads(result), Some((NTy::Vec, NTy::Str)));
         }

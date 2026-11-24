@@ -147,7 +147,7 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
     assert!(fn_body(&rust, "classify").starts_with("xs: &[AlmideString])"), "{}", fn_body(&rust, "classify"));
     // The stores convert the borrow into the owned binding's type.
     assert!(fn_body(&rust, "keep").contains("model = lit.to_almide();"), "{}", fn_body(&rust, "keep"));
-    assert!(fn_body(&rust, "keep_list").contains("out = xs.to_vec();"), "{}", fn_body(&rust, "keep_list"));
+    assert!(fn_body(&rust, "keep_list").contains("out = xs.to_list();"), "{}", fn_body(&rust, "keep_list"));
 
     run_on_every_leg(&bin, &source, EXPECTED);
 }

@@ -21,8 +21,11 @@ const KEEP: &str = "fn keep(xs: List[Int]) -> List[Int] = xs\n\
 #[test]
 fn an_identity_param_moves_instead_of_copying() {
     let (rust, certs) = certified(KEEP);
-    assert!(rust.contains("fn almd_keep(mut v1: Vec<i64>) -> Vec<i64> {\n    v1\n}"), "keep does not take its list:\n{rust}");
-    assert!(!rust.contains(".to_vec()"), "a copy is left:\n{rust}");
+    assert!(rust.contains("fn almd_keep(mut v1: AlmideList<i64>) -> AlmideList<i64> {\n    v1\n}"), "keep does not take its list:\n{rust}");
+    // The program, past the spliced runtime (whose AlmideList block itself
+    // spells `.to_vec()` in its std-Vec conversions, ADR-0037).
+    let program = rust.split("// __ALMIDE_V1_RT_END__").nth(1).expect("the runtime splice ends");
+    assert!(!program.contains(".to_vec()") && !program.contains(".to_list()"), "a copy is left:\n{program}");
     let (_, _, calls) = certs.iter().find(|(p, ..)| p == "native-calls").expect("a native-calls witness");
     // keep's block declares its list param a move; grow's site hands it over (`M`).
     assert!(calls.split('#').any(|b| b.starts_with("1||")), "{calls}");
@@ -48,7 +51,7 @@ fn a_list_concatenated_with_itself_is_copied_not_grown() {
     );
     let f = &rust[rust.find("fn almd_twice(").expect("twice")..];
     let f = &f[..f.find("\n}\n").unwrap_or(f.len())];
-    assert!(f.contains("Vec::with_capacity"), "the self-concatenation is not a copy:\n{f}");
+    assert!(f.contains("AlmideList::with_capacity"), "the self-concatenation is not a copy:\n{f}");
 }
 
 #[test]

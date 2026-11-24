@@ -75,8 +75,10 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
     };
     let body_raw = render_stmts(ctx, body).join("\n");
     let body_str = indent_lines(&body_raw, 4);
-    ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
-        .unwrap_or_else(|| format!("for _ in _ {{ }}"))
+    let rendered = ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| format!("for _ in _ {{ }}"));
+    // #4906: a loop that only appends to a list keeps its length in a local.
+    super::loop_appender::with_appender(ctx, iterable, rendered)
 }
 
 /// `list.range(a, b)` as the rendered bounds `(a, b)`, for a consumer that

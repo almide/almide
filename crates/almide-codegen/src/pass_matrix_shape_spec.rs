@@ -413,7 +413,7 @@ fn make_unrolled_mul(
             };
             cells.push(sum);
         }
-        rows.push(format!("vec![{}]", cells.join(", ")));
+        rows.push(format!("almide_list![{}]", cells.join(", ")));
     }
 
     // #617: Matrix is the AlmideRcCow value type in generated code — the raw

@@ -23,7 +23,7 @@ fn fnv1a32(data: &[u8]) -> i64 {
     h as i64
 }
 
-pub fn almide_rt_hash_fnv1a32(b: &Vec<u8>) -> i64 { fnv1a32(b) }
+pub fn almide_rt_hash_fnv1a32(b: &AlmideList<u8>) -> i64 { fnv1a32(b) }
 
 const ALMIDE_SHA_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -36,7 +36,7 @@ const ALMIDE_SHA_K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-fn sha256(data: &[u8]) -> Vec<u8> {
+fn sha256(data: &[u8]) -> AlmideList<u8> {
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
         0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
@@ -85,6 +85,6 @@ fn sha256(data: &[u8]) -> Vec<u8> {
     h.iter().flat_map(|x| x.to_be_bytes()).collect()
 }
 
-pub fn almide_rt_hash_sha256(b: &Vec<u8>) -> Vec<u8> { sha256(b) }
+pub fn almide_rt_hash_sha256(b: &AlmideList<u8>) -> AlmideList<u8> { sha256(b) }
 
-pub fn almide_rt_hash_sha256_hex(b: &Vec<u8>) -> AlmideString { let __almide_out: String = sha256(b).iter().map(|b| format!("{:02x}", b)).collect(); __almide_out.into() }
+pub fn almide_rt_hash_sha256_hex(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = sha256(b).iter().map(|b| format!("{:02x}", b)).collect(); __almide_out.into() }

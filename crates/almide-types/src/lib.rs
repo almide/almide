@@ -66,6 +66,10 @@ pub mod reuse {
         /// The runtime fn that takes the source by value, where the intrinsic
         /// borrows it; `None` when the intrinsic itself consumes (`@consume`).
         pub owned_twin: Option<&'static str>,
+        /// `@appends`: the result is the reused list with the fn's other
+        /// (`Int`) param appended as one element (crates/almide-mir
+        /// `render_native_appends`).
+        pub appends: bool,
     }
 
     include!("generated/reuse.rs");

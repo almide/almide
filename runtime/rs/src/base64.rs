@@ -40,7 +40,7 @@ const fn build_alphabet(s62: u8, s63: u8) -> [u8; 64] {
 fn encode_with(b: &[u8], alphabet: &[u8; 64]) -> String {
     // Output length is always a multiple of 4 (padded form): 4 chars per
     // 3 input bytes, rounding up.
-    let mut out = Vec::with_capacity(b.len().div_ceil(3) * 4);
+    let mut out = AlmideList::with_capacity(b.len().div_ceil(3) * 4);
     let mut chunks = b.chunks_exact(3);
     for chunk in &mut chunks {
         let n = ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | (chunk[2] as u32);
@@ -106,7 +106,7 @@ const ALMIDE_ERR_BITS: &str = "invalid base64 trailing bits";
 /// read both alphabets in both functions, and ignored the dropped bits, so
 /// `QQ==`, `QR==`, `QQ`, `QQ========` all decoded to `A` (RFC 4648 §12's
 /// malleability). Go's `Encoding.Strict()` refuses the same set.
-fn decode_str(s: &str, s62: u8, s63: u8) -> Result<Vec<u8>, String> {
+fn decode_str(s: &str, s62: u8, s63: u8) -> Result<AlmideList<u8>, String> {
     let bytes = s.as_bytes();
     if bytes.len() % 4 != 0 {
         return Err(format!("invalid base64 length: {}", s.len()));
@@ -119,7 +119,7 @@ fn decode_str(s: &str, s62: u8, s63: u8) -> Result<Vec<u8>, String> {
     let vals = body
         .iter()
         .map(|&c| decode_char(c, s62, s63))
-        .collect::<Option<Vec<u8>>>()
+        .collect::<Option<AlmideList<u8>>>()
         .ok_or_else(|| ALMIDE_ERR_CHAR.to_string())?;
     // One pad drops the low 2 bits of the last symbol, two pads the low 4.
     let dropped = match pad { 1 => 0x03, 2 => 0x0f, _ => 0 };
@@ -127,7 +127,7 @@ fn decode_str(s: &str, s62: u8, s63: u8) -> Result<Vec<u8>, String> {
         return Err(ALMIDE_ERR_BITS.to_string());
     }
 
-    let mut out = Vec::with_capacity(vals.len() / 4 * 3 + 2);
+    let mut out = AlmideList::with_capacity(vals.len() / 4 * 3 + 2);
     let mut chunks = vals.chunks_exact(4);
     for q in &mut chunks {
         out.push((q[0] << 2) | (q[1] >> 4));
@@ -144,10 +144,10 @@ fn decode_str(s: &str, s62: u8, s63: u8) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-pub fn almide_rt_base64_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_STD_ALPHABET); __almide_out.into() }
+pub fn almide_rt_base64_encode(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_STD_ALPHABET); __almide_out.into() }
 
-pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_URL_ALPHABET); __almide_out.into() }
+pub fn almide_rt_base64_encode_url(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_URL_ALPHABET); __almide_out.into() }
 
-pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s, b'+', b'/') })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_base64_decode(s: &str) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { decode_str(s, b'+', b'/') })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_base64_decode_url(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s, b'-', b'_') })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_base64_decode_url(s: &str) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { decode_str(s, b'-', b'_') })(); __almide_r.map_err(Into::into) }

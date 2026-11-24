@@ -254,14 +254,26 @@ pub(crate) fn render_print(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::rend
 }
 
 /// The appends of each piece after a chain's head onto its unique view,
-/// reserved once for all of them, when every piece is a literal or a string.
+/// reserved once for all of them. An Int, Bool or Float piece is formatted
+/// into a text of its own first, so a loop `s = "${s}, ${n}"` grows `s` in
+/// place rather than formatting all of `s` again on every turn: that rebuild
+/// made each step cost the length of `s`, quadratic in the loop (a nested
+/// list's display, 400,000 inner Ints, ran 17 s native against 0.07 s wasm).
 pub(crate) fn push_pieces(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
     use crate::render_native::NTy;
     (!pieces.is_empty()).then_some(())?;
     let mut lens = Vec::new();
     let mut pushes = Vec::new();
+    let mut texts = Vec::new();
     for p in pieces {
         let arg = match p {
+            Piece::Int(_) | Piece::Bool(_) | Piece::Float(_) => {
+                let (template, args) = fmt_parts(std::slice::from_ref(p), tys)?;
+                let t = format!("__t{}", texts.len());
+                texts.push(format!("let {t} = AlmideString::from_fmt(format_args!(\"{template}\"{args}));"));
+                lens.push(format!("{t}.len()"));
+                format!("{t}.as_str()")
+            }
             Piece::Lit(s) => {
                 lens.push(s.len().to_string());
                 format!("\"{}\"", almide_base::rust_lit::escape_rust_str(s))
@@ -272,12 +284,12 @@ pub(crate) fn push_pieces(pieces: &[Piece], tys: &BTreeMap<ValueId, crate::rende
                 lens.push(format!("{code}.len()"));
                 if owned { format!("{code}.as_str()") } else { code }
             }
-            _ => return None,
         };
         pushes.push(format!("__u.push_str({arg});"));
     }
     let extra = lens.join(" + ");
-    Some(format!("{{ let __extra = {extra}; let mut __u = __head.unique_with(__extra); __u.reserve(__extra); {} }}", pushes.join(" ")))
+    let texts = texts.iter().map(|t| format!("{t} ")).collect::<String>();
+    Some(format!("{{ {texts}let __extra = {extra}; let mut __u = __head.unique_with(__extra); __u.reserve(__extra); {} }}", pushes.join(" ")))
 }
 
 fn render_final_opt(dst: ValueId, pieces: &[Piece], tys: &BTreeMap<ValueId, crate::render_native::NTy>) -> Option<String> {
