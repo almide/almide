@@ -25,5 +25,3 @@ wall	spec/wasm_host_js/region_extern_pull.almd
 # reject: the v1 render covers it, almide-verify rejects a witness (#4930).
 reject	research/benchmark/perf/native/cli_app.almd
 reject	research/benchmark/perf/onebrc/onebrc.almd
-reject	research/benchmark/perf/v1-shapes/chunked_line_fold.almd
-reject	research/benchmark/perf/v1-shapes/station_lines_aggregate.almd
