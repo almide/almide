@@ -198,6 +198,18 @@ while IFS= read -r f; do
     sed 's/^/  /' "$OUT/$N.anchor" >&2
     exit 1
   fi
+  # The runtime routines the anchor file names, as this artifact ships them:
+  # the bytes the kernel reads with the proof script's shipped-form decoders
+  # after the loop (check-shipped-routines.sh).
+  if [ -f "$OUT/$N.anchor" ]; then
+    printf 'MODULE %s\n' "$f" >> "$OUT/shipped-dump"
+    if ! "$ANCHORCHECK" --proved-bytes "$OUT/$N.wasm" "$OUT/$N.anchors" >> "$OUT/shipped-dump" 2> "$OUT/$N.shipped-err"; then
+      echo "STRUCTURAL WALL FAIL: $f: the named runtime routines could not be read out of the shipped bytes:" >&2
+      tail -1 "$OUT/shipped-dump" | sed 's/^/  /' >&2
+      sed 's/^/  /' "$OUT/$N.shipped-err" >&2
+      exit 1
+    fi
+  fi
   # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
   # what it certifies must be the translation of the shipped functions
   # (--lin-verify) and is judged as a bounds witness below. What it leaves
@@ -242,6 +254,18 @@ fi
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
 [ "$SEEN" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: read $SEEN of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
+# SHIPPED ROUTINES: the proofs about `$inc` / `$dec_flat` / `$free` / `$alloc`
+# are about instruction trees; check-structural-bytes.sh ties those trees to
+# the bytes the EMITTER writes. Two passes run after the emitter (the stock-
+# WASI transform puts an exit call in front of every trap; the prune and the
+# transform renumber globals and functions), so here the Rocq kernel reads
+# each judged artifact's routines AS SHIPPED with StructuralShipped.v's
+# decoders and must answer the proven tree for every one, with one global in
+# the `$line_end` role, `$dec_flat` freeing through the routine that decodes
+# as `$free`, and every inserted exit call naming the `proc_exit` import.
+echo "== the runtime routines as shipped, read by the proof script's decoders (Rocq kernel) =="
+[ -s "$OUT/shipped-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact's runtime routines were dumped — the shipped-form check went blind" >&2; exit 1; }
+bash "$ROOT/proofs/check-shipped-routines.sh" "$OUT/shipped-dump" "$OUT/shipped" | sed 's/^/  /'
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"
