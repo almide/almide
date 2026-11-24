@@ -140,7 +140,7 @@ jobs:
             # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
             # bare non-zero command (the first exit 5) would end the whole loop.
             rust_code=0; $ALMIDE test "$f" > /dev/null 2>&1 || rust_code=$?
-            # C-461: a listed INCOMPLETE program carries the flag (scripts/lib/incomplete-verification.sh).
+            # C-462: a listed INCOMPLETE program carries the flag (scripts/lib/incomplete-verification.sh).
             wasm_code=0; $ALMIDE test "$f" --target wasm $(incomplete_flag test "$f") > /dev/null 2>&1 || wasm_code=$?
 
             if [ "$rust_code" -eq 0 ]; then rust_pass=$((rust_pass + 1)); else rust_fail=$((rust_fail + 1)); fi

@@ -1480,7 +1480,7 @@ jobs:
       - name: Almide spec tests (WASM target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          # C-461: a program whose wasm certificate is INCOMPLETE is refused
+          # C-462: a program whose wasm certificate is INCOMPLETE is refused
           # by default; the corpus programs still INCOMPLETE are listed in
           # proofs/incomplete-verification.toml and pass under the flag, and
           # the log check refuses an INCOMPLETE program the ledger does not list.
