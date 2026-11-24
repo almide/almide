@@ -192,6 +192,9 @@ class ProseTests(unittest.TestCase):
             "name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)",
             "name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal "
             "to expected and native; the module and glue ship only the program's surface)",
+            "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
+            "name: Native walls (#4006 — the corpus's native v1 walls and rejected certificates are exactly the "
+            "shrink-only rows of proofs/native-walls.txt)",
             "name: Stability closure standing (#1485 — informational, never blocks)",
             "name: Installers refuse a release whose attestation they could not verify, unless --skip-attestation "
             "(security row 16)",
