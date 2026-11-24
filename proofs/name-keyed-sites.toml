@@ -1056,11 +1056,6 @@ class = "legacy"
 names = 27
 
 [[site]]
-id = "crates/almide-wasm/src/witness_gate_callbacks.rs::is_self_hosted_hof::or-pattern"
-class = "legacy"
-names = 6
-
-[[site]]
 id = "src/cargo_cfg.rs::expr::or-pattern"
 class = "legacy"
 names = 2

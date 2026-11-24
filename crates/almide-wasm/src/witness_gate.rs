@@ -9,7 +9,7 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 /// The inlined-callback rules (split for the file budget).
 #[path = "witness_gate_callbacks.rs"]
 mod callbacks;
-use callbacks::{inline_callback_subset, is_self_hosted_hof};
+use callbacks::inline_callback_subset;
 /// The built-value rules (split for the file budget).
 #[path = "witness_gate_built.rs"]
 mod built;
@@ -551,9 +551,7 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
         // any other declines by arm name. A Fn value that arrives as a value
         // (a Var, a call result) is an ordinary argument everywhere.
         almide_ir::CallTarget::Module { module, func, .. } => {
-            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. }))
-                && !is_self_hosted_hof(module.as_str(), func.as_str())
-            {
+            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
                 return inline_callback_subset(module.as_str(), func.as_str(), args);
             }
         }

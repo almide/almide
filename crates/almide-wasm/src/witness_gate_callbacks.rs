@@ -5,29 +5,13 @@ use almide_ir::{IrExpr, IrExprKind};
 
 use super::{value_subset, Why};
 
-/// #2758: the fallible collection HOFs (`list.__fallible_map__…`,
-/// `map.` / `set.` / `option.__fallible_*`, the checker's instantiation of a
-/// callback that raises — stdlib/{list,map,set,option}.almd) are
-/// SELF-HOSTED: an ordinary call
-/// to a lifted stdlib body, no native arm inlines the lambda. The literal
-/// callback is then a closure VALUE — its env is built by the closure hooks
-/// and handed over under the callee's convention like any fresh argument.
-///
-/// A MONO INSTANCE surface name (`result.filter`'s instance, the checker's
-/// instantiation reaching the registry under its instance name) is
-/// the same: no native arm matches it, so it lowers as the linked call.
-/// Were an arm to inline it after all, the callback node would carry no
-/// hook and the module-call audit would decline the frame.
-///
-/// Two surfaces take a Fn VALUE outright: `bytes.map` has no native arm
-/// (the linked self-host body calls the closure), and `list.push` stores the
-/// closure it is handed as an element (`lower_arg`, Retain).
-pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    let base = almide_ir::mono_base_or_self(func);
-    (matches!(module, "list" | "map" | "set" | "option") && base.starts_with("__fallible_"))
-        || (base != func && !base.starts_with("__"))
-        || matches!((module, func), ("bytes", "map") | ("list", "push"))
-}
+// #2758: a SELF-HOSTED collection HOF (`list.__fallible_map__…`, a mono
+// instance surface name, `bytes.map`, `list.push`'s closure element) takes a
+// literal callback as a closure VALUE — its env built by the closure hooks
+// and handed over under the callee's convention. That is the ordinary
+// argument rule `inline_callback_subset` falls back to for any call it does
+// not list, so no list of self-hosted names is kept (it was one until the
+// fallback and the module-call audit made it redundant, 2026-11-24).
 
 /// #2755 / #2758: a module call that INLINES a literal callback. Admitted
 /// for the arms whose lowering (list.rs) records the callback as a loop
@@ -64,7 +48,18 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 /// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
 /// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating` —
 /// except an fs walker's, whose closure route is recorded.
-/// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
+///
+/// Any OTHER module call with a literal callback is judged as a self-hosted
+/// callee's is (each argument by the ordinary value rule, a literal callback
+/// a closure value), and the rest is the module-call audit's
+/// (`witness_module_result`, calls_modules.rs), which needs a hook for every
+/// droppable argument node: an arm that inlines the callback as a predicate
+/// activation (`lower_inlined_predicate`: `list.find_index`,
+/// `list.partition`, `set.any` / `set.all` through `list.any` / `list.all`)
+/// or a linked self-hosted callee that takes it as a closure value
+/// (`lower_arg`) hooks it; an arm that inlines it with no activation hooks
+/// nothing, and the frame declines there as `module-arm:unaudited`. What
+/// decides is the hook the lowering fires, not a list of arm names.
 pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
     let arity = match (module, func, args) {
@@ -101,7 +96,11 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
         // element over every inlined stage, whose callbacks are the chain's
         // own `list.map` / `list.filter` arguments, judged below as such.
         ("list", "fold", [_, _, _]) => 2,
-        _ => return here(""),
+        // Any other call: the ordinary argument rule a self-hosted callee's
+        // closure argument takes (a literal callback is a closure VALUE, the
+        // closure hooks'), and the module-call audit decides the rest — an
+        // arm that inlines the callback without an activation declines there.
+        _ => return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg"))),
     };
     let (cb, rest) = args.split_last()?;
     let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
