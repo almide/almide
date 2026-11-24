@@ -48,8 +48,8 @@
 # naming the PR and why):
 # unstamped_ceiling     = "84"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "97"
-# failopen_ceiling      = "21"
+# skipped_route_ceiling = "70"
+# failopen_ceiling      = "20"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -3195,25 +3195,30 @@ id = "verify.gate-build"
 at = "src/cli/verify.rs::gate_build"
 items = [
   "src/cli/verify.rs::gate_build",
+  "src/certificate_gate.rs::judge",
 ]
 keys = []
-decides = "build --target wasm writes the core module only when the installed almide-verify accepts the build's own bundle (exit 0/3); rejects (exit 1/2) stop the write"
+decides = "every wasm route (build, run, test, bench, a component's core module) writes or runs a module only when the almide-verify LIBRARY linked into the compiler accepts the build's own bundle over the exact bytes (CERTIFIED or INCOMPLETE); a REJECTed witness, an unreadable bundle, other bytes or no witness stop it"
 from = "mixed:declaration+text"
-unknown = "allow"
-unknown_note = "no almide-verify beside the exe or on PATH => `let Some(verifier) = locate_verifier() else { return Ok(()) }` (verify.rs:188): the build ships unjudged; a component build drops the sinks (build_wasm.rs:101-102)"
-routes = { check = "n.a.: writes nothing", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836 (run.rs:738 compile_to_wasm_bytes, no gate)", build = "runs: core module only, verifier present only", test = "skipped:#4836 (test_wasm.rs:192 route_wasm_tests)", bench = "skipped:#4836 (bench.rs:120)", native = "n.a.: native certs are not judged (see witness.native-verified-fallback)", wasm = "runs: build only", wasi = "skipped: #4836 build --target wasi is the rustc route (build.rs:322), no bundle", component = "skipped:#4836 (build_wasm.rs:101 drops the sinks)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+unknown = "refuse"
+unknown_note = "#4836 (owner ruling 2026-11-24, Q3): the verifier is linked (certificate_gate.rs::judge), so 'no almide-verify installed' cannot happen; gate_build and verify::certified_with run unconditionally. What the verifier has not seen is refused: a novel property, an unknown record, a bundle pinned to other bytes, a bundle with no witness (novel test). INCOMPLETE stays a pass (verify.gate-build-incomplete-accepted, Q4 pending)"
+routes = { check = "n.a.: writes nothing", check_json = "n.a.", check_effects = "n.a.", run = "runs: verify::certified (run.rs:747), unconditional since #4836 in-process", build = "runs: core module or a component's core, always (linked verifier)", test = "runs: verify::certified_test (test_wasm.rs:196, :917)", bench = "runs: verify::certified (bench.rs:124)", native = "n.a.: native certs are not judged (see witness.native-verified-fallback)", wasm = "runs: build only", wasi = "skipped: #4836 build --target wasi is the rustc route (build.rs:322), no bundle", component = "runs: the core module is judged before packaging (build_wasm.rs:98-106)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
-  "tests/verify_shim_test.rs::a_real_program_is_judged_by_the_real_verifier",
-  "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign",
+  "tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused",
+  "tests/component_core_judged_test.rs::a_component_is_judged_by_the_linked_verifier_not_a_binary_beside_the_compiler",
 ]
-control_note = "scripts/check-build-certifies.sh (nightly wasm-checked-alloc-nightly.yml:148): re-injected lost bounds check => exit 1, no file; verifier moved away => file written"
+control_note = "proofs/decision-controls/verify.gate-build.patch skips the linked verdict; scripts/check-build-certifies.sh (nightly wasm-checked-alloc-nightly.yml): re-injected lost bounds check => build exit 1, no file; run refused; the standalone verifier rejects the same bundle"
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c2:fail-open (no verifier => Ok)",
-  "c3:route-skipped #4836",
+  "c3:no probe: no program makes the gate refuse without a compiler bug; the route refusal is the drill scripts/check-build-certifies.sh (re-injected emitter bugs, build and run)",
+  "c3:wasi skipped #4836 (rustc route, no structural bundle)",
 ]
-note = "No verifier is documented (proven-vs-trusted.md:214 NOT-a-claim). The `--verified` / allow_unverified flags reach compile_to_wasm_bytes_surfaced and are discarded (`let _ = (&mut ir_program, allow_unverified, verified)`, wasm_compile.rs:560) while the doc comment at wasm_compile.rs:476-478 still says `--verified` ships exactly what was verified; --wasm-opt rewrites the file after the gate (build_wasm.rs:321, says so on the Built line)."
+note = "Before #4836's in-process change a build with no almide-verify installed shipped unjudged (proven-vs-trusted.md: 'a build without the verifier installed is checked (it is not)' — that NOT-a-claim line is now obsolete, change queued with the proof-spine session). The `--verified` / allow_unverified flags reach compile_to_wasm_bytes_surfaced and are discarded (`let _ = (&mut ir_program, allow_unverified, verified)`, wasm_compile.rs:560); --wasm-opt rewrites the file after the gate (build_wasm.rs, says so on the Built line)."
+novel = "tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused"
+control_patch = "proofs/decision-controls/verify.gate-build.patch"
+control_test = "tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused"
+control_seen = "e105a32f96 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; panic at tests/decision_verify_gate_novel_test.rs:34, the novel-property refusal) (24th engineer)"
 
 [[site]]
 id = "verify.gate-build-incomplete-accepted"
@@ -3226,7 +3231,7 @@ decides = "exit 3 (INCOMPLETE: every witness accepted, some function declared un
 from = "declaration"
 unknown = "allow"
 unknown_note = "a frame the witness subset gate declines (any shape not yet admitted, witness_gate.rs) becomes an `uncertified` line (witness_bundle.rs:107-109), the bundle is INCOMPLETE, `Some(0 | 3) => Ok(())` (verify.rs:217) writes the artifact"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build only", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build only", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::an_uncertified_function_makes_the_outcome_incomplete",
 ]
@@ -3235,24 +3240,24 @@ issues = [4836]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open (declined frames pass)",
-  "c3:route-skipped #4836",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
 note = "By design (verify.rs:181-186 doc; Built line says `certificate pending`), but nothing bounds how much of a program may be uncertified: a module whose every frame declines still passes, as long as one witness (call-modes `(program)`) exists to avoid the empty-bundle reject."
 
 [[site]]
 id = "verify.gate-build-scratch-files"
-at = "src/cli/verify.rs::gate_build"
+at = "src/cli/verify.rs::cmd_verify"
 items = [
-  "src/cli/verify.rs::gate_build",
+  "src/cli/verify.rs::cmd_verify",
 ]
 keys = []
-decides = "the bytes and bundle the verifier judges are written to temp_dir()/almide-build-<pid>.{wasm,bundle} and read back by the verifier subprocess"
+decides = "the bundle `almide verify` hands the standalone almide-verify binary is written in a fresh private directory, never at a predictable shared name (the build gate hands no file to anyone since #4836's in-process judge)"
 from = "type"
 unknown = "refuse"
 unknown_note = "a fresh 0700 scratch directory per run (almide_base::private_dir, #4853): an existing name is skipped, never written through; artifact and bundle are made inside it and removed with it"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "runs: wasm, verifier present", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs: build", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = ["tests/decision_scratch_dir_test.rs::novel_the_build_route_hands_the_verifier_a_fresh_private_directory"]
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.: since #4836 the build gate judges in process and writes no hand-off file", test = "n.a.", bench = "n.a.", native = "n.a.", wasm = "runs: `almide verify` (cmd_verify, verify.rs:386-397)", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+tests = ["tests/decision_scratch_dir_test.rs::novel_the_verify_route_hands_the_verifier_a_fresh_private_directory"]
 control_note = "NONE"
 issues = [4853]
 status = "UNSTAMPED"
@@ -3299,7 +3304,7 @@ decides = "a bundle is read only when every line is a known record of its declar
 from = "declaration"
 unknown = "refuse"
 unknown_note = "unknown magic, record, property, a short witness, an artifact record before v2, a share-out `s` before v3, rc-sig before v4, native-calls before v5 => BundleError (bundle.rs:246-302)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836 native certs discarded", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "skipped: #4836 native certs discarded", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::what_version_one_does_not_define_is_refused",
   "crates/almide-verify/src/bundle.rs::tests::a_malformed_or_repeated_artifact_record_is_refused",
@@ -3310,7 +3315,7 @@ control_note = "crates/almide-verify/src/bundle.rs::tests::what_version_one_does
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c3:route-skipped #4836",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: native, wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
 ]
 note = "The parser itself meets c1/c2/c4; only the routes that never call the verifier keep it unstamped."
 
@@ -3325,7 +3330,7 @@ decides = "CERTIFIED iff ≥1 witness and all accepted and no uncertified line; 
 from = "declaration"
 unknown = "allow"
 unknown_note = "a defined function of the shipped module with neither a witness record nor an `uncertified` line is simply absent from the verdict: the verifier links no wasm decoder (Cargo.toml: no dependencies) and never enumerates the artifact's functions; completeness is the producer's claim"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "skipped: #4836", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::no_witness_is_not_an_accept",
 ]
@@ -3334,7 +3339,7 @@ issues = [4836]
 status = "UNSTAMPED"
 reasons = [
   "c2:fail-open (unwitnessed function unjudged)",
-  "c3:route-skipped #4836",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: native, wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
 note = "bundle.rs:174-192. The artifact hash (main.rs:66-76) binds the verdict to a file, not to coverage of that file; a v1 bundle (no artifact record) is judged with artifact_ok = true. The anchor check (CI only) is what ties events to bytes."
@@ -3350,7 +3355,7 @@ decides = "each witness is accepted or rejected by the Rust transcription of its
 from = "declaration"
 unknown = "refuse"
 unknown_note = "an unknown property name is refused at parse (Property::from_name, bundle.rs:237); malformed witness bytes reject in each checker"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "skipped: #4836 proofs/native-wall.sh only", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "skipped: #4836 proofs/native-wall.sh only", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/tests/coq_examples.rs",
   "crates/almide-verify/tests/cli.rs::one_witness_speaks_the_extracted_checker_interface",
@@ -3360,7 +3365,7 @@ control_note = "scripts/witness-reinject.sh (bounds/init/fields/native/native-ca
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c3:route-skipped #4836",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: native, wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
 ]
 note = "c1/c2/c4 hold for the checkers; their reach on shipped programs is the gate_build route set."
 
@@ -3525,7 +3530,7 @@ decides = "which function bodies the structural recorder certifies; anything out
 from = "mixed:type+prefix"
 unknown = "allow"
 unknown_note = "host-splice leaves are declined by a name-prefix list (__http_framed_/__http_call_/__http_serve_/__proc_, witness_gate.rs:533-538); the same lower_host_leaf path also intercepts __net_*/__unix_*/__shm_*/__net_udp_*/__net_lookup_host (net_call.rs:120, http_call.rs:115) which the list does not name, so those frames are admitted; a new leaf family is admitted the same way"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-wasm/tests/witness_*.rs",
   "crates/almide-wasm/tests/golden/witness-declines.txt",
@@ -3536,7 +3541,7 @@ status = "UNSTAMPED"
 reasons = [
   "c1:prefix-keyed host-leaf decline",
   "c2:fail-open novel host leaf",
-  "c3:route-skipped #4836",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
 note = "NEW suspect, low: fs_call_two lowers both operands through lower_arg(Borrow) (fs.rs:165-171), so the argument hooks may fire for net leaves and the decline may be unnecessary for them; the point is that the admit/decline split is by spelling, not by the lowering route. Related to, not covered by, #4828."
@@ -3675,12 +3680,17 @@ decides = "each function's capability reach, read from the shipped bytes' almide
 from = "mixed:reach+prefix"
 unknown = "refuse"
 unknown_note = "an op no family assigns, or a non-constant op, is SENTINEL (cert_project.rs:115-117, 658) which no bound contains; but `__selfhost_*` fns get declared=None (emit_decls.rs:90, prefix) and are bounded only by their own reach"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped:#4836", build = "runs: wasm with verifier", test = "skipped:#4836", bench = "skipped:#4836", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "skipped:#4836", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = ["crates/almide-wasm/tests/witness_floor.rs", "tests/verify_shim_test.rs::a_plain_fn_calling_a_pure_extern_builds_under_the_verifier_and_reports_foreign"]
 control_note = "UNKNOWN"
 issues = [4836, 4829]
 status = "UNSTAMPED"
-reasons = ["c1: manifest_bound reads allow names through its own pre-epoch-15 table (cert_project.rs:452-466: IO grants FS_READ / FS_WRITE, Env grants PROC; FS, Proc and the leaves grant nothing), not Effect::granted_by as certificate::manifest_caps does (crates/almide-mir/src/certificate.rs:492-514) — issue draft issue-witness-manifest-vocabulary", "c3: route-skipped #4836", "c2: the verifier reads an out-of-range callee index as reaching nothing (crates/almide-verify/src/reach.rs:44-45; not probed)", "c4: no-control (a neuter is located in the row's note; not run)"]
+reasons = [
+  "c1: manifest_bound reads allow names through its own pre-epoch-15 table (cert_project.rs:452-466: IO grants FS_READ / FS_WRITE, Env grants PROC; FS, Proc and the leaves grant nothing), not Effect::granted_by as certificate::manifest_caps does (crates/almide-mir/src/certificate.rs:492-514) — issue draft issue-witness-manifest-vocabulary",
+  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
+  "c2: the verifier reads an out-of-range callee index as reaching nothing (crates/almide-verify/src/reach.rs:44-45; not probed)",
+  "c4: no-control (a neuter is located in the row's note; not run)",
+]
 note = "the manifest comes from verify.rs manifest_allow: one that does not parse is refused now (#4829); it is still the cwd's (issue-verify-cwd-manifest). `__selfhost_*` fns get declared=None (emit_decls.rs:90, prefix)."
 
 [[site]]
