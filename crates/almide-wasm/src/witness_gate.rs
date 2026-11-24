@@ -755,9 +755,11 @@ fn ends_in_loop_ctl(e: &IrExpr) -> bool {
 ///   `witness_store`), the exit plan's releases are recorded like a `!`
 ///   propagation's, and the block leaves (`witness_err_raise`). Admitted.
 /// - `ok(v)` is transparent — the value IS `v` — while every consumer reads
-///   the node as a fresh construction (`rc_owned_result`). That agrees only
-///   when `v` is a scalar or certainly fresh itself, so any other `ok(v)`
-///   declines as `effect:carrier:ok-borrowed`.
+///   the node as a fresh construction (`rc_owned_result`). That agrees when
+///   `v` (through block tails) is a scalar, certainly fresh, or a call's
+///   handed-over credit; a borrowed Var takes its share at the node (data.rs
+///   `lower_err_raise`, the carrier's share-out on the Var's line). Any other
+///   `ok(v)` declines as `effect:carrier:ok-borrowed`.
 pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     struct Carrier(bool);
     impl almide_ir::visit::IrVisitor for Carrier {
@@ -765,10 +767,13 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
             // A call's droppable result is its callee's handed-over credit
             // (#1986); one an arm declares a View declines at emission
             // (data.rs `lower_err_raise`).
+            // A block's value is its tail's (`{ let t = f(x); "w" + t }`,
+            // arg_temps.rs): its binds are the body's own sites, judged
+            // with the body below.
             if let IrExprKind::ResultOk { expr } = &e.kind
                 && !scalar_ty(&expr.ty)
-                && !crate::rc_ownership::rc_certainly_fresh(&expr.kind)
-                && !matches!(expr.kind, IrExprKind::Call { .. })
+                && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(expr).kind)
+                && !matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Call { .. } | IrExprKind::Var { .. })
             {
                 self.0 = true;
             } else if !self.0 {
