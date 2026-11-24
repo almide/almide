@@ -5,6 +5,9 @@
 //! naming a type only its owner may serve is E118. No dependencies, no
 //! network: the grant is the root manifest's own.
 
+#[path = "support/novel.rs"]
+mod novel;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -41,24 +44,28 @@ fn a_listed_type_needs_no_grant() {
 
 #[test]
 fn novel_an_unlisted_type_is_refused_until_the_application_grants_it() {
-    // Not in the table and not script-capable by html's declaration: before
-    // the closed table this was served by default.
-    let dir = project("refused", "", "application/vnd.acme+json");
+    // A FRESH media type no list in the compiler can have named: neither in
+    // the table nor script-capable by html's declaration. Before the closed
+    // table it was served by default.
+    let fresh = format!("application/vnd.{}+json", novel::ident("novel"));
+    let other = format!("application/{}", novel::ident("other"));
+    let dir = project("refused", "", &fresh);
     let out = almide(&dir, &["check", "src/main.almd"]);
     assert!(!out.status.success(), "an unlisted type was admitted:\n{}", text(&out));
     assert!(text(&out).contains("E117"), "{}", text(&out));
     assert!(text(&out).contains("\"self\""), "the refusal names the grant: {}", text(&out));
 
-    let dir = project("granted", "\n[trust]\nmedia = { \"self\" = [\"application/vnd.acme+json\"] }\n", "application/vnd.acme+json");
+    let grant = format!("\n[trust]\nmedia = {{ \"self\" = [\"{fresh}\"] }}\n");
+    let dir = project("granted", &grant, &fresh);
     for route in [&["check", "src/main.almd"][..], &["run", "src/main.almd"][..]] {
         let out = almide(&dir, route);
         assert!(out.status.success(), "{route:?} refused a granted type:\n{}", text(&out));
     }
     let out = almide(&dir, &["run", "src/main.almd"]);
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "application/vnd.acme+json");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), fresh);
 
-    // A grant names exactly its types: another unlisted one stays refused.
-    let dir = project("other", "\n[trust]\nmedia = { \"self\" = [\"application/vnd.acme+json\"] }\n", "text/javascript");
+    // A grant names exactly its types: another fresh one stays refused.
+    let dir = project("other", &grant, &other);
     let out = almide(&dir, &["check", "src/main.almd"]);
     assert!(!out.status.success() && text(&out).contains("E117"), "{}", text(&out));
 }
