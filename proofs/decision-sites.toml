@@ -3257,7 +3257,7 @@ reasons = [
   "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
-note = "By design (verify.rs:181-186 doc; Built line says `certificate pending`), but nothing bounds how much of a program may be uncertified: a module whose every frame declines still passes, as long as one witness (call-modes `(program)`) exists to avoid the empty-bundle reject."
+note = "By design (verify.rs:181-186 doc; Built line says `certificate pending`), but nothing bounds how much of a program may be uncertified: a module whose every frame declines still passes, as long as one witness (call-modes `(program)`) exists to avoid the empty-bundle reject. Measured 2026-11-24 (24th, owner Q4, behaviour unchanged): `almide verify` over every .almd in spec/, research/benchmark/perf/ and research/benchmark/exercises/ on 6364b73a53 — 2102 files: 1953 CERTIFIED, 32 INCOMPLETE (perf 5: btrees, binarytrees, treealloc, v1-shapes/set_bool_float_elements, v1-shapes/tree_window; exercises 1: affine-cipher; spec 26), 0 REJECTED, 117 not a core wasm module. Proposal awaiting the owner: refuse by default, an explicit opt-out flag that warns and records it."
 
 [[site]]
 id = "verify.gate-build-scratch-files"
