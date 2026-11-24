@@ -1,0 +1,14 @@
+// Probe: a list indexed in a loop that also grows it in place with
+// `list.push`. Every index read is below the list's length at that moment,
+// so the program must print the sum (369).
+effect fn main() -> Unit = {
+  var xs = [10, 20, 30]
+  var total = 0
+  var i = 0
+  while i < 6 {
+    if i >= 2 then list.push(xs, 100 + i) else ()
+    total = total + xs[i]
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

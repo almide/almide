@@ -1,0 +1,15 @@
+// Probe: a list of strings indexed in a loop that empties it in place with
+// `list.clear` on the second turn. The index that follows is past the end of
+// the now empty list, so the program must stop there with "index out of
+// bounds" and must not read the released strings.
+effect fn main() -> Unit = {
+  var names = ["alpha-alpha-alpha", "beta-beta-beta", "gamma-gamma-gamma", "delta-delta-delta"]
+  var out = ""
+  var i = 0
+  while i < 4 {
+    if i == 1 then list.clear(names) else ()
+    out = out + names[i]
+    i = i + 1
+  }
+  println(out)
+}
