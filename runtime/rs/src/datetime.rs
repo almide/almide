@@ -98,7 +98,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
             return Err("expected YYYY-MM-DDTHH:MM:SSZ".into());
         };
         // Digits-only fields: one refused part refuses the whole string.
-        fn fields(half: &str, sep: char) -> Option<Vec<i64>> {
+        fn fields(half: &str, sep: char) -> Option<AlmideList<i64>> {
             half.split(sep)
                 .map(|p| if almide_rt_iso_digits(p) { p.parse::<i64>().ok() } else { None })
                 .collect()

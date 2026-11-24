@@ -110,6 +110,15 @@ const ROWS: &[Row] = &[
     Row { id: "mut_bytes", almide_params: "mut v: Bytes", almide_ret: "Unit", host_params: "v: &mut Vec<u8>", host_ret: "()", host_body: "v.push(b'!')",
           call: "var a_mb = bytes.from_string(\"x\")\n  let a_mb0 = a_mb\n  f_mut_bytes(a_mb)\n  println(int.to_string(bytes.len(a_mb)))\n  println(int.to_string(bytes.len(a_mb0)))",
           expected: "2\n1" },
+    // ADR-0037 ruling (A): the host writes a std `Vec`; the wrapper copies it
+    // back into the caller's list block, and another owner of the block it
+    // was copied from keeps its bytes (copy-on-write at the boundary).
+    Row { id: "mut_bytes_shared", almide_params: "mut v: Bytes", almide_ret: "Unit", host_params: "v: &mut Vec<u8>", host_ret: "()", host_body: "v[0] = b'y'; v.push(b'!')",
+          call: "var a_mbs = bytes.from_string(\"x\")\n  let a_mbs0 = a_mbs\n  f_mut_bytes_shared(a_mbs)\n  println(int.to_string(bytes.get(a_mbs, 0) ?? -1))\n  println(int.to_string(bytes.get(a_mbs, 1) ?? -1))\n  println(int.to_string(bytes.get(a_mbs0, 0) ?? -1))\n  println(int.to_string(bytes.len(a_mbs0)))",
+          expected: "121\n33\n120\n1" },
+    Row { id: "mut_list_shared", almide_params: "mut v: List[Int]", almide_ret: "Unit", host_params: "v: &mut Vec<i64>", host_ret: "()", host_body: "v[0] = 7; v.push(9)",
+          call: "var a_mls2 = [1, 2]\n  let a_mls20 = a_mls2\n  f_mut_list_shared(a_mls2)\n  println(list.join(list.map(a_mls2, (x) => int.to_string(x)), \",\"))\n  println(list.join(list.map(a_mls20, (x) => int.to_string(x)), \",\"))",
+          expected: "7,2,9\n1,2" },
     Row { id: "two", almide_params: "a: Bytes, b: String, c: Int", almide_ret: "Int", host_params: "a: &[u8], b: &str, c: i64", host_ret: "i64", host_body: "a.len() as i64 + b.len() as i64 + c",
           call: "println(int.to_string(f_two(bytes.from_string(\"ab\"), \"cde\", 100)))", expected: "105" },
     Row { id: "rawptr", almide_params: "v: Handle", almide_ret: "Int", host_params: "v: *mut u8", host_ret: "i64", host_body: "v.is_null() as i64",

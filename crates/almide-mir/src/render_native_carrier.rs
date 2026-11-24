@@ -234,7 +234,7 @@ fn payload_rhs(st: &AddrState, tys: &BTreeMap<ValueId, NTy>, v: ValueId, k: NTy)
     let g = tys.get(&sv.base).copied();
     if st.still_empty_list(&sv.base) && (matches!(k, NTy::Vec | NTy::VecStr)
         || k.rec().is_some_and(|i| crate::render_native_rec::list_elem(i).is_some())) {
-        return Ok("Vec::new()".into());
+        return Ok("AlmideList::new()".into());
     }
     match g {
         Some(g) if field_accepts(k, g) => owned_from(&var(sv.base), g).ok_or_else(|| wall("native: an unowned carrier payload")),

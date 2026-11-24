@@ -150,7 +150,7 @@ fn mut_list_param_stays_borrowed_in_the_loop() {
         eprintln!("skipping: almide binary not available");
         return;
     }
-    assert_borrowed_loop(&emitted_fn(LIST_SRC, "count_down", "list"), "Vec<i64>");
+    assert_borrowed_loop(&emitted_fn(LIST_SRC, "count_down", "list"), "AlmideList<i64>");
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn a_rebound_mut_param_declines_the_loop() {
     }
     let body = emitted_fn(REBIND_SRC, "walk", "rebind");
     assert!(
-        signature(&body).contains("&mut Vec<i64>"),
+        signature(&body).contains("&mut AlmideList<i64>"),
         "a `mut` parameter must stay borrowed whether or not the function is \
          loop-converted:\n{body}"
     );

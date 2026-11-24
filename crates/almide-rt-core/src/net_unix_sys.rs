@@ -108,8 +108,8 @@ mod almide_unix_sys {
     }
 
     /// One SCM_RIGHTS control message carrying `fds`.
-    fn rights_message(fds: &[i32]) -> Vec<u8> {
-        let mut control = vec![0u8; cmsg_space(fds.len())];
+    fn rights_message(fds: &[i32]) -> std::vec::Vec<u8> {
+        let mut control = ::std::vec![0u8; cmsg_space(fds.len())];
         let len = (CMSG_HDR + fds.len() * 4) as CmsgLen;
         let w = std::mem::size_of::<CmsgLen>();
         control[..w].copy_from_slice(&len.to_ne_bytes());
@@ -135,10 +135,10 @@ mod almide_unix_sys {
 
     /// The descriptors of every SCM_RIGHTS message in the first `total`
     /// bytes of `control`.
-    fn rights_in(control: &[u8], total: usize) -> Vec<i32> {
+    fn rights_in(control: &[u8], total: usize) -> std::vec::Vec<i32> {
         let w = std::mem::size_of::<CmsgLen>();
         let mut at = 0usize;
-        let mut got = Vec::new();
+        let mut got = std::vec::Vec::new();
         while at + CMSG_HDR <= total {
             let len = cmsg_len_at(control, at);
             if len < CMSG_HDR || at + len > total {
@@ -155,8 +155,8 @@ mod almide_unix_sys {
     /// One `sendmsg` of `data` on `sock`, with `fds` as SCM_RIGHTS when
     /// non-empty; the byte count sent.
     pub fn send(sock: &std::os::fd::BorrowedFd<'_>, data: &[u8], fds: &[std::os::fd::BorrowedFd<'_>]) -> std::io::Result<usize> {
-        let raw: Vec<i32> = fds.iter().map(std::os::fd::AsRawFd::as_raw_fd).collect();
-        let mut control = if raw.is_empty() { Vec::new() } else { rights_message(&raw) };
+        let raw: std::vec::Vec<i32> = fds.iter().map(std::os::fd::AsRawFd::as_raw_fd).collect();
+        let mut control = if raw.is_empty() { std::vec::Vec::new() } else { rights_message(&raw) };
         let mut iov = IoVec { base: data.as_ptr() as *mut u8, len: data.len() };
         let msg = MsgHdr {
             name: std::ptr::null_mut(),
@@ -176,8 +176,8 @@ mod almide_unix_sys {
 
     /// One `recvmsg` into `buf` on `sock`: the byte count, and the
     /// descriptors that arrived with it, now owned (close-on-exec).
-    pub fn recv(sock: &std::os::fd::BorrowedFd<'_>, buf: &mut [u8]) -> std::io::Result<(usize, Vec<std::os::fd::OwnedFd>)> {
-        let mut control = vec![0u8; cmsg_space(MAX_FDS)];
+    pub fn recv(sock: &std::os::fd::BorrowedFd<'_>, buf: &mut [u8]) -> std::io::Result<(usize, std::vec::Vec<std::os::fd::OwnedFd>)> {
+        let mut control = ::std::vec![0u8; cmsg_space(MAX_FDS)];
         let mut iov = IoVec { base: buf.as_mut_ptr(), len: buf.len() };
         let mut msg = MsgHdr {
             name: std::ptr::null_mut(),
@@ -212,8 +212,8 @@ mod almide_unix_sys {
 
     /// `poll` for readability (data, a connection, or the peer's close) on
     /// each of `fds`, `timeout` ms (negative: no limit); whether each is ready.
-    pub fn readable(fds: &[std::os::fd::BorrowedFd<'_>], timeout: i32) -> std::io::Result<Vec<bool>> {
-        let mut polls: Vec<PollFd> = fds
+    pub fn readable(fds: &[std::os::fd::BorrowedFd<'_>], timeout: i32) -> std::io::Result<std::vec::Vec<bool>> {
+        let mut polls: std::vec::Vec<PollFd> = fds
             .iter()
             .map(|f| PollFd { fd: std::os::fd::AsRawFd::as_raw_fd(f), events: POLLIN, revents: 0 })
             .collect();

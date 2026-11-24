@@ -27,9 +27,9 @@ fn borrowed_keys_preserve_all_lookup_lanes() {
     fn check<T: Clone + PartialEq + std::fmt::Debug + 'static>(keys: Vec<Vec<T>>, absent: Vec<T>, hashable: bool) {
         for n in [3, 40] {
             let keys = &keys[..n];
-            let mut map: AlmideMap<Vec<T>, usize> = keys.iter().cloned().enumerate().map(|(i,k)| (k,i)).collect();
+            let mut map: AlmideMap<AlmideList<T>, usize> = keys.iter().cloned().enumerate().map(|(i,k)| (AlmideList::from(k),i)).collect();
             let mut set = AlmideSet::new();
-            for k in keys { set.insert(k.clone()); }
+            for k in keys { set.insert(AlmideList::from(k.clone())); }
             assert_eq!(matches!(map.lookup, AlmideKeyLookup::Built(_)), hashable && n >= ALMIDE_MAP_INDEX_THRESHOLD);
             assert_eq!(matches!(set.lookup, AlmideKeyLookup::Built(_)), hashable && n >= ALMIDE_MAP_INDEX_THRESHOLD);
             for ordered in [false, true] {
@@ -43,8 +43,8 @@ fn borrowed_keys_preserve_all_lookup_lanes() {
                     assert_eq!(map.get(k.as_slice()), Some(&i));
                     assert!(map.contains_key(k.as_slice()));
                     assert!(set.contains(k.as_slice()));
-                    assert_eq!(k.almide_key_hash(), k.as_slice().almide_key_hash());
-                    assert_eq!(k.almide_key_bytes(), k.as_slice().almide_key_bytes());
+                    assert_eq!(AlmideList::from(k.clone()).almide_key_hash(), k.as_slice().almide_key_hash());
+                    assert_eq!(AlmideList::from(k.clone()).almide_key_bytes(), k.as_slice().almide_key_bytes());
                 }
                 assert_eq!(map.get(absent.as_slice()), None);
                 assert!(!set.contains(absent.as_slice()));

@@ -390,8 +390,9 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let (type_s, value_s) = rc_cow_clone_bind_type_value(ctx, value, type_s, value_s);
     let needs_mut = matches!(mutability, Mutability::Let) && {
         let ty_str = type_s.as_str();
-        ty_str == "Vec<u8>"
+        ty_str == "Vec<u8>" || ty_str == "AlmideList<u8>"
             || ty_str.starts_with("Vec<")
+            || ty_str.starts_with("AlmideList<")
             || ty_str.starts_with("std::collections::HashMap<")
             // #617: Bytes/Matrix render as AlmideRcCow — their in-place mutators
             // (&mut deref-coerce = make_mut COW) still need a `mut` binding,

@@ -37,8 +37,8 @@ mod parallel_runtime_tests {
         // The normal floor must not assume output/thread hooks are ambient.
         assert!(runtime_body("almide_rt_fan_map_par").is_none());
         let (params, ret, items) = parallel_runtime_body("almide_rt_fan_map_par").expect("the runtime source defines almide_rt_fan_map_par");
-        assert_eq!(params, ["Vec<A>", "F"]);
-        assert_eq!(ret, "Result<Vec<B>,AlmideString>");
+        assert_eq!(params, ["AlmideList<A>", "F"]);
+        assert_eq!(ret, "Result<AlmideList<B>,AlmideString>");
         let mut src = String::from("#![allow(dead_code, unused_imports, unused_mut, unused_variables)]\n");
         src.push_str(&crate::render_native::fan_glue());
         src.push_str(&crate::render_native_str::almide_string_alias());
@@ -49,7 +49,7 @@ mod parallel_runtime_tests {
         src.push_str(r#"
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("trap") {
-        let _: Result<Vec<i64>, AlmideString> = almide_rt_fan_map_par((0..64).collect(), |i| {
+        let _: Result<AlmideList<i64>, AlmideString> = almide_rt_fan_map_par((0..64).collect(), |i| {
             println!("element {i}");
             if i == 3 || i == 49 { almide_abort(format!("trap {i}")); }
             Ok(i)
@@ -61,7 +61,7 @@ fn main() {
     let worker = std::sync::atomic::AtomicBool::new(false);
     let parallel = !almide_rt_list_par_sequential() && almide_rt_list_par_workers(64) > 1;
     let first_pair = std::sync::Barrier::new(2);
-    let result: Result<Vec<i64>, AlmideString> = almide_rt_fan_map_par((0..64).collect(), |i| {
+    let result: Result<AlmideList<i64>, AlmideString> = almide_rt_fan_map_par((0..64).collect(), |i| {
         // Otherwise the caller can drain this tiny queue before a worker
         // is scheduled, making the thread-observation assertion flaky.
         let ordinal = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst); // the same test program text, off the playground compile path
@@ -73,10 +73,10 @@ fn main() {
     assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 64);
     assert_eq!(result.unwrap_err().as_str(), "error 3");
     assert_eq!(worker.load(std::sync::atomic::Ordering::SeqCst), parallel);
-    let values = almide_rt_fan_map_par(vec![2i64, 1, 3], |i| Ok(i * 7)).unwrap();
-    assert_eq!(values, vec![14, 7, 21]);
-    assert_eq!(almide_rt_fan_map_par(Vec::<i64>::new(), |i| Ok(i)).unwrap(), Vec::<i64>::new());
-    let words: Vec<AlmideString> = (0..64).map(|i| format!("word {i}").into()).collect();
+    let values = almide_rt_fan_map_par(almide_list![2i64, 1, 3], |i| Ok(i * 7)).unwrap();
+    assert_eq!(values, almide_list![14, 7, 21]);
+    assert_eq!(almide_rt_fan_map_par(AlmideList::<i64>::new(), |i| Ok(i)).unwrap(), AlmideList::<i64>::new());
+    let words: AlmideList<AlmideString> = (0..64).map(|i| format!("word {i}").into()).collect();
     let saved = words.clone();
     let prefix = AlmideString::from("shared capture:");
     prefix.almide_share();

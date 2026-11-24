@@ -267,7 +267,7 @@ fn owned_from(code: &str, t: NTy) -> Option<String> {
         }
         NTy::Str | NTy::Vec | NTy::VecStr | NTy::Rec(_) => crate::render_native_move::take_expr(code),
         NTy::StrRef => format!("AlmideString::from({code})"),
-        NTy::VecRef | NTy::VecStrRef => format!("{code}.to_vec()"),
+        NTy::VecRef | NTy::VecStrRef => format!("{code}.to_list()"),
         NTy::RecRef(_) => format!("{code}.clone()"),
         _ => return None,
     })
@@ -698,19 +698,19 @@ pub(crate) fn single_concat(func: &MirFunction, i: usize, tys: &mut BTreeMap<Val
     }
     let left = match tys.get(a)? {
         NTy::VecStr if crate::render_native_move::moving_arg(*a) => {
-            format!("let mut r: Vec<AlmideString> = {}; r.push({}_e0);", crate::render_native_move::take_expr(&var(*a)), var(*x))
+            format!("let mut r: AlmideList<AlmideString> = {}; r.push({}_e0);", crate::render_native_move::take_expr(&var(*a)), var(*x))
         }
-        NTy::VecStr => format!("let mut r: Vec<AlmideString> = Vec::with_capacity({a}.len() + 1); r.extend_from_slice(&{a}[..]); r.push({}_e0);", var(*x), a = var(*a)),
-        NTy::VecStrRef => format!("let mut r: Vec<AlmideString> = Vec::with_capacity({a}.len() + 1); r.extend_from_slice({a}); r.push({}_e0);", var(*x), a = var(*a)),
+        NTy::VecStr => format!("let mut r: AlmideList<AlmideString> = AlmideList::with_capacity({a}.len() + 1); r.extend_from_slice(&{a}[..]); r.push({}_e0);", var(*x), a = var(*a)),
+        NTy::VecStrRef => format!("let mut r: AlmideList<AlmideString> = AlmideList::with_capacity({a}.len() + 1); r.extend_from_slice({a}); r.push({}_e0);", var(*x), a = var(*a)),
         // Any other left side: the list is built here for the `+` below.
         _ => {
             st.single.remove(x);
-            return Some((format!("let mut {x}: Vec<AlmideString> = vec![{x}_e0];", x = var(*x)), false));
+            return Some((format!("let mut {x}: AlmideList<AlmideString> = almide_list![{x}_e0];", x = var(*x)), false));
         }
     };
     st.single.remove(x);
     tys.insert(*d, NTy::VecStr);
-    Some((format!("let mut {}: Vec<AlmideString> = {{ {left} r }};", var(*d)), true))
+    Some((format!("let mut {}: AlmideList<AlmideString> = {{ {left} r }};", var(*d)), true))
 }
 
 

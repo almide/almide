@@ -5,7 +5,7 @@ use std::process::Command;
 fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     let _guard = crate::render_native_rec::install(vec![crate::render_native_rec::RecDecl {
         name: crate::render_native_rec::BYTES_KEY.into(),
-        alias: Some("Vec<u8>"),
+        alias: Some("AlmideList<u8>"),
         ..Default::default()
     }]);
     let mut st = AddrState::new(&MirFunction::default(), &Default::default());
@@ -23,8 +23,9 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
     let dir = std::env::temp_dir().join(format!("almide-native-byte-words-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create the temp dir");
     let mut source = format!(
-        "{}\n{}\nfn main() {{ let {}: i64 = std::env::args().nth(1).unwrap().parse().unwrap();\n",
+        "{}\n{}\n{}\nfn main() {{ let {}: i64 = std::env::args().nth(1).unwrap().parse().unwrap();\n",
         crate::native_floor::floor_header(),
+        crate::render_native_str::almide_string_alias(),
         crate::render_native::OOB_SHIM,
         var(index)
     );
@@ -32,7 +33,7 @@ fn byte_words_preserve_endianness_bits_and_reject_invalid_ranges() {
         crate::render_native_bounds::reset();
         tys.insert(base, NTy::Rec(0));
         source.push_str(&format!(
-            "{{ let mut {} = vec![0u8; 10]; let {}: i64 = -81985529216486896;\n",
+            "{{ let mut {} = almide_list![0u8; 10]; let {}: i64 = -81985529216486896;\n",
             var(base),
             var(value)
         ));

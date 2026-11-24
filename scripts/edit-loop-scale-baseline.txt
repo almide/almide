@@ -264,9 +264,24 @@ share_lex | AMD EPYC 7763 64-Core Processor | 0.1183 | 47
 share_lex | AMD EPYC 9V74 80-Core Processor | 0.1127 | 26
 share_lex | AMD EPYC 9V45 96-Core Processor | 0.1178 | 11
 share_lex | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz | 0.1139 | 9
+# share_lex on Intel(R) Xeon(R) 6975P-C (2026-11-24, owner ruling 2026-11-24): a
+#   class with no anchor of its own, so the shared 0.1091 (ceiling 0.1309) gated it,
+#   and it reads above that on develop itself: 0.1326 (pr-4921 queue 78959afb2),
+#   0.1299 (develop 45004226520), 0.1345 (#4929 PR job, front end byte-identical
+#   to develop by a same-box A/B on GCE c4: lex 0.1292 vs 0.1289, check 0.7444 vs
+#   0.7445). Centred on the median of those three, +/-20% kept.
+share_lex | Intel(R) Xeon(R) 6975P-C | 0.1326 | 3
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
-share_parse 0.1150
+# share_parse moved 0.1150 -> 0.1320 (2026-11-24, owner ruling 2026-11-24): develop
+#   had spent the band — its own push and merge-queue jobs read 0.1225-0.1328 on
+#   every class (EPYC 7763 0.1311-0.1328, Xeon 6975P-C 0.1225/0.1255), against a
+#   0.1380 ceiling, and #4929 failed at 0.1391 on a 7763 with a front end measured
+#   identical to develop by a same-box A/B (GCE c4, two interleaved rounds each:
+#   parse 0.1264 vs 0.1266). The eight develop/queue readings since 2026-11-22:
+#     0.1225 0.1255 0.1311 0.1314 0.1326 0.1327 0.1328 0.1328   median 0.1320
+#   Re-centred on that median; the +/-20% band width is kept.
+share_parse 0.1320
 #     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
 #                  median 0.7320, 1.2% spread (2026-08-14, M4 Pro)
 share_check 0.7692

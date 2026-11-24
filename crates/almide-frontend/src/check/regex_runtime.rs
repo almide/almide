@@ -6,6 +6,8 @@
 #![allow(dead_code, unused, clippy::all, clippy::pedantic)]
 
 pub(crate) type AlmideString = String;
+/// The list type the runtime ships (ADR-0037), so the checker runs the same file.
+pub(crate) use almide_str::{almide_list, AlmideList, AlmideToList};
 
 pub(crate) trait IntoAlmide<T> {
     fn into_almide(self) -> T;

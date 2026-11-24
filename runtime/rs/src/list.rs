@@ -1,8 +1,8 @@
 // list extern — Rust native implementations
 // Signatures match TOML templates: &Vec for read-only, Vec for consuming
 
-pub fn almide_rt_list_len<T>(xs: &[T]) -> i64 { xs.len() as i64 }
-pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
+pub fn almide_rt_list_len<T: Clone>(xs: &[T]) -> i64 { xs.len() as i64 }
+pub fn almide_rt_list_is_empty<T: Clone>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
@@ -11,12 +11,12 @@ pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as
 pub fn almide_rt_list_first_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.first() }
 pub fn almide_rt_list_last_ref<A: Clone>(xs: &[A]) -> Option<&A> { xs.last() }
 pub fn almide_rt_list_get_ref<T: Clone>(xs: &[T], i: i64) -> Option<&T> { xs.get(i as usize) }
-pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
-pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
+pub fn almide_rt_list_contains<T: PartialEq + Clone>(xs: &[T], x: T) -> bool { xs.contains(&x) }
+pub fn almide_rt_list_index_of<T: PartialEq + Clone>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 #[inline]
 pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { AlmideString::join(xs, sep) }
-pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> Vec<A> { xs.iter().rev().cloned().collect() }
-pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.to_vec(); v.sort(); v }
+pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> AlmideList<A> { xs.iter().rev().cloned().collect() }
+pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> AlmideList<A> { let mut v = AlmideList::from(xs); v.sort(); v }
 // Float ordering uses IEEE-754 totalOrder (`f64::total_cmp`): NaN takes its
 // totalOrder position (greatest, after +inf; with a -NaN before -inf) and
 // `-0.0 < +0.0`. `f64` is not `Ord`, so `list.sort`/`min`/`max` on `List[Float]`
@@ -42,10 +42,10 @@ fn almide_float_order_key(x: f64) -> i64 {
 }
 #[inline(always)]
 fn almide_float_order(a: &f64, b: &f64) -> std::cmp::Ordering { almide_float_order_key(*a).cmp(&almide_float_order_key(*b)) }
-pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(almide_float_order); v }
+pub fn almide_rt_list_sort_float(xs: &[f64]) -> AlmideList<f64> { let mut v = AlmideList::from(xs); v.sort_by(almide_float_order); v }
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(almide_float_order) }
 pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(almide_float_order) }
-pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
+pub fn almide_rt_list_sort_by_float<A: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> AlmideList<A> {
     let mut v = xs;
     // C-055: extract each key once, including when the callback mutates a
     // captured value. Integer order keys preserve the canonical NaN order.
@@ -72,36 +72,36 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 // panic (exit 101). A NEGATIVE size is read as 0 like every count (#4147); it
 // used to keep the `as usize` wrap (chunk: the whole list as one chunk,
 // windows: empty).
-pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
+pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> AlmideList<AlmideList<T>> { if n <= 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| AlmideList::from(c)).collect() }
+pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> AlmideList<T> { let mut r = AlmideList::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 // The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
 // key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
 // probes every other type by `PartialEq`, so the answer is the old
 // `r.contains` scan's — Float `-0.0 == 0.0`, NaN never matches — in O(n)
 // for the hashed types where the scan was O(n^2).
-pub fn almide_rt_list_unique<T: Clone + PartialEq + 'static>(xs: &[T]) -> Vec<T> {
+pub fn almide_rt_list_unique<T: Clone + PartialEq + 'static>(xs: &[T]) -> AlmideList<T> {
     let mut seen: AlmideMap<T, ()> = AlmideMap::new();
-    let mut r = Vec::new();
+    let mut r = AlmideList::new();
     for x in xs {
         if !seen.contains_key(x) { seen.insert(x.clone(), ()); r.push(x.clone()); }
     }
     r
 }
-pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> Vec<T> { let mut r = xs.to_vec(); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
-pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> Vec<T> { let mut r = xs.to_vec(); let (a, b) = (i as usize, j as usize); if a < r.len() && b < r.len() { r.swap(a, b); } r }
+pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> AlmideList<T> { let mut r = AlmideList::from(xs); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
+pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> AlmideList<T> { let mut r = AlmideList::from(xs); let (a, b) = (i as usize, j as usize); if a < r.len() && b < r.len() { r.swap(a, b); } r }
 
 // Consuming functions (templates use .to_vec())
-pub fn almide_rt_list_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
-pub fn almide_rt_list_filter<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().filter(|x| f(x.clone())).collect() }
-pub fn almide_rt_list_fold<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> B { let f = move |a, b| f(a, b); xs.into_iter().fold(init, f) }
+pub fn almide_rt_list_map<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideList<B> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
+pub fn almide_rt_list_filter<A: Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let f = move |a| f(a); xs.retain(|x| f(x.clone())); xs }
+pub fn almide_rt_list_fold<A: Clone, B: Clone>(xs: AlmideList<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> B { let f = move |a, b| f(a, b); xs.into_iter().fold(init, f) }
 pub fn almide_rt_list_find<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.iter().find(|x| f((*x).clone())).cloned() }
 pub fn almide_rt_list_any<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().any(|x| f(x.clone())) }
 pub fn almide_rt_list_all<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().all(|x| f(x.clone())) }
 pub fn almide_rt_list_each<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A)>) { let f = move |a| f(a); for x in xs { f(x.clone()); } }
 pub fn almide_rt_list_count<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> i64 { let f = move |a| f(a); xs.iter().filter(|x| f((*x).clone())).count() as i64 }
-pub fn almide_rt_list_enumerate<T: Clone>(xs: Vec<T>) -> Vec<(i64, T)> { xs.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect() }
-pub fn almide_rt_list_zip<T: Clone, U: Clone>(a: Vec<T>, b: Vec<U>) -> Vec<(T, U)> { a.into_iter().zip(b.into_iter()).collect() }
-pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: std::rc::Rc<dyn Fn(A, B) -> C>) -> Vec<C> { let f = move |a, b| f(a, b); a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect() }
+pub fn almide_rt_list_enumerate<T: Clone>(xs: AlmideList<T>) -> AlmideList<(i64, T)> { xs.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect() }
+pub fn almide_rt_list_zip<T: Clone, U: Clone>(a: AlmideList<T>, b: AlmideList<U>) -> AlmideList<(T, U)> { a.into_iter().zip(b.into_iter()).collect() }
+pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C: Clone>(a: AlmideList<A>, b: AlmideList<B>, f: std::rc::Rc<dyn Fn(A, B) -> C>) -> AlmideList<C> { let f = move |a, b| f(a, b); a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect() }
 // Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
 // consuming the outer list bought nothing — and it made `flatten` unusable
 // alongside a borrow of the same binding in one expression:
@@ -109,17 +109,17 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // `get` borrowed it, so `check` accepted and rustc rejected with E0505
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
-pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
+pub fn almide_rt_list_flatten<T: Clone>(xs: &[AlmideList<T>]) -> AlmideList<T> { xs.iter().flatten().cloned().collect() }
 // One loop, not `flat_map().collect()`: `FlatMap`'s size hint has a lower
 // bound of 0, so the collect grew its result by doubling, and its adapter
 // cost more per element than the callback's own list. The first sublist's
 // length times the source's sizes the result once (a hint: a failed
 // reservation leaves the appends to grow it), and each sublist's elements
 // move over without a per-element copy.
-pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec<B>>) -> Vec<B> {
+pub fn almide_rt_list_flat_map<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> AlmideList<B>>) -> AlmideList<B> {
     let f = move |a| f(a);
     let n = xs.len();
-    let mut out: Vec<B> = Vec::new();
+    let mut out: AlmideList<B> = AlmideList::new();
     for a in xs {
         let mut part = f(a);
         if out.capacity() == 0 {
@@ -148,29 +148,29 @@ pub fn almide_rt_list_flat_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Vec
 //
 // Semantics are identical to `almide_rt_list_flat_map`: same order, same
 // elements, same length. Only the intermediate container is gone.
-pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs: Vec<A>, f: F) -> Vec<B> {
-    let mut out = Vec::with_capacity(xs.len().saturating_mul(N));
+pub fn almide_rt_list_flat_map_arr<A: Clone, B: Clone, const N: usize, F: Fn(A) -> [B; N]>(xs: AlmideList<A>, f: F) -> AlmideList<B> {
+    let mut out = AlmideList::with_capacity(xs.len().saturating_mul(N));
     for x in xs { out.extend(f(x)); }
     out
 }
-pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
+pub fn almide_rt_list_flat_map_effect<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> Result<AlmideList<B>, AlmideString>>) -> Result<AlmideList<B>, AlmideString> { let __almide_r: Result<AlmideList<B>, String> = (|| { let f = move |a| f(a); let mut r = AlmideList::new(); for x in xs { r.extend(f(x)?); } Ok(r) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_filter_map<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> AlmideList<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
 // A negative count is read as 0 (#4147): `take(xs, -1)` is `[]` and `drop(xs, -1)`
 // is `xs`. It used to go through `n as usize`, so `take(rows, -1)` returned every
 // row and a `?limit=-1` lifted a cap. `almide_list_count` is the one spelling of the rule.
 pub fn almide_list_count(n: i64) -> usize { n.max(0) as usize }
-pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(almide_list_count(n)).cloned().collect() }
-pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().skip(almide_list_count(n)).cloned().collect() }
-pub fn almide_rt_list_take_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().take_while(|x| f((*x).clone())).cloned().collect() }
-pub fn almide_rt_list_drop_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().skip_while(|x| f((*x).clone())).cloned().collect() }
-pub fn almide_rt_list_partition<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (Vec<A>, Vec<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
-pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, Vec<A>> {
+pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> AlmideList<T> { xs.iter().take(almide_list_count(n)).cloned().collect() }
+pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> AlmideList<T> { xs.iter().skip(almide_list_count(n)).cloned().collect() }
+pub fn almide_rt_list_take_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let f = move |a| f(a); xs.iter().take_while(|x| f((*x).clone())).cloned().collect() }
+pub fn almide_rt_list_drop_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let f = move |a| f(a); xs.iter().skip_while(|x| f((*x).clone())).cloned().collect() }
+pub fn almide_rt_list_partition<A: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (AlmideList<A>, AlmideList<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
+pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, AlmideList<A>> {
     let f = move |a| f(a);
-    let mut m: AlmideMap<B, Vec<A>> = AlmideMap::new();
+    let mut m: AlmideMap<B, AlmideList<A>> = AlmideMap::new();
     for x in xs {
         let k = f(x.clone());
-        if let Some(g) = m.get_mut(&k) { g.push(x); } else { m.insert(k, vec![x]); }
+        if let Some(g) = m.get_mut(&k) { g.push(x); } else { m.insert(k, almide_list![x]); }
     }
     m
 }
@@ -180,7 +180,7 @@ pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec
 // `groupingBy(f, counting())`). `f` runs once per element in order, as in
 // `group_by`; the element is handed to it by value — nothing keeps it — so
 // it is never cloned, and no group `Vec` is grown, kept or freed.
-pub fn almide_rt_list_group_count<A, B: PartialEq + 'static>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, i64> {
+pub fn almide_rt_list_group_count<A: Clone, B: PartialEq + 'static + Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, i64> {
     let f = move |a| f(a);
     let mut m: AlmideMap<B, i64> = AlmideMap::new();
     for x in xs {
@@ -189,11 +189,11 @@ pub fn almide_rt_list_group_count<A, B: PartialEq + 'static>(xs: Vec<A>, f: std:
     m
 }
 // Range bounds clamp into [0, len] (#4147): a negative bound is 0, like string.slice.
-pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
-pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
-pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
-pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> Vec<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
-pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let mut r = Vec::new(); for (i, x) in xs.into_iter().enumerate() { if i > 0 { r.push(sep.clone()); } r.push(x); } r }
+pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> AlmideList<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { almide_list![] } else { AlmideList::from(&xs[s..e]) } }
+pub fn almide_rt_list_insert<T: Clone>(mut xs: AlmideList<T>, i: i64, x: T) -> AlmideList<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
+pub fn almide_rt_list_remove_at<T: Clone>(mut xs: AlmideList<T>, i: i64) -> AlmideList<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
+pub fn almide_rt_list_update<A: Clone>(mut xs: AlmideList<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> AlmideList<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
+pub fn almide_rt_list_intersperse<T: Clone>(xs: AlmideList<T>, sep: T) -> AlmideList<T> { let mut r = AlmideList::new(); for (i, x) in xs.into_iter().enumerate() { if i > 0 { r.push(sep.clone()); } r.push(x); } r }
 // Negative counts clamp to 0 (C-054 discipline — the wasm self-host
 // `list_repeat` already clamps; `n as usize` on a negative i64 panicked).
 //
@@ -213,11 +213,11 @@ pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
 // unroll is picked to divide that count (5 for 2^28) instead of the one the
 // out-of-line body runs for every count — 1.16x the instructions per element.
 #[inline(never)]
-pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
+pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> AlmideList<T> {
     if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
         almide_abort("repeat result too large");
     }
-    vec![x; n.max(0) as usize]
+    almide_list![x; n.max(0) as usize]
 }
 // `list.range` has NO chosen ceiling (ratified A, 2026-08-17): this leg fills to
 // its own structural bound, and a span the machine cannot satisfy is the C-197
@@ -226,33 +226,33 @@ pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
 // (i64::MIN, 3). `saturating_sub` keeps the count honest where `end - start`
 // would wrap. The wasm leg fails with the SAME message at its own i32 floor
 // bound; success between the two bounds is the contracted divergence.
-pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
+pub fn almide_rt_list_range(start: i64, end: i64) -> AlmideList<i64> {
     let count = end.saturating_sub(start).max(0) as usize;
-    let mut v: Vec<i64> = Vec::new();
+    let mut v: AlmideList<i64> = AlmideList::new();
     if v.try_reserve_exact(count).is_err() {
         almide_abort_oom();
     }
     v.extend(start..end);
     v
 }
-pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
-pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
-pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> {
+pub fn almide_rt_list_reduce<A: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
+pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: AlmideList<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> AlmideList<B> { let f = move |a, b| f(a, b); let mut r = AlmideList::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
+pub fn almide_rt_list_sort_by<A: Clone, B: Ord + Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideList<A> {
     // C-055: sort_by_cached_key evaluates every key once except a singleton.
     if xs.len() == 1 { let _ = f(xs[0].clone()); }
     xs.sort_by_cached_key(|x| f(x.clone()));
     xs
 }
-pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_fold_effect<A: Clone, B: Clone>(xs: AlmideList<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_map_effect<A: Clone, B: Clone>(xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<AlmideList<B>, AlmideString> { let __almide_r: Result<AlmideList<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
+pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> AlmideList<T> {
     let start = xs.len() - almide_list_count(n).min(xs.len());
-    xs[start..].to_vec()
+    AlmideList::from(&xs[start..])
 }
-pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
+pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> AlmideList<T> {
     let end = xs.len() - almide_list_count(n).min(xs.len());
-    xs[..end].to_vec()
+    AlmideList::from(&xs[..end])
 }
 
 // The OWNED twins of the range ops (#3398). The ops above borrow their source
@@ -261,18 +261,18 @@ pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
 // keeps the elements it returns by moving them instead of cloning each one.
 // Same results as the borrowing op for every argument (negative counts and
 // out-of-range bounds included); the twin table is `owned_source.rs`.
-pub fn almide_rt_list_take_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { xs.truncate(almide_list_count(n)); xs }
-pub fn almide_rt_list_drop_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let k = almide_list_count(n).min(xs.len()); xs.drain(..k); xs }
-pub fn almide_rt_list_take_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.truncate(k); xs }
-pub fn almide_rt_list_drop_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.drain(..k); xs }
-pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let i = xs.iter().position(|x| f(x.clone()))?; Some(xs.swap_remove(i)) }
-pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
-pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = xs.len() - almide_list_count(n).min(xs.len()); xs.drain(..start); xs }
-pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = xs.len() - almide_list_count(n).min(xs.len()); xs.truncate(end); xs }
+pub fn almide_rt_list_take_owned<T: Clone>(mut xs: AlmideList<T>, n: i64) -> AlmideList<T> { xs.truncate(almide_list_count(n)); xs }
+pub fn almide_rt_list_drop_owned<T: Clone>(mut xs: AlmideList<T>, n: i64) -> AlmideList<T> { let k = almide_list_count(n).min(xs.len()); xs.drain(..k); xs }
+pub fn almide_rt_list_take_while_owned<A: Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.truncate(k); xs }
+pub fn almide_rt_list_drop_while_owned<A: Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> AlmideList<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.drain(..k); xs }
+pub fn almide_rt_list_find_owned<A: Clone>(mut xs: AlmideList<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let i = xs.iter().position(|x| f(x.clone()))?; Some(xs.swap_remove(i)) }
+pub fn almide_rt_list_slice_owned<T: Clone>(mut xs: AlmideList<T>, start: i64, end: i64) -> AlmideList<T> { let s = almide_list_count(start); let e = almide_list_count(end).min(xs.len()); if s >= e { return AlmideList::new(); } xs.truncate(e); xs.drain(..s); xs }
+pub fn almide_rt_list_take_end_owned<T: Clone>(mut xs: AlmideList<T>, n: i64) -> AlmideList<T> { let start = xs.len() - almide_list_count(n).min(xs.len()); xs.drain(..start); xs }
+pub fn almide_rt_list_drop_end_owned<T: Clone>(mut xs: AlmideList<T>, n: i64) -> AlmideList<T> { let end = xs.len() - almide_list_count(n).min(xs.len()); xs.truncate(end); xs }
 // The point writes (#3533): `xs = list.set(xs, i, v)` wrote into a copy of the
 // whole list every step; the twin writes into the source it owns.
-pub fn almide_rt_list_set_owned<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { if let Some(s) = xs.get_mut(i as usize) { *s = x; } xs }
-pub fn almide_rt_list_swap_owned<T>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> { let (a, b) = (i as usize, j as usize); if a < xs.len() && b < xs.len() { xs.swap(a, b); } xs }
+pub fn almide_rt_list_set_owned<T: Clone>(mut xs: AlmideList<T>, i: i64, x: T) -> AlmideList<T> { if let Some(s) = xs.get_mut(i as usize) { *s = x; } xs }
+pub fn almide_rt_list_swap_owned<T: Clone>(mut xs: AlmideList<T>, i: i64, j: i64) -> AlmideList<T> { let (a, b) = (i as usize, j as usize); if a < xs.len() && b < xs.len() { xs.swap(a, b); } xs }
 // Keep the FIRST element of each distinct key, in first-occurrence order.
 // The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
 // Option or Float key dedups exactly as the wasm leg's generic-equality scan
@@ -281,10 +281,10 @@ pub fn almide_rt_list_swap_owned<T>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> { 
 // Float key follows `PartialEq` — `-0.0 == 0.0` collapses, NaN never matches.
 // The seen keys live in an `AlmideMap` (#3704), with the same answers as
 // the old `Vec` scan for the reason `almide_rt_list_unique` gives.
-pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
+pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static + Clone>(xs: AlmideList<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> AlmideList<T> {
     let f = move |a| f(a);
     let mut seen: AlmideMap<K, ()> = AlmideMap::new();
-    let mut result = Vec::new();
+    let mut result = AlmideList::new();
     for x in xs {
         let k = f(x.clone());
         if !seen.contains_key(&k) { seen.insert(k, ()); result.push(x); }
@@ -295,10 +295,10 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f:
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
 // panic exit 101 the wasm leg never shows). n > len returns empty instead of
 // leaking std's behavior.
-pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
+pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> AlmideList<AlmideList<T>> {
     if n <= 0 { almide_abort("window size must be positive"); }
-    if (n as usize) > xs.len() { return vec![]; }
-    xs.windows(n as usize).map(|w| w.to_vec()).collect()
+    if (n as usize) > xs.len() { return almide_list![]; }
+    xs.windows(n as usize).map(|w| AlmideList::from(w)).collect()
 }
 
 // ── Parallel variants (pure list ops under a `fan` block, #2044) ──
@@ -639,7 +639,7 @@ impl AlmideFanClock {
 // too, so none waits for a helper that is busy elsewhere.
 /// The `std::thread::scope` panic: once every task has finished, a panicked
 /// one panics the offer.
-fn almide_fan_panic_if_any(outcomes: Vec<std::thread::Result<()>>) {
+fn almide_fan_panic_if_any(outcomes: std::vec::Vec<std::thread::Result<()>>) {
     if outcomes.iter().any(Result::is_err) {
         panic!("a scoped thread panicked");
     }
@@ -671,7 +671,7 @@ fn almide_fan_block(n: usize, workers: usize) -> usize {
 ///
 /// Returns this thread's outcome, then every helper's PANIC (a helper that
 /// finished normally leaves nothing).
-fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl Fn(&mut dyn Iterator<Item = T>) + Sync + 'a) -> Vec<std::thread::Result<()>> {
+fn almide_fan_deal<'a, T: Send + 'a>(blocks: std::vec::Vec<T>, workers: usize, work: impl Fn(&mut dyn Iterator<Item = T>) + Sync + 'a) -> std::vec::Vec<std::thread::Result<()>> {
     use std::sync::atomic::Ordering;
     let queue = AlmideFanBlocks::new(blocks);
     let gate = AlmideFanGate {
@@ -682,7 +682,7 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
         caller: std::thread::current(),
         parking: std::sync::atomic::AtomicBool::new(false),
         counted: std::sync::atomic::AtomicBool::new(false),
-        panics: std::sync::Mutex::new(Vec::new()),
+        panics: std::sync::Mutex::new(std::vec::Vec::new()),
         take: std::cell::UnsafeCell::new(None),
     };
     let me: &AlmideFanGate = &gate;
@@ -762,7 +762,7 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
             }
         },
     );
-    let mut outcomes = vec![mine];
+    let mut outcomes = ::std::vec![mine];
     outcomes.append(&mut gate.panics.lock().unwrap_or_else(|e| e.into_inner()));
     outcomes
 }
@@ -802,11 +802,11 @@ fn almide_fan_park() {
 /// Each cell is a `Mutex` so the type is `Sync` without an `unsafe impl`
 /// (#4007); the lock is never contended, because one thread draws each index.
 struct AlmideFanBlocks<T> {
-    cells: Vec<std::sync::Mutex<Option<T>>>,
+    cells: std::vec::Vec<std::sync::Mutex<Option<T>>>,
 }
 
 impl<T> AlmideFanBlocks<T> {
-    fn new(blocks: Vec<T>) -> Self {
+    fn new(blocks: std::vec::Vec<T>) -> Self {
         AlmideFanBlocks { cells: blocks.into_iter().map(|b| std::sync::Mutex::new(Some(b))).collect() }
     }
 
@@ -840,7 +840,7 @@ struct AlmideFanGate {
     /// then no helper clones `caller`: seven helpers cloning and dropping one
     /// handle per offer contended on its count.
     parking: std::sync::atomic::AtomicBool,
-    panics: std::sync::Mutex<Vec<std::thread::Result<()>>>,
+    panics: std::sync::Mutex<std::vec::Vec<std::thread::Result<()>>>,
     /// The offer's taking loop, borrowed from `almide_fan_deal`'s frame
     /// (see the SAFETY note there).
     take: std::cell::UnsafeCell<Option<*const (dyn Fn() -> bool + Sync)>>,
@@ -1169,12 +1169,12 @@ fn almide_fan_pool_wake(helpers: usize) {
     }
 }
 
-pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
+pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Clone, F: Fn(A) -> B + Send + Sync>(xs: AlmideList<A>, f: F) -> AlmideList<B> {
     xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().map(&f).collect();
     }
-    let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
+    let site = almide_rt_list_par_map::<A, B, F> as fn(AlmideList<A>, F) -> AlmideList<B> as usize;
     let n = xs.len();
     let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
@@ -1183,14 +1183,14 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
         return out;
     }
     let block = almide_fan_block(n, workers);
-    let mut slots: Vec<Option<B>> = (0..n).map(|_| None).collect();
+    let mut slots: std::vec::Vec<Option<B>> = (0..n).map(|_| None).collect();
     // One output timeline per BLOCK, under the enclosing fan element's (the
     // group's parent): inside a block the elements run in list order on one
     // thread, blocks drain in list order, and a trap in element k waits for
     // the blocks below its own (ADR-0024 D6, #3779 — adopting the parent's
     // sink alone carried no index, so under a one-arm fan the first trap in
     // TIME won). The group flushes this thread's stdout first (C-197).
-    let blocks: Vec<_> = xs.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+    let blocks: std::vec::Vec<_> = xs.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
     let group = almide_fan_group(blocks.len());
     almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
         for (b, (chunk, out)) in blocks {
@@ -1205,25 +1205,27 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
-pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: Vec<A>, f: F) -> Vec<A> {
+pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: AlmideList<A>, f: F) -> AlmideList<A> {
     xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
-        return xs.into_iter().filter(|x| f(x.clone())).collect();
+        let mut xs = xs;
+        xs.retain(|x| f(x.clone()));
+        return xs;
     }
-    let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
+    let site = almide_rt_list_par_filter::<A, F> as fn(AlmideList<A>, F) -> AlmideList<A> as usize;
     let n = xs.len();
     let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
-        let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
+        let out = clock.calling(|| { let mut xs = xs; xs.retain(|x| f(x.clone())); (xs, n) });
         clock.record();
         return out;
     }
     let block = almide_fan_block(n, workers);
     // each element's verdict by index; the kept elements are then taken in
     // list order
-    let mut keep = vec![false; n];
+    let mut keep = ::std::vec![false; n];
     // One output timeline per block (see `almide_rt_list_par_map`).
-    let blocks: Vec<_> = xs.chunks(block).zip(keep.chunks_mut(block)).enumerate().collect();
+    let blocks: std::vec::Vec<_> = xs.chunks(block).zip(keep.chunks_mut(block)).enumerate().collect();
     let group = almide_fan_group(blocks.len());
     // the lowest thread's panic, as joining the handles in order resumed it
     if let Some(Err(panic)) = almide_fan_deal(blocks, workers, |blocks| {
@@ -1262,7 +1264,7 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
         let block = almide_fan_block(xs.len(), workers);
         let hit = std::sync::atomic::AtomicBool::new(false);
         // One output timeline per block (see `almide_rt_list_par_map`).
-        let blocks: Vec<_> = xs.chunks(block).enumerate().collect();
+        let blocks: std::vec::Vec<_> = xs.chunks(block).enumerate().collect();
         let group = almide_fan_group(blocks.len());
         almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
             for (b, chunk) in blocks {
@@ -1301,7 +1303,7 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
 
 // ── Mutable operations ──
 
-#[inline(always)] pub fn almide_rt_list_push<A>(xs: &mut Vec<A>, x: A) { xs.push(x); }
+#[inline(always)] pub fn almide_rt_list_push<A: Clone>(xs: &mut AlmideList<A>, x: A) { xs.push(x); }
 
 // Pre-allocate a List with the given capacity. Start-empty (len=0) but
 // skips all reallocations up to `cap` pushes. Useful when the caller
@@ -1319,13 +1321,13 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
 // unobservable (C-034). v0's wasm leg clamped at the same 64 MiB in
 // emit_wasm/calls_list.rs, retired in c71eff7b.
 pub const ALMIDE_MAX_WITH_CAPACITY_PREALLOC_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
-#[inline(always)] pub fn almide_rt_list_with_capacity<A>(cap: i64) -> Vec<A> {
+#[inline(always)] pub fn almide_rt_list_with_capacity<A>(cap: i64) -> AlmideList<A> {
     let elem_size = std::mem::size_of::<A>().max(1);
     let max_cap = ALMIDE_MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size;
-    Vec::with_capacity((cap.max(0) as usize).min(max_cap))
+    AlmideList::with_capacity((cap.max(0) as usize).min(max_cap))
 }
-pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
-pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
+pub fn almide_rt_list_pop<A: Clone>(xs: &mut AlmideList<A>) -> Option<A> { xs.pop() }
+pub fn almide_rt_list_clear<A: Clone>(xs: &mut AlmideList<A>) { xs.clear(); }
 
 // ── `${xs}` reprs (the compound `[a, b]` of the standard codegen's AlmideRepr) ──
 // Each element as AlmideRepr renders it inside a container: a number or Bool
@@ -1339,10 +1341,10 @@ pub fn almide_rt_list_eq_int(a: &[i64], b: &[i64]) -> bool { a == b }
 pub fn almide_rt_list_eq_float(a: &[f64], b: &[f64]) -> bool { a == b }
 pub fn almide_rt_list_eq_bool(a: &[bool], b: &[bool]) -> bool { a == b }
 pub fn almide_rt_list_eq_str(a: &[AlmideString], b: &[AlmideString]) -> bool { a == b }
-pub fn almide_rt_list_eq_list_int(a: &[Vec<i64>], b: &[Vec<i64>]) -> bool { a == b }
-pub fn almide_rt_list_eq_list_float(a: &[Vec<f64>], b: &[Vec<f64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_int(a: &[AlmideList<i64>], b: &[AlmideList<i64>]) -> bool { a == b }
+pub fn almide_rt_list_eq_list_float(a: &[AlmideList<f64>], b: &[AlmideList<f64>]) -> bool { a == b }
 pub fn almide_rt_list_eq_opt_int(a: &[Option<i64>], b: &[Option<i64>]) -> bool { a == b }
-pub fn almide_rt_list_eq_any<A: PartialEq>(a: &[A], b: &[A]) -> bool { a == b }
+pub fn almide_rt_list_eq_any<A: PartialEq + Clone>(a: &[A], b: &[A]) -> bool { a == b }
 pub fn almide_rt_list_eq_res_int(a: &[Result<i64, AlmideString>], b: &[Result<i64, AlmideString>]) -> bool { a == b }
 pub fn almide_rt_list_to_string_str(xs: &[AlmideString]) -> AlmideString { let mut o = String::from("["); for (i, e) in xs.iter().enumerate() { if i > 0 { o.push_str(", "); } o.push('"'); o.push_str(&e.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")); o.push('"'); } o.push(']'); o.into() }
 
