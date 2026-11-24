@@ -471,7 +471,20 @@ pub(crate) fn render_v1_native_or_fallback(
     // whole program renders — the differential that holds the two routes'
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
-    match rendered.map(|(rust, _)| rust) {
+    // #4828, #4930 (owner ruling 2026-11-24 W2): the v1 render's own
+    // certificates — of the MIR it rendered — are judged by the linked
+    // verifier against the exact Rust text that ships, before rustc sees it.
+    // A rejection is a compiler bug: the build stops.
+    let rendered = rendered.map(|(rust, certs)| {
+        if let Err(e) = almide::certificate_gate_native::judge_native(&format!("almide {}", env!("ALMIDE_VERSION_LINE")), "native v1 render", &rust, &certs) {
+            err(&format!(
+                "error[certificate-rejected]: the native v1 render's own certificate does not hold, which is a compiler bug — please report it\n  {e}"
+            ));
+            std::process::exit(1);
+        }
+        rust
+    });
+    match rendered {
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
