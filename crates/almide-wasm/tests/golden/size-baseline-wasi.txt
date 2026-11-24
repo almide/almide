@@ -386,6 +386,9 @@
 1555	spec/wasm_cross/if_let_forms.almd
 3732	spec/wasm_cross/if_let_guard_let.almd
 2446	spec/wasm_cross/index_bounds.almd
+2404	spec/wasm_cross/index_bounds_count_after_clear.almd
+2151	spec/wasm_cross/index_bounds_count_after_pop.almd
+2199	spec/wasm_cross/index_bounds_count_after_push.almd
 2184	spec/wasm_cross/index_bounds_i64.almd
 2094	spec/wasm_cross/index_bounds_loop_invariant.almd
 2393	spec/wasm_cross/index_bounds_write_heap.almd
