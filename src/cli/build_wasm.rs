@@ -80,13 +80,11 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    // #4011 (row 3 of the security table): with an independent verifier
-    // installed, the build records its certificate as it emits and the
-    // verifier judges it before anything is written (verify.rs `gate_build`).
-    let certify = super::verify::verifier_present();
-    if certify {
-        almide_wasm::witness::start_collecting();
-    }
+    // #4011 (row 3 of the security table): the build records its certificate
+    // as it emits and the linked verifier judges it before anything is
+    // written (verify.rs `gate_build`; #4836: on every build, not only when a
+    // verifier binary happens to be installed).
+    almide_wasm::witness::start_collecting();
     let (emitted, host_ops, surface, outside_guarantee) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
@@ -95,17 +93,15 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     let shape = WasmPackage::decide(&host_ops, req.component);
     let bytes = shape.package(file, &emitted, &host_ops);
     super::phase_lap("package");
-    if certify {
-        // A component is not the core module the certificate describes
-        // (`almide verify` refuses it the same way): the core module it
-        // packages is judged before it is packaged (#4836).
-        let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
-        if let Err(e) = super::verify::gate_build(file, &emitted, shipped, &[]) {
-            err(&format!(
-                "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
-            ));
-            std::process::exit(1);
-        }
+    // A component is not the core module the certificate describes
+    // (`almide verify` refuses it the same way): the core module it
+    // packages is judged before it is packaged (#4836).
+    let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
+    if let Err(e) = super::verify::gate_build(file, &emitted, shipped, &[]) {
+        err(&format!(
+            "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
+        ));
+        std::process::exit(1);
     }
 
     super::phase_lap("certify");

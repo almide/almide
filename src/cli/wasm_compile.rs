@@ -698,7 +698,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // from the same inputs (`wasm_run_cache`); every gate above has run.
     // On a certified route (`verify::certified`: the witness sinks armed) a
     // reused module recorded no certificate, so an entry there is written
-    // only after the installed verifier accepted it, keyed by that verifier
+    // only after the linked verifier accepted it, keyed by that verifier
     // too (#4836): a hit is a module this verifier already judged.
     let certifying = almide_wasm::witness::collecting();
     let cache = (embedded_leg && !library_ok && inputs.has_main)

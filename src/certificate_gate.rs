@@ -1,0 +1,52 @@
+//! The wasm build gate's judge (#4011, #4836): the `almide-verify` LIBRARY's
+//! verdict on the certificate bundle a build recorded and the bytes it pins.
+//!
+//! Owner ruling 2026-11-24: the verifier runs in process on every wasm route
+//! (`build`, `run`, `test`, `bench`, the core module of a component), so a
+//! build can never ship unjudged because no `almide-verify` binary was
+//! installed. The verifier crate links no compiler crate
+//! (crates/almide-verify/Cargo.toml), so what judges here is the same
+//! independent code the standalone binary runs; `almide verify` still execs
+//! that binary.
+//!
+//! Every outcome that is not an accept is a refusal: a bundle the verifier
+//! cannot read (an unknown property, record or version), one that pins no
+//! artifact or other bytes, one with no witness, or one with a REJECTed
+//! witness. INCOMPLETE (every witness accepted, some function declared
+//! uncertified) is a pass, as it was with the binary (exit 3).
+
+use almide_verify::bundle::{self, Outcome};
+
+/// `Ok(())` when the linked verifier CERTIFIES `bundle_text` over `shipped`
+/// (or finds it INCOMPLETE); `Err` with the verdict lines otherwise.
+pub fn judge(bundle_text: &[u8], shipped: &[u8]) -> Result<(), String> {
+    let who = format!("almide-verify {} (linked)", almide_verify::VERSION);
+    let parsed = bundle::parse(bundle_text).map_err(|e| format!("{who} could not read this build's certificate: {e}"))?;
+    let Some(artifact) = parsed.artifact.as_ref() else {
+        return Err(format!("{who}: this build's certificate pins no artifact"));
+    };
+    let pinned = bundle::artifact_matches(artifact, shipped);
+    let (verdicts, outcome) = bundle::verify(&parsed);
+    let outcome = if pinned { outcome } else { Outcome::Rejected };
+    match outcome {
+        Outcome::Certified | Outcome::Incomplete => Ok(()),
+        Outcome::Rejected => {
+            let mut lines: Vec<String> = verdicts
+                .iter()
+                .filter(|v| !v.accepted)
+                .map(|v| format!("REJECT  {:<15}  {}", v.property.name(), v.function))
+                .collect();
+            if !pinned {
+                lines.push(format!(
+                    "ARTIFACT  sha256 {}: MISMATCH (the bundle names {})",
+                    almide_verify::sha256::hex(shipped),
+                    artifact.sha256
+                ));
+            }
+            if verdicts.is_empty() {
+                lines.push("no witness: a bundle that certifies nothing is not an accept".into());
+            }
+            Err(format!("{who} judged this build's certificate and did not accept it ({}):\n{}", outcome.label(), lines.join("\n")))
+        }
+    }
+}
