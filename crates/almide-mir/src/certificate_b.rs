@@ -73,6 +73,8 @@ struct Streams {
     /// skip its equality (#1146; the kernel-proven checker still rejects the
     /// poisoned cert itself, which is the poison's whole job).
     poisoned: bool,
+    /// Inside a top-level loop group (`CertScan::depth > 0`).
+    in_loop: bool,
 }
 
 fn seg_net(seg: &str) -> i64 {
@@ -177,6 +179,7 @@ impl Streams {
             stream: BTreeMap::new(),
             frames: Vec::new(),
             poisoned: false,
+            in_loop: false,
         }
     }
     /// Append an event segment to `o` — into the innermost open branch arm when
@@ -234,9 +237,10 @@ impl Streams {
             // the frame, so the flat concat would erase the exit obligation.
             let seg = if flat_concat_ok(&t, &e) {
                 format!("{t}{e}")
-            } else if t == e && !either_has_delimiter(&t, &e) && !t.contains(['x', 'X', 't', 'T']) {
-                // #4934: two identical arms are the one path they both are
-                // (`{i|i}` is `i`), and a loop body has no reading for a region.
+            } else if self.in_loop && t == e && !either_has_delimiter(&t, &e) && !t.contains(['x', 'X', 't', 'T']) {
+                // #4934: inside a loop group, two identical arms are written
+                // as the one path they both are (`{i|i}` is `i`): the checker
+                // reads a region there as an item ahead of the loop.
                 t
             } else if either_has_delimiter(&t, &e) {
                 self.poisoned = true;
@@ -874,11 +878,13 @@ impl CertScan {
             self.slot_delimiters_open();
         }
         self.depth += 1;
+        self.s.in_loop = true;
     }
 
     /// Top-level loop exit: close `)` on every slot stream.
     fn exit_loop(&mut self) {
         self.depth = self.depth.saturating_sub(1);
+        self.s.in_loop = self.depth > 0;
         if self.depth == 0 {
             self.slot_delimiters_close();
         }
