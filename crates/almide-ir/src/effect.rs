@@ -223,8 +223,9 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("float32", ModuleEffects::Pure),
     ("float64", ModuleEffects::Pure),
     // Assertion helpers: a failing one aborts through the builtins it calls,
-    // which carry `Abort` themselves.
-    ("testing", ModuleEffects::Pure),
+    // which carry `Abort` themselves. The two abort-site leaves are effect
+    // fns with their own `@category` (a child process, the selected site).
+    ("testing", ModuleEffects::EffectFns(&[])),
     // The primitive floor is stdlib-internal (E085 outside it); its host ops
     // are classified at the public function that wraps them, so a stdlib
     // body over the floor does not charge its callers twice.

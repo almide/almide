@@ -15,13 +15,15 @@ fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.asser
 // the native test binary, a fresh instance of the wasm module on the embedded
 // host — and answers [status, stdout, stderr]. The verdict below is the one
 // comparison every leg shares (D4), and its failure block is D5's.
+@category("Proc")
 @intrinsic("almide_rt_test_abort_site_run")
-fn __abort_site_run(site: Int) -> List[String] = _
+effect fn __abort_site_run(site: Int) -> List[String] = _
 
 // The site a child was started to run, or -1 in the parent: the wasm test
 // runner's `main` asks it to choose between the tests and one site.
+@category("Env.read")
 @intrinsic("almide_rt_test_abort_site_selected")
-fn __abort_site_selected() -> Int = _
+effect fn __abort_site_selected() -> Int = _
 
 local fn abort_header(line: String) -> Bool = ["Error: ", "PANIC: "] |> list.any((h) => string.starts_with(line, h))
 

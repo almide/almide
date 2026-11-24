@@ -40771,13 +40771,15 @@ fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.asser
 
 
 
+@category("Proc")
 @intrinsic("almide_rt_test_abort_site_run")
-fn __abort_site_run(site: Int) -> List[String] = _
+effect fn __abort_site_run(site: Int) -> List[String] = _
 
 
 
+@category("Env.read")
 @intrinsic("almide_rt_test_abort_site_selected")
-fn __abort_site_selected() -> Int = _
+effect fn __abort_site_selected() -> Int = _
 
 local fn abort_header(line: String) -> Bool = ["Error: ", "PANIC: "] |> list.any((h) => string.starts_with(line, h))
 
