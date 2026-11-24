@@ -144,6 +144,8 @@ impl Checker {
             self.expect_annotated_value(&declared);
         }
         let val_ty = self.infer_expr(value);
+        // #4928: a function bound to a local is what a later use passes or calls.
+        self.record_purity_binding(name.as_str(), value);
         // #3274: resolved BEFORE `define_var`, so `let g = g` reads the outer `g`.
         let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
@@ -254,6 +256,8 @@ impl Checker {
             self.expect_annotated_value(&declared);
         }
         let val_ty = self.infer_expr(value);
+        // #4928: a function bound to a local is what a later use passes or calls.
+        self.record_purity_binding(name.as_str(), value);
         let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
@@ -301,6 +305,8 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
+        // #4928: a function bound to a local is what a later use passes or calls.
+        self.record_purity_binding(name.as_str(), value);
         // #3274: `var g = pure_fn; g = rd` — the var now may hold `rd`.
         if let Some(target) = self.effect_fn_value_target(value)
             && self.env.lookup_var(name).is_some_and(|t| !matches!(resolve_ty(t, &self.uf), Ty::Fn { is_effect: true, .. }))
