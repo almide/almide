@@ -1,0 +1,21 @@
+// Probe: the display of a five-thousand-deep value whose recursive component
+// is NOT the last field of its case.
+type Snoc =
+  | Empty
+  | Push(Snoc, Int)
+
+fn build(n: Int) -> Snoc = {
+  var s: Snoc = Empty
+  for i in 0..<n {
+    s = Push(s, i)
+  }
+  s
+}
+
+effect fn main() -> Unit = {
+  let s = build(5000)
+  let text = "${s}"
+  println(int.to_string(string.len(text)))
+  println(if string.ends_with(text, ", 4998), 4999)") then "tail ok" else "tail WRONG")
+  println(if string.starts_with(text, "Push(Push(Push(") then "head ok" else "head WRONG")
+}

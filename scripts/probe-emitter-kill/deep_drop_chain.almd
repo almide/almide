@@ -1,0 +1,23 @@
+// Probe: a three-million-deep value of a recursive variant, built in a loop,
+// walked without recursion, and released when `main` returns.
+type Chain =
+  | End
+  | Link(Int, Chain)
+
+fn build(n: Int) -> Chain = {
+  var c: Chain = End
+  for i in 0..<n {
+    c = Link(i, c)
+  }
+  c
+}
+
+fn head_of(c: Chain) -> Int = match c {
+  End => -1,
+  Link(v, _) => v,
+}
+
+effect fn main() -> Unit = {
+  let c = build(3000000)
+  println(int.to_string(head_of(c)))
+}

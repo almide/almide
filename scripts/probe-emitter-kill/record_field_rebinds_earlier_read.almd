@@ -1,0 +1,14 @@
+// Probe: a record literal whose second field rebinds the list its first field
+// read. Operands are values evaluated left to right, so `first` is the list
+// held before the block ran.
+type Pair = { first: List[String], second: Int }
+
+effect fn main() -> Unit = {
+  var xs = ["alpha", "beta", "gamma"]
+  let p = Pair { first: xs, second: { xs = ["x", "y", "z"]; 7 } }
+  let fresh = ["one", "two", "three"]
+  println("${p.first}")
+  println(int.to_string(p.second))
+  println("${xs}")
+  println("${fresh}")
+}
