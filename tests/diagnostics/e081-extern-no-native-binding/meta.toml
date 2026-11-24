@@ -1,0 +1,4 @@
+check_target = "native"
+expects_code = "E081"
+expects_error = "`js_log` has no implementation on the native target"
+hint_substring = "give the fn an Almide body the native build runs"
