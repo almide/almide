@@ -1032,7 +1032,7 @@ fn almide_list_extend_grow<T: Clone>(list: &mut AlmideList<T>, len: usize) -> (N
 
 impl<T: Clone> Extend<T> for AlmideList<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, it: I) {
-        let mut it = it.into_iter();
+        let it = it.into_iter();
         let hint = it.size_hint().0;
         if hint == 0 {
             for x in it {
