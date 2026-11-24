@@ -661,14 +661,6 @@ impl<T: Clone> IntoIterator for AlmideList<T> {
 }
 
 impl<T: Clone> AlmideList<T> {
-    /// `self.into_iter().enumerate().map(|(i, x)| f(i, x)).collect()`: [`Self::extend_indexed`] into a block at its
-    /// final capacity.
-    pub fn map_indexed<U: Clone, F: FnMut(usize, T) -> U>(self, f: F) -> AlmideList<U> {
-        let mut out = AlmideList::<U>::with_capacity(self.len());
-        out.extend_indexed(self, f);
-        out
-    }
-
     /// Appends `f(i, x)` for each element `x` of `src` at index `i`, in one counted fill: `src`'s length is the
     /// count and the room is reserved up front, so no element store is checked against the room (an `extend` over
     /// an iterator it cannot trust checks every one). Elements move out of a unique `src` and are cloned from a
@@ -715,7 +707,10 @@ impl<T: Clone> AlmideList<T> {
             && std::mem::align_of::<T>() == std::mem::align_of::<U>()
             && std::mem::size_of::<T>() > 0;
         if len == 0 || !fits || !self.is_unique() {
-            return self.map_indexed(|_, x| f(x));
+            // One block at its final capacity, filled by the source's count.
+            let mut out = AlmideList::<U>::with_capacity(len);
+            out.extend_indexed(self, |_, x| f(x));
+            return out;
         }
         /// Unwinding out of `f` at element `done`: the `done` elements already written are `U`s, the one `f` was
         /// handed is gone, the rest are `T`s. Drop each as what it is, then free the block.

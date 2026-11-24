@@ -99,7 +99,7 @@ pub fn almide_rt_list_any<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>)
 pub fn almide_rt_list_all<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().all(|x| f(x.clone())) }
 pub fn almide_rt_list_each<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A)>) { let f = move |a| f(a); for x in xs { f(x.clone()); } }
 pub fn almide_rt_list_count<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> i64 { let f = move |a| f(a); xs.iter().filter(|x| f((*x).clone())).count() as i64 }
-pub fn almide_rt_list_enumerate<T: Clone>(xs: AlmideList<T>) -> AlmideList<(i64, T)> { xs.map_indexed(|i, x| (i as i64, x)) }
+pub fn almide_rt_list_enumerate<T: Clone>(xs: AlmideList<T>) -> AlmideList<(i64, T)> { xs.into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect() }
 pub fn almide_rt_list_zip<T: Clone, U: Clone>(a: AlmideList<T>, b: AlmideList<U>) -> AlmideList<(T, U)> { a.into_iter().zip(b.into_iter()).collect() }
 pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C: Clone>(a: AlmideList<A>, b: AlmideList<B>, f: std::rc::Rc<dyn Fn(A, B) -> C>) -> AlmideList<C> { let f = move |a, b| f(a, b); a.into_iter().zip(b.into_iter()).map(|(x, y)| f(x, y)).collect() }
 // Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
