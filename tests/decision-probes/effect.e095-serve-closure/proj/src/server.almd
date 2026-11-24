@@ -1,0 +1,3 @@
+import http
+
+pub effect fn serve_on(port: Int, app: HttpHandler) -> Unit = http.serve(port, app)!

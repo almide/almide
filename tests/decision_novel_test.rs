@@ -350,3 +350,40 @@ fn novel_verify_refuses_a_fresh_file_that_is_not_the_built_module() {
     let o = run(&proj, &["verify", &format!("{stem}.almd")]);
     assert!(!text(&o).contains("is not the module"), "control: with no file there is nothing to mismatch:\n{}", text(&o));
 }
+
+/// effect.e095-serve-closure (owner ruling 2026-11-24): the serve app's slot
+/// is the one its declaration marks `@instance_closed`, carried through a
+/// wrapper's inferred slot. A fresh module wraps `http.serve` under a fresh
+/// fn name, and the app its caller passes reads a fresh local: refused, on
+/// the route that runs nothing (check) and on the one that builds.
+#[test]
+fn novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused() {
+    let m = novel::module();
+    let w = novel::ident("serve_on");
+    let local = novel::ident("boot");
+    let (_t, proj) = project(&[
+        (&format!("src/{m}.almd"), format!("import http\n\npub effect fn {w}(port: Int, app: HttpHandler) -> Unit = http.serve(port, app)!\n")),
+        (
+            "src/main.almd",
+            format!(
+                "import http\nimport self.{m}\n\neffect fn main() -> Unit = {{\n  let {local} = \"x\"\n  {m}.{w}(8080, (req) => http.response(200, {local}))!\n}}\n"
+            ),
+        ),
+    ]);
+    for args in [&["check", "src/main.almd"][..], &["build", "src/main.almd", "--target", "wasm", "-o", "app.wasm"][..]] {
+        let o = run(&proj, args);
+        refused_with(&o, "E095", "a fresh serve wrapper's app reading a fresh local");
+        assert!(text(&o).contains(&local), "E095 does not name the local {local}:\n{}", text(&o));
+    }
+}
+
+/// The declarations E095 and E008 read: every `@concurrent` /
+/// `@instance_closed` argument of a bundled stdlib fn names a parameter of
+/// it (an unknown name would silently declare no slot), and the serve app is
+/// one of the instance-closed slots.
+#[test]
+fn every_stdlib_slot_attribute_names_a_parameter() {
+    let bad = almide_frontend::concurrent_reach::stdlib_slot_attributes_naming_no_parameter();
+    assert!(bad.is_empty(), "stdlib slot attributes naming no parameter: {bad:?}");
+    assert_eq!(almide_frontend::concurrent_reach::stdlib_closed_slots("http", "serve"), vec![1], "http.serve's app is not instance-closed");
+}
