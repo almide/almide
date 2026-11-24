@@ -1,0 +1,164 @@
+name: Probe — record the ledger rows of new cross-target fixtures
+# A one-off on its own branch: builds the CLI from this commit, re-records
+# every ledger in which a new spec/wasm_cross fixture gets a row, and uploads
+# the resulting diff per job. The branch under it is the fixture branch plus
+# this file; the diff is carried back to the fixture branch by hand. Not a
+# gate.
+on:
+  push:
+    branches: [probe/fixture-ledgers]
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+
+jobs:
+  wasm-ledgers:
+    name: Manifests, allocation, size, witness floor, surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Build the CLI
+        run: cargo build --release --locked --bin almide
+      - name: Run, AST and check manifests
+        env:
+          # The binary is built from this very commit and the checkout is
+          # detached, so the generators' own tree check keeps only the
+          # untracked-fixture refusal (scripts/lib/oracle-header.sh).
+          ALMIDE_MANIFEST_TREE_CHECK: gate
+        run: |
+          export ORACLE="$PWD/target/release/almide"
+          bash scripts/gen-run-manifest.sh
+          bash scripts/gen-ast-manifest.sh
+          bash scripts/gen-check-manifest.sh
+          git --no-pager diff --stat
+      - name: Allocation ledger
+        if: always()
+        run: ALMIDE_UPDATE_ALLOC=1 cargo test --release --locked -p almide-wasm --test alloc_ledger
+      - name: Size ledger
+        if: always()
+        run: ALMIDE_UPDATE_SIZES=1 cargo test --release --locked -p almide-wasm --test size_ratchet
+      - name: Witness floor
+        if: always()
+        run: ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release --locked -p almide-wasm --test witness_floor
+      - name: Exercised surface
+        if: always()
+        run: ALMIDE_UPDATE_SURFACE=1 cargo test --release --locked -p almide-wasm --test surface_matrix
+      - name: Collect the diff
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/ledgers"
+          git status --short | tee "$RUNNER_TEMP/ledgers/status.txt"
+          git --no-pager diff --stat
+          git diff --binary > "$RUNNER_TEMP/ledgers/wasm-ledgers.patch"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasm-ledgers
+          path: ${{ runner.temp }}/ledgers
+
+  root-ledgers:
+    name: Native verified floor, interpreter ledgers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Native verified floor
+        run: ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --locked --test native_verified_floor_test
+      - name: Interpreter abstain and bridge-fallback ledgers
+        if: always()
+        run: ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --locked --test wasm_runtime_interp_ledger interp_abstain_ledger
+      - name: Collect the diff
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/ledgers"
+          git status --short | tee "$RUNNER_TEMP/ledgers/status.txt"
+          git --no-pager diff --stat
+          git diff --binary > "$RUNNER_TEMP/ledgers/root-ledgers.patch"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: root-ledgers
+          path: ${{ runner.temp }}/ledgers
+
+  output-parity:
+    name: Output parity baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Build the CLI
+        run: cargo build --release --locked --bin almide
+      - name: Output parity baseline
+        run: bash proofs/output-parity.sh --update
+      - name: Collect the diff
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/ledgers"
+          git status --short | tee "$RUNNER_TEMP/ledgers/status.txt"
+          git --no-pager diff --stat
+          git diff --binary > "$RUNNER_TEMP/ledgers/output-parity.patch"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: output-parity
+          path: ${{ runner.temp }}/ledgers
