@@ -10439,6 +10439,11 @@ fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
 /// A body of a declared media type, built only by `http.typed`.
 mod type TypedBody: Body = { media_type: String, bytes: Bytes }
 
+
+
+
+
+@media_table("text/plain", "text/csv", "text/css", "text/markdown", "text/tab-separated-values", "application/json", "application/octet-stream", "application/zip", "application/gzip", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "audio/mpeg", "audio/ogg", "audio/wav", "video/mp4", "video/webm", "font/woff", "font/woff2")
 fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
 fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes

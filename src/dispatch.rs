@@ -970,6 +970,9 @@ fn arm_budgets(cli: &crate::cli_args::Cli) {
 }
 
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
+    // E117 reads the application's own `[trust] media` grant ("self") off
+    // the manifest of the program being checked, on every route.
+    crate::media_owners::set_self_grants_reader(crate::media_grant::self_grants_for);
     // #4590: a retired spelling is an error naming the new one, whatever
     // else the command line says; a bare `almide` prints the grouped help.
     match &cli.command {

@@ -115,6 +115,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // stdlib needs the application's `[trust] media` grant, D7)
     "header_write",
     "literal_media",
+    // The closed media-type table of a body type's media fn: the only types
+    // a `@literal_media` builder of that type takes without the
+    // application's own `[trust] media` grant (E117)
+    "media_table",
     "media_owns",
     "script_capable",
     // Scheduling and placement

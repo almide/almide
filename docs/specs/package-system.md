@@ -202,7 +202,12 @@ error: almide.toml:5: unknown key `brnach` in dependency `foo` is refused — al
 | `[target.<platform>]` | `native-deps` |
 
 `[native-deps]` entries are crate names and `[trust].media` keys are package
-sources, so any key is one there (a crate spec is Cargo's to judge). A
+sources, so any key is one there (a crate spec is Cargo's to judge). One
+`[trust].media` key is reserved: `"self"` names the application itself, and
+its list is the media types `http.typed` may label bytes with beyond the
+stdlib's closed table of non-script types (E117, ADR-0032 D7). A `"self"`
+entry naming a malformed type, a script-capable one or a type a stdlib module
+owns is refused (E118), as is a dependency whose key would be `self`. A
 dependency entry that is not a table, or names neither `git` nor `path`,
 declares nothing and is a warning (stderr; a `"level":"warning"` row in
 `almide check --json`), which never changes the exit code.

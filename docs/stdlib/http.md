@@ -255,11 +255,24 @@ text/html; charset=utf-8
 
 ### `http.typed(media_type: String, body: Bytes) -> TypedBody`
 
-A body of any other media type. The type is written as a literal and read at
-check time (E117): a computed one, a malformed one, or one a browser runs
+A body of another media type. The type is written as a literal and read at
+check time (E117): it must be one of the standard non-script types the stdlib
+lists for `typed` — `text/plain`, `text/csv`, `text/css`, `text/markdown`,
+`text/tab-separated-values`, `application/json`, `application/octet-stream`,
+`application/zip`, `application/gzip`, `image/png`, `image/jpeg`, `image/gif`,
+`image/webp`, `image/avif`, `audio/mpeg`, `audio/ogg`, `audio/wav`,
+`video/mp4`, `video/webm`, `font/woff`, `font/woff2` — or one the application
+grants itself in `almide.toml`:
+
+```toml
+[trust]
+media = { "self" = ["application/vnd.acme+json"] }
+```
+
+A computed type, a malformed one, any other type, and one a browser runs
 script in — HTML and XHTML (owned by `html`), SVG (a granted package's), XML
-and `+xml` types — is refused, so a String never reaches a browser as markup
-except through a safe type. The bytes are kept exactly: `http.body_bytes`
+and `+xml` types, whatever the grant — is refused, so a String never reaches
+a browser as markup or script except through a safe type. The bytes are kept exactly: `http.body_bytes`
 answers them and `http.serve` sends them byte for byte (#4311).
 
 ```almd run
