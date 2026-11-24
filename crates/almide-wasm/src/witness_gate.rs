@@ -528,15 +528,10 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
     };
     match target {
         almide_ir::CallTarget::Named { name } => {
-            // The http_framed host-op leaves (calls.rs) intercept before
-            // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_")
-                || name.as_str().starts_with("__http_call_")
-                || name.as_str().starts_with("__http_serve_")
-                || name.as_str().starts_with("__proc_")
-            {
-                return Some(Why::Deep("call:host-splice".into()));
-            }
+            // A bodyless host-op leaf (http_call.rs `lower_host_leaf`) is
+            // audited like a module arm: its operands enter through
+            // `lower_arg` and the frame declines when one did not. Its
+            // arguments are judged below like any call's.
             // `__is_null` reads the Value tag of its lowered argument: no
             // argument hook fires, so only an RC-free argument is honest.
             // `panic` concatenates its message into a line and aborts: an
