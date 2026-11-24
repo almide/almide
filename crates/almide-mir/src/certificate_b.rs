@@ -30,10 +30,25 @@ fn flat_concat_ok(t: &str, e: &str) -> bool {
     if structured_net(e) != Some(0) {
         return false;
     }
-    if t.contains(['x', 't']) {
-        return false;
+    // A marker inside an already-flushed inner branch is that branch's own
+    // (its bracket names the exiting side); only an arm's own top-level
+    // marker keeps the bracket.
+    !exits_at_top(t) && !exits_at_top(e)
+}
+
+/// `seg` holds a divergence marker `x` / `t` outside every bracket: the arm
+/// itself exits or aborts.
+fn exits_at_top(seg: &str) -> bool {
+    let mut depth = 0i32;
+    for c in seg.chars() {
+        match c {
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => depth -= 1,
+            'x' | 't' if depth == 0 => return true,
+            _ => {}
+        }
     }
-    !e.contains(['x', 't'])
+    false
 }
 
 /// Either arm still carries a structural delimiter — the poisoned-flush
@@ -72,6 +87,25 @@ fn seg_net(seg: &str) -> i64 {
         .sum()
 }
 
+/// `seg` without its event-free loop groups `()` and `[|]`. The checker
+/// executes an empty loop body as the identity (`exec_line`: a loop must
+/// preserve the count, and no event changes it or faults), so dropping one
+/// changes no verdict. A slot stream opens `(` on every top-level loop, so a
+/// loop in one arm of a branch left an empty group on the line of a slot the
+/// loop never touches, and that arm, holding a delimiter, could only be
+/// written as the rejecting poison (the `!` early exit's error slot, read by
+/// a fold in the ok arm).
+fn without_empty_regions(seg: &str) -> String {
+    let mut s = seg.to_string();
+    loop {
+        let next = s.replace("()", "").replace("[|]", "");
+        if next == s {
+            return s;
+        }
+        s = next;
+    }
+}
+
 /// The net count change of an event segment as the checker executes it
 /// (`exec_line`, crates/almide-verify/src/ownership.rs): a loop `(...)` or a
 /// conditional loop `[...|...]` preserves the count, so it adds 0 when its
@@ -105,10 +139,15 @@ fn structured_net(seg: &str) -> Option<i64> {
             }
         }
         let nets: Vec<i64> = arms.iter().map(|a| seg_net(a)).collect();
+        // An exiting (`x`) or aborting (`t`) arm leaves the line; the line
+        // continues from the other arm alone (`BranchRet` / `BranchAbort`).
+        let marked: Vec<bool> = arms.iter().map(|a| a.contains(['x', 't'])).collect();
         match close {
-            ')' if nets == [0] => {}
-            ']' if nets == [0, 0] => {}
-            '}' if nets.len() == 2 && nets[0] == nets[1] => net += nets[0],
+            ')' if nets == [0] && marked == [false] => {}
+            ']' if nets == [0, 0] && marked == [false, false] => {}
+            '}' if marked == [true, false] => net += nets[1],
+            '}' if marked == [false, true] => net += nets[0],
+            '}' if nets.len() == 2 && marked == [false, false] && nets[0] == nets[1] => net += nets[0],
             _ => return None,
         }
     }
@@ -173,8 +212,8 @@ impl Streams {
             None => return, // EndIf without IfThen — malformed MIR, nothing buffered
         };
         for o in fr.order {
-            let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
-            let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
+            let t = without_empty_regions(&fr.then_ev.get(&o).cloned().unwrap_or_default());
+            let e = without_empty_regions(&fr.else_ev.get(&o).cloned().unwrap_or_default());
             // An arm carrying a divergence marker `x` or `t` NEVER flattens (even at
             // net 0): the bracket is what tells the checker WHICH side exited
             // the frame, so the flat concat would erase the exit obligation.
@@ -836,5 +875,30 @@ mod structured_net_tests {
         assert_eq!(structured_net("i{d|d"), None); // unclosed
         assert_eq!(structured_net("d}"), None); // stray close
         assert!(!flat_concat_ok("", "i{d|}"));
+    }
+
+    /// An inner branch one arm of which exits (`x`) or aborts (`t`) counts
+    /// its surviving arm; the outer arm holding it flattens when that is net
+    /// 0, its marker staying inside the inner bracket. A marker an arm holds
+    /// at its own top level, or one inside a loop, never flattens.
+    #[test]
+    fn an_inner_exit_branch_counts_its_surviving_arm() {
+        assert_eq!(structured_net("b{dx|}"), Some(0));
+        assert_eq!(structured_net("{m|dt}"), Some(-1));
+        assert!(flat_concat_ok("b{dx|}", ""));
+        assert!(!flat_concat_ok("dx", ""));
+        assert_eq!(structured_net("{dx|dx}"), None);
+        assert_eq!(structured_net("(dx)"), None);
+    }
+
+    /// An event-free loop group is the identity the checker executes, so it
+    /// is dropped from an arm; a group holding an event stays.
+    #[test]
+    fn an_empty_loop_group_leaves_the_arm() {
+        use super::without_empty_regions;
+        assert_eq!(without_empty_regions("()d"), "d");
+        assert_eq!(without_empty_regions("(())[|]m"), "m");
+        assert_eq!(without_empty_regions("(b)d"), "(b)d");
+        assert_eq!(without_empty_regions("[b|]"), "[b|]");
     }
 }
