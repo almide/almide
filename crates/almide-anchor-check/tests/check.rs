@@ -326,6 +326,70 @@ fn a_hoisted_count_rewritten_inside_the_loop_is_refused() {
     assert!(bounds(&body, "c0 a0", "1:20 1:30").is_err());
 }
 
+/// A list BUILT in the function, as a literal is: the block in a temporary
+/// (local 3), then in the list's variable (local 0). Its payload pointer
+/// (local 6) and its count (local 4) are read before the loop, and the loop
+/// runs `stmt` (`n` instructions, from 17) before the check (const 21 + n)
+/// and the load (31 + n). Local 5 holds what `stmt` makes. `$alloc` stands in
+/// for every routine; `judges` are the recorded judge sites.
+fn built(stmt: &str, n: usize, judges: &[usize]) -> Result<Report, String> {
+    let body = format!(
+        "i32.const 64 call $alloc local.set 3
+         local.get 3 local.set 0
+         local.get 0 i32.const 12 i32.add local.set 6
+         local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u local.set 4
+         (block (loop
+           {stmt}
+           local.get 1 local.get 4 i64.ge_u (if (then i32.const 0 drop unreachable))
+           local.get 6 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.load drop
+           local.get 1 i64.const 1 i64.add local.set 1
+           br 0))"
+    );
+    let bytes = module("(local i32 i64 i64 i32 i64 i32 i32)", &body);
+    let bodies = decode(&bytes)?;
+    let mut r = Report::default();
+    let js: Vec<At> = judges.iter().map(|&op| At { func: 1, op }).collect();
+    check_bounds(&bodies, "c0 a0", &format!("1:{} 1:{}", 21 + n, 31 + n), &js, &mut r).map(|()| r)
+}
+
+#[test]
+fn a_built_list_only_read_inside_the_loop_is_accepted() -> Result<(), String> {
+    assert_eq!(built("", 0, &[])?.bounds_operands, 1);
+    // A call handed another block the loop carries (local 5) is not handed
+    // the list.
+    assert_eq!(built("local.get 5 call $alloc local.set 5", 3, &[])?.bounds_operands, 1);
+    Ok(())
+}
+
+/// `list.pop` in place: the judge (at 18) rewrites the list's variable, and
+/// the count word is stored through the judge's block. The count read
+/// before the loop is stale from then on.
+#[test]
+fn a_count_word_stored_through_the_judged_variable_of_a_built_list_is_refused() {
+    let pop = "local.get 0 call $alloc local.set 5 local.get 5 local.set 0
+               local.get 5 i32.const 0 i32.store offset=4";
+    assert!(built(pop, 8, &[18]).unwrap_err().contains("writes the list's count"));
+}
+
+/// `list.push` in place: after the judge, a call (at 23) is handed the
+/// judge's block and its result rewrites the variable.
+#[test]
+fn a_call_handed_the_judged_variable_of_a_built_list_is_refused() {
+    let push = "local.get 0 call $alloc local.set 5 local.get 5 local.set 0
+                local.get 5 call $alloc local.set 0";
+    assert!(built(push, 8, &[18]).unwrap_err().contains("handed"));
+}
+
+/// `list.clear`: a fresh block replaces the list, whose old block a call (at
+/// 21) is handed through the variable the loop rewrites.
+#[test]
+fn a_call_handed_the_rewritten_variable_of_a_built_list_is_refused() {
+    let clear = "i32.const 0 call $alloc local.set 5
+                 local.get 0 call $alloc drop
+                 local.get 5 local.set 0";
+    assert!(built(clear, 8, &[]).unwrap_err().contains("handed"));
+}
+
 // ── bounds: a `for` loop's exit test (#4280) ───────────────────────────────
 
 /// Locals: 0 the list block, 1 the count, 2 the counter, 3 another block.
