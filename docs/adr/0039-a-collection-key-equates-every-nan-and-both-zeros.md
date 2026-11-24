@@ -85,3 +85,12 @@ The checker's admission of keys does not change here. A Set element may hold any
 - **Java's split of the zeros** (`0.0` and `-0.0` distinct keys). Rejected: two keys that are `==` would be different keys. Every language in the table except Java and Kotlin treats them as one key.
 - **Refuse Float keys** (Rust). Rejected: `Set[Float]` and `Map[Float, V]` are legal Almide today and their common uses (no NaN) are sound; refusing them breaks written code for a corner case D1 defines.
 - **Bitwise equality** (what native v1 does today for nested Floats). Rejected: two NaNs with different payloads are two keys depending on which operation produced them, which a writer cannot see.
+
+## Owner decisions (2026-11-25)
+
+The owner ruled ○ on four follow-up questions:
+
+- **The rule is SameValueZero, as ruled.** The ruling's shorthand called it "Java-style"; Java's `Double.equals` keeps `0.0` and `-0.0` apart, so the rule matches JavaScript's SameValueZero, not Java. The rule stands as ruled: every NaN is one key and the two zeros are one key.
+- **Set and Map `==` follow the key equality** (D3): a Set or Map holding a NaN is `==` to itself.
+- **Native `Set[List[Float]]` and `Set[Option[Float]]` render before the final**, with the element's Floats as real `f64` values in the set (the top-level `Set[Float]` form, #4795, extended), so no E081 refusal remains.
+- **Lifting E058 for `Map[Float, V]` waits until after the final.** D6 stands until then.
