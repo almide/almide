@@ -10381,6 +10381,7 @@ import url
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(handler)
+@instance_closed(handler)
 @category("Net.listen")
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
