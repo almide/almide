@@ -1,0 +1,3 @@
+# The probe of verify.e051-dialect-ahead: a file stamped for a dialect far
+# above the one this compiler speaks.
+expect = "E051"

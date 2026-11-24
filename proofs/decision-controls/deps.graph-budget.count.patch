@@ -1,0 +1,14 @@
+# Second negative control of deps.graph-budget (proofs/decision-sites.toml): the dependency count budget is never enforced for a named dependency
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_dependency_chain_past_the_depth_budget_is_refused
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -1002,7 +1002,7 @@
+         let (count, depth) = (visited.len() as u64, chain.len() as u64);
+         budget::observe(BudgetId::DependencyCount, count);
+         budget::observe(BudgetId::DependencyDepth, depth);
+-        if count > budget::limit(BudgetId::DependencyCount) {
++        if count > budget::limit(BudgetId::DependencyCount) && dep.name.is_empty() {
+             return Err(format!(
+                 "error: too many dependencies ({count}, max {}): the dependency graph reached `{}` through {}\n  \
+                  hint: a real project needs far fewer; a manifest that asks for more is refused before it is fetched \

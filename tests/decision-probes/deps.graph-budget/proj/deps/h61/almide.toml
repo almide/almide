@@ -1,0 +1,6 @@
+[package]
+name = "h61"
+version = "0.1.0"
+
+[dependencies]
+h62 = { path = "../h62" }
