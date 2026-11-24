@@ -82,7 +82,7 @@ fn almide_net_tcp_accept_unlocked(h: i64) -> Result<i64, String> {
 
 pub fn almide_rt_net___os_tcp_connect(host: &str, port: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net_tcp_connect_unlocked(host, port) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net___os_tcp_read(handle: i64, len: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<std::vec::Vec<u8>, String> = (|| { almide_net_stream_io(handle, |t| t.tcp_read(handle, len)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_net___os_tcp_read(handle: i64, len: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { almide_net_stream_io(handle, |t| t.tcp_read(handle, len)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_net___os_tcp_write(handle: i64, data: &[u8]) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net_stream_io(handle, |t| t.tcp_write(handle, data)) })(); __almide_r.map_err(Into::into) }
 
@@ -92,7 +92,7 @@ pub fn almide_rt_net___os_tcp_is_open(handle: i64) -> bool {
     almide_net(|t| t.tcp_is_open(handle))
 }
 
-pub fn almide_rt_net___os_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<std::vec::Vec<u8>, String> = (|| { almide_net_stream_io(handle, |t| t.tcp_read_timeout(handle, len, timeout_ms)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_net___os_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { almide_net_stream_io(handle, |t| t.tcp_read_timeout(handle, len, timeout_ms)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_net___os_tcp_available(handle: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net_stream_io(handle, |t| t.tcp_available(handle)) })(); __almide_r.map_err(Into::into) }
 
@@ -120,7 +120,7 @@ pub fn almide_rt_net___os_udp_local_port(handle: i64) -> Result<i64, AlmideStrin
 pub fn almide_rt_net___os_udp_send_to(handle: i64, data: &[u8], host: &str, port: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net_udp_io(handle, |t| t.udp_send_to(handle, data, host, port)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_net___os_udp_recv_from(handle: i64, max: i64) -> Result<(AlmideList<u8>, AlmideString, i64), AlmideString> {
-    let __almide_r: Result<(AlmideList<u8>, String, i64), String> = almide_net_udp_io(handle, |t| t.udp_recv_from(handle, max)).map(|(b, a, p)| (AlmideList::from(b), a, p));
+    let __almide_r: Result<(AlmideList<u8>, String, i64), String> = almide_net_udp_io(handle, |t| t.udp_recv_from(handle, max));
     __almide_r.map(|(d, h, p)| (d, h.into(), p)).map_err(Into::into)
 }
 
