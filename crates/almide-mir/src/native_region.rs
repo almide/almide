@@ -18,7 +18,9 @@
 //! and permission checks stay in the checked ffi.almd bodies. Any other way
 //! an address could cross a boundary (an `@export`, a C binding, a Region
 //! inside another value, a returned or callback Region, a host call that
-//! takes the address itself) is refused (see `lent`).
+//! takes the address itself) is refused (see `lent`). Only the native
+//! program's own boundaries count (`is_boundary`): an `@export(wasm)` fn is
+//! an ordinary fn of a native binary, so its Region stays in the closed form.
 use almide_ir::{visit_mut::{walk_expr_mut, walk_stmt_mut, walk_pattern_mut}, *};
 use almide_lang::{intern::sym, types::Ty};
 use crate::lower::LowerError;
@@ -108,14 +110,21 @@ fn closed(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
 /// parameter, so foreign code sees the block only for the call.
 fn lent(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
     use almide_lang::types::extern_abi::{is_region, NativeExtern};
-    let lends = |f: &IrFunction| f.export_attrs.is_empty()
+    let lends = |f: &IrFunction| !crate::native_foreign::is_c_export(f)
         && matches!(crate::native_foreign::selected(f), Some((NativeExtern::Rust, _)))
         && !reach.carries(&f.ret_ty)
         && f.params.iter().all(|p| !reach.carries(&p.ty) || (is_region(&p.ty) && !p.is_mut));
     !gate.foreign && !almide_ir::meter_plan::program_has_regions(ir)
         && ir.functions.iter().all(|f| !is_boundary(f) || !signature_carries(f, reach) || lends(f))
 }
-fn is_boundary(f: &IrFunction) -> bool { !f.extern_attrs.is_empty() || !f.export_attrs.is_empty() }
+/// A boundary of the NATIVE program: an `@extern` the native build binds
+/// (`rust` / `c`) or an `@export(c)`. Another target's attribute
+/// (`@extern(wasm, ...)`, `@export(wasm, ...)`) crosses nothing here: a wasm
+/// export is an ordinary fn of the native binary, and a wasm-only extern either
+/// runs its Almide body or is refused before the render (C-461).
+fn is_boundary(f: &IrFunction) -> bool {
+    crate::native_foreign::selected(f).is_some() || crate::native_foreign::is_c_export(f)
+}
 fn signature_carries(f: &IrFunction, reach: &AddressReach) -> bool {
     reach.carries(&f.ret_ty) || f.params.iter().any(|p| reach.carries(&p.ty))
 }
