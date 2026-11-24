@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # `almide build --target wasm` judges its own certificate (#4011, row 3 of
-# docs/roadmap/active/security-by-construction.md): with `almide-verify`
-# installed next to it, the build records its witnesses as it emits and
-# refuses to write the artifact when the verifier rejects them. This drill
+# docs/roadmap/active/security-by-construction.md): the build records its
+# witnesses as it emits and the linked `almide-verify` library judges them
+# (#4836: on every build — no installed binary is needed, so none can be
+# missing); it refuses to write the artifact on a rejection. This drill
 # proves the refusal is real, in a throwaway worktree:
 #   1. CONTROL — unpatched, each reproduction builds (exit 0) and the file is
 #      written;
@@ -10,9 +11,10 @@
 #      (proofs/fixtures/bounds-witness/reinject/<name>.patch, whose witness
 #      almide-verify rejects), the build exits 1, prints
 #      error[certificate-rejected], and writes NO file;
-#   3. the same patched compiler with the verifier moved away writes the
-#      file (exit 0): the refusal is the verifier's verdict, not the patch
-#      breaking the build;
+#   3. the refusal is the verifier's verdict, not the patch breaking the
+#      build: the build's refusal names a REJECTed witness, and the
+#      standalone almide-verify binary, handed the same program's bundle by
+#      `almide verify`, rejects it too (exit 1, a REJECT line);
 #   4. (#4836) the patched `almide run --target wasm` refuses the module the
 #      same way (exit 1, error[certificate-rejected]) instead of running it.
 #
@@ -31,7 +33,6 @@ trap 'git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"
 git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q --bin almide && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
 BIN="$TARGET/debug/almide"
-VER="$TARGET/debug/almide-verify"
 # try <name>: the build's exit, then whether the file was written.
 try() {
   rm -f "$wt/out.wasm"
@@ -54,13 +55,14 @@ for name in "${names[@]}"; do
   elif [ "$r" != 1 ] || ! grep -q "certificate-rejected" "$wt/run.log"; then
     echo "FAIL $name: with the bug re-injected \`run --target wasm\` exits $r, not a refusal: $(head -3 "$wt/run.log")"; fail=1
   else
-    mv "$VER" "$VER.away"
-    w=$(try "$name")
-    mv "$VER.away" "$VER"
-    if [ "$w" != "0 written" ]; then
-      echo "FAIL $name: without the verifier the patched build reads '$w' — the refusal was not the verifier's"; fail=1
+    (cd "$wt" && "$BIN" verify "$DIR/$name.almd") > "$wt/verify.log" 2>&1
+    w=$?
+    if ! grep -q "REJECT  " "$wt/build.log"; then
+      echo "FAIL $name: the build's refusal names no REJECTed witness — the refusal was not the verifier's: $(head -3 "$wt/build.log")"; fail=1
+    elif [ "$w" != 1 ] || ! grep -q "^REJECT  " "$wt/verify.log"; then
+      echo "FAIL $name: the standalone verifier reads the same bundle as exit $w, not a REJECT: $(head -3 "$wt/verify.log")"; fail=1
     else
-      echo "ok   $name: control built (exit 0, written); re-injected, refused (exit 1, no file, certificate-rejected) and run refused; without the verifier, written"
+      echo "ok   $name: control built (exit 0, written); re-injected, refused (exit 1, no file, certificate-rejected, a REJECTed witness) and run refused; the standalone verifier rejects the same bundle"
     fi
   fi
   git -C "$wt" checkout -q -- .
