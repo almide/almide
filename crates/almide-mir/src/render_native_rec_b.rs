@@ -582,7 +582,9 @@ fn native_set_element_type(t: &almide_lang::types::Ty) -> Result<(), crate::lowe
     use almide_lang::types::{Ty, constructor::TypeConstructorId};
     match t {
         Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => Ok(()),
-        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a) if a.len() == 1 => native_set_element_type(&a[0]),
+        // An Option's `==` is its payload's (`Option<T>: PartialEq`), so an
+        // Option of an exact element is exact (`Set[Option[Int]]`, #4799).
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set | TypeConstructorId::Option, a) if a.len() == 1 => native_set_element_type(&a[0]),
         Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if RECS.with(|r| r.borrow().iter().any(|d| d.name == block_key(t) && d.eq_safe)) {
             Ok(())
         } else {
@@ -595,9 +597,9 @@ fn native_set_element_type(t: &almide_lang::types::Ty) -> Result<(), crate::lowe
 /// Native counterpart used after declaration types have been bound at a call.
 pub(crate) fn native_set_element_kind(t: NTy) -> bool {
     match t {
-        NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr | NTy::Bool | NTy::F64 => true,
+        NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr | NTy::Bool | NTy::F64 | NTy::Opt => true,
         NTy::Rec(i) => is_bytes(t) || RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.eq_safe))
-            || list_elem(i).or_else(|| set_elem(i)).is_some_and(native_set_element_kind),
+            || list_elem(i).or_else(|| set_elem(i)).or_else(|| option_payload(i)).is_some_and(native_set_element_kind),
         _ => false,
     }
 }
