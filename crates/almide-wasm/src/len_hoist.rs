@@ -7,18 +7,27 @@
 //! alias a store), so spectralnorm's inner loop reloaded and divided the
 //! length 57.6M times — 3 ms of its 42.
 //!
-//! WHAT CHANGES A COUNT: only a statement that rebinds the variable —
-//! `Assign`, a fresh `Bind` of the same id, or a destructure binding it.
-//! `list.push` and friends reach the variable through the C-132 move-mode
-//! write-back, which IS an `Assign`, so they are covered. An element store
-//! (`IndexAssign`) and the peephole list ops keep the length (a COW copy
-//! changes the block ADDRESS, never the count, and the address is re-read at
-//! every access — only the count is cached). A Map is a different statement
-//! (`MapInsert`) and a different access path.
+//! WHAT CHANGES A COUNT: a statement that rebinds the variable — `Assign`, a
+//! fresh `Bind` of the same id, or a destructure binding it — and a call that
+//! takes the list as a `mut` receiver. `list.push`, `list.pop` and
+//! `list.clear` grow, shorten or empty the block, and the emitter writes the
+//! var back itself (`mut_var`, emitter_vars.rs): the loop body this scan
+//! walks holds NO `Assign` for them. An element store (`IndexAssign`) and the
+//! peephole list ops keep the length (a COW copy changes the block ADDRESS,
+//! never the count, and the address is re-read at every access — only the
+//! count is cached). A Map is a different statement (`MapInsert`) and a
+//! different access path.
 //!
-//! WHAT THE SCAN REFUSES, conservatively: a variable passed to any call
-//! inside the loop, and every candidate when the loop contains a lambda —
-//! the point is one measured inner loop, not a general invariance proof.
+//! WHAT THE SCAN REFUSES: a variable passed to any call inside the loop, and
+//! every candidate when the loop contains a lambda. The call refusal is
+//! LOAD-BEARING, not a margin: it is the only thing that disqualifies the
+//! in-place calls above. With it removed the count read before the loop goes
+//! stale — a valid index aborts after a push, a read runs past the end after
+//! a pop or a clear; spec/wasm_cross/index_bounds_count_after_{push,pop,clear}.almd
+//! pin the three. payload_ptr.rs rests its address-stability argument on the
+//! same refusal. It also refuses more than it must (a list handed only to
+//! `list.len` keeps its count): the point is one measured inner loop, not a
+//! general invariance proof.
 
 use std::collections::BTreeSet;
 
