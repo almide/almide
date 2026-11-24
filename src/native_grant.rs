@@ -41,11 +41,17 @@ pub struct NativeCode {
     /// (E085 refuses those outside the stdlib), as
     /// `` @inline_rust fn `name` (file:line) `` (#4100).
     pub templates: Vec<String>,
+    /// What the scan could not read: a `native/` directory it cannot list,
+    /// an `almide.toml` that does not parse, an `.almd` file it cannot read
+    /// or parse. Nothing proves such a package brings no native code, so it
+    /// is refused like one that does.
+    pub unscanned: Vec<String>,
 }
 
 impl NativeCode {
     pub fn is_empty(&self) -> bool {
         self.modules.is_empty() && self.assets == 0 && self.crates.is_empty() && self.externs.is_empty() && self.templates.is_empty()
+            && self.unscanned.is_empty()
     }
 
     /// One line naming every piece, e.g.
@@ -65,6 +71,9 @@ impl NativeCode {
             parts.push(format!("@extern fn {}", self.externs.join(", ")));
         }
         parts.extend(self.templates.iter().cloned());
+        if !self.unscanned.is_empty() {
+            parts.push(format!("not scannable (read as native code): {}", self.unscanned.join(", ")));
+        }
         parts.join("; ")
     }
 }
@@ -88,6 +97,9 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
     let mut code = NativeCode::default();
     let native_dir = package_dir.join("native");
     if native_dir.is_dir() {
+        if std::fs::read_dir(&native_dir).is_err() {
+            code.unscanned.push("native/ (cannot be listed)".to_string());
+        }
         for (rel, is_module) in native_files(&native_dir, Path::new("")) {
             if is_module {
                 code.modules.push(format!("native/{}", rel.display()));
@@ -97,11 +109,16 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
         }
     }
     let toml = package_dir.join("almide.toml");
-    if let Some(proj) = toml.exists().then(|| crate::project::parse_toml(&toml).ok()).flatten() {
-        for nd in proj.native_deps {
-            if !code.crates.contains(&nd.name) {
-                code.crates.push(nd.name);
+    if std::fs::symlink_metadata(&toml).is_ok() {
+        match crate::project::parse_toml(&toml) {
+            Ok(proj) => {
+                for nd in proj.native_deps {
+                    if !code.crates.contains(&nd.name) {
+                        code.crates.push(nd.name);
+                    }
+                }
             }
+            Err(_) => code.unscanned.push("almide.toml (does not parse)".to_string()),
         }
     }
     let mut files = Vec::new();
@@ -109,7 +126,10 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
     files.sort();
     for file in files {
         let rel = file.strip_prefix(package_dir).unwrap_or(&file).display().to_string();
-        let (externs, templates) = native_fns(&file);
+        let Some((externs, templates)) = native_fns(&file) else {
+            code.unscanned.push(format!("{rel} (cannot be read or parsed)"));
+            continue;
+        };
         code.externs.extend(externs.into_iter().map(|(name, line)| format!("`{name}` ({rel}:{line})")));
         code.templates.extend(templates.into_iter().map(|(attr, name, line)| format!("@{attr} fn `{name}` ({rel}:{line})")));
     }
@@ -162,14 +182,21 @@ const TEMPLATE_ATTRS: &[&str] = &["inline_rust", "intrinsic", "wasm_intrinsic"];
 /// The top-level fns in `file` that bring native code: `(name, line)` of
 /// each `@extern` whose target the native build binds (`rust`/`rs`, `c`; the
 /// predicate the checker and codegen use), and `(attribute, name, line)` of
-/// each fn carrying one of [`TEMPLATE_ATTRS`]. A file that does not parse
-/// contributes nothing here; the build reports it.
+/// each fn carrying one of [`TEMPLATE_ATTRS`]. `None` when the file cannot
+/// be read or does not parse: the caller counts it as unscanned, never as
+/// bringing nothing.
 #[allow(clippy::type_complexity)]
-fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)>) {
+fn native_fns(file: &Path) -> Option<(Vec<(String, usize)>, Vec<(String, String, usize)>)> {
     let (mut externs, mut templates) = (Vec::new(), Vec::new());
-    let Ok(source) = std::fs::read_to_string(file) else { return (externs, templates) };
+    let source = std::fs::read_to_string(file).ok()?;
     let tokens = crate::lexer::Lexer::tokenize(&source);
-    let Ok(program) = crate::parser::Parser::new(tokens).parse() else { return (externs, templates) };
+    let mut parser = crate::parser::Parser::new(tokens);
+    let program = parser.parse().ok()?;
+    // A recovered parse drops the declarations it could not read, and with
+    // them any `@extern` they carried.
+    if parser.errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
+        return None;
+    }
     for d in &program.decls {
         let crate::ast::Decl::Fn { name, extern_attrs, attrs, span, .. } = d else { continue };
         let line = span.map_or(0, |s| s.line);
@@ -180,7 +207,7 @@ fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)
             templates.push((a.name.to_string(), name.to_string(), line));
         }
     }
-    (externs, templates)
+    Some((externs, templates))
 }
 
 /// Every fetched dependency of `proj` with the native code it brings.
