@@ -315,6 +315,15 @@ pub(crate) fn elidable(functions: &[MirFunction], sites: &BTreeMap<(String, usiz
 }
 
 /// The sites served so far.
+/// Record a site another route served through the runtime body `symbol`
+/// its declaration names (the slicing / viewing twins of
+/// `render_native_slices`, #4930): the native-calls witness then binds the
+/// call to that body's runtime block, as for a site served here, instead of
+/// to a program function the render does not call.
+pub(crate) fn record_served(function: &str, at: usize, symbol: &str) {
+    STATE.with(|st| st.borrow_mut().sites.insert((function.to_string(), at), symbol.to_string()));
+}
+
 pub(crate) fn sites() -> BTreeMap<(String, usize), String> {
     STATE.with(|s| s.borrow().sites.clone())
 }
