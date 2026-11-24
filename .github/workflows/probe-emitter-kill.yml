@@ -1,0 +1,71 @@
+name: Probe — programs written for the surviving source mutants
+# A one-off measurement on its own branch: three programs written for one
+# mutant of the second sample that only the byte-level check noticed — it lets
+# a list's element count be read once before a loop although the loop hands
+# the list to a call (scripts/probe-emitter-kill/). Two of them shorten the
+# list inside the loop and must stop on the next index; the third only reads
+# it. Not a gate.
+on:
+  push:
+    branches: [probe/emitter-kill-fresh]
+
+permissions:
+  contents: read
+
+env:
+  # The same sample as probe-emitter-mutants.yml; the ids judged here are
+  # scripts/probe-emitter-kill-ids.txt.
+  SAMPLE_N: "480"
+  SAMPLE_SEED: "20261124"
+
+jobs:
+  kill:
+    name: Targeted programs
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Install the mutation tool and list the mutants
+        run: |
+          cargo install --locked cargo-mutants
+          mkdir -p "$RUNNER_TEMP/mutants"
+          cargo mutants --list --json --package almide-wasm > "$RUNNER_TEMP/mutants/mutants.json"
+          python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/mutants/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" 0 1 "$(paste -sd, scripts/probe-emitter-kill-ids.txt)"
+          cat "$RUNNER_TEMP/pick/index.tsv" | cut -f1,2,3,5
+      - name: Measure
+        run: bash scripts/probe-emitter-kill.sh "$RUNNER_TEMP/kill" "$RUNNER_TEMP/pick"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: emitter-kill
+          path: |
+            ${{ runner.temp }}/kill/results.tsv
+            ${{ runner.temp }}/kill/base
+            ${{ runner.temp }}/kill/m*/*.embedded
+            ${{ runner.temp }}/kill/m*/*.stock
+            ${{ runner.temp }}/kill/m*/*.err
+            ${{ runner.temp }}/kill/m*/*.build
+            ${{ runner.temp }}/pick/index.tsv

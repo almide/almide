@@ -1,0 +1,14 @@
+// Probe (control): the same loop with a function that only reads the list.
+// The count never changes, so every index is in range and the sum prints.
+fn first(xs: List[Int]) -> Int = xs[0]
+
+effect fn main() -> Unit = {
+  var xs = [10, 20, 30, 40, 50, 60, 70, 80]
+  var total = 0
+  var i = 0
+  while i < 8 {
+    total = total + xs[i] + first(xs)
+    i = i + 1
+  }
+  println(int.to_string(total))
+}
