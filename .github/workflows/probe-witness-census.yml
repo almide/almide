@@ -1,9 +1,15 @@
 name: Probe — witness census
 # A one-off measurement on its own branch: sizes, check times and the row-4
-# census of every artifact the structural wall judges. Not a gate.
+# census of the repository's own larger programs (examples, tools, benchmark
+# sources), which no gate selects, at the revision the two test corpora were
+# measured at. Not a gate.
 on:
   push:
-    branches: [probe/census-develop]
+    branches: [probe/census-programs]
+
+env:
+  PROGRAMS: "1"
+  NO_MUTATE: "1"
 
 permissions:
   contents: read

@@ -17,6 +17,7 @@ ROOT="$PWD"
 OUT="${1:?usage: scripts/probe-witness-census.sh <out-dir>}"
 mkdir -p "$OUT/work" "$OUT/keep"
 OUT="$(cd "$OUT" && pwd)"
+: >> "$OUT/mutrows.tsv"
 W="$OUT/work"
 
 cargo build -q --bin almide || exit 1
@@ -81,7 +82,9 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
     grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
-    "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    if [ -z "${NO_MUTATE:-}" ]; then
+      "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
+    fi
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true
     if [ -n "$ANCHOROLD" ]; then
       MUT_ONLY=control "$ANCHOROLD" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows-old.tsv" || true
@@ -102,6 +105,8 @@ one() { # one <leg> <file>
   # Keep what a rejection needs to be read by hand (and two accepted modules whose mutants are read).
   if [ "$arc" -ne 0 ] || [ "$(basename "$f")" = args_surface.almd ] || [ "$(basename "$f")" = result_eq.almd ]; then
     local d="$OUT/keep/$(basename "$f" .almd)"
+    # Many of the larger programs are called main.almd: keep each under its path.
+    [ -z "${PROGRAMS:-}" ] || d="$OUT/keep/$(printf '%s' "${f%.almd}" | tr '/' '_')"
     mkdir -p "$d"
     cp "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" "$W/a.anchor" "$d/" 2>/dev/null
     "$ANCHORCHECK" --explain "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" > "$d/explain.txt" 2>&1 || true
@@ -111,8 +116,23 @@ one() { # one <leg> <file>
   fi
 }
 
+if [ -n "${PROGRAMS:-}" ]; then
+  # Probe only: the repository's own larger programs (tools, examples,
+  # benchmark sources) instead of the two test corpora, under the fixtures
+  # leg. No gate selects these.
+  git ls-files 'examples/*.almd' 'examples/**/*.almd' 'research/benchmark/exercises/**/*.almd' 'research/benchmark/perf/**/*.almd' \
+    'research/benchmark/lang-bench/**/*.almd' 'tools/almide-gates/src/main.almd' 'tools/stdlib-crawler/main.almd' \
+    | xargs grep -lE '^(effect )?fn main\(' | sort > "$OUT/programs.txt"
+  echo "programs: $(wc -l < "$OUT/programs.txt") listed"
+  while IFS= read -r f; do one fixtures "$f"; done < "$OUT/programs.txt"
+  echo "== per program (source bytes, produced, wasm bytes, verify exit, anchor exit, anchor ms, verdict or first error)"
+  awk -F'\t' 'NR > 1 {cmd = "wc -c < \"" $2 "\""; cmd | getline n; close(cmd); printf "   %7d %-62s %-6s %8s v=%s a=%s %7.1f ms  %s\n", n, $2, $3, $4, $8, $10, $11 / 1e6, substr($14, 1, 150)}' "$OUT/rows.tsv" | sort -k1,1nr
+  echo "== why a program was not produced"
+  awk -F'\t' 'NR > 1 && $3 != "yes" {r = $14; gsub(/[0-9]+/, "N", r); c[substr(r, 1, 110)]++} END {for (k in c) print "   " c[k], k}' "$OUT/rows.tsv" | sort -k1,1nr
+else
 grep -v -E '^(#|$)' crates/almide-wasm/tests/golden/witness-fixtures.txt | while IFS= read -r f; do one fixtures "$f"; done
 ls spec/stdlib/*_test.almd | while IFS= read -r f; do one tests "$f"; done
+fi
 
 python3 - "$OUT/rows.tsv" <<'PY'
 import csv, re, sys, statistics
