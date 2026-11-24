@@ -3826,9 +3826,8 @@ control_note = "proofs/check-stdlib-purity-registry.sh (PURITY / EXISTENCE / COM
 issues = [4827]
 status = "UNSTAMPED"
 reasons = [
-  "c1:name/prefix lists",
-  "c2:prefix admits novel http fns",
-  "c3:native v1 only",
+  "c1: PURE_MODULES is a hand list of module names (purity.rs:59); the per-fn half is derived (is_pure_fn_in_impure_module over host_reach, #4827 2f3a490159) and a PURE_MODULES entry that reaches a declared host op is refused by a gate (0fed7e5825), so c2's prefix hole is closed (re-read 2026-11-24, 23rd)",
+  "c3: native v1 only (test / bench / wasi / emit cells skipped #4827)",
 ]
 note = "Drift gate keys on the `effect` keyword, which prim host ops do not carry (#4827)."
 
@@ -3874,7 +3873,10 @@ tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs
 control_note = "crates/almide-ir/src/effect.rs tests (classification gate: row per module, Pure module with an unexplained effect fn refused)"
 issues = [4827, 4815]
 status = "UNSTAMPED"
-reasons = ["c1: module rows by name; runtime symbols by `almide_rt_<module>_` prefix (effect.rs:325-346)", "c2: prim is Pure (effect.rs:231); an unknown symbol head is empty (effect.rs:334); an undeclared fn of a module is empty (effect.rs:317) (#4827)"]
+reasons = [
+  "c1: module rows are keyed by module name (STDLIB_MODULE_EFFECTS, effect.rs:143-233) and a runtime symbol finds its module by the `almide_rt_<module>_` prefix (effect.rs:334-342)",
+  "c2 (re-read 2026-11-24, 23rd): #4827's hole is closed in the tree — `prim` Pure is backed by the gate a_pure_module_reaches_no_declared_host_op (host_reach over @prim_op(host), 2f3a490159) and an undeclared intrinsic fails closed to its module's default (effect.rs:348-353); still open: a symbol whose head names no module, and a fn its module does not declare, get the empty set (effect.rs:335, 343, 326)",
+]
 note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM)."
 
 [[site]]
