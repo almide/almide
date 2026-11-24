@@ -401,12 +401,22 @@ elif ! ci_slice_active; then
   exit 1
 fi
 
-echo "== the extracted checker judges every witness; the kernel file is generated =="
-KGEN="$(mktemp /tmp/KernelStructural_XXXXXX).v"
+echo "== the extracted checker judges every witness; the kernel files are generated =="
+# SEVERAL FILES, one coqc each. A closed goal stays in the environment of the
+# process that closed it, so one coqc over every goal grows with the corpus:
+# measured on the 16 GB CI machine (2026-11-24), this leg's single process left
+# 2.6 GB available a minute before its end, and the corpus wall's went past the
+# machine's memory. The same goals, each with the same `Qed`, are written across
+# files of at most KERNEL_PART_BYTES of goal text, and each file is compiled by
+# its own process, KERNEL_JOBS at a time. Any file that fails fails the wall.
+KERNEL_PART_BYTES="${KERNEL_PART_BYTES:-200000}"
+KERNEL_JOBS="${KERNEL_JOBS:-2}"
+KDIR="$(mktemp -d /tmp/KernelStructural_XXXXXX)"
 set +e
-python3 - "$OUT" "$ROOT/proofs/checker" "$EXCEPTIONS" "$KGEN" "$MODE" <<'PYEOF'
+python3 - "$OUT" "$ROOT/proofs/checker" "$EXCEPTIONS" "$KDIR" "$MODE" "$KERNEL_PART_BYTES" <<'PYEOF'
 import os, subprocess, sys
-out, checker, exceptions_path, kgen, mode = sys.argv[1:6]
+out, checker, exceptions_path, kdir, mode = sys.argv[1:6]
+budget = int(sys.argv[6])
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
       "bounds": "check_lbounds_cert", "init": "check_init_cert", "fields": "check_fields_cert", "rc-sig": "check_sig_cert"}
@@ -550,22 +560,46 @@ for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
 
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
-with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n")
-    g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
-    LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
-    for prop, ws in accepts.items():
-        chunk, size = [], 0
-        for w in ws + [None]:
-            if w is None or (chunk and size + len(w) > LIMIT):
-                if chunk:
-                    g.write("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], ";".join(lit(x) for x in chunk)))
-                chunk, size = [], 0
-            if w is not None:
-                chunk.append(w)
-                size += len(w)
-    for prop, w in rejects:
-        g.write("Goal %s %s = false.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)))
+HEADER = ("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes HelperSig BoundsCert InitCert FieldCert RoutineBoundsCert RoutineProcsCert RoutineLinCert.\n"
+          "From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
+class Parts:
+    """The goals, in order, across files of at most `budget` bytes of goal text
+    (a goal larger than that has a file to itself). Never zero files: with no
+    goal at all there is still the header to compile, as before."""
+    def __init__(self):
+        self.files, self.goals, self.bytes, self.f, self.size = 0, 0, 0, None, 0
+    def start(self):
+        self.f = open(os.path.join(kdir, "Part%04d.v" % self.files), "w")
+        self.f.write(HEADER)
+        self.files, self.size = self.files + 1, 0
+    def goal(self, text):
+        if self.f is None:
+            self.start()
+        elif self.size and self.size + len(text) > budget:
+            self.f.close()
+            self.start()
+        self.f.write(text)
+        self.size, self.goals, self.bytes = self.size + len(text), self.goals + 1, self.bytes + len(text)
+    def close(self):
+        if self.f is None:
+            self.start()
+        self.f.close()
+parts = Parts()
+LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
+for prop, ws in accepts.items():
+    chunk, size = [], 0
+    for w in ws + [None]:
+        if w is None or (chunk and size + len(w) > LIMIT):
+            if chunk:
+                parts.goal("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], ";".join(lit(x) for x in chunk)))
+            chunk, size = [], 0
+        if w is not None:
+            chunk.append(w)
+            size += len(w)
+for prop, w in rejects:
+    parts.goal("Goal %s %s = false.\nProof. vm_compute. reflexivity. Qed.\n" % (FN[prop], lit(w)))
+parts.close()
+print("  kernel file: %d goal(s), %d byte(s) of goal text, in %d part(s) of at most %d byte(s)" % (parts.goals, parts.bytes, parts.files, budget))
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
@@ -604,19 +638,27 @@ PYEOF
 PRC=$?
 set -e
 if [ "$PRC" -ne 0 ]; then
-  rm -f "$KGEN"
+  rm -rf "$KDIR"
   echo "STRUCTURAL WALL FAIL: a certified fixture's witness is rejected, or the verdicts disagree (above)." >&2
   exit 1
 fi
 
 echo "== KERNEL ORACLE: the Rocq kernel re-derives every verdict above =="
 KSTART=$(date +%s)
-if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
-  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute)"
-  rm -f "$KGEN" "${KGEN%.v}.vo" "${KGEN%.v}.vos" "${KGEN%.v}.vok" "${KGEN%.v}.glob"
+# One coqc per part. A part that fails ends xargs at once (exit 255), so the
+# wall stops at the first failure with a non-zero status; and the verdict is
+# OK only when every part written has its compiled file beside it.
+KRC=0
+(cd "$ROOT/proofs" && find "$KDIR" -name 'Part*.v' | sort \
+  | xargs -P "$KERNEL_JOBS" -I{} sh -c '"$0" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255' "$COQC" {}) || KRC=$?
+KPARTS="$(find "$KDIR" -name 'Part*.v' | wc -l | tr -d ' ')"
+KDONE="$(find "$KDIR" -name 'Part*.vo' | wc -l | tr -d ' ')"
+if [ "$KRC" -eq 0 ] && [ "$KPARTS" -ge 1 ] && [ "$KDONE" -eq "$KPARTS" ]; then
+  echo "  KERNEL OK: every structural witness verdict certified by the Rocq kernel in $(( $(date +%s) - KSTART ))s (vm_compute, $KPARTS part(s), $KERNEL_JOBS at a time)"
+  rm -rf "$KDIR"
 else
   echo "STRUCTURAL WALL FAIL: the KERNEL disagrees with the extracted checker on a structural witness (extraction divergence)." >&2
-  rm -f "$KGEN"
+  rm -rf "$KDIR"
   exit 1
 fi
 

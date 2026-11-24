@@ -21,17 +21,17 @@ fn hex_from_nibble(c: u8) -> Option<u8> {
     }
 }
 
-pub fn almide_rt_hex_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_LOWER); __almide_out.into() }
+pub fn almide_rt_hex_encode(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_LOWER); __almide_out.into() }
 
-pub fn almide_rt_hex_encode_upper(b: &Vec<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_UPPER); __almide_out.into() }
+pub fn almide_rt_hex_encode_upper(b: &AlmideList<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_UPPER); __almide_out.into() }
 
-pub fn almide_rt_hex_decode(s: &str) -> Result<Vec<u8>, AlmideString> {
-    let __almide_r: Result<Vec<u8>, String> = (|| {
+pub fn almide_rt_hex_decode(s: &str) -> Result<AlmideList<u8>, AlmideString> {
+    let __almide_r: Result<AlmideList<u8>, String> = (|| {
         let bytes = s.as_bytes();
         if bytes.len() % 2 != 0 {
             return Err(format!("hex string has odd length: {}", bytes.len()));
         }
-        let mut out = Vec::with_capacity(bytes.len() / 2);
+        let mut out = AlmideList::with_capacity(bytes.len() / 2);
         let mut i = 0;
         while i < bytes.len() {
             let hi = hex_from_nibble(bytes[i]).ok_or_else(|| format!("invalid hex char at {}", i))?;

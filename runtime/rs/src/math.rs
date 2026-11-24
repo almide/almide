@@ -157,16 +157,16 @@ fn almide_rt_math_choose_odd_factorials(n: u64, k: u64) -> u64 {
     odd << t
 }
 // g[s] = G_s's surviving coefficients (lowest first), s in 1..=63; g[0] is unused.
-fn almide_rt_math_choose_block_polys() -> Vec<Vec<u64>> {
-    let mut g: Vec<Vec<u64>> = vec![vec![1], vec![1, 2]];
+fn almide_rt_math_choose_block_polys() -> AlmideList<AlmideList<u64>> {
+    let mut g: AlmideList<AlmideList<u64>> = almide_list![almide_list![1], almide_list![1, 2]];
     for s in 1..63usize {
         let c = &g[s];
         // G_s(2y): coefficient i scaled by 2^i (i < 64 since s*i < 64).
-        let a: Vec<u64> = c.iter().enumerate().map(|(i, &x)| x << i).collect();
+        let a: AlmideList<u64> = c.iter().enumerate().map(|(i, &x)| x << i).collect();
         // G_s(2y + 1) by Horner: b = b * (2y + 1) + c_i, from the top coefficient.
-        let mut b: Vec<u64> = Vec::new();
+        let mut b: AlmideList<u64> = AlmideList::new();
         for &x in c.iter().rev() {
-            let mut nb = vec![0u64; b.len() + 1];
+            let mut nb = almide_list![0u64; b.len() + 1];
             for (j, &bj) in b.iter().enumerate() {
                 nb[j] = nb[j].wrapping_add(bj);
                 nb[j + 1] = nb[j + 1].wrapping_add(bj.wrapping_mul(2));
@@ -175,7 +175,7 @@ fn almide_rt_math_choose_block_polys() -> Vec<Vec<u64>> {
             b = nb;
         }
         let d = 63 / (s + 1) + 1;
-        let mut p = vec![0u64; d];
+        let mut p = almide_list![0u64; d];
         for (i, &ai) in a.iter().enumerate().take(d) {
             for (j, &bj) in b.iter().enumerate().take(d - i) {
                 p[i + j] = p[i + j].wrapping_add(ai.wrapping_mul(bj));
@@ -186,7 +186,7 @@ fn almide_rt_math_choose_block_polys() -> Vec<Vec<u64>> {
     g
 }
 // O(m): the odd part of m!, mod 2^64.
-fn almide_rt_math_choose_odd_fact(g: &[Vec<u64>], m: u64) -> u64 {
+fn almide_rt_math_choose_odd_fact(g: &[AlmideList<u64>], m: u64) -> u64 {
     let mut r: u64 = 1;
     let mut x = m;
     while x > 0 {

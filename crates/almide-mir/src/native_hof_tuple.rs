@@ -64,7 +64,7 @@ fn runtime_type(env: &Env, d: &DTy) -> Option<String> {
             let ts = es.iter().map(|e| runtime_type(env, e)).collect::<Option<Vec<_>>>()?;
             format!("({}{})", ts.join(", "), if ts.is_empty() { "" } else { "," })
         }
-        DTy::List(e) => format!("Vec<{}>", runtime_type(env, e)?),
+        DTy::List(e) => format!("AlmideList<{}>", runtime_type(env, e)?),
         DTy::Opt(e) => format!("Option<{}>", runtime_type(env, e)?),
         DTy::Result(a, b) => format!("Result<{}, {}>", runtime_type(env, a)?, runtime_type(env, b)?),
         DTy::Fn(..) => return None,
@@ -117,9 +117,11 @@ fn convert_callback_value(env: &Env, d: &DTy, native: NTy, code: &str, into_nati
             if value == "__item" { return Some(code.into()); }
             // The copy is a list as long as its source: it reserves the way
             // every list this render builds does (C-197's abort), never
-            // through a sized `collect`'s capacity panic.
+            // through a sized `collect`'s capacity panic. The fill is counted
+            // by the source's length (`extend_indexed`), so no element store
+            // is checked against the room.
             let reserved = crate::render_native_addr::reserved_vec("(__list.len() as i64)");
-            format!("{{ let __list = {code}; let mut __copy = {reserved}; __copy.extend(__list.into_iter().map(|__item| {value})); __copy }}")
+            format!("{{ let __list = {code}; let mut __copy = {reserved}; __copy.extend_indexed(__list, |_, __item| {value}); __copy }}")
         }
         DTy::Opt(e) => format!("({code}).map(|__item| {})",
             convert_callback_value(env, e, opt_payload(native)?, "__item", into_native)?),

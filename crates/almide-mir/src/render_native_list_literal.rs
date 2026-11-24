@@ -31,7 +31,7 @@ fn built_whole(out: &mut String, indent: usize, base: ValueId, (n, k): (usize, u
     if k + 1 == n && !crate::native_map_entries::is_deferred(base) {
         let b = var(base);
         let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
-        put(out, indent, &format!("let mut {b}: {ty} = vec![{}];", es.join(", ")));
+        put(out, indent, &format!("let mut {b}: {ty} = almide_list![{}];", es.join(", ")));
     }
 }
 
@@ -43,7 +43,7 @@ pub(super) fn pushed_str(st: &mut AddrState, out: &mut String, indent: usize, ba
     };
     elem_local(out, indent, (&var(base), k), "AlmideString", rhs, false);
     st.literal.insert(base, (n, k + 1));
-    built_whole(out, indent, base, (n, k), "Vec<AlmideString>");
+    built_whole(out, indent, base, (n, k), "AlmideList<AlmideString>");
 }
 
 /// Whether the borrowed slot store of `v` (from `src`) into `base` copies:

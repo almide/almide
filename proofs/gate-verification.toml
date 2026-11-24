@@ -1524,7 +1524,7 @@ reads = "scalar"
 wired_by = ".github/workflows/native-v1-perf-nightly.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4006 landing (2026-11-01, GCE c1-native, sec-c1-next 25197e951): the unforged run exited 0 over 15 gated programs with the six proofs/native-v1-perf-ledger.txt rows read as debt; the same run with ALMIDE_NATIVE_DRILL_NO_MOVES=1 NATIVE_V1_PERF_ONLY_SHAPES=1 (the render keeps every copy) exited 1 with `LOSS research/benchmark/perf/v1-shapes/push_swap.almd: v1 316495323 vs v0 18735135 instructions = 16.893x`; earlier runs on the branch read genuine losses before their fixes (append_accumulator_heap_linear 741.4x, tree_walk 14.4x, variant_result_one_credit_churn 9.75x), each exiting 1"
-measures = "per program on proofs/native-verified-floor.txt and research/benchmark/perf/v1-shapes/: the ratio of cachegrind I refs of the default `almide build` (certified v1) binary over the `--no-verified` (v0) binary, against 1.03 and the debt ledger's recorded ratio; report-only, the min-of-9 interleaved wall-time ratio on rows over 20M instructions (warning above 1.10)"
+measures = "per program on proofs/native-verified-floor.txt and research/benchmark/perf/v1-shapes/: the ratio of cachegrind I refs of the default `almide build` (certified v1) binary over the `--no-verified` (v0) binary, against 1.03 and the debt ledger's recorded ratio; for a time-bound program (proofs/native-v1-perf-time-bound.txt: its loop runs until a clock has advanced), the ratio of the callgrind instructions inside `main` (empty-`main` glue off) per pass of the loop, the passes counted from the row's declared syscall in the same run's trace, against the same 1.03 and ledger; report-only, the min-of-9 interleaved wall-time ratio on rows over 20M instructions (warning above 1.10)"
 varies = "2026-11-01: the gated count rose 9 -> 15 as the floor grew 264 -> 341; the ledger opened with six rows (1.116 - 1.618)"
 blind = "a v1 loss in a program under 1M instructions (startup dominates) -> scripts/check-native-v1-perf-small.sh (each small program's own work, counted inside main, v1 against v0, no size floor); a shape no shape bench or certified program exercises -> scripts/check-native-v1-perf-shapes.sh (every render path no program in this corpus executes, per renderer function, against a shrink-only baseline); a memory-locality loss instruction counts miss -> scripts/check-perf-ratio.sh (wall time of the native benches, which this gate only warns on)"
 
@@ -1547,6 +1547,16 @@ evidence = "#4006 (2026-11-03, GCE c1-native, sec-c1-perf-r1): the unforged run 
 measures = "the code regions of crates/almide-mir/src/render_native*.rs that no program in the perf gates' corpus (the floor's spec programs and research/benchmark/perf/v1-shapes) executes when rendered, less those whose own straight-line code walls (nested blocks and closures left out), counted per renderer function by llvm-cov region coverage of an instrumented render, against proofs/native-v1-perf-shapes-baseline.txt"
 varies = "2026-11-03: the first baseline read 6 paths in 4 functions while only regions with a recorded zero count of their own were taken; counting every unexercised region that neither walls nor is code-less (a propagating `?`) it reads 1119 paths in 162 functions"
 blind = "a path whose cost depends on the shape it composes with, though every path is executed -> scripts/check-native-v1-perf.sh (the ratio of every composition the corpus holds)"
+
+[[gate]]
+path = "scripts/check-native-v1-perf-time-bound-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/native-v1-perf-nightly.yml"
+class = "EXERCISED"
+evidence = "landing (2026-11-22, GCE c4-standard-8 bm-1, adr0037-b 4eefbf0c43 + the per-pass change): the gate's own per-pass measurement over a datetime.monotonic_ns spin bounded by datetime.now_ms read 216.253 then 216.309 instructions per pass on two runs of the same binary (3649.5 and 2986.5 passes, ratio 1.000), and a spin with one more `acc + now % 1000003` per pass read 227.362 against 216.253 = 1.051 > 1.03 (2506.5 passes), exit 0; the same measurement over spec/wasm_cross/datetime_monotonic_ns.almd read v1 220.440 against v0 224.149 per pass = 0.983 (2919 / 2568 passes) where its totals had read 0.832 to 1.124 across quiet pairs"
+measures = "the per-pass ratio check-native-v1-perf.sh's time-bound rows compute (scripts/lib/native-v1-perf-in-main.sh per_pass_work, clock_gettime at two reads per pass): the same binary twice must read within 1.03, a pass with one more integer step must read over it"
+varies = "2026-11-22: the dearer pass read 1.116 with `(acc * 31 + now % 1000003) % 1000033` and 1.051 with `acc + now % 1000003` (the step kept, nearer the line)"
+blind = "a time-bound row whose declared syscall the loop stops making -> scripts/check-native-v1-perf.sh (MEASURE-FAIL under 100 passes); a per-pass loss under 1.03 -> scripts/check-native-v1-perf-shapes.sh (every render path the corpus leaves unexercised, per renderer function)"
 
 [[gate]]
 path = "scripts/check-spec-test-files.sh"

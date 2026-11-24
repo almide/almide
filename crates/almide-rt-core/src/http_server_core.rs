@@ -17,7 +17,7 @@
 // collide with http.rs's or the client core's imports in the flat module.
 
 /// A parsed request: (method, target, body, headers in wire order).
-pub type HttpServerRequest = (String, String, String, Vec<(String, String)>);
+pub type HttpServerRequest = (String, String, String, std::vec::Vec<(String, String)>);
 
 /// Bind the listener `http.serve(port, _)` accepts on: every interface
 /// (`0.0.0.0`), as C-367 states. A loopback-only default would break every
@@ -87,7 +87,7 @@ pub struct HttpServerConn {
 /// that worker, never the thread running the handler (#4021).
 enum HttpServerOut {
     Stream(std::net::TcpStream),
-    Worker(std::sync::mpsc::SyncSender<Vec<u8>>, std::sync::Arc<HttpServerGate>),
+    Worker(std::sync::mpsc::SyncSender<std::vec::Vec<u8>>, std::sync::Arc<HttpServerGate>),
 }
 
 /// The time a read may take and the answer when it runs out: `408` for the
@@ -159,7 +159,7 @@ pub fn http_server_next_with(listener: &std::net::TcpListener, limits: &HttpServ
 
 /// The bytes of the core's own refusal: `<status>` with its reason as a
 /// `text/plain` body.
-fn http_server_refusal_bytes(status: i64) -> Vec<u8> {
+fn http_server_refusal_bytes(status: i64) -> std::vec::Vec<u8> {
     let headers = [("Content-Type".to_string(), "text/plain".to_string())];
     http_server_response_bytes_for(false, status, &headers, http_server_reason(status))
 }
@@ -325,7 +325,7 @@ fn http_server_worker(
 ) {
     match http_server_read_request(&stream, accepted, &limits) {
         Ok((req, deadline)) => {
-            let (reply, answer) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
+            let (reply, answer) = std::sync::mpsc::sync_channel::<std::vec::Vec<u8>>(1);
             let head = req.0 == "HEAD";
             let conn = HttpServerConn { out: HttpServerOut::Worker(reply, gate.clone()), head, deadline };
             if tx.send(Some((conn, req))).is_err() {
@@ -495,7 +495,7 @@ fn http_server_line(
     started: bool,
     too_long: HttpServerReject,
 ) -> Result<String, HttpServerReject> {
-    let mut line: Vec<u8> = Vec::new();
+    let mut line: std::vec::Vec<u8> = std::vec::Vec::new();
     loop {
         let buf = http_server_fill(reader, clock, started || !line.is_empty())?;
         if buf.is_empty() {
@@ -533,7 +533,7 @@ fn http_server_exact(
     reader: &mut std::io::BufReader<std::net::TcpStream>,
     clock: HttpServerClock,
     n: usize,
-    out: &mut Vec<u8>,
+    out: &mut std::vec::Vec<u8>,
 ) -> Result<(), HttpServerReject> {
     let mut left = n;
     while left > 0 {
@@ -557,9 +557,9 @@ fn http_server_chunked(
     reader: &mut std::io::BufReader<std::net::TcpStream>,
     clock: HttpServerClock,
     max_body: usize,
-) -> Result<Vec<u8>, HttpServerReject> {
+) -> Result<std::vec::Vec<u8>, HttpServerReject> {
     let bad = || HttpServerReject::Status(400);
-    let mut body = Vec::new();
+    let mut body = std::vec::Vec::new();
     loop {
         let line = http_server_line(reader, clock, true, bad())?;
         let size = line.split(';').next().unwrap_or_default().trim();
@@ -635,9 +635,9 @@ impl HttpServerFraming {
 fn http_server_read_headers(
     reader: &mut std::io::BufReader<std::net::TcpStream>,
     clock: HttpServerClock,
-) -> Result<(Vec<(String, String)>, HttpServerFraming), HttpServerReject> {
+) -> Result<(std::vec::Vec<(String, String)>, HttpServerFraming), HttpServerReject> {
     let too_many = || HttpServerReject::Status(431);
-    let mut headers = Vec::new();
+    let mut headers = std::vec::Vec::new();
     let mut framing = HttpServerFraming::default();
     let mut lines = 0usize;
     loop {
@@ -673,7 +673,7 @@ fn http_server_read_body(
     clock: HttpServerClock,
     max_body: usize,
     framing: &HttpServerFraming,
-) -> Result<Vec<u8>, HttpServerReject> {
+) -> Result<std::vec::Vec<u8>, HttpServerReject> {
     if framing.chunked {
         // Both framings at once is a smuggling shape (RFC 9112 §6.3): refused.
         if framing.content_length.is_some() {
@@ -685,7 +685,7 @@ fn http_server_read_body(
     if n > max_body as u64 {
         return Err(HttpServerReject::Status(413));
     }
-    let mut body = Vec::with_capacity(n as usize);
+    let mut body = std::vec::Vec::with_capacity(n as usize);
     http_server_exact(reader, clock, n as usize, &mut body)?;
     Ok(body)
 }
@@ -697,7 +697,7 @@ fn http_server_read_body(
 /// path and query; asterisk-form and authority-form are refused. Answers
 /// (method, origin-form target, is HTTP/1.1), or None for a `400`.
 pub fn http_server_request_line(line: &str) -> Option<(String, String, bool)> {
-    let parts: Vec<&str> = line.split(' ').collect();
+    let parts: std::vec::Vec<&str> = line.split(' ').collect();
     if parts.len() != 3 {
         return None;
     }
@@ -932,7 +932,7 @@ pub const HTTP_SERVER_OWNED_FIELDS: &[&str] = &["connection", "content-length", 
 
 /// The response bytes for a request of any method but HEAD: see
 /// [`http_server_response_bytes_for`].
-pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Vec<u8> {
+pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> std::vec::Vec<u8> {
     http_server_response_bytes_for(false, status, headers, body)
 }
 
@@ -944,7 +944,7 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 /// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
 /// (§8.6). The headers must already have passed [`http_server_bad_header`].
 /// The body is bytes: a `Body`'s bytes are sent exactly (#4311).
-pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> Vec<u8> {
+pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: impl AsRef<[u8]>) -> std::vec::Vec<u8> {
     let body = body.as_ref();
     let mut out = format!("HTTP/1.1 {} {}\r\n", status, http_server_reason(status));
     for (k, v) in headers {

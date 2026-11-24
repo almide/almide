@@ -147,6 +147,8 @@ quote = "1"
 # CA and per-host leaves (ADR-0035: the fetch only speaks https). Same pin and
 # ring backend almide-rt-core's TLS tests use.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# Tests that include a runtime source file run it on the list type it ships (ADR-0037).
+almide-str = { path = "crates/almide-str" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

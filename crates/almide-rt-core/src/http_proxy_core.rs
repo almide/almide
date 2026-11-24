@@ -34,7 +34,7 @@ struct AlmideHttpProxy {
     kind: AlmideHttpProxyKind,
     host: String,
     port: u16,
-    userinfo: Option<(Vec<u8>, Vec<u8>)>,
+    userinfo: Option<(std::vec::Vec<u8>, std::vec::Vec<u8>)>,
     /// `host:port (from VAR)` — for error messages; never the credentials.
     shown: String,
 }
@@ -182,7 +182,7 @@ fn http_proxy_tunnel(s: &mut std::net::TcpStream, u: &AlmideHttpUrl, p: &AlmideH
     }
     req.push_str("\r\n");
     s.write_all(req.as_bytes()).map_err(|e| http_proxy_io(p, &e))?;
-    let mut head: Vec<u8> = Vec::new();
+    let mut head: std::vec::Vec<u8> = std::vec::Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
         match http_read_retrying(s, &mut byte) {
@@ -226,7 +226,7 @@ fn http_socks5_connect(s: &mut std::net::TcpStream, u: &AlmideHttpUrl, p: &Almid
         }
         _ => return Err(http_socks5_fail(p, "answered with an unknown address type")),
     };
-    let mut bound = vec![0u8; rest];
+    let mut bound = ::std::vec![0u8; rest];
     s.read_exact(&mut bound).map_err(io)?;
     Ok(())
 }
@@ -249,7 +249,7 @@ fn http_socks5_greet(s: &mut std::net::TcpStream, p: &AlmideHttpProxy) -> Result
             if user.len() > 255 || pass.len() > 255 {
                 return Err(fail("credentials are longer than 255 bytes"));
             }
-            let mut login = vec![1, user.len() as u8];
+            let mut login = ::std::vec![1, user.len() as u8];
             login.extend_from_slice(user);
             login.push(pass.len() as u8);
             login.extend_from_slice(pass);
@@ -268,14 +268,14 @@ fn http_socks5_greet(s: &mut std::net::TcpStream, p: &AlmideHttpProxy) -> Result
 
 /// The CONNECT request for `u`: an address resolved here, or the host name
 /// for the proxy to resolve (`remote_dns`, socks5h).
-fn http_socks5_request(u: &AlmideHttpUrl, p: &AlmideHttpProxy, remote_dns: bool) -> Result<Vec<u8>, String> {
-    let mut req = vec![5, 1, 0];
+fn http_socks5_request(u: &AlmideHttpUrl, p: &AlmideHttpProxy, remote_dns: bool) -> Result<std::vec::Vec<u8>, String> {
+    let mut req = ::std::vec![5, 1, 0];
     let ip: Option<std::net::IpAddr> = if remote_dns {
         u.host.parse().ok()
     } else {
         let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(u.host.as_str(), u.port))
             .map_err(|_| http_error_text(HttpErrorClass::Dns, &u.url))?;
-        let mut addrs: Vec<std::net::SocketAddr> = addrs.collect();
+        let mut addrs: std::vec::Vec<std::net::SocketAddr> = addrs.collect();
         addrs.sort_by_key(|a| a.is_ipv6());
         Some(addrs.first().ok_or_else(|| http_error_text(HttpErrorClass::Dns, &u.url))?.ip())
     };
