@@ -428,7 +428,9 @@ pub(crate) enum Commands {
         /// the same two-leg routing `build --target wasm` uses and report
         /// E081 / E082 at check time instead of at build time. `wasi` judges
         /// the rustc wasm32-wasip1 route `build --target wasi` takes (E081,
-        /// #4913). Only `wasm` or `wasi`.
+        /// #4913). `native` judges the native build route `build` / `run`
+        /// take (E081 for an `@extern` fn with no native binding, C-461).
+        /// Only `wasm`, `wasi` or `native`.
         #[arg(long)]
         target: Option<String>,
     },

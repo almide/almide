@@ -59,6 +59,11 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
     let (pending, metered, _) = crate::try_compile_pending(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
     t.lap("frontend");
+    // C-461: the program route refuses a reachable `@extern` fn with no
+    // native binding and no Almide body (the test harness keeps its holes).
+    if !test_mode && super::native_extern_gate::check(pending.ir(), file).is_err() {
+        return Err("compile failed".to_string());
+    }
     let rs_code = if test_mode {
         pending.generate_tests()?
     } else if native_verified {

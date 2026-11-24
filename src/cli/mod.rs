@@ -50,6 +50,7 @@ mod cargo_toml;
 mod crate_inputs;
 pub(crate) use crate_inputs::native_rust_text;
 mod native_target;
+mod native_extern_gate;
 mod std_split;
 mod js_host;
 mod wasm_debug;

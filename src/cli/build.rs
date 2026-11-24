@@ -340,6 +340,12 @@ pub fn cmd_build(args: BuildArgs) {
         return;
     }
 
+    // C-461: a reachable `@extern` fn with no native binding and no Almide
+    // body has nothing a native binary could run; refused before any render.
+    if super::native_extern_gate::check(pending.ir(), file).is_err() {
+        std::process::exit(1);
+    }
+
     // NATIVE trust spine (#764, rung 1) — OPT-IN `--verified` (explicit flag, not
     // the wasm default): try the v1 MIR renderer (same Perceus MIR as the wasm
     // leg; Drop erased to Rust scope-end, ownership verified pre-render). A WALL

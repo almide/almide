@@ -201,14 +201,16 @@ fn refuse_build_switches_under_critical() {
 }
 
 /// `almide check --target`: `wasm` adds the wasm build route's verdicts,
-/// `wasi` the rustc wasm32-wasip1 route's (#4913); nothing else is accepted.
+/// `wasi` the rustc wasm32-wasip1 route's (#4913), `native` the native build
+/// route's (C-461); nothing else is accepted.
 fn check_target_route(target: Option<&str>) -> cli::CheckTarget {
     match target {
         None => cli::CheckTarget::Native,
         Some("wasm") => cli::CheckTarget::Wasm,
         Some("wasi") => cli::CheckTarget::Wasi,
+        Some("native") => cli::CheckTarget::NativeRoute,
         Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm` or `wasi` (got `{other}`) — the native target is what `almide check` already judges");
+            eprintln!("error: `almide check --target` accepts only `wasm`, `wasi` or `native` (got `{other}`)");
             std::process::exit(1);
         }
     }

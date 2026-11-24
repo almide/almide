@@ -542,6 +542,9 @@ fn prepare_checked_ir(
     // sibling convention impls the round-1 pass could not see; mangle them so
     // the link set carries them (user modules only — see the impl doc).
     if native_bodies {
+        // Before the link: a library body only a dropped fn called is then
+        // never linked, so no orphan reaches the render or its certificate.
+        crate::native_unbound_externs::prune_unreached(&mut ir);
         ir = native_bundled::flatten(ir, &user_modules)?;
         crate::native_region::expand(&mut ir)?;
     } else {
