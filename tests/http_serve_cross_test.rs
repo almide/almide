@@ -1443,7 +1443,7 @@ const BYTES_PROGRAM: &str = r#"import env
 import http
 
 effect fn handle(req: HttpRequest) -> HttpResponse = match http.path(req) {
-  "/typed" => http.response(200, http.typed("application/x-sweep", bytes.from_list(list.range(0, 256)))),
+  "/typed" => http.response(200, http.typed("application/zip", bytes.from_list(list.range(0, 256)))),
   "/with" => http.with_body(http.response(200, ""), bytes.from_list(list.range(128, 256) + list.range(0, 128))),
   _ => http.response(200, bytes.from_list(list.range(0, 256))),
 }
@@ -1465,7 +1465,7 @@ fn a_bytes_body_is_served_byte_for_byte_on_native_and_the_embedded_lane() {
     let rotated: Vec<u8> = (128..=255u8).chain(0..128u8).collect();
     for wasm in [false, true] {
         let leg = boot_at(&file, wasm);
-        for (path, want, ty) in [("/", &all, "application/octet-stream"), ("/typed", &all, "application/x-sweep"), ("/with", &rotated, "application/octet-stream")] {
+        for (path, want, ty) in [("/", &all, "application/octet-stream"), ("/typed", &all, "application/zip"), ("/with", &rotated, "application/octet-stream")] {
             let resp = ask_then_close(leg.port, format!("GET {path} HTTP/1.1\r\nHost: a\r\n\r\n").as_bytes());
             let head = head_of(&resp);
             assert!(head.starts_with("HTTP/1.1 200"), "wasm={wasm} {path}: {head}");

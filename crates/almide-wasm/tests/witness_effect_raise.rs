@@ -2,8 +2,9 @@
 //! call through a record field, and a scalar cell capture in the structural
 //! witness. A bare `err(e)` where the raw type is expected RAISES: the err
 //! block is built, the exit's releases are recorded like a `!` propagation's,
-//! and the block leaves. `ok(v)` there is transparent, which agrees with every
-//! consumer only for a scalar or certainly-fresh `v`; any other declines. A
+//! and the block leaves. `ok(v)` there is transparent; over a borrowed Var it
+//! takes the share a construction would (the share-out `s` on the Var's
+//! line), so the consumer's fresh reading holds. A
 //! record field's Fn value is a view lent to the lifted body. A cell capture
 //! whose occupant is a scalar has no RC site in the lambda. A callback that
 //! raises instantiates the self-hosted `list.__fallible_map`: an ordinary
@@ -54,8 +55,10 @@ fn raised_errs_field_callees_and_scalar_cells_witness_exactly() {
     // raising arm, the ok carrier on the other.
     assert_eq!(get("raise"), "{|im}\n{|im}\n{|im}\n");
     assert!(accepted(&get("raise")));
-    // `ok(s)` over a borrowed param: the consumer would read it as fresh.
-    assert_eq!(get("keep"), "!decline:effect:carrier:ok-borrowed\n");
+    // `ok(s)` over a borrowed param: shared at the node (`s` on the param's
+    // line), so the ok carrier the consumer reads as fresh holds a credit.
+    assert!(!get("keep").starts_with('!') && get("keep").contains('s'), "{:?}", get("keep"));
+    assert!(accepted(&get("keep")), "{:?}", get("keep"));
     // The record param and the field's Fn value are views.
     assert!(accepted(&get("apply_op")) && !get("apply_op").contains(|c| "iadm".contains(c)), "{:?}", get("apply_op"));
     // The lambda capturing the Int cell `n` certifies.
