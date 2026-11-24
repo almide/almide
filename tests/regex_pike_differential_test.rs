@@ -30,7 +30,7 @@
 mod rt {
     pub type AlmideString = String;
     // ADR-0037: the list type the runtime ships, not a stand-in.
-    pub use almide_str::{almide_list, AlmideList, AlmideToList};
+    pub use almide_str::AlmideList;
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
         panic!("{msg}")
     }
