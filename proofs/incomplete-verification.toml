@@ -30,8 +30,18 @@
 #               58 — the 56 above plus the two `bench` rows the bench-route
 #               census found (binarytrees, treealloc: region-window-elided-release;
 #               scripts/check-wasm-runtime-ratio.sh benches both).
+#   2026-11-24  27th engineer: the bodyless host leaves certified as audited arms
+#               (the host-splice name-prefix decline deleted) and a borrowed `ok`
+#               payload shared at the node (#4936); the census on ds-2 over the
+#               same harness shapes (test spec/, run embedded_cross + wasm_cross,
+#               build perf + exercises + wasm_host_js, bench binarytrees /
+#               treealloc): 58 -> 37 rows, REJECT 0. A borrowed `ok(x)` is admitted
+#               only in an effect body's raw tail positions: admitted anywhere, it
+#               certified process.poll (`some(ok(s))` in a match over an owned
+#               carrier), whose RC byte check (almide-anchor-check) then found two
+#               releases no event records — so those frames stay listed.
 #
-# ceiling = "58"
+# ceiling = "37"
 
 [[program]]
 entry = "test spec/integration/clone_opt_test.almd"
@@ -52,11 +62,6 @@ reasons = ["tail:Unwrap"]
 entry = "test spec/lang/fallible_lambda_test.almd"
 uncertified = 3
 reasons = ["call-arg:Lambda:list.map:propagating"]
-
-[[program]]
-entry = "test spec/lang/fan_map_test.almd"
-uncertified = 1
-reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
 entry = "test spec/lang/fan_test.almd"
@@ -129,19 +134,9 @@ uncertified = 1
 reasons = ["!poison"]
 
 [[program]]
-entry = "test spec/stdlib/process_exec_status_test.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
 entry = "test spec/stdlib/process_start_test.almd"
-uncertified = 9
-reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
-
-[[program]]
-entry = "test spec/stdlib/process_timeout_test.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
 entry = "test spec/stdlib/random_bytes_test.almd"
@@ -184,94 +179,24 @@ uncertified = 1
 reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
-entry = "run spec/embedded_cross/append_bytes_past_read_bound.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
 entry = "run spec/embedded_cross/fan_mapper_effect_callback_forms.almd"
 uncertified = 1
 reasons = ["call-arg:Lambda:list.map:propagating"]
 
 [[program]]
-entry = "run spec/embedded_cross/fs_non_utf8_entry_names.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_call_handle_errs.almd"
-uncertified = 5
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_call_repr.almd"
-uncertified = 1
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_call_wait_body_bytes.almd"
-uncertified = 3
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_client_errs.almd"
-uncertified = 1
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_error_classes.almd"
-uncertified = 1
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_framed_errs.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_header_refusal.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_request_framing.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_response_header_names.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/http_url_redaction_dial.almd"
-uncertified = 1
-reasons = ["call:host-splice"]
-
-[[program]]
-entry = "run spec/embedded_cross/process_kill_syscall.almd"
-uncertified = 4
-reasons = ["call:host-splice"]
-
-[[program]]
 entry = "run spec/embedded_cross/process_spawn_family.almd"
-uncertified = 12
-reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
 entry = "run spec/embedded_cross/process_start_family.almd"
-uncertified = 10
-reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
 entry = "run spec/embedded_cross/process_start_run_end_stops_children.almd"
-uncertified = 6
-reasons = ["call:host-splice", "effect:carrier:ok-borrowed"]
-
-[[program]]
-entry = "run spec/embedded_cross/read_bound_fifo_and_cap.almd"
-uncertified = 2
-reasons = ["call:host-splice"]
+uncertified = 1
+reasons = ["effect:carrier:ok-borrowed"]
 
 [[program]]
 entry = "build research/benchmark/perf/binarytrees/binarytrees.almd"
@@ -294,28 +219,8 @@ uncertified = 1
 reasons = ["region-window-elided-release"]
 
 [[program]]
-entry = "build spec/wasm_host_js/effect_export_scalar.almd"
-uncertified = 1
-reasons = ["tail:view-result"]
-
-[[program]]
-entry = "build spec/wasm_host_js/region_export_address.almd"
-uncertified = 1
-reasons = ["tail:view-result"]
-
-[[program]]
-entry = "build spec/wasm_host_js/region_export_lease.almd"
-uncertified = 1
-reasons = ["tail:view-result"]
-
-[[program]]
-entry = "build spec/wasm_host_js/region_export_push.almd"
-uncertified = 1
-reasons = ["tail:view-result"]
-
-[[program]]
 entry = "bench research/benchmark/perf/binarytrees/binarytrees.almd"
-uncertified = 1
+uncertified = 2
 reasons = ["region-window-elided-release"]
 
 [[program]]
