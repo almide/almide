@@ -87,10 +87,22 @@ fn renamed(map: &mut HashMap<u32, u32>, proved: u32, shipped: u32) -> bool {
     }
 }
 
+/// Where a held body is not byte for byte its list: the call and the global
+/// sites that carry another index, the out-of-memory addresses other than the
+/// probe's, and the exit calls in front of traps. All zero: the list's bytes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Differences {
+    pub calls: usize,
+    pub globals: usize,
+    pub addresses: usize,
+    pub exits: usize,
+}
+
 /// `shipped` is the proof's `proved`, up to the three differences of the
 /// module header.
-fn held(name: &str, shipped: &[Op<'_>], proved: &[Op<'_>], imports: u32, r: &mut Renames) -> Result<(), String> {
+fn held(name: &str, shipped: &[Op<'_>], proved: &[Op<'_>], imports: u32, r: &mut Renames) -> Result<Differences, String> {
     let differs = |j: usize, i: usize, what: String| format!("proved: `${name}` is not the proof's `{name}_bytes` at instruction {j} of the list ({i} of the shipped body): {what}");
+    let mut d = Differences::default();
     let mut i = 0;
     for (j, p) in proved.iter().enumerate() {
         // The stock-WASI transform's exit call in front of a trap.
@@ -103,18 +115,26 @@ fn held(name: &str, shipped: &[Op<'_>], proved: &[Op<'_>], imports: u32, r: &mut
                     return Err(differs(j, i, format!("the call in front of the trap names import {function_index}, another names {:?}", r.exit)));
                 }
                 i += 2;
+                d.exits += 1;
             }
         }
         let Some(s) = shipped.get(i) else {
             return Err(differs(j, i, "the shipped body ends".to_string()));
         };
         let same = match (s, p) {
-            (Op::Call { function_index: a }, Op::Call { function_index: b }) => renamed(&mut r.funcs, *b, *a),
+            (Op::Call { function_index: a }, Op::Call { function_index: b }) => {
+                d.calls += usize::from(a != b);
+                renamed(&mut r.funcs, *b, *a)
+            }
             (Op::GlobalGet { global_index: a }, Op::GlobalGet { global_index: b }) | (Op::GlobalSet { global_index: a }, Op::GlobalSet { global_index: b }) => {
+                d.globals += usize::from(a != b);
                 renamed(&mut r.globals, *b, *a)
             }
             // The out-of-memory report's argument: the probe immediate.
-            (Op::I32Const { .. }, Op::I32Const { value: 0 }) if matches!(proved.get(j + 1), Some(Op::Call { .. })) => true,
+            (Op::I32Const { value }, Op::I32Const { value: 0 }) if matches!(proved.get(j + 1), Some(Op::Call { .. })) => {
+                d.addresses += usize::from(*value != 0);
+                true
+            }
             (a, b) => a == b,
         };
         if !same {
@@ -125,7 +145,7 @@ fn held(name: &str, shipped: &[Op<'_>], proved: &[Op<'_>], imports: u32, r: &mut
     if i != shipped.len() {
         return Err(format!("proved: `${name}` has {} instruction(s) after the last of the proof's `{name}_bytes`", shipped.len() - i));
     }
-    Ok(())
+    Ok(d)
 }
 
 /// The field names of the module's function imports, by function index.
@@ -146,8 +166,8 @@ fn import_names(wasm: &[u8]) -> Result<Vec<String>, String> {
 
 /// Hold the routines the anchor file names to the proof script's lists:
 /// `alloc`, the rc_inc `inc`, and the `proved` line's flat release and free
-/// routine. Answers how many were held. `imports` is the module's count of
-/// imported functions.
+/// routine. Answers the routines held, each with where it is not its list
+/// byte for byte. `imports` is the module's count of imported functions.
 pub fn check_proved_routines(
     wasm: &[u8],
     bodies: &[Body<'_>],
@@ -155,10 +175,10 @@ pub fn check_proved_routines(
     alloc: Option<u32>,
     inc: Option<u32>,
     line: ProvedLine,
-) -> Result<usize, String> {
+) -> Result<Vec<(&'static str, Differences)>, String> {
     let (dec, free) = line;
     let mut r = Renames::default();
-    let mut n = 0;
+    let mut n = Vec::new();
     for (name, f) in [("alloc", alloc), ("inc", inc), ("dec", dec), ("free", free)] {
         let Some(f) = f else { continue };
         let b = f
@@ -166,8 +186,7 @@ pub fn check_proved_routines(
             .and_then(|d| bodies.get(d as usize))
             .ok_or_else(|| format!("proved: `${name}` is named as function {f}, which the module does not define"))?;
         let bytes = list(name)?;
-        held(name, &b.ops, &instructions(&bytes)?, imports, &mut r)?;
-        n += 1;
+        n.push((name, held(name, &b.ops, &instructions(&bytes)?, imports, &mut r)?));
     }
     // The flat release frees through the routine held as `$free`.
     if dec.is_some() {
@@ -202,7 +221,19 @@ mod tests {
         let proved = instructions(&bytes).unwrap();
         let mut shipped = proved.clone();
         edit(&mut shipped);
-        held(name, &shipped, &proved, imports, &mut Renames::default())
+        held(name, &shipped, &proved, imports, &mut Renames::default()).map(|_| ())
+    }
+
+    #[test]
+    fn the_differences_of_a_held_body_are_counted() {
+        let bytes = list("dec").unwrap();
+        let proved = instructions(&bytes).unwrap();
+        let same = held("dec", &proved, &proved, 0, &mut Renames::default()).unwrap();
+        assert_eq!(same, Differences::default());
+        let mut shipped = reading_global(&proved, 1);
+        exit_call(&mut shipped, 0);
+        let d = held("dec", &shipped, &proved, 1, &mut Renames::default()).unwrap();
+        assert_eq!(d, Differences { calls: 0, globals: 1, addresses: 0, exits: 1 });
     }
 
     fn at(ops: &[Op<'_>], want: impl Fn(&Op<'_>) -> bool) -> usize {

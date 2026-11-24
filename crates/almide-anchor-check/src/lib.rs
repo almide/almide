@@ -82,7 +82,7 @@ pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_ancho
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
-pub use proved::{check_proved_routines, ProvedLine};
+pub use proved::{check_proved_routines, Differences, ProvedLine};
 pub use routines::check_named_routines;
 use anchors::helper_sigs;
 pub use decode::{branch_target, decode, function_imports, store_width, Body};
@@ -136,8 +136,9 @@ pub struct Report {
     pub field_unlocated: usize,
     /// #4277, when the anchor file carries `rc` lines.
     pub rc: Option<RcReport>,
-    /// The runtime routines held to the proof script's lists (proved.rs).
-    pub proved: usize,
+    /// The runtime routines held to the proof script's lists, each with
+    /// where it is not its list byte for byte (proved.rs).
+    pub proved: Vec<(&'static str, Differences)>,
 }
 
 struct Ctx<'b, 'a> {

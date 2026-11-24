@@ -93,7 +93,14 @@ fn main() {
                 "FIELDS OK: {} site(s) / {} store(s), {} access(es) ({} case field(s) under their tag test), {} tag read(s), {} unlocated",
                 r.field_sites, r.field_stores, r.field_accesses, r.field_guarded, r.field_tags, r.field_unlocated
             );
-            println!("PROVED OK: {} runtime routine(s) held to the proof script's bytes", r.proved);
+            // Per held routine: its call sites and global sites that carry
+            // another index than the list's, its out-of-memory addresses
+            // other than the probe's, and the exit calls in front of its traps.
+            println!(
+                "PROVED OK: {} runtime routine(s) held to the proof script's bytes{}",
+                r.proved.len(),
+                r.proved.iter().map(|(n, d)| format!(" {n}:{}/{}/{}/{}", d.calls, d.globals, d.addresses, d.exits)).collect::<String>()
+            );
             match &counted {
                 Some(Ok(c)) => println!(
                     "CENSUS: frames {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk; routines {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk",
