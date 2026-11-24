@@ -20,11 +20,7 @@ wall	spec/wasm_host_js/hook_errors.almd
 wall	spec/wasm_host_js/hook_errors_async.almd
 wall	spec/wasm_host_js/unmarked_promise.almd
 # wall: Region storage needs a closed Almide-owned address domain.
-wall	spec/wasm_host_js/effect_export_scalar.almd
 wall	spec/wasm_host_js/extern_data_ptr_lifetime.almd
-wall	spec/wasm_host_js/region_export_address.almd
-wall	spec/wasm_host_js/region_export_lease.almd
-wall	spec/wasm_host_js/region_export_push.almd
 wall	spec/wasm_host_js/region_extern_pull.almd
 # reject: the v1 render covers it, almide-verify rejects a witness (#4930).
 reject	research/benchmark/perf/native/cli_app.almd
