@@ -46,6 +46,12 @@ pub(crate) fn native_test_source(file: &str, no_check: bool) -> Result<NativeSou
     generate_native_source(file, no_check, true, false, &PhaseTimer::start())
 }
 
+/// The program `almide run` builds for `file` (the v1-rendered, verified
+/// route), for `almide bench`, which must time that same program.
+pub(crate) fn native_program_source(file: &str) -> Result<NativeSource, String> {
+    generate_native_source(file, false, false, true, &PhaseTimer::start())
+}
+
 fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_verified: bool, t: &PhaseTimer) -> Result<NativeSource, String> {
     let opts = crate::codegen::CodegenOptions::default();
     // `metered`: from the IR, not the text — a user literal spelled like a
