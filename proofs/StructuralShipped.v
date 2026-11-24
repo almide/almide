@@ -30,9 +30,12 @@
    byte-level check (proved.rs: the import named `proc_exit`). g is a
    naming, as index 3 was.
 
-   TRUSTED beyond StructuralDecode.v's list: that the imported exit does not
-   return (the trees read `exit; unreachable` as the trap they read
-   `unreachable` as). *)
+   TRUSTED beyond StructuralDecode.v's list: what the imported exit does.
+   The trees read `i32.const 1; call x; unreachable` as the trap they read
+   `unreachable` as. Control never continues past it, whatever the import
+   does, because the `unreachable` still follows; but the trees do not model
+   the import's own effects (a host function runs with the exported memory in
+   reach before it ends the process or returns into the trap). *)
 
 From AlmideTrust Require Import StructuralRuntime.
 From AlmideTrust Require LargeTree.
@@ -42,6 +45,106 @@ From Stdlib Require Import ZArith.
 From Stdlib Require Import List.
 Import ListNotations.
 Open Scope Z_scope.
+
+(* ══ INDICES AS THEY ARE ENCODED ═════════════════════════════════════════
+
+   A function or global index is an unsigned LEB128 number. The emitted
+   lists carry indices below 128, one byte each, and StructuralDecode.v
+   reads them as one byte. A shipped module can call function 195, which is
+   the two bytes 195;1.
+
+   `tokens` walks a function body instruction by instruction and replaces
+   the immediate of every `call`, `global.get` and `global.set` by ONE
+   element holding the index's value. Every other byte is kept as it is, so
+   the decoders below read constants, memargs and local indices exactly as
+   StructuralDecode.v does. They bind an index as one element and never
+   inspect it, which is why their theorems hold for every index.
+
+   It is strict: an opcode outside its table (a float constant, an indirect
+   call, a table or reference instruction, a prefixed instruction) is no
+   token list at all. *)
+
+(* An unsigned LEB128 number of at most five bytes: its value and the rest. *)
+Fixpoint uleb_go (n : nat) (sh acc : Z) (bs : list Z) : option (Z * list Z) :=
+  match n, bs with
+  | S n', b :: r =>
+      if b <? 128 then Some (acc + Z.shiftl b sh, r)
+      else uleb_go n' (sh + 7) (acc + Z.shiftl (b - 128) sh) r
+  | _, _ => None
+  end.
+
+Definition uleb (bs : list Z) : option (Z * list Z) := uleb_go 5 0 0 bs.
+
+(* The bytes of one LEB128 number, signed or unsigned (the continuation bit
+   is the same), and the rest. *)
+Fixpoint leb_span (n : nat) (bs : list Z) : option (list Z * list Z) :=
+  match n, bs with
+  | S n', b :: r =>
+      if b <? 128 then Some ([b], r)
+      else match leb_span n' r with
+           | Some (s, r') => Some (b :: s, r')
+           | None => None
+           end
+  | _, _ => None
+  end.
+
+Definition is_in (op : Z) (l : list Z) : bool := existsb (Z.eqb op) l.
+
+Fixpoint tokens_go (fuel : nat) (bs : list Z) (acc : list Z) : option (list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bs with
+      | [] => Some (rev acc)
+      | op :: r =>
+          if is_in op [16; 35; 36] then
+            (* call, global.get, global.set: the index, as its value *)
+            match uleb r with
+            | Some (v, r') => tokens_go f r' (v :: op :: acc)
+            | None => None
+            end
+          else if is_in op [2; 3; 4; 12; 13; 32; 33; 34; 65; 66] then
+            (* block, loop, if (block type); br, br_if; local.get / set / tee;
+               i32.const, i64.const: one LEB128 immediate, kept *)
+            match leb_span 10 r with
+            | Some (s, r') => tokens_go f r' (rev s ++ op :: acc)
+            | None => None
+            end
+          else if andb (40 <=? op) (op <=? 62) then
+            (* loads and stores: alignment and offset, kept *)
+            match leb_span 5 r with
+            | Some (s1, r1) =>
+                match leb_span 5 r1 with
+                | Some (s2, r2) => tokens_go f r2 (rev s2 ++ rev s1 ++ op :: acc)
+                | None => None
+                end
+            | None => None
+            end
+          else if is_in op [63; 64] then
+            (* memory.size, memory.grow: the memory's index byte, kept *)
+            match r with
+            | b :: r' => tokens_go f r' (b :: op :: acc)
+            | [] => None
+            end
+          else if orb (is_in op [0; 1; 5; 11; 15; 26; 27])
+                      (andb (69 <=? op) (op <=? 196)) then
+            (* unreachable, nop, else, end, return, drop, select, and the
+               numeric instructions: no immediate *)
+            tokens_go f r (op :: acc)
+          else None
+      end
+  end.
+
+Definition tokens (bs : list Z) : option (list Z) :=
+  tokens_go (S (length bs)) bs [].
+
+(* A two-byte index becomes one element; a constant's bytes are kept. *)
+Example a_wide_index_is_one_token :
+  tokens [65; 240; 2; 16; 195; 1; 35; 128; 1; 11] = Some [65; 240; 2; 16; 195; 35; 128; 11].
+Proof. reflexivity. Qed.
+
+Example an_unknown_opcode_is_no_token_list : tokens [32; 0; 17; 0; 0; 11] = None.
+Proof. reflexivity. Qed.
 
 (* ══ `$inc` / `$dec_flat` / `$free` ═══════════════════════════════════════ *)
 
@@ -172,12 +275,30 @@ Fixpoint sdecode_go (fuel : nat) (nm : naming) (bs : list Z)
       end
   end.
 
-(* Decode one full function body (empty starting stack, drained end). *)
+(* Decode one full function body (empty starting stack, drained end), given
+   as tokens. *)
 Definition sdecode (nm : naming) (bs : list Z) : option (list stmt * roles) :=
   match sdecode_go 1000 nm bs [] [] no_roles with
   | Some (ss, [], ro) => Some (ss, ro)
   | _ => None
   end.
+
+(* The same, from a body's bytes. *)
+Definition sdecode_bytes (nm : naming) (bs : list Z) : option (list stmt * roles) :=
+  match tokens bs with
+  | Some ts => sdecode nm ts
+  | None => None
+  end.
+
+(* The emitted lists are their own tokens: their indices are one byte. *)
+Theorem inc_bytes_are_tokens : tokens inc_bytes = Some inc_bytes.
+Proof. reflexivity. Qed.
+
+Theorem dec_bytes_are_tokens : tokens dec_bytes = Some dec_bytes.
+Proof. reflexivity. Qed.
+
+Theorem free_bytes_are_tokens : tokens free_bytes = Some free_bytes.
+Proof. reflexivity. Qed.
 
 (* The emitted lists, read by this decoder: the same trees, and the indices
    StructuralDecode.v's decoder fixes. *)
@@ -193,7 +314,8 @@ Theorem free_bytes_sdecode :
   sdecode free_naming free_bytes = Some (free_body 48, no_roles).
 Proof. reflexivity. Qed.
 
-(* `$inc` as it ships: its one global index is whatever the prune left. *)
+(* `$inc` as it ships, in tokens: its one global index is whatever the prune
+   left. `g`, `fr` and `x` below are index VALUES, of any size. *)
 Definition inc_shipped (g : Z) : list Z :=
   [32;0;35;g;73;4;64;15;11;
    32;0;32;0;40;2;0;65;1;106;54;2;0;
@@ -531,6 +653,16 @@ Definition sadecode (bs : list Z) : option (list astmt * aroles) :=
   | _ => None
   end.
 
+(* The same, from the body's bytes. *)
+Definition sadecode_bytes (bs : list Z) : option (list astmt * aroles) :=
+  match tokens bs with
+  | Some ts => sadecode ts
+  | None => None
+  end.
+
+Theorem alloc_bytes_are_tokens : tokens alloc_bytes = Some alloc_bytes.
+Proof. reflexivity. Qed.
+
 (* The emitted list, read by this decoder: the same tree, the indices
    StructuralDecode.v's decoder fixes, and the probe address. *)
 Theorem alloc_bytes_sadecode :
@@ -616,8 +748,8 @@ Proof. reflexivity. Qed.
 (* ══ ONE MODULE'S ROUTINES ═══════════════════════════════════════════════
 
    What proofs/check-shipped-routines.sh has the kernel check per shipped
-   module, on the module's own bytes. The tree is compared by conversion;
-   the roles are folded into what must hold of them. *)
+   module, on the module's own BYTES (tokenised here). The tree is compared
+   by conversion; the roles are folded into what must hold of them. *)
 
 Definition all_are (x : Z) (l : list Z) : bool := forallb (Z.eqb x) l.
 
@@ -632,7 +764,7 @@ Definition same (l : list Z) : bool :=
    `exit_ix`. *)
 Definition dec_verdict (free_ix exit_ix : Z) (bs : list Z)
   : option (list stmt * list Z * bool) :=
-  match sdecode dec_naming bs with
+  match sdecode_bytes dec_naming bs with
   | Some (t, ro) =>
       Some (t, r_floor ro,
             andb (all_are free_ix (r_free ro)) (all_are exit_ix (r_exit ro)))
@@ -644,7 +776,7 @@ Definition dec_verdict (free_ix exit_ix : Z) (bs : list Z)
    one message, one printer and one exit. *)
 Definition alloc_verdict (exit_ix : Z) (bs : list Z)
   : option (list astmt * list Z * bool) :=
-  match sadecode bs with
+  match sadecode_bytes bs with
   | Some (t, ro) =>
       Some (t, a_heap ro,
             andb (all_are exit_ix (a_exit ro))
@@ -676,6 +808,26 @@ Proof. reflexivity. Qed.
 Theorem alloc_shipped_verdict :
   alloc_verdict 1 (alloc_form (die_shipped [128;8] 7 1 1) 0)
   = Some (alloc_body 48, [0;0;0;0], true).
+Proof. reflexivity. Qed.
+
+(* Indices of two bytes, as larger modules ship them: `$dec_flat` freeing
+   through function 195 (bytes 195;1), and `$alloc` whose own exit routine
+   is function 195 and whose message is at 368 (bytes 240;2). *)
+Theorem dec_with_a_wide_callee_verdict :
+  dec_verdict 195 1
+    [32;0;35;1;73;4;64;15;11;
+     32;0;40;2;0;65;1;107;33;1;
+     32;1;65;127;70;4;64;65;1;16;1;0;11;
+     32;0;32;1;54;2;0;
+     32;1;69;4;64;32;0;16;195;1;11;
+     11]
+  = Some (dec_body, [1], true).
+Proof. reflexivity. Qed.
+
+Theorem alloc_with_a_wide_callee_verdict :
+  alloc_verdict 1
+    (alloc_form [65;240;2;16;3;65;1;16;195;1;65;1;16;1;0] 1)
+  = Some (alloc_body 48, [1;1;1;1], true).
 Proof. reflexivity. Qed.
 
 (* Controls: what the shipped-form decoders still refuse. A changed

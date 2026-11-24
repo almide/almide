@@ -73,13 +73,13 @@ def example(name, m):
     fr = r["free"][0] if "free" in r else -1
     goals, ev = [], []
     if "inc" in r:
-        goals.append(f"sdecode inc_naming {zl(r['inc'][1])} = Some (inc_body, mkRoles [g] [] [])")
+        goals.append(f"sdecode_bytes inc_naming {zl(r['inc'][1])} = Some (inc_body, mkRoles [g] [] [])")
     if "dec" in r:
         goals.append(f"dec_verdict ({fr}) ({ex}) {zl(r['dec'][1])} = Some (dec_body, [g], true)")
     if "inc" in r or "dec" in r:
         ev.append("g")
     if "free" in r:
-        goals.append(f"sdecode free_naming {zl(r['free'][1])} = Some (free_body 48, no_roles)")
+        goals.append(f"sdecode_bytes free_naming {zl(r['free'][1])} = Some (free_body 48, no_roles)")
     if "alloc" in r:
         goals.append(f"alloc_verdict ({ex}) {zl(r['alloc'][1])} = Some (alloc_body 48, [h;h;h;h], true)")
         ev.append("h")
@@ -119,10 +119,15 @@ PY
 
 : > "$WORK/verdicts.tsv"
 fail=0
+# The chunks are independent: compile them side by side, then read each one's
+# exit code in order.
+export COQC HERE WORK
+find "$WORK" -maxdepth 1 -name 'Shipped_*.v' | LC_ALL=C sort \
+  | xargs -P "${SHIPPED_JOBS:-4}" -I{} bash -c 'c="$(basename "$1" .v)"; if "$COQC" -Q "$HERE" AlmideTrust "$1" > "$WORK/$c.log" 2>&1; then echo 0 > "$WORK/$c.rc"; else echo 1 > "$WORK/$c.rc"; fi' _ {}
 for v in "$WORK"/Shipped_*.v; do
   [ -e "$v" ] || continue
   c="$(basename "$v" .v)"
-  if "$COQC" -Q "$HERE" AlmideTrust "$v" > "$WORK/$c.log" 2>&1; then
+  if [ "$(cat "$WORK/$c.rc" 2>/dev/null)" = 0 ]; then
     awk -F'\t' -v c="$c" '$1 == c { print $3 "\t" $4 "\tok" }' "$WORK/index.tsv" >> "$WORK/verdicts.tsv"
   else
     # the chunk holds a module the kernel refuses: ask module by module
