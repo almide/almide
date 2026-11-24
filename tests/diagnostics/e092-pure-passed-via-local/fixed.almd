@@ -1,0 +1,10 @@
+// #4928: the local holds a lambda without the output; the caller prints.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let g = (y) => y + 1
+  let n = apply(g, 2)
+  println("side effect")
+  println("${n}")
+}
