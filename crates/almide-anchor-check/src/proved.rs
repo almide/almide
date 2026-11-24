@@ -164,6 +164,47 @@ fn import_names(wasm: &[u8]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Every defined function's instruction bytes (its code entry after the
+/// locals vector, through its final `end`), in position order.
+fn code_bytes(wasm: &[u8]) -> Result<Vec<&[u8]>, String> {
+    let mut out = Vec::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        if let Payload::CodeSectionEntry(body) = payload.map_err(|e| e.to_string())? {
+            let start = body.get_operators_reader().map_err(|e| e.to_string())?.original_position() as usize;
+            out.push(&wasm[start..body.range().end as usize]);
+        }
+    }
+    Ok(out)
+}
+
+/// A named routine as it ships: its role, its function index, and its
+/// instruction bytes.
+pub type Shipped = (&'static str, u32, Vec<u8>);
+
+/// The routines the anchor file names, as they ship, and the index of the
+/// import named `proc_exit` when the module has one. This is what the proof
+/// script's shipped-form decoder is run on (proofs/StructuralShipped.v,
+/// proofs/check-shipped-routines.sh): the bytes are the module's own, and
+/// nothing here judges them.
+pub fn shipped_routines(wasm: &[u8], anchors: &str) -> Result<(Vec<Shipped>, Option<u32>), String> {
+    let (alloc, _, _, _, _, rc_lines) = crate::anchors::parse_anchors_held(anchors)?;
+    let (dec, free) = crate::anchors::proved_anchors(anchors)?.unwrap_or((None, None));
+    let inc = rc_lines.as_ref().and_then(|l| l.0);
+    let imports = crate::decode::function_imports(wasm);
+    let code = code_bytes(wasm)?;
+    let mut out = Vec::new();
+    for (name, f) in [("alloc", (alloc != u32::MAX).then_some(alloc)), ("inc", inc), ("dec", dec), ("free", free)] {
+        let Some(f) = f else { continue };
+        let b = f
+            .checked_sub(imports)
+            .and_then(|d| code.get(d as usize))
+            .ok_or_else(|| format!("proved: `${name}` is named as function {f}, which the module does not define"))?;
+        out.push((name, f, b.to_vec()));
+    }
+    let exit = import_names(wasm)?.iter().position(|n| n == "proc_exit").map(|i| i as u32);
+    Ok((out, exit))
+}
+
 /// Hold the routines the anchor file names to the proof script's lists:
 /// `alloc`, the rc_inc `inc`, and the `proved` line's flat release and free
 /// routine. Answers the routines held, each with where it is not its list
@@ -234,6 +275,13 @@ mod tests {
         exit_call(&mut shipped, 0);
         let d = held("dec", &shipped, &proved, 1, &mut Renames::default()).unwrap();
         assert_eq!(d, Differences { calls: 0, globals: 1, addresses: 0, exits: 1 });
+    }
+
+    #[test]
+    fn a_body_s_bytes_start_after_its_locals() {
+        let wasm = wat::parse_str("(module (func (param i32) (local i32 i64) local.get 0 drop) (func nop))").unwrap();
+        let code = code_bytes(&wasm).unwrap();
+        assert_eq!(code, vec![&[0x20, 0x00, 0x1a, 0x0b][..], &[0x01, 0x0b][..]]);
     }
 
     fn at(ops: &[Op<'_>], want: impl Fn(&Op<'_>) -> bool) -> usize {

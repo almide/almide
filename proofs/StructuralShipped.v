@@ -612,3 +612,91 @@ Proof. intros fe fx px h. reflexivity. Qed.
 Theorem alloc_emitted_adecodes_at_1024 :
   adecode [128;8] (alloc_form (die_emitted [128;8] 6 2) 1) = Some (alloc_body 48).
 Proof. reflexivity. Qed.
+
+(* ══ ONE MODULE'S ROUTINES ═══════════════════════════════════════════════
+
+   What proofs/check-shipped-routines.sh has the kernel check per shipped
+   module, on the module's own bytes. The tree is compared by conversion;
+   the roles are folded into what must hold of them. *)
+
+Definition all_are (x : Z) (l : list Z) : bool := forallb (Z.eqb x) l.
+
+Definition same (l : list Z) : bool :=
+  match l with
+  | [] => true
+  | x :: r => all_are x r
+  end.
+
+(* `$dec_flat`: its tree, the global it reads as `$line_end`, and whether it
+   frees through `free_ix` and exits, in front of its trap, through
+   `exit_ix`. *)
+Definition dec_verdict (free_ix exit_ix : Z) (bs : list Z)
+  : option (list stmt * list Z * bool) :=
+  match sdecode dec_naming bs with
+  | Some (t, ro) =>
+      Some (t, r_floor ro,
+            andb (all_are free_ix (r_free ro)) (all_are exit_ix (r_exit ro)))
+  | None => None
+  end.
+
+(* `$alloc`: its tree, the globals it reads as the bump frontier, and whether
+   every exit call the transform added is `exit_ix`, and its three dies name
+   one message, one printer and one exit. *)
+Definition alloc_verdict (exit_ix : Z) (bs : list Z)
+  : option (list astmt * list Z * bool) :=
+  match sadecode bs with
+  | Some (t, ro) =>
+      Some (t, a_heap ro,
+            andb (all_are exit_ix (a_exit ro))
+                 (andb (same (a_eprint ro))
+                       (andb (same (a_exit0 ro)) (same (a_oom ro)))))
+  | None => None
+  end.
+
+(* The verdicts on the emitted lists and on the shipped schemas. *)
+Theorem dec_bytes_verdict :
+  dec_verdict 33 (-1) dec_bytes = Some (dec_body, [3], true).
+Proof. reflexivity. Qed.
+
+Theorem dec_shipped_verdict :
+  dec_verdict 9 1 (dec_shipped 0 9 1) = Some (dec_body, [0], true).
+Proof. reflexivity. Qed.
+
+(* A flat release that frees through another function than the module's
+   free routine, or exits through another import: the tree is read, the
+   verdict is false. *)
+Theorem dec_freeing_elsewhere_is_refused :
+  dec_verdict 9 1 (dec_shipped 0 10 1) = Some (dec_body, [0], false).
+Proof. reflexivity. Qed.
+
+Theorem dec_exiting_elsewhere_is_refused :
+  dec_verdict 9 1 (dec_shipped 0 9 2) = Some (dec_body, [0], false).
+Proof. reflexivity. Qed.
+
+Theorem alloc_shipped_verdict :
+  alloc_verdict 1 (alloc_form (die_shipped [128;8] 7 1 1) 0)
+  = Some (alloc_body 48, [0;0;0;0], true).
+Proof. reflexivity. Qed.
+
+(* Controls: what the shipped-form decoders still refuse. A changed
+   constant, a dropped instruction, a store in place of the load. *)
+Theorem a_changed_constant_is_not_the_tree :
+  option_map fst (sdecode inc_naming
+    [32;0;35;3;73;4;64;15;11; 32;0;32;0;40;2;0;65;2;106;54;2;0; 11])
+  <> Some inc_body.
+Proof. discriminate. Qed.
+
+Theorem a_dropped_guard_is_not_the_tree :
+  option_map fst (sdecode inc_naming [32;0;32;0;40;2;0;65;1;106;54;2;0;11])
+  <> Some inc_body.
+Proof. discriminate. Qed.
+
+Theorem a_call_without_the_block_does_not_decode :
+  sdecode dec_naming
+    [32;0;35;3;73;4;64;15;11;
+     32;0;40;2;0;65;1;107;33;1;
+     32;1;65;127;70;4;64;0;11;
+     32;0;32;1;54;2;0;
+     32;1;69;4;64;32;1;16;33;11;
+     11] = None.
+Proof. reflexivity. Qed.

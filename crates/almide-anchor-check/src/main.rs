@@ -59,6 +59,26 @@ fn main() {
         }
         return;
     }
+    // `--proved-bytes <artifact.wasm> <anchors>`: the runtime routines the
+    // anchor file names, as they ship (proved.rs), one line of decimal bytes
+    // each: the input of the proof script's shipped-form decoder.
+    if args.first().map(String::as_str) == Some("--proved-bytes") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        match almide_anchor_check::shipped_routines(&w, &a) {
+            Ok((routines, exit)) => {
+                for (name, index, code) in routines {
+                    println!("SHIPPED {name} {index}{}", code.iter().map(|b| format!(" {b}")).collect::<String>());
+                }
+                println!("EXIT {}", exit.map_or_else(|| "-".to_string(), |x| x.to_string()));
+            }
+            Err(e) => {
+                println!("PROVED REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),

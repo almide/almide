@@ -82,7 +82,7 @@ pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_ancho
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
-pub use proved::{check_proved_routines, Differences, ProvedLine};
+pub use proved::{check_proved_routines, shipped_routines, Differences, ProvedLine, Shipped};
 pub use routines::check_named_routines;
 use anchors::helper_sigs;
 pub use decode::{branch_target, decode, function_imports, store_width, Body};
