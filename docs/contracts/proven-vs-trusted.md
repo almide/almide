@@ -68,10 +68,16 @@ transform and the prune) and edit those routines: an exit call in front of
 every trap, renumbered functions and globals. The bodies that SHIP are held
 to the same lists by `almide-anchor-check` (proved.rs), which reads them out
 of the proof script and tolerates those rewrites (and any constant for the
-out-of-memory report's address, which the decode theorem takes as a
-parameter) and no other difference. The realization theorems are stated
-about the lists: a tolerated difference is checked to have a known shape,
-not proven harmless
+out-of-memory report's address) and no other difference; that is a
+comparison by unverified code. The proof reaches the shipped bytes through
+`proofs/StructuralShipped.v`: its decoders read the shipped forms (an index
+bound in its role, the exit call in front of a trap read as the trap) as the
+SAME trees the realization theorems are about, and
+`proofs/structural-wall.sh` has the Rocq kernel check that, artifact by
+artifact, on the artifact's own bytes
+(`proofs/check-shipped-routines.sh`). Still trusted there: what the imported
+`proc_exit` does before the trap that follows it, and that the globals bound
+in the two roles hold what the model says
 ([proofs/TRUSTED_BASE.md](../../proofs/TRUSTED_BASE.md), "The passes after
 the emitter").
 
@@ -86,7 +92,7 @@ the emitter").
 | IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
 | MIR ownership witness | **proven to be re-checkable** | `proofs/gate.sh`: the untrusted producer emits a witness, the kernel-proven checker re-verifies it |
 | `almide-verify` (the checker a binary distribution runs, #2152) | trusted — agreement-gated, not proven | an independently versioned Rust transcription of the five Coq checkers, linking no compiler crate; `proofs/gate.sh` holds it to the extracted checker's verdict on every row plus a seeded random differential, `proofs/corpus-wall.sh` on the whole corpus witness set |
-| MIR → wasm bytes | retired (#2761) | the incumbent renderer is deleted; `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v` now stand about its modeled runtime. The structural runtime's bytes: as emitted, `proofs/check-structural-bytes.sh` against `StructuralDecode.v`; as shipped (after the stock-WASI transform and the prune), `almide-anchor-check` proved.rs against the same lists, up to three stated differences |
+| MIR → wasm bytes | retired (#2761) | the incumbent renderer is deleted; `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v` now stand about its modeled runtime. The structural runtime's bytes: as emitted, `proofs/check-structural-bytes.sh` against `StructuralDecode.v`; as shipped (after the stock-WASI transform and the prune), the Rocq kernel reads each judged artifact's four routines with `StructuralShipped.v`'s decoders as the proven trees (`proofs/check-shipped-routines.sh`, run by the structural wall), and `almide-anchor-check` proved.rs compares them with the same lists up to three stated differences |
 | Renderer-written runtime items of the certified native render (#4006) | **trusted** — part of the trusted render | items the native render itself writes into the runtime crate it splits out, not taken from v0's runtime: `impl Default for AlmideValue` (the JSON null) and `impl Default for AlmideMatrix` (the 0×0 matrix), the placeholder a generated struct, a moved-out slot or a carrier's absent payload starts from, never read before it is overwritten; and `#[inline]` on each one-line runtime constructor (`-> T { T::…}`), a codegen hint with no semantics. No witness covers them; the floor's v1/v0 output comparison and `proofs/native-wall.sh` run every program that uses them |
 | Almide-owned FFI Region storage on native | **trusted IR representation refinement** | `native_region.rs` retains the checked `ffi.almd` bounds and permission bodies and replaces the private buffer address with storage every copy of the Region shares: a closure over a shared Bytes cell when no address can cross a host boundary, or the runtime's `AlmideFfiBlock` (one fixed-size `Rc` allocation, an ordinary counted value) when a Region is passed to an `@extern(rust)` fn. MIR witnesses cover the ordinary closure/cell and counted-value ownership operations; they do not prove that either representation preserves every source observation. Native/v0/WASI tests cover alias writes, slices, detached views, source-buffer rebinding and bounds. Exported addresses, C bindings, a Region inside another value, returned or callback Regions, and metered programs are refused by this refinement; it adds no writable-borrow proof rule for #4491. |
 | A Region lent to an `@extern(rust)` call on native | **trusted** — the same contract v0 and wasm already rely on | while the call runs, foreign code may read and write `[ptr, ptr + len)`, where `ptr` is the Region's offset into its `AlmideFfiBlock` and `len` its length (`native_foreign.rs`, `almide_rt_ffi_block_ptr`). The block is fixed-size, kept alive by the Region argument, and neither moved nor freed during the call; its cells are `UnsafeCell`s, so the write is a permitted mutation. That the host stays inside the range, and keeps no pointer after returning, is the host's promise, not checked. `tests/native_tagged_values_test.rs` runs a host writing through a slice and every copy of its parent observing it |
