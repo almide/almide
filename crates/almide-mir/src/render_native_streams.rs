@@ -203,11 +203,11 @@ fn early_releases(lines: &[String], d: usize, end: usize, args: &[&str]) -> Opti
 /// rather than walking the stream twice to count it.
 fn sizing_only(lines: &[String], k: usize) -> Option<(usize, usize)> {
     let (v, _, _) = let_parts(&lines[k])?;
-    let reserve = format!("{{ let mut r = Vec::new(); if r.try_reserve_exact({v}.max(0) as usize).is_err() {{");
+    let reserve = format!("{{ let mut r = AlmideList::new(); if r.try_reserve_exact({v}.max(0) as usize).is_err() {{");
     let uses: Vec<usize> = (0..lines.len()).filter(|&j| j != k && !is_note(&lines[j]) && mentions(&lines[j], v)).collect();
     let [j] = uses[..] else { return None };
     let (_, ty, rhs) = let_parts(&lines[j])?;
-    (ty.starts_with("Vec<") && rhs.starts_with(&reserve) && !mentions(&rhs.replacen(&reserve, "", 1), v)).then_some((k, j))
+    (ty.starts_with("AlmideList<") && rhs.starts_with(&reserve) && !mentions(&rhs.replacen(&reserve, "", 1), v)).then_some((k, j))
 }
 
 fn render(lines: &[String], p: &Plan) -> Vec<String> {
@@ -220,7 +220,7 @@ fn render(lines: &[String], p: &Plan) -> Vec<String> {
         }
         let decl = let_parts(l);
         match decl {
-            Some((v, ty, _)) if p.sized.iter().any(|&(_, j)| j == k) => out.push(format!("{}let mut {v}: {ty} = Vec::new();", pad(l))),
+            Some((v, ty, _)) if p.sized.iter().any(|&(_, j)| j == k) => out.push(format!("{}let mut {v}: {ty} = AlmideList::new();", pad(l))),
             Some((v, _, _)) if p.lens.contains(&k) => out.push(format!("{}let mut {v}: i64 = {}.count() as i64;", pad(l), p.call)),
             _ if k == p.h => out.push(l.replace(&format!("{}.iter().enumerate()", p.src), &format!("{}.enumerate()", p.call))),
             _ if k > p.h && k < p.e && p.item == StreamItem::Int => out.push(l.replace(&format!("(*{})", p.elem), &p.elem)),
@@ -245,11 +245,11 @@ mod tests {
     }
 
     const SPLIT_MAP: &str = r#"    let mut v21: AlmideString = AlmideString::new();
-    let mut v23: Vec<AlmideString> = crate::almide_str_block::almide_str_list(almide_rt_string_split(&v21, ","));
+    let mut v23: AlmideList<AlmideString> = crate::almide_str_block::almide_str_list(almide_rt_string_split(&v21, ","));
     drop(v21);
     // v26: v23 + 4 bytes
     let mut v27: i64 = v23.len() as i64;
-    let mut v28: Vec<AlmideString> = Vec::new();
+    let mut v28: AlmideList<AlmideString> = AlmideList::new();
     v28.extend(v23.iter().enumerate().map(|(v30, __e_v30)| {
         let v30: i64 = v30 as i64;
         let mut v35: &str = &(*__e_v30)[..];
@@ -265,8 +265,8 @@ mod tests {
         assert!(got.contains("v28.extend(almide_rt_string_split_iter(&v21, \",\").enumerate().map(|(v30, __e_v30)| {"), "{got}");
         assert!(got.contains("let mut v27: i64 = almide_rt_string_split_iter(&v21, \",\").count() as i64;"), "{got}");
         // A length that only sizes the collected list is not counted.
-        let sized = run(&SPLIT_MAP.replace("let mut v28: Vec<AlmideString> = Vec::new();", "let mut v28: Vec<AlmideString> = { let mut r = Vec::new(); if r.try_reserve_exact(v27.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); almide_host_exit(1); } r };"));
-        assert!(!sized.contains("v27") && sized.contains("let mut v28: Vec<AlmideString> = Vec::new();"), "{sized}");
+        let sized = run(&SPLIT_MAP.replace("let mut v28: AlmideList<AlmideString> = AlmideList::new();", "let mut v28: AlmideList<AlmideString> = { let mut r = AlmideList::new(); if r.try_reserve_exact(v27.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); almide_host_exit(1); } r };"));
+        assert!(!sized.contains("v27") && sized.contains("let mut v28: AlmideList<AlmideString> = AlmideList::new();"), "{sized}");
         assert!(!got.contains("let mut v23") && !got.contains("drop(v23)"), "{got}");
         // The argument is released after the loop, not before it.
         let at = got.find("drop(v21);").expect("released");
@@ -289,7 +289,7 @@ mod tests {
         // The block behind a borrow may be written while the loop runs
         // (a shared cell): the list was read before any such write.
         let src = r#"    let mut v12: &AlmdRec2 = v11;
-    let mut v17: Vec<i64> = almide_rt_bytes_to_list(v12);
+    let mut v17: AlmideList<i64> = almide_rt_bytes_to_list(v12);
     for (v20, __e_v20) in v17.iter().enumerate() {
         let v20: i64 = v20 as i64;
         let mut v25: i64 = (*__e_v20);
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn an_int_stream_yields_the_value() {
         let src = r#"    let mut v64: AlmdRec5 = almide_rt_bytes_from_string(v58);
-    let mut v65: Vec<i64> = almide_rt_bytes_to_list(&v64);
+    let mut v65: AlmideList<i64> = almide_rt_bytes_to_list(&v64);
     let mut v70: i64 = 0i64;
     for (v53, __e_v53) in v65.iter().enumerate() {
         let v53: i64 = v53 as i64;

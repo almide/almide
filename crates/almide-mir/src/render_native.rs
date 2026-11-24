@@ -171,7 +171,7 @@ const STACK_GUARD_GLUE_SHIM: &str = "#[inline(never)]\nfn almide_stack_guard_ins
 /// decode loop called per symbol paid a call frame per symbol).
 pub(crate) const OOB_SHIM: &str = "#[cold]\n#[inline(never)]\nfn almide_oob() -> ! {\n    almide_abort(\"index out of bounds\")\n}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize]\n}";
-const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
+const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut [i64], i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { almide_oob() }\n        v[i as usize] = x;\n}";
 
 /// Borrow a stringy value as `&str` for a call argument.
 pub(crate) fn as_str_arg(code: &str, t: NTy) -> String {
@@ -463,6 +463,9 @@ fn render_items(prog: &MirProgram, sigs: &NativeSigs, runtime_module: bool) -> R
         }
         out.push_str(&crate::render_native_rec::runtime_default_impls());
         out.push_str(&format!("}}\n{RT_MOD_END}pub use {RT_MOD}::*;\n\n"));
+        // ADR-0037: `almide_list!` builds the list block in the program
+        // as in the runtime; a macro does not travel through the glob.
+        out.push_str(crate::render_native_str::almide_list_macro());
     }
     let user_start = out.len();
     out.push_str(&crate::render_native_rec::struct_defs());

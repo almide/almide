@@ -82,8 +82,8 @@ fn a_group_that_consumes_the_list_stays_owned() {
     let rust = emitted(SRC, "consumers");
     // keep_b returns `xs + [..]` (consumes) and keep_a returns xs itself:
     // the optimistic first round must be corrected by the next one.
-    assert!(rust.contains("pub fn keep_b(xs: Vec<T>"), "a member that consumes the list owns it:\n{}", grep(&rust, "pub fn keep_"));
-    assert!(rust.contains("pub fn keep_a(xs: Vec<T>"), "its partner, which returns the list, owns it too:\n{}", grep(&rust, "pub fn keep_"));
+    assert!(rust.contains("pub fn keep_b(xs: AlmideList<T>"), "a member that consumes the list owns it:\n{}", grep(&rust, "pub fn keep_"));
+    assert!(rust.contains("pub fn keep_a(xs: AlmideList<T>"), "its partner, which returns the list, owns it too:\n{}", grep(&rust, "pub fn keep_"));
 }
 
 fn grep(rust: &str, needle: &str) -> String {

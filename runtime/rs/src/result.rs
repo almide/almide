@@ -52,9 +52,9 @@ pub fn almide_rt_result_flatten<T, E>(r: Result<Result<T, E>, E>) -> Result<T, E
     match r { Ok(inner) => inner, Err(e) => Err(e) }
 }
 
-pub fn almide_rt_result_partition<T, E>(rs: Vec<Result<T, E>>) -> (Vec<T>, Vec<E>) {
-    let mut oks = Vec::new();
-    let mut errs = Vec::new();
+pub fn almide_rt_result_partition<T: Clone, E: Clone>(rs: AlmideList<Result<T, E>>) -> (AlmideList<T>, AlmideList<E>) {
+    let mut oks = AlmideList::new();
+    let mut errs = AlmideList::new();
     for r in rs {
         match r {
             Ok(v) => oks.push(v),

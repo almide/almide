@@ -165,7 +165,7 @@ fn parallel_map_hof() -> Result<Hof, String> {
         .chars().filter(|c| !c.is_whitespace()).collect();
     if params != [fan_rust_type(&dparams[0]).ok_or("fan input ABI")?, "F".into()]
         || Some(rust_ret) != fan_rust_type(&ret)
-        || !head.contains(&format!("<A:Send+Sync+Clone,B:Send,F:{callback}+Send+Sync>")) {
+        || !head.contains(&format!("<A:Send+Sync+Clone,B:Send+Clone,F:{callback}+Send+Sync>")) {
         return Err("parallel runtime signature disagrees with the compiler builtin".into());
     }
     Ok(fan_map_route(symbol, symbol.into(), (dparams, ret), items))
@@ -222,7 +222,7 @@ fn fan_rust_type(ty: &DTy) -> Option<String> {
         DTy::Var(v) => v.clone(),
         DTy::Str => "AlmideString".into(),
         DTy::Bool => "bool".into(),
-        DTy::List(e) => format!("Vec<{}>", fan_rust_type(e)?),
+        DTy::List(e) => format!("AlmideList<{}>", fan_rust_type(e)?),
         DTy::Result(a, b) => format!("Result<{},{}>", fan_rust_type(a)?, fan_rust_type(b)?),
         DTy::Fn(ps, r) => format!("Fn({})->{}", ps.iter().map(fan_rust_type).collect::<Option<Vec<_>>>()?.join(","), fan_rust_type(r)?),
         _ => return None,
@@ -248,10 +248,16 @@ fn parallel_declared_hof(module: &str, func: &str, symbol: &str) -> Result<Hof, 
     let borrowed = rust_params.first() == Some(&slice_ty);
     if rust_params != [if borrowed { slice_ty } else { input_ty }, "F".into()]
         || Some(rust_ret) != fan_rust_type(&ret) { return Err("parallel runtime signature disagrees".into()); }
-    let mut bounds: Vec<_> = names.iter().map(|n| format!("{n}:{}", if n == input_name { "Send+Sync+Clone" } else { "Send" })).collect();
-    bounds.push(format!("F:{}+Send+Sync", fan_rust_type(callback).ok_or("parallel callback ABI")?));
+    // An output element is `Send`, and `Clone` too where the runtime collects
+    // it into a list block (ADR-0037: a block's writes need `Clone`).
     let head: String = items.first().ok_or("no parallel body")?.split('{').next().unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect();
-    if !head.contains(&format!("<{}>", bounds.join(","))) { return Err("parallel runtime callback bounds disagree".into()); }
+    let callback_bound = format!("F:{}+Send+Sync", fan_rust_type(callback).ok_or("parallel callback ABI")?);
+    let agrees = ["Send", "Send+Clone"].iter().any(|out| {
+        let mut bounds: Vec<_> = names.iter().map(|n| format!("{n}:{}", if n == input_name { "Send+Sync+Clone" } else { out })).collect();
+        bounds.push(callback_bound.clone());
+        head.contains(&format!("<{}>", bounds.join(",")))
+    });
+    if !agrees { return Err("parallel runtime callback bounds disagree".into()); }
     Ok(Hof { symbol: symbol.into(), twin: symbol.into(),
         params: dparams.into_iter().enumerate().map(|(i, d)| (d, i == 0 && borrowed)).collect(),
         mutable: vec![false; 2], matrix_ref_lists: vec![false; 2], ret, items, bounds: Vec::new(), owned: None })

@@ -93,12 +93,21 @@ if [ "$rc" -ne 1 ] || ! grep -q MISMATCH "$OUT/tamper/verify"; then
 fi
 echo "  ok: the flipped byte reads MISMATCH (exit 1)"
 
-echo "== the extracted checker judges every witness; the kernel file is generated =="
-KGEN="$(mktemp /tmp/KernelNative_XXXXXX).v"
+echo "== the extracted checker judges every witness; the kernel files are generated =="
+# SEVERAL FILES, one coqc each, as in corpus-wall.sh and structural-wall.sh: a
+# closed goal stays in the environment of the process that closed it, so one
+# coqc over every goal grows with the corpus. The same goals, each with the
+# same `Qed`, are written across files of at most KERNEL_PART_BYTES of goal
+# text, and each file is compiled by its own process, KERNEL_JOBS at a time.
+# Any file that fails fails the wall.
+KERNEL_PART_BYTES="${KERNEL_PART_BYTES:-200000}"
+KERNEL_JOBS="${KERNEL_JOBS:-2}"
+KDIR="$(mktemp -d /tmp/KernelNative_XXXXXX)"
 set +e
-python3 - "$OUT" "$ROOT/proofs/checker" "$KGEN" <<'PYEOF'
+python3 - "$OUT" "$ROOT/proofs/checker" "$KDIR" "$KERNEL_PART_BYTES" <<'PYEOF'
 import os, subprocess, sys
-out, checker, kgen = sys.argv[1:4]
+out, checker, kdir = sys.argv[1:4]
+budget = int(sys.argv[4])
 
 def parse(path):
     b = open(path, "rb").read()
@@ -151,20 +160,44 @@ for row in open(os.path.join(out, "index")):
 
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
-with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NativeCalls BoundsCert.\n")
-    g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
-    LIMIT = 60000
-    for prop, fn_name in KERNEL_FN.items():
-        chunk, size = [], 0
-        for w in [w for p, w in accepts if p == prop] + [None]:
-            if w is None or (chunk and size + len(w) > LIMIT):
-                if chunk:
-                    g.write("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (fn_name, ";".join(lit(x) for x in chunk)))
-                chunk, size = [], 0
-            if w is not None:
-                chunk.append(w)
-                size += len(w)
+HEADER = ("From AlmideTrust Require Import OwnershipChecker NativeCalls BoundsCert.\n"
+          "From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
+class Parts:
+    """The goals, in order, across files of at most `budget` bytes of goal text
+    (a goal larger than that has a file to itself). Never zero files: with no
+    goal at all there is still the header to compile, as before."""
+    def __init__(self):
+        self.files, self.goals, self.bytes, self.f, self.size = 0, 0, 0, None, 0
+    def start(self):
+        self.f = open(os.path.join(kdir, "Part%04d.v" % self.files), "w")
+        self.f.write(HEADER)
+        self.files, self.size = self.files + 1, 0
+    def goal(self, text):
+        if self.f is None:
+            self.start()
+        elif self.size and self.size + len(text) > budget:
+            self.f.close()
+            self.start()
+        self.f.write(text)
+        self.size, self.goals, self.bytes = self.size + len(text), self.goals + 1, self.bytes + len(text)
+    def close(self):
+        if self.f is None:
+            self.start()
+        self.f.close()
+parts = Parts()
+LIMIT = 60000
+for prop, fn_name in KERNEL_FN.items():
+    chunk, size = [], 0
+    for w in [w for p, w in accepts if p == prop] + [None]:
+        if w is None or (chunk and size + len(w) > LIMIT):
+            if chunk:
+                parts.goal("Goal forallb %s [%s] = true.\nProof. vm_compute. reflexivity. Qed.\n" % (fn_name, ";".join(lit(x) for x in chunk)))
+            chunk, size = [], 0
+        if w is not None:
+            chunk.append(w)
+            size += len(w)
+parts.close()
+print("  kernel file: %d goal(s), %d byte(s) of goal text, in %d part(s) of at most %d byte(s)" % (parts.goals, parts.bytes, parts.files, budget))
 
 n = sum(1 for _ in open(os.path.join(out, "index")))
 nown = sum(1 for p, _ in accepts if p == "ownership")
@@ -178,18 +211,26 @@ PYEOF
 PRC=$?
 set -e
 if [ "$PRC" -ne 0 ]; then
-  rm -f "$KGEN"
+  rm -rf "$KDIR"
   echo "NATIVE WALL FAIL: a rendered program's witness is rejected, or the verdicts disagree (above)." >&2
   exit 1
 fi
 
 echo "== KERNEL ORACLE: the Rocq kernel re-derives every verdict above =="
-if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$KGEN" >/dev/null 2>&1); then
-  echo "  KERNEL OK: every native witness verdict certified by the Rocq kernel (vm_compute)"
-  rm -f "$KGEN" "${KGEN%.v}.vo" "${KGEN%.v}.vos" "${KGEN%.v}.vok" "${KGEN%.v}.glob"
+# One coqc per part. A part that fails ends xargs at once (exit 255), so the
+# wall stops at the first failure with a non-zero status; and the verdict is
+# OK only when every part written has its compiled file beside it.
+KRC=0
+(cd "$ROOT/proofs" && find "$KDIR" -name 'Part*.v' | sort \
+  | xargs -P "$KERNEL_JOBS" -I{} sh -c '"$0" -Q . AlmideTrust "$1" >/dev/null 2>&1 || exit 255' "$COQC" {}) || KRC=$?
+KPARTS="$(find "$KDIR" -name 'Part*.v' | wc -l | tr -d ' ')"
+KDONE="$(find "$KDIR" -name 'Part*.vo' | wc -l | tr -d ' ')"
+if [ "$KRC" -eq 0 ] && [ "$KPARTS" -ge 1 ] && [ "$KDONE" -eq "$KPARTS" ]; then
+  echo "  KERNEL OK: every native witness verdict certified by the Rocq kernel (vm_compute, $KPARTS part(s), $KERNEL_JOBS at a time)"
+  rm -rf "$KDIR"
 else
   echo "NATIVE WALL FAIL: the KERNEL disagrees with the extracted checker on a native witness." >&2
-  rm -f "$KGEN"
+  rm -rf "$KDIR"
   exit 1
 fi
 

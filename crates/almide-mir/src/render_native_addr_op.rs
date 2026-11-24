@@ -601,7 +601,7 @@ fn store_rec_field(s: AddrSink<'_>, ad: Addr, v: ValueId, i: u16, k: usize) -> R
                 if st.still_empty_list(&sv.base)
                     && (f == NTy::VecStr || matches!(f, NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some())) =>
             {
-                "Vec::new()".to_string()
+                "AlmideList::new()".to_string()
             }
             other => return Err(wall(format!("native: a {other:?} value stored into a {f:?} record field"))),
         },
@@ -672,7 +672,7 @@ fn store_list_slot(s: AddrSink<'_>, ad: Addr, v: ValueId, ix: &str) -> Result<bo
             }
             if list_literal::complete(ad.base, (n, k)) {
                 let es: Vec<String> = (0..n).map(|j| format!("{b}_e{j}")).collect();
-                line!("let mut {b}: {} = vec![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
+                line!("let mut {b}: {} = almide_list![{}];", owned_ty_of(ty(tys, &ad.base)), es.join(", "));
             }
             return Ok(true);
         }

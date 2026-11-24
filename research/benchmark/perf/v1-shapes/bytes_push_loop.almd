@@ -1,0 +1,25 @@
+// v1-vs-v0 shape bench: a held Bytes buffer cleared, then filled by
+// `bytes.push` in an inner loop that only appends to it (fasta's line loop);
+// and a List filled the same way.
+fn main() -> Unit = {
+  var buf = bytes.zeros(64)
+  var xs: List[Int] = []
+  var total = 0
+  var line = 0
+  while line < 20000 {
+    bytes.clear(buf)
+    var i = 0
+    while i < 60 {
+      bytes.push(buf, (line + i) % 251)
+      i = i + 1
+    }
+    total = total + bytes.len(buf)
+    line = line + 1
+  }
+  var j = 0
+  while j < 100000 {
+    list.push(xs, j % 7)
+    j = j + 1
+  }
+  println(int.to_string(total + list.len(xs)))
+}

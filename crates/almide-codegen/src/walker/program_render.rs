@@ -397,6 +397,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     render_program_top_lets(&ctx, program, &mut parts);
     render_program_functions(&ctx, program, &mut parts);
     render_program_test_fns(&ctx, program, &mut parts);
+    render_callback_faces(&ctx, program, &mut parts);
 
     // Modules are flattened by ir_link_flatten into root functions/types/top_lets.
     // No per-module iteration needed.

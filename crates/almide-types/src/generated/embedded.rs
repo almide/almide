@@ -1074,8 +1074,11 @@ fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
 
 
+
+
 @intrinsic("almide_rt_bytes_append_fresh")
 @reuse(b)
+@appends
 fn __append(b: Bytes, val: Int) -> Bytes = _
 
 

@@ -88,8 +88,11 @@ fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 // `b` with the low 8 bits of `val` appended, a fresh Bytes: the functional
 // form a `bytes.push(buf, x)` statement lowers to (`buf = bytes.append(buf,
 // x)`), which the self-hosted `bytes.append` specializes (`@specializes`).
+// `@appends`: a loop that only appends to a Bytes it holds keeps its length
+// local (crates/almide-mir `render_native_appends`).
 @intrinsic("almide_rt_bytes_append_fresh")
 @reuse(b)
+@appends
 fn __append(b: Bytes, val: Int) -> Bytes = _
 
 // `b[pos]`, the checked read: a negative or past-the-end `pos` aborts with

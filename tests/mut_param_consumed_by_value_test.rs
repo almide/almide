@@ -116,11 +116,11 @@ fn every_by_value_position_of_a_mut_param_owns_the_read() {
     for (name, spelling) in [
         ("ret_tail", "t.clone()"),
         ("into_record", "t: t.clone()"),
-        ("into_list", "vec![t.clone()]"),
+        ("into_list", "almide_list![t.clone()]"),
         ("into_tuple", "(t.clone(), 7i64)"),
         ("into_let", "let u: Table = t.clone();"),
         ("concat_str", "concat(s.to_almide(), AlmideString::from(\"!\")"),
-        ("concat_list", "concat(xs.to_vec(), vec![10i64])"),
+        ("concat_list", "concat(xs.to_list(), almide_list![10i64])"),
     ] {
         let body = fn_body(&rust, name);
         assert!(body.contains(spelling), "{name}: expected `{spelling}` in\n{body}");

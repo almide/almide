@@ -23,7 +23,7 @@ pub enum AlmideValue {
     Int(i64),
     Float(f64),
     Str(AlmideString),
-    Array(Vec<AlmideValue>),
+    Array(AlmideList<AlmideValue>),
     Object(AlmideObject),
 }
 
@@ -44,16 +44,16 @@ const ALMIDE_OBJECT_INDEX_MIN: usize = 16;
 /// updated.
 #[derive(Default)]
 pub struct AlmideObject {
-    pairs: Vec<(AlmideKey, AlmideValue)>,
+    pairs: AlmideList<(AlmideKey, AlmideValue)>,
     index: Option<std::collections::HashMap<AlmideKey, usize>>,
 }
 
 impl AlmideObject {
-    pub fn new() -> Self { AlmideObject { pairs: Vec::new(), index: None } }
-    pub fn with_capacity(n: usize) -> Self { AlmideObject { pairs: Vec::with_capacity(n), index: None } }
+    pub fn new() -> Self { AlmideObject { pairs: AlmideList::new(), index: None } }
+    pub fn with_capacity(n: usize) -> Self { AlmideObject { pairs: AlmideList::with_capacity(n), index: None } }
     /// The pairs as given, in order; the index is built when first needed.
-    pub fn from_pairs(pairs: Vec<(AlmideKey, AlmideValue)>) -> Self { AlmideObject { pairs, index: None } }
-    pub fn into_pairs(self) -> Vec<(AlmideKey, AlmideValue)> { self.pairs }
+    pub fn from_pairs(pairs: AlmideList<(AlmideKey, AlmideValue)>) -> Self { AlmideObject { pairs, index: None } }
+    pub fn into_pairs(self) -> AlmideList<(AlmideKey, AlmideValue)> { self.pairs }
     /// Build the index if the Object is big enough to want one and has none.
     fn ensure_index(&mut self) {
         if self.index.is_none() && self.pairs.len() >= ALMIDE_OBJECT_INDEX_MIN {
@@ -124,8 +124,8 @@ impl std::fmt::Debug for AlmideObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.pairs.fmt(f) }
 }
 
-impl From<Vec<(AlmideKey, AlmideValue)>> for AlmideObject {
-    fn from(pairs: Vec<(AlmideKey, AlmideValue)>) -> Self { AlmideObject::from_pairs(pairs) }
+impl From<AlmideList<(AlmideKey, AlmideValue)>> for AlmideObject {
+    fn from(pairs: AlmideList<(AlmideKey, AlmideValue)>) -> Self { AlmideObject::from_pairs(pairs) }
 }
 
 impl FromIterator<(AlmideKey, AlmideValue)> for AlmideObject {
@@ -134,7 +134,7 @@ impl FromIterator<(AlmideKey, AlmideValue)> for AlmideObject {
 
 impl IntoIterator for AlmideObject {
     type Item = (AlmideKey, AlmideValue);
-    type IntoIter = std::vec::IntoIter<(AlmideKey, AlmideValue)>;
+    type IntoIter = <AlmideList<(AlmideKey, AlmideValue)> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter { self.pairs.into_iter() }
 }
 
@@ -182,7 +182,7 @@ pub fn almide_rt_value_str(s: &str) -> AlmideValue { AlmideValue::Str(AlmideStri
 pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
-pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
+pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(AlmideList::from(items)) }
 pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())) }
 /// No Object holds a key twice (C-401, #4112): a pair list that repeats a key
 /// is folded as one upsert per pair — the key keeps the POSITION of its first
@@ -191,7 +191,7 @@ pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideVa
 /// `to_map`) sees one entry, and `json.stringify` never writes a key twice.
 /// Small lists compare pairwise; from 16 pairs the Object's own key index
 /// answers (#4297), and the Object keeps it.
-pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> AlmideObject {
+pub(crate) fn almide_rt_object_upsert(pairs: AlmideList<(AlmideKey, AlmideValue)>) -> AlmideObject {
     if pairs.len() < ALMIDE_OBJECT_INDEX_MIN
         && !(1..pairs.len()).any(|i| pairs[..i].iter().any(|(k, _)| *k == pairs[i].0))
     {
@@ -208,8 +208,8 @@ pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> A
 // value and its elements MOVED into the Value. The borrowing forms above
 // cloned every element, so building a document copied each subtree once per
 // nesting level, and freed the copies' originals right after.
-pub fn almide_rt_value_array_owned(items: Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items) }
-pub fn almide_rt_value_object_owned(pairs: Vec<(AlmideString, AlmideValue)>) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.into_iter().map(|(k, v)| (almide_rt_intern_key(&k), v)).collect())) }
+pub fn almide_rt_value_array_owned(items: AlmideList<AlmideValue>) -> AlmideValue { AlmideValue::Array(items) }
+pub fn almide_rt_value_object_owned(pairs: AlmideList<(AlmideString, AlmideValue)>) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.into_iter().map(|(k, v)| (almide_rt_intern_key(&k), v)).collect())) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user
@@ -287,11 +287,11 @@ pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, AlmideString> {
     __almide_r.map_err(Into::into)
 }
 pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, AlmideString> { let __almide_r: Result<bool, String> = (|| { match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> { let __almide_r: Result<Vec<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<AlmideList<AlmideValue>, AlmideString> { let __almide_r: Result<AlmideList<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 /// `value.as_object` (R-value-02): the Object's pairs in order, the `as_array`
 /// family's Object cell; any other kind is the same `expected Object` err
 /// `value.__field` gives.
-pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<Vec<(AlmideString, AlmideValue)>, AlmideString> {
+pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<AlmideList<(AlmideString, AlmideValue)>, AlmideString> {
     match v {
         AlmideValue::Object(pairs) => Ok(pairs.iter().map(|(k, x)| (AlmideString::from(k.as_ref()), x.clone())).collect()),
         _ => Err(AlmideString::from(format!("expected Object, received {}", almide_rt_value_kind(v)))),
@@ -299,7 +299,7 @@ pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<Vec<(AlmideString, A
 }
 /// The `@reuse` twin (#2157): a Value at its last use hands its items over
 /// instead of having every element (each a whole subtree) cloned out of it.
-pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> {
+pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<AlmideList<AlmideValue>, AlmideString> {
     match v {
         AlmideValue::Array(a) => Ok(a),
         other => Err(AlmideString::from(format!("expected Array, received {}", almide_rt_value_kind(&other)))),
@@ -308,11 +308,11 @@ pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<Vec<AlmideValue>
 
 // ── List encode/decode ──
 
-pub fn almide_rt_value_encode_list<T, F: Fn(T) -> AlmideValue>(items: Vec<T>, f: F) -> AlmideValue {
+pub fn almide_rt_value_encode_list<T: Clone, F: Fn(T) -> AlmideValue>(items: AlmideList<T>, f: F) -> AlmideValue {
     AlmideValue::Array(items.into_iter().map(f).collect())
 }
-pub fn almide_rt_value_decode_list<T, F: Fn(AlmideValue) -> Result<T, AlmideString>>(v: AlmideValue, f: F) -> Result<Vec<T>, AlmideString> {
-    let __almide_r: Result<Vec<T>, AlmideString> = (|| {
+pub fn almide_rt_value_decode_list<T: Clone, F: Fn(AlmideValue) -> Result<T, AlmideString>>(v: AlmideValue, f: F) -> Result<AlmideList<T>, AlmideString> {
+    let __almide_r: Result<AlmideList<T>, AlmideString> = (|| {
         match v {
             AlmideValue::Array(items) => items.into_iter().enumerate()
                 .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
@@ -326,8 +326,8 @@ pub fn almide_rt_value_decode_list<T, F: Fn(AlmideValue) -> Result<T, AlmideStri
 /// By-reference twin of `almide_rt_value_decode_list` for an element decoder
 /// that BORROWS its input (#1679): every derived `T.decode` takes `&AlmideValue`,
 /// so the elements are read in place instead of moved out of a copy.
-pub fn almide_rt_value_decode_list_ref<T, F: Fn(&AlmideValue) -> Result<T, AlmideString>>(v: &AlmideValue, f: F) -> Result<Vec<T>, AlmideString> {
-    let __almide_r: Result<Vec<T>, AlmideString> = (|| {
+pub fn almide_rt_value_decode_list_ref<T: Clone, F: Fn(&AlmideValue) -> Result<T, AlmideString>>(v: &AlmideValue, f: F) -> Result<AlmideList<T>, AlmideString> {
+    let __almide_r: Result<AlmideList<T>, AlmideString> = (|| {
         match v {
             AlmideValue::Array(items) => items.iter().enumerate()
                 .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
@@ -427,17 +427,17 @@ pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(AlmideValue) -> Resul
 
 // ── Concrete list helpers ──
 
-pub fn almide_rt___encode_list_string(items: Vec<AlmideString>) -> AlmideValue { almide_rt_value_encode_list(items, |s| almide_rt_value_str(&s)) }
-pub fn almide_rt___encode_list_int(items: Vec<i64>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_int) }
-pub fn almide_rt___encode_list_float(items: Vec<f64>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_float) }
-pub fn almide_rt___encode_list_bool(items: Vec<bool>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_bool) }
+pub fn almide_rt___encode_list_string(items: AlmideList<AlmideString>) -> AlmideValue { almide_rt_value_encode_list(items, |s| almide_rt_value_str(&s)) }
+pub fn almide_rt___encode_list_int(items: AlmideList<i64>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_int) }
+pub fn almide_rt___encode_list_float(items: AlmideList<f64>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_float) }
+pub fn almide_rt___encode_list_bool(items: AlmideList<bool>) -> AlmideValue { almide_rt_value_encode_list(items, almide_rt_value_bool) }
 // The primitive list decoders borrow their input (#1679): the derive's
 // `__decode_list_<prim>(field)` call is borrow-wrapped by BorrowInsertion from
 // this signature, and the walker folds that into a `value_field_ref` lookup.
-pub fn almide_rt___decode_list_string(v: &AlmideValue) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<AlmideString>, AlmideString> = { almide_rt_value_decode_list_ref(v, almide_rt_value_as_string) }; __almide_v.into_almide() }
-pub fn almide_rt___decode_list_int(v: &AlmideValue) -> Result<Vec<i64>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_int) }
-pub fn almide_rt___decode_list_float(v: &AlmideValue) -> Result<Vec<f64>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_float) }
-pub fn almide_rt___decode_list_bool(v: &AlmideValue) -> Result<Vec<bool>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_bool) }
+pub fn almide_rt___decode_list_string(v: &AlmideValue) -> Result<AlmideList<AlmideString>, AlmideString> { let __almide_v: Result<AlmideList<AlmideString>, AlmideString> = { almide_rt_value_decode_list_ref(v, almide_rt_value_as_string) }; __almide_v.into_almide() }
+pub fn almide_rt___decode_list_int(v: &AlmideValue) -> Result<AlmideList<i64>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_int) }
+pub fn almide_rt___decode_list_float(v: &AlmideValue) -> Result<AlmideList<f64>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_float) }
+pub fn almide_rt___decode_list_bool(v: &AlmideValue) -> Result<AlmideList<bool>, AlmideString> { almide_rt_value_decode_list_ref(v, almide_rt_value_as_bool) }
 
 // ── Concrete option helpers ──
 
@@ -463,10 +463,10 @@ pub fn almide_rt___decode_default_bool(v: &AlmideValue, key: AlmideString, defau
 // a present key decodes through the same per-element path the required-field
 // form uses. Without these the derive emitted `__decode_default_value`, a
 // name no runtime provides — check green, rustc E0425.
-pub fn almide_rt___decode_default_list_string(v: &AlmideValue, key: AlmideString, default: Vec<AlmideString>) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<AlmideString>, AlmideString> = { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }; __almide_v.into_almide() }
-pub fn almide_rt___decode_default_list_int(v: &AlmideValue, key: AlmideString, default: Vec<i64>) -> Result<Vec<i64>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
-pub fn almide_rt___decode_default_list_float(v: &AlmideValue, key: AlmideString, default: Vec<f64>) -> Result<Vec<f64>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
-pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: AlmideString, default: Vec<bool>) -> Result<Vec<bool>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
+pub fn almide_rt___decode_default_list_string(v: &AlmideValue, key: AlmideString, default: AlmideList<AlmideString>) -> Result<AlmideList<AlmideString>, AlmideString> { let __almide_v: Result<AlmideList<AlmideString>, AlmideString> = { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }; __almide_v.into_almide() }
+pub fn almide_rt___decode_default_list_int(v: &AlmideValue, key: AlmideString, default: AlmideList<i64>) -> Result<AlmideList<i64>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
+pub fn almide_rt___decode_default_list_float(v: &AlmideValue, key: AlmideString, default: AlmideList<f64>) -> Result<AlmideList<f64>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
+pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: AlmideString, default: AlmideList<bool>) -> Result<AlmideList<bool>, AlmideString> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
 
 // ── AlmideValue utilities ──
 
@@ -474,11 +474,11 @@ pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: AlmideString, 
 /// `almide_json_keys`) so a program that uses `value.__keys` but never `json` still
 /// links — the native runtime is included per-module, so a cross-module reference
 /// would be undefined on a value-only program (#416 native-link fix).
-pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
-    let __almide_v: Vec<String> = {
+pub fn almide_rt_value_keys(v: &AlmideValue) -> AlmideList<AlmideString> {
+    let __almide_v: AlmideList<String> = {
         match v {
             AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(),
-            _ => vec![],
+            _ => almide_list![],
         }
     };
     __almide_v.into_almide()
@@ -581,7 +581,7 @@ pub fn almide_rt_value_omit(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
             // pairs by doubling, a reallocation copy at a few sizes, which
             // left the cost's growth uneven across sizes (the re-inspection's
             // 3% fit refused it, rms 6.3%).
-            let mut kept = Vec::with_capacity(pairs.len());
+            let mut kept = AlmideList::with_capacity(pairs.len());
             kept.extend(pairs.iter().filter(|(k, _)| !drop.contains(k.as_ref())).cloned());
             AlmideValue::Object(AlmideObject::from_pairs(kept))
         }

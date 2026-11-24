@@ -14,8 +14,8 @@ fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
         (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
         (NTy::Str, NTy::Str) => format!("{code}.clone()"),
         (NTy::Str, NTy::StrRef) => format!("AlmideString::from({code})"),
-        (NTy::Vec, NTy::Vec | NTy::VecRef) => format!("{code}.to_vec()"),
-        (NTy::VecStr, NTy::VecStr | NTy::VecStrRef) => format!("{code}.to_vec()"),
+        (NTy::Vec, NTy::Vec | NTy::VecRef) => format!("{code}.to_list()"),
+        (NTy::VecStr, NTy::VecStr | NTy::VecStrRef) => format!("{code}.to_list()"),
         (a @ (NTy::Opt | NTy::Res | NTy::ResStr), b) if a == b => format!("{code}.clone()"),
         (NTy::Rec(i), NTy::Rec(j) | NTy::RecRef(j)) if i == j => format!("{code}.clone()"),
         _ => return crate::native_value_repr::tuple_copy(code, got, want),
@@ -51,11 +51,11 @@ fn is_str_value_pairs(list: u16) -> bool {
 fn owned_pairs(code: &str, got: NTy, dying: bool) -> Option<String> {
     match got {
         NTy::Rec(i) if is_str_value_pairs(i) && dying => Some(format!(
-            "{}.into_iter().map(|t| (t.f0, t.f1)).collect::<Vec<_>>()",
+            "{}.into_iter().map(|t| (t.f0, t.f1)).collect::<AlmideList<_>>()",
             crate::render_native_move::take_expr(code)
         )),
         NTy::Rec(i) | NTy::RecRef(i) if is_str_value_pairs(i) => {
-            Some(format!("{code}.iter().map(|t| (t.f0.clone(), t.f1.clone())).collect::<Vec<_>>()"))
+            Some(format!("{code}.iter().map(|t| (t.f0.clone(), t.f1.clone())).collect::<AlmideList<_>>()"))
         }
         _ => None,
     }
@@ -97,11 +97,11 @@ fn converted_list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
     let elem_of = |i: u16| crate::render_native_rec::list_elem(i);
     match (elem, got) {
         // The render's float list holds each cell's bits.
-        (ListElem::Float, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()")),
+        (ListElem::Float, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| f64::from_bits(*x as u64)).collect::<AlmideList<f64>>()")),
         // And a bool list each cell's 0 / 1.
-        (ListElem::Bool, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| *x != 0).collect::<Vec<bool>>()")),
+        (ListElem::Bool, NTy::Vec | NTy::VecRef) => Some(format!("&{code}.iter().map(|x| *x != 0).collect::<AlmideList<bool>>()")),
         (ListElem::FloatRows, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i) == Some(NTy::Vec) => Some(format!(
-            "&{code}.iter().map(|r| r.iter().map(|x| f64::from_bits(*x as u64)).collect::<Vec<f64>>()).collect::<Vec<Vec<f64>>>()"
+            "&{code}.iter().map(|r| r.iter().map(|x| f64::from_bits(*x as u64)).collect::<AlmideList<f64>>()).collect::<AlmideList<AlmideList<f64>>>()"
         )),
         (ListElem::Matrix, NTy::Rec(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => Some(format!("&{code}")),
         (ListElem::Matrix, NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_matrix) => Some(code.to_string()),
@@ -109,7 +109,7 @@ fn converted_list_arg(elem: ListElem, code: &str, got: NTy) -> Option<String> {
         // (v0 hands it shared blocks): lend it a slice of the blocks' references,
         // which meets that bound and every other a reference meets.
         (ListElem::Bytes, NTy::Rec(i) | NTy::RecRef(i)) if elem_of(i).is_some_and(crate::render_native_rec::is_bytes) => {
-            Some(format!("&{code}.iter().collect::<Vec<&Vec<u8>>>()"))
+            Some(format!("&{code}.iter().collect::<AlmideList<&AlmideList<u8>>>()"))
         }
         _ => None,
     }
@@ -279,7 +279,7 @@ fn borrowed_list_arg(cx: &CallCx, elem: ListElem, code: &str, got: NTy) -> Optio
 fn owned_list_arg(cx: &CallCx, elem: ListElem, code: &str, got: &NTy, dying_here: bool) -> Result<String, LowerError> {
     let borrowed = borrowed_list_arg(cx, elem, code, *got).ok_or_else(cx.mismatch)?;
     let moves = dying_here && borrowed == format!("&{code}") && matches!(got, NTy::Vec | NTy::VecStr | NTy::Rec(_));
-    Ok(if moves { crate::render_native_move::take_expr(code) } else { format!("({borrowed}).to_vec()") })
+    Ok(if moves { crate::render_native_move::take_expr(code) } else { format!("({borrowed}).to_list()") })
 }
 
 /// An accepted runtime-typed value, borrowed or cloned as the param asks. The
@@ -400,7 +400,7 @@ fn set_source_list_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
     };
     if crate::native_value_repr::same_owned(want, elem) { return list_arg(ListElem::Any, code, got); }
     let value = owned_arg(want, "(*__item)", elem)?;
-    Some(format!("&({code}).iter().map(|__item| {value}).collect::<Vec<_>>()"))
+    Some(format!("&({code}).iter().map(|__item| {value}).collect::<AlmideList<_>>()"))
 }
 
 /// A `Map[K, V]` param's argument.
@@ -481,9 +481,9 @@ fn map_pairs_arg(cx: &CallCx, code: &str, got: &NTy, dying: bool) -> Result<Stri
         "native: map pair value cannot convert {got_v:?} to {want_v:?} in `{}`", cx.name
     )))? };
     Ok(if moved {
-        format!("{}.into_iter().map(|t| ({a}, {b})).collect::<Vec<_>>()", crate::render_native_move::take_expr(code))
+        format!("{}.into_iter().map(|t| ({a}, {b})).collect::<AlmideList<_>>()", crate::render_native_move::take_expr(code))
     } else {
-        format!("{code}.iter().map(|t| ({a}, {b})).collect::<Vec<_>>()")
+        format!("{code}.iter().map(|t| ({a}, {b})).collect::<AlmideList<_>>()")
     })
 }
 
@@ -540,9 +540,9 @@ mod tests {
         let (p, r) = rust_signature("pub fn almide_rt_x<T: Clone>(xs: &[T], n: i64) -> Result<i64, AlmideString> { x }").unwrap();
         assert_eq!(p, vec!["&[T]", "i64"]);
         assert_eq!(r, "Result<i64, AlmideString>");
-        let (p, r) = rust_signature("pub fn apply<A, F: Fn(A) -> Result<A, String> + Send>(xs: Vec<A>, f: F) -> Vec<A> { x }").unwrap();
-        assert_eq!(p, ["Vec<A>", "F"]);
-        assert_eq!(r, "Vec<A>");
+        let (p, r) = rust_signature("pub fn apply<A, F: Fn(A) -> Result<A, String> + Send>(xs: AlmideList<A>, f: F) -> AlmideList<A> { x }").unwrap();
+        assert_eq!(p, ["AlmideList<A>", "F"]);
+        assert_eq!(r, "AlmideList<A>");
         let (p, r) = rust_signature("fn apply(f: std::rc::Rc<dyn Fn(i64) -> i64>, n: i64) -> i64 { x }").unwrap();
         assert_eq!(p, ["std::rc::Rc<dyn Fn(i64) -> i64>", "i64"]);
         assert_eq!(r, "i64");

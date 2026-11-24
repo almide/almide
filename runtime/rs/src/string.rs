@@ -39,7 +39,7 @@ pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
     let mut lowered = full.chars();
     let mut out = String::with_capacity(full.len());
     for c in s.chars() {
-        let span: Vec<char> = lowered.by_ref().take(c.to_lowercase().count()).collect();
+        let span: AlmideList<char> = lowered.by_ref().take(c.to_lowercase().count()).collect();
         almide_case_push(&mut out, c, span.into_iter());
     }
     out.into()
@@ -139,7 +139,7 @@ fn almide_string_ascii_sep(sep: &str) -> Option<char> {
 // converting the Vec would allocate, copy and free every piece twice under
 // the shared buffer. The pieces are the streaming twin's, collected, so the
 // list and the stream cannot disagree.
-pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
+pub fn almide_rt_string_split(s: &str, sep: &str) -> AlmideList<AlmideString> {
     almide_rt_string_split_iter(s, sep).map(AlmideString::from).collect()
 }
 // The streaming twin of `split` (native render, `render_native_loops`): the
@@ -205,7 +205,7 @@ pub fn almide_rt_string_repeat(s: &str, n: i64) -> AlmideString {
     __almide_out.into()
 }
 pub fn almide_rt_string_reverse(s: &str) -> AlmideString { let __almide_out: String = s.chars().rev().collect(); __almide_out.into() }
-pub fn almide_rt_string_chars(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.chars().map(|c| c.to_string()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_string_chars(s: &str) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = { s.chars().map(|c| c.to_string()).collect() }; __almide_v.into_almide() }
 pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<AlmideString> {
     let __almide_v: Option<String> = {
         if i < 0 { return None; }
@@ -217,7 +217,7 @@ pub fn almide_rt_string_char_count(s: &str) -> i64 { s.chars().count() as i64 }
 pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|b| s[..b].chars().count() as i64) }
 pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|b| s[..b].chars().count() as i64) }
 pub fn almide_rt_string_count_matches(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
-pub fn almide_rt_string_lines(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.lines().map(|l| l.to_string()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_string_lines(s: &str) -> AlmideList<AlmideString> { let __almide_v: AlmideList<String> = { s.lines().map(|l| l.to_string()).collect() }; __almide_v.into_almide() }
 pub fn almide_rt_string_is_empty(s: &str) -> bool { s.is_empty() }
 pub fn almide_rt_string_is_whitespace(s: &str) -> bool { s.chars().all(|c| c.is_whitespace()) }
 pub fn almide_rt_string_is_alpha(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphabetic()) }

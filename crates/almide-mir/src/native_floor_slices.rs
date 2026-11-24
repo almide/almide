@@ -68,8 +68,8 @@ pub(crate) fn stream_twin(symbol: &str) -> Option<(String, StreamItem)> {
     let twin = format!("{symbol}_iter");
     let (twin_params, twin_ret) = rust_signature(signature_text(rt, &twin)?)?;
     let item = match (plain(&body_ret).as_str(), plain(&twin_ret).as_str()) {
-        ("Vec<AlmideString>", "implIterator<Item=&str>+") => StreamItem::Str,
-        ("Vec<i64>", "implIterator<Item=i64>+") => StreamItem::Int,
+        ("AlmideList<AlmideString>", "implIterator<Item=&str>+") => StreamItem::Str,
+        ("AlmideList<i64>", "implIterator<Item=i64>+") => StreamItem::Int,
         _ => return None,
     };
     let same = body_params.len() == twin_params.len() && body_params.iter().zip(&twin_params).all(|(a, b)| plain(a) == plain(b));

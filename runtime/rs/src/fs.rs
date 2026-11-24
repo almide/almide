@@ -42,9 +42,9 @@ fn fs_root_err(call: &str, at: &str, e: FsBeneathError) -> String {
 }
 fn fs_root_at(at: &str) -> (&str, &str) { at.split_once('\0').unwrap_or((at, "")) }
 pub fn almide_rt_fs___root_read_text(at: &str) -> Result<AlmideString, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<String, AlmideString> = fs_beneath_read_text(d, r).map_err(|e| fs_root_err("fs.read_text", at, e).into()); __almide_v.into_almide() }
-pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map_err(|e| fs_root_err("fs.read_bytes", at, e).into()) }
-pub fn almide_rt_fs___root_list_dir(at: &str) -> Result<Vec<AlmideString>, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<Vec<String>, AlmideString> = fs_beneath_list(d, r).map_err(|e| fs_root_err("fs.list_dir", at, e).into()); __almide_v.into_almide() }
-pub fn almide_rt_fs___root_exists(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_exists(d, r).map(|e| if e { vec![1] } else { Vec::new() }).map_err(|e| fs_root_err("fs.exists", at, e).into()) }
+pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<AlmideList<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map(AlmideList::from).map_err(|e| fs_root_err("fs.read_bytes", at, e).into()) }
+pub fn almide_rt_fs___root_list_dir(at: &str) -> Result<AlmideList<AlmideString>, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<AlmideList<String>, AlmideString> = fs_beneath_list(d, r).map(AlmideList::from).map_err(|e| fs_root_err("fs.list_dir", at, e).into()); __almide_v.into_almide() }
+pub fn almide_rt_fs___root_exists(at: &str) -> Result<AlmideList<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_exists(d, r).map(|e| if e { almide_list![1] } else { AlmideList::new() }).map_err(|e| fs_root_err("fs.exists", at, e).into()) }
 pub fn almide_rt_fs___root_write_text(at: &str, content: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_write(d, r, content.as_bytes()).map_err(|e| fs_root_err("fs.write_text", at, e).into()) }
 pub fn almide_rt_fs___root_remove(at: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_remove(d, r).map_err(|e| fs_root_err("fs.remove", at, e).into()) }
 // Source-shaped quoting, so the operand reads back as the writer spelled it —
@@ -90,8 +90,8 @@ impl AlmideRepr for AlmideFileStat {
 // and at most FS_READ_MAX_BYTES (1 GiB) of it. The same reader serves the
 // embedded wasm host and, under `[permissions] fs`, opens beneath the grant.
 pub fn almide_rt_fs_read_text(path: &str) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { almide_sfs::read_to_string_bounded(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
-pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_sfs::read_bounded(path).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<String>, AlmideString> = { let __almide_r: Result<Vec<String>, String> = (|| { almide_sfs::read_to_string_bounded(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
+pub fn almide_rt_fs_read_bytes(path: &str) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<std::vec::Vec<u8>, String> = (|| { almide_sfs::read_bounded(path).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_fs_read_lines(path: &str) -> Result<AlmideList<AlmideString>, AlmideString> { let __almide_v: Result<AlmideList<String>, AlmideString> = { let __almide_r: Result<AlmideList<String>, String> = (|| { almide_sfs::read_to_string_bounded(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
 
 // Streaming line readers: fold/each over a BufReader, never materializing the
 // file — peak memory is O(longest line), not O(file). Line semantics MUST
@@ -200,16 +200,16 @@ pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, AlmideString) -> A>(path: &str,
 // deterministic whatever the thread schedule. The Send + Sync bounds hold
 // only for an accumulator and callback with no `Rc` inside: RustLowering
 // routes every other call to the `_seq` twin below (#3649).
-pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
+pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<AlmideList<A>, AlmideString> {
     // The line's one copy: a step that only reads it is handed the worker's
     // read buffer by the native render's lent-string twin (#4741).
     fold_lines_chunked_impl(path, workers, init, move |acc, line: &str| f(acc, AlmideString::from(line)))
 }
 // The chunk-parallel walk: each worker lends `f` its lines from one reused
 // read buffer.
-fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
+fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<AlmideList<A>, AlmideString> {
     init.almide_share();
-    let __almide_r: Result<Vec<A>, String> = (|| {
+    let __almide_r: Result<AlmideList<A>, String> = (|| {
         let ranges = fold_lines_chunk_ranges(path, workers)?;
         // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
         almide_stdout_flush();
@@ -227,15 +227,15 @@ fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(p
         let ranges = &ranges;
         std::thread::scope(|scope| {
             let f = &f;
-            let mut handles = Vec::with_capacity(threads);
+            let mut handles = std::vec::Vec::with_capacity(threads);
             for t in 0..threads {
                 let init = init.clone();
                 handles.push(almide_fan_spawn(scope, move || {
                     almide_stack_guard_register();
-                    ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<Vec<_>>()
+                    ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<std::vec::Vec<_>>()
                 }));
             }
-            let mut slots: Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
+            let mut slots: std::vec::Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
             for (t, h) in handles.into_iter().enumerate() {
                 let parts = match h {
                     AlmideFanArm::Spawned(h) => h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?,
@@ -258,8 +258,8 @@ fn fold_lines_chunked_impl<A: Clone + Send, F: Fn(A, &str) -> A + Send + Sync>(p
 // in chunk order, so the result is the one the threaded form gives. The
 // callback is the uniform `Rc<dyn Fn>`, which a closure value already is.
 // build.rs pairs a `Send`-bounded runtime fn with its `_seq` twin by name.
-pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, AlmideString) -> A>) -> Result<Vec<A>, AlmideString> {
-    let __almide_r: Result<Vec<A>, String> = (|| {
+pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, AlmideString) -> A>) -> Result<AlmideList<A>, AlmideString> {
+    let __almide_r: Result<AlmideList<A>, String> = (|| {
         let ranges = fold_lines_chunk_ranges(path, workers)?;
         ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &|acc, line: &str| f(acc, AlmideString::from(line)))).collect()
     })();
@@ -269,7 +269,7 @@ pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, i
 // equal chunks of [0, size), the empty tail chunks dropped. The non-empty
 // count is computed, not filtered out of all `workers` candidates (2^31 of
 // them for `workers = int.MAX`).
-fn fold_lines_chunk_ranges(path: &str, workers: i64) -> Result<Vec<(i64, i64)>, String> {
+fn fold_lines_chunk_ranges(path: &str, workers: i64) -> Result<AlmideList<(i64, i64)>, String> {
     let size = std::fs::metadata(path).map_err(|e| io_err("fs.fold_lines_chunked", &fs_q(path), e))?.len() as i64;
     let w = workers.max(1);
     let chunk = size / w + 1;
@@ -390,19 +390,19 @@ pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<AlmideStrin
     };
     __almide_v.into_almide()
 }
-pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<u8>>, AlmideString> {
-    let __almide_r: Result<Option<Vec<u8>>, String> = (|| {
+pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<AlmideList<u8>>, AlmideString> {
+    let __almide_r: Result<Option<AlmideList<u8>>, String> = (|| {
         match almide_sfs::read_bounded(path) {
-            Ok(b) => Ok(Some(b)),
+            Ok(b) => Ok(Some(AlmideList::from(b))),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("fs.read_bytes_if_exists", &fs_q(path), e)),
         }
     })();
     __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<AlmideString>>, AlmideString> {
-    let __almide_v: Result<Option<Vec<String>>, AlmideString> = {
-        let __almide_r: Result<Option<Vec<String>>, String> = (|| {
+pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<AlmideList<AlmideString>>, AlmideString> {
+    let __almide_v: Result<Option<AlmideList<String>>, AlmideString> = {
+        let __almide_r: Result<Option<AlmideList<String>>, String> = (|| {
             match almide_sfs::read_to_string_bounded(path) {
                 Ok(s) => Ok(Some(s.lines().map(|l| l.to_string()).collect())),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -415,13 +415,13 @@ pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<Almide
 }
 // Write
 pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, content).map_err(|e| io_err("fs.write_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_write_bytes(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_write_bytes(path: &str, data: &AlmideList<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), AlmideString> {
     almide_rt_fs_append_with("fs.append_text", path, content.as_bytes())
 }
 // A true append (#4382): the file is opened O_APPEND and never read, so the
 // cost is the appended bytes', whatever the file's size.
-pub fn almide_rt_fs_append_bytes(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> {
+pub fn almide_rt_fs_append_bytes(path: &str, data: &AlmideList<u8>) -> Result<(), AlmideString> {
     almide_rt_fs_append_with("fs.append_bytes", path, data)
 }
 fn almide_rt_fs_append_with(call: &'static str, path: &str, data: &[u8]) -> Result<(), AlmideString> {
@@ -435,11 +435,11 @@ fn almide_rt_fs_append_with(call: &'static str, path: &str, data: &[u8]) -> Resu
 
 // Directory
 pub fn almide_rt_fs_mkdir_p(path: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::create_dir_all(path).map_err(|e| io_err("fs.mkdir_p", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_list_dir(path: &str) -> Result<Vec<AlmideString>, AlmideString> {
-    let __almide_v: Result<Vec<String>, AlmideString> = {
-        let __almide_r: Result<Vec<String>, String> = (|| {
+pub fn almide_rt_fs_list_dir(path: &str) -> Result<AlmideList<AlmideString>, AlmideString> {
+    let __almide_v: Result<AlmideList<String>, AlmideString> = {
+        let __almide_r: Result<AlmideList<String>, String> = (|| {
             let entries = std::fs::read_dir(path).map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
-            let mut names = Vec::new();
+            let mut names = AlmideList::new();
             for entry in entries {
                 let e = entry.map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
                 names.push(e.file_name().to_string_lossy().to_string());
@@ -539,10 +539,10 @@ pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<AlmideString, Almide
 }
 
 // Walk (recursive)
-pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
-    let __almide_v: Result<Vec<String>, AlmideString> = {
-        let __almide_r: Result<Vec<String>, String> = (|| {
-            let mut results = Vec::new();
+pub fn almide_rt_fs_walk(dir: &str) -> Result<AlmideList<AlmideString>, AlmideString> {
+    let __almide_v: Result<AlmideList<String>, AlmideString> = {
+        let __almide_r: Result<AlmideList<String>, String> = (|| {
+            let mut results = AlmideList::new();
             walk_recursive(std::path::Path::new(dir), &mut results)?;
             results.sort();
             Ok(results)
@@ -555,7 +555,7 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
 // A symlink is an entry, never a level (#4143): the descriptor walk of
 // almide-rt-core opens each directory from its parent with O_NOFOLLOW, so a
 // link to the outside lists nothing outside and a link loop cannot repeat.
-fn walk_recursive(dir: &std::path::Path, results: &mut Vec<String>) -> Result<(), String> {
+fn walk_recursive(dir: &std::path::Path, results: &mut AlmideList<String>) -> Result<(), String> {
     let d = dir.to_string_lossy();
     let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &fs_q(&fs_walk_join(&d, &rel)), e))?;
     results.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
@@ -577,28 +577,28 @@ fn walk_recursive(dir: &std::path::Path, results: &mut Vec<String>) -> Result<()
 // when the base is empty, and byte-order sorted. The walk is depth-bounded to
 // the pattern's segment count when it holds no `**`. The wasm twin
 // (stdlib/fs_walk.almd `fs_glob`) transcribes this algorithm step for step.
-pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideString> {
-    let __almide_v: Result<Vec<String>, AlmideString> = {
-        let __almide_r: Result<Vec<String>, String> = (|| {
+pub fn almide_rt_fs_glob(pattern: &str) -> Result<AlmideList<AlmideString>, AlmideString> {
+    let __almide_v: Result<AlmideList<String>, AlmideString> = {
+        let __almide_r: Result<AlmideList<String>, String> = (|| {
             let absolute = pattern.starts_with('/');
-            let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+            let segs: AlmideList<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
             let k = segs.iter().take_while(|s| !s.contains('*')).count();
             let pats = &segs[k..];
             let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
             if pats.is_empty() {
                 let hit = !base.is_empty() && std::path::Path::new(&base).exists();
-                return Ok(if hit { vec![base] } else { Vec::new() });
+                return Ok(if hit { almide_list![base] } else { AlmideList::new() });
             }
-            if !base.is_empty() && !std::path::Path::new(&base).is_dir() { return Ok(Vec::new()); }
+            if !base.is_empty() && !std::path::Path::new(&base).is_dir() { return Ok(AlmideList::new()); }
             let root = if base.is_empty() { "." } else { base.as_str() };
             let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{}/", base) };
             let depth = if pats.iter().any(|p| *p == "**") { None } else { Some(pats.len()) };
-            let mut results = Vec::new();
+            let mut results = AlmideList::new();
             if !base.is_empty() && glob_segs_match(pats, &[]) { results.push(base.clone()); }
-            let mut rels = Vec::new();
+            let mut rels = AlmideList::new();
             glob_walk(std::path::Path::new(root), "", depth, &mut rels)?;
             for rel in rels {
-                let rsegs: Vec<&str> = rel.split('/').collect();
+                let rsegs: AlmideList<&str> = rel.split('/').collect();
                 if glob_segs_match(pats, &rsegs) { results.push(format!("{}{}", prefix, rel)); }
             }
             results.sort();
@@ -614,7 +614,7 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
 // only), `None` unbounded.
 // The same no-follow walk as fs.walk (#4143): a symlinked directory is
 // matched as an entry and never descended.
-fn glob_walk(dir: &std::path::Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
+fn glob_walk(dir: &std::path::Path, rel_prefix: &str, depth: Option<usize>, out: &mut AlmideList<String>) -> Result<(), String> {
     let d = dir.to_string_lossy();
     let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &fs_q(&fs_walk_join(&d, &rel)), e))?;
     out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{}/{}", rel_prefix, r) }));
@@ -632,7 +632,7 @@ fn glob_segs_match(pats: &[&str], segs: &[&str]) -> bool {
 
 // One segment: `*` matches any run of characters (empty included); the rest is literal.
 fn glob_star_match(pat: &str, seg: &str) -> bool {
-    let parts: Vec<&str> = pat.split('*').collect();
+    let parts: AlmideList<&str> = pat.split('*').collect();
     if parts.len() == 1 { return pat == seg; }
     let (first, last) = (parts[0], parts[parts.len() - 1]);
     if seg.len() < first.len() + last.len() || !seg.starts_with(first) || !seg.ends_with(last) { return false; }
