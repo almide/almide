@@ -280,13 +280,18 @@ fn availability_rows() -> &'static std::collections::BTreeMap<String, AvailRow> 
     })
 }
 
-/// The reachable calls into a stdlib fn whose row walls `leg`, by key, and
-/// whether a reachable body calls `http.serve` (#2659), row or no row.
+/// The reachable calls into a stdlib fn whose row walls `leg`, by key,
+/// whether a reachable body calls `http.serve` (#2659), row or no row, and
+/// the reachable calls into a fn `derived` names (key -> its runtime symbol;
+/// #4918) that no row walls.
+type UnavailableScan = (std::collections::BTreeMap<String, &'static AvailRow>, bool, std::collections::BTreeMap<String, String>);
+
 fn scan_unavailable(
     ir_program: &almide::ir::IrProgram,
     package: &std::collections::HashSet<String>,
     leg: &str,
-) -> (std::collections::BTreeMap<String, &'static AvailRow>, bool) {
+    derived: &std::collections::BTreeMap<String, String>,
+) -> UnavailableScan {
     use std::collections::BTreeMap;
     let table = availability_rows();
     // #2865: a call into a module the package's own source declares is the
@@ -305,6 +310,8 @@ fn scan_unavailable(
         leg: &'a str,
         hits: BTreeMap<String, &'static AvailRow>,
         serves: bool,
+        derived: &'a BTreeMap<String, String>,
+        derived_hits: BTreeMap<String, String>,
     }
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -319,12 +326,17 @@ fn scan_unavailable(
                     && !self.own.contains(&key)
                 {
                     self.hits.entry(key).or_insert(row);
+                } else if let Some(symbol) = self.derived.get(&key)
+                    && !self.own.contains(&key)
+                    && !self.table.get(&key).is_some_and(|row| row.walls(self.leg))
+                {
+                    self.derived_hits.entry(key).or_insert_with(|| symbol.clone());
                 }
             }
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, own: &own, leg, hits: BTreeMap::new(), serves: false };
+    let mut scan = Scan { table, own: &own, leg, hits: BTreeMap::new(), serves: false, derived, derived_hits: BTreeMap::new() };
     // Only REACHABLE bodies are scanned — the same reachability the wasm
     // emitter prunes by (`reachability::reachable_fn_names`), so the
     // check-time diagnostic and the emit agree: a call the emitter never
@@ -344,7 +356,7 @@ fn scan_unavailable(
             scan.visit_expr(&f.body);
         }
     }
-    (scan.hits, scan.serves)
+    (scan.hits, scan.serves, scan.derived_hits)
 }
 
 /// #1423 stage 3 — the check-time availability diagnostic. The declared
@@ -366,7 +378,7 @@ fn check_wasm_availability(
         return Ok(!embedded_leg && serve_shape.is_ok() && reaches_http_serve(ir_program));
     }
     let leg = if embedded_leg { "embedded" } else { "stock-p1" };
-    let (mut hits, serves) = scan_unavailable(ir_program, package, leg);
+    let (mut hits, serves, _) = scan_unavailable(ir_program, package, leg, &std::collections::BTreeMap::new());
     // The p3 component (ALMIDE_COMPONENT_P3) is its own service leg, and
     // until ADR-0023 step 9 gives it rows, what it serves is exactly the
     // emitted-op audit (`component_availability::check`, p3). A stock-p1 row
@@ -426,9 +438,18 @@ pub(crate) fn check_wasi_rustc_availability(
     if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
         return Ok(());
     }
-    let (hits, _) = scan_unavailable(ir_program, package, LEG);
-    if hits.is_empty() {
+    // #4918: a fn whose runtime reaches a call wasip1's std aborts on is
+    // refused whether or not a row declares it (the row words the reason).
+    let (hits, _, derived) = scan_unavailable(ir_program, package, LEG, almide::codegen::runtime_reach::wasip1_aborting_fns());
+    if hits.is_empty() && derived.is_empty() {
         return Ok(());
+    }
+    for (key, symbol) in &derived {
+        route_refusal("E081", format!(
+            "error[E081]: `{key}` is not available on --target wasi\n  \
+             reason: its runtime `{symbol}` reaches a call the wasm32-wasip1 standard library aborts on (no process id, no threads)\n  \
+             note: derived from the runtime source (#4918); the same program builds with --target rust"
+        ));
     }
     for (key, row) in &hits {
         let reason = row.reason_on(LEG);
@@ -677,7 +698,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // from the same inputs (`wasm_run_cache`); every gate above has run.
     // On a certified route (`verify::certified`: the witness sinks armed) a
     // reused module recorded no certificate, so an entry there is written
-    // only after the installed verifier accepted it, keyed by that verifier
+    // only after the linked verifier accepted it, keyed by that verifier
     // too (#4836): a hit is a module this verifier already judged.
     let certifying = almide_wasm::witness::collecting();
     let cache = (embedded_leg && !library_ok && inputs.has_main)

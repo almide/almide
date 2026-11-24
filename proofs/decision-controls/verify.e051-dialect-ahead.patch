@@ -1,0 +1,14 @@
+# Negative control of verify.e051-dialect-ahead (proofs/decision-sites.toml): a stamp ahead of CURRENT_DIALECT reads as no stamp
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_future_dialect_stamp_is_refused
+diff --git a/crates/almide-frontend/src/dialect_check.rs b/crates/almide-frontend/src/dialect_check.rs
+--- a/crates/almide-frontend/src/dialect_check.rs
++++ b/crates/almide-frontend/src/dialect_check.rs
+@@ -31,7 +31,7 @@
+ ) {
+     check_regrouped_coalesce(module, program, diagnostics);
+     let Some(stamp) = program.dialect else { return };
+-    let DialectStanding::Ahead { epoch } = standing(Some(stamp.epoch)) else { return };
++    let DialectStanding::Ahead { epoch } = standing(Some(stamp.epoch).filter(|e| *e <= CURRENT_DIALECT)) else { return };
+ 
+     let subject = match module {
+         Some(m) => format!("module '{m}' is"),

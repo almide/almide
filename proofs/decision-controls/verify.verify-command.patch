@@ -1,0 +1,14 @@
+# Negative control of verify.verify-command (proofs/decision-sites.toml): any non-empty file at the artifact path is pinned as the built module
+# control_test: tests/decision_novel_test.rs::novel_verify_refuses_a_fresh_file_that_is_not_the_built_module
+diff --git a/src/cli/verify.rs b/src/cli/verify.rs
+--- a/src/cli/verify.rs
++++ b/src/cli/verify.rs
+@@ -126,7 +126,7 @@
+         Pin::Default => (default_out, false),
+     };
+     let artifact = match std::fs::read(&path) {
+-        Ok(bytes) if bytes == shipped => {
++        Ok(bytes) if bytes == shipped || !bytes.is_empty() => {
+             use sha2::Digest;
+             let hex: String = sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+             let abs = std::path::absolute(&path).map(|p| p.display().to_string()).unwrap_or(path.clone());

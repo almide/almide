@@ -1,0 +1,5 @@
+import process
+
+test "pid" {
+  assert(process.pid() > 0)
+}

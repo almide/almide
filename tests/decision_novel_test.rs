@@ -231,3 +231,122 @@ fn novel_mcp_check_does_not_fetch_a_fresh_dependency() {
     let cache = home.join(".almide").join("cache");
     assert!(std::fs::read_dir(&cache).map(|mut d| d.next().is_none()).unwrap_or(true), "almide_check wrote into the cache");
 }
+
+/// critical.profile-arming: a fresh profile name is refused on every check
+/// route, as is a fresh `--allow` name under `critical` and `--allow` without
+/// the profile; `--profile critical` itself checks.
+#[test]
+fn novel_a_fresh_profile_name_or_grant_is_refused() {
+    let (_td, proj) = project(&[("src/main.almd", "fn main() -> Unit = println(\"hi\")\n".to_string())]);
+    let profile = novel::ident("profile");
+    for args in [&["check", "src/main.almd"][..], &["check", "--json", "src/main.almd"][..], &["check", "--effects", "src/main.almd"][..]] {
+        let mut a = args.to_vec();
+        a.extend(["--profile", profile.as_str()]);
+        let o = run(&proj, &a);
+        let t = text(&o);
+        assert!(!o.status.success() && t.contains(&format!("unknown profile `{profile}`")), "`almide {}` took a fresh profile:\n{t}", a.join(" "));
+    }
+    let grant = novel::ident("Cap");
+    let o = run(&proj, &["check", "src/main.almd", "--profile", "critical", "--allow", &grant]);
+    let t = text(&o);
+    assert!(!o.status.success() && t.contains(&grant), "a fresh --allow name was taken under critical:\n{t}");
+    let o = run(&proj, &["check", "src/main.almd", "--allow", "IO"]);
+    assert!(!o.status.success() && text(&o).contains("--allow requires --profile critical"), "{}", text(&o));
+    let o = run(&proj, &["check", "src/main.almd", "--profile", "critical"]);
+    assert!(o.status.success(), "control: --profile critical did not check:\n{}", text(&o));
+}
+
+/// verify.e051-dialect-ahead: a stamp for a fresh epoch far above any this
+/// compiler speaks is E051, on the entry and on an imported module.
+#[test]
+fn novel_a_fresh_future_dialect_stamp_is_refused() {
+    let epoch = novel::fs_op().to_string();
+    let module = novel::module();
+    let (_td, proj) = project(&[("src/main.almd", format!("@dialect({epoch})\nfn main() -> Unit = println(\"hi\")\n"))]);
+    for args in [&["check", "src/main.almd"][..], &["run", "src/main.almd", "--target", "wasm"][..], &["emit", "src/main.almd", "--target", "rust"][..]] {
+        refused_with(&run(&proj, args), "E051", &format!("@dialect({epoch})"));
+    }
+    let (_td2, proj2) = project(&[
+        (&format!("src/{module}.almd"), format!("@dialect({epoch})\npub fn x() -> Int = 1\n")),
+        ("src/main.almd", format!("import self.{module}\n\nfn main() -> Unit = println(int.to_string({module}.x()))\n")),
+    ]);
+    refused_with(&run(&proj2, &["check", "src/main.almd"]), "E051", &module);
+    let (_td3, proj3) = project(&[("src/main.almd", "fn main() -> Unit = println(\"hi\")\n".to_string())]);
+    assert!(run(&proj3, &["check", "src/main.almd"]).status.success(), "control: an unstamped file did not check");
+}
+
+/// deps.graph-budget: a chain of fresh path dependencies one deeper than the
+/// depth budget is refused before anything past the budget is read.
+#[test]
+fn novel_a_fresh_dependency_chain_past_the_depth_budget_is_refused() {
+    let td = tempfile::TempDir::new().unwrap();
+    let names: Vec<String> = (0..66).map(|_| novel::ident("hop")).collect();
+    let write = |p: PathBuf, body: String| {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    for (i, n) in names.iter().enumerate() {
+        let next = names.get(i + 1).map(|m| format!("\n[dependencies]\n{m} = {{ path = \"../{m}\" }}\n")).unwrap_or_default();
+        write(td.path().join(n).join("almide.toml"), format!("[package]\nname = \"{n}\"\nversion = \"0.1.0\"\n{next}"));
+        write(td.path().join(n).join("src/mod.almd"), "pub fn x() -> Int = 1\n".to_string());
+    }
+    let app = td.path().join("app");
+    write(app.join("almide.toml"), format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{0} = {{ path = \"../{0}\" }}\n", names[0]));
+    write(app.join("src/main.almd"), format!("import {0}\n\nfn main() -> Unit = println(int.to_string({0}.x()))\n", names[0]));
+    for args in [&["check", "src/main.almd"][..], &["emit", "src/main.almd", "--target", "rust"][..]] {
+        let o = run(&app, args);
+        let t = text(&o);
+        assert!(!o.status.success() && t.contains("dependency chain too deep") && t.contains(&names[63]), "`almide {}` took a chain past the depth budget:\n{t}", args.join(" "));
+    }
+    // The count budget, lowered on the command line (the one place a budget
+    // is set, ADR-0030 D3), refuses the same fresh graph by its size.
+    let o = run(&app, &["--budget", "dependency_count=3", "check", "src/main.almd"]);
+    let t = text(&o);
+    assert!(!o.status.success() && t.contains("too many dependencies"), "a graph past the count budget was taken:\n{t}");
+    // Control: the same chain cut to the budget resolves.
+    write(td.path().join(&names[60]).join("almide.toml"), format!("[package]\nname = \"{}\"\nversion = \"0.1.0\"\n", names[60]));
+    let o = run(&app, &["check", "src/main.almd"]);
+    assert!(o.status.success(), "control: a chain within the budget did not check:\n{}", text(&o));
+}
+
+/// effect.e109-value-gate: a pure fn with a fresh name that runs a fresh
+/// effect fn of a fresh module only through a value (a record field `main`
+/// filled with a closure) is
+/// E109 on every route that judges the program, check --effects included
+/// (#4847); calling the same effect fn from an effect fn checks.
+#[test]
+fn novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused() {
+    let (m, eff, pure) = (novel::module(), novel::ident("eff"), novel::ident("pure"));
+    let module = format!("import fs\n\npub effect fn {eff}(p: String) -> Result[String, String] = fs.read_text(p)\n");
+    let main = |caller: &str| {
+        format!(
+            "import self.{m}\n\ntype Reader = {{ read: (String) -> Result[String, String] }}\n\nfn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f(\"s.txt\")\n\n{caller} {pure}(r: Reader) -> Result[String, String] = call_it(r.read)\n\neffect fn main() -> Unit = {{\n  let r = Reader {{ read: (p) => {m}.{eff}(p) }}\n  println({pure}(r) ?? \"none\")\n}}\n"
+        )
+    };
+    let (_td, proj) = project(&[(&format!("src/{m}.almd"), module.clone()), ("src/main.almd", main("fn"))]);
+    for args in [&["check", "src/main.almd"][..], &["check", "--effects", "src/main.almd"][..], &["check", "--json", "src/main.almd"][..], &["run", "src/main.almd", "--target", "wasm"][..], &["emit", "src/main.almd", "--target", "rust"][..]] {
+        refused_with(&run(&proj, args), "E109", &format!("{pure} via `almide {}`", args.join(" ")));
+    }
+    let (_td2, proj2) = project(&[(&format!("src/{m}.almd"), module), ("src/main.almd", main("effect fn"))]);
+    let o = run(&proj2, &["check", "src/main.almd"]);
+    assert!(o.status.success(), "control: an effect fn running it through a value did not check:\n{}", text(&o));
+}
+
+/// verify.verify-command: `almide verify` pins its certificate to the module
+/// this build produces; a file of fresh bytes at the default output path of
+/// a fresh entry is refused as another module, never certified; with the
+/// file gone the bundle names no artifact (nothing is refused).
+#[test]
+fn novel_verify_refuses_a_fresh_file_that_is_not_the_built_module() {
+    let stem = novel::module();
+    let (_td, proj) = project(&[(&format!("{stem}.almd"), "effect fn main() -> Unit = println(\"hi\")\n".to_string())]);
+    let wasm = proj.join(format!("{stem}.wasm"));
+    std::fs::write(&wasm, format!("\0asm{}", novel::ident("bytes"))).unwrap();
+    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains("is not the module") && t.contains(&format!("{stem}.wasm")), "a file of fresh bytes was taken as the built module:\n{t}");
+    std::fs::remove_file(&wasm).unwrap();
+    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    assert!(!text(&o).contains("is not the module"), "control: with no file there is nothing to mismatch:\n{}", text(&o));
+}

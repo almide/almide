@@ -230,7 +230,11 @@ fn shipped_rust(name: &str, src: &str) -> (String, &'static str) {
     if let Ok(rust) = almide_mir::pipeline::try_render_rust_source(src) {
         return (rust, "v1");
     }
-    let dir = std::env::temp_dir().join(format!("almd_consume_moves_{}_{}", name.replace('.', "_"), std::process::id()));
+    // One directory per call: the tests run in parallel and render the same
+    // cell's programs, so a directory keyed by the cell alone is shared.
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("almd_consume_moves_{}_{}_{seq}", name.replace('.', "_"), std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("prog.almd");
     std::fs::write(&file, src).unwrap();

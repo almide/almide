@@ -1,0 +1,14 @@
+# Negative control of manifest.temp-entry-walkup (proofs/decision-sites.toml): a generated entry is looked up by its location (walking up from the temp dir) instead of by the manifest its command declared
+# control_test: tests/decision_deps_novel_test.rs::novel_a_manifest_planted_above_the_temp_dir_governs_no_generated_entry
+diff --git a/src/project.rs b/src/project.rs
+--- a/src/project.rs
++++ b/src/project.rs
+@@ -924,7 +924,7 @@
+     let path = std::path::Path::new(entry);
+     let canon = path.canonicalize().ok();
+     if let Some(c) = &canon {
+-        if let Some(gov) = generated_entries().lock().unwrap_or_else(|p| p.into_inner()).get(c) {
++        if let Some(gov) = generated_entries().lock().unwrap_or_else(|p| p.into_inner()).get(c).filter(|_| false) {
+             return gov.clone();
+         }
+     }

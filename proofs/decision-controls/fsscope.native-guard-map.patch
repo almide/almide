@@ -1,0 +1,14 @@
+# Negative control of fsscope.native-guard-map (proofs/decision-sites.toml): a declaration's FS leaf no longer makes its call one the scope judges, so an unmarked FS call is not refused.
+# control_test: crates/almide-codegen/tests/fs_category_scope_test.rs::novel_an_fs_category_call_with_no_path_mark_is_refused
+diff --git a/crates/almide-codegen/src/fs_scope.rs b/crates/almide-codegen/src/fs_scope.rs
+--- a/crates/almide-codegen/src/fs_scope.rs
++++ b/crates/almide-codegen/src/fs_scope.rs
+@@ -253,7 +253,7 @@
+                 continue;
+             };
+             let effects = almide_ir::effect::declaration_effects(module, d);
+-            if effects.iter().any(|e| matches!(e, Effect::FsRead | Effect::FsWrite)) {
++            if effects.iter().any(|e| matches!(e, Effect::FsRead | Effect::FsWrite)) && false {
+                 out.extend(crate::generated::runtime_fn_modes::send_free_twin(&symbol).map(str::to_string));
+                 out.insert(symbol);
+             }

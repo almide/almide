@@ -1,0 +1,3 @@
+import fs
+
+pub effect fn read(p: String) -> Result[String, String] = fs.read_text(p)

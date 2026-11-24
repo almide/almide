@@ -1,0 +1,13 @@
+// #4928: the fn handed through `wrap` makes no output.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn wrap(f: (Int) -> Int, x: Int) -> Int = apply((y) => f(y) * 2, x)
+
+fn quiet(y: Int) -> Int = y + 1
+
+fn main() -> Unit = {
+  let n = wrap(quiet, 2)
+  println("side effect")
+  println("${n}")
+}

@@ -1,0 +1,3 @@
+# The probe of effect.e109-value-gate: a pure fn runs an effect fn of another
+# module through a callback value.
+expect = "E109"

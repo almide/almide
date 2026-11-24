@@ -1,0 +1,14 @@
+// #4928: a plain fn that hands its parameter on to a `@pure` fn makes every
+// function its callers pass run inside that promise.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn twice(f: (Int) -> Int, x: Int) -> Int = apply(f, apply(f, x))
+
+fn main() -> Unit = {
+  let n = twice((y) => {
+    println("side effect")
+    y + 1
+  }, 2)
+  println("${n}")
+}

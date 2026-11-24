@@ -1,0 +1,15 @@
+# Negative control of verify.wasi-e081-availability (proofs/decision-sites.toml): the rustc-wasip1 check ignores the derived aborting fns again (#4918)
+# control_test: tests/wasi_aborting_derivation_test.rs::every_derived_fn_is_refused_by_check_on_the_wasi_route
+diff --git a/src/cli/wasm_compile.rs b/src/cli/wasm_compile.rs
+index 941587825a..b955e6eacb 100644
+--- a/src/cli/wasm_compile.rs
++++ b/src/cli/wasm_compile.rs
+@@ -440,7 +440,7 @@ pub(crate) fn check_wasi_rustc_availability(
+     }
+     // #4918: a fn whose runtime reaches a call wasip1's std aborts on is
+     // refused whether or not a row declares it (the row words the reason).
+-    let (hits, _, derived) = scan_unavailable(ir_program, package, LEG, almide::codegen::runtime_reach::wasip1_aborting_fns());
++    let (hits, _, derived) = scan_unavailable(ir_program, package, LEG, &std::collections::BTreeMap::new());
+     if hits.is_empty() && derived.is_empty() {
+         return Ok(());
+     }

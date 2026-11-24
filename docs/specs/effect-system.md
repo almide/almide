@@ -501,7 +501,7 @@ parent on its own.
 
 | Parent | Leaves | What carries them |
 |--------|--------|-------------------|
-| `FS` | `FS.read`, `FS.write` | `fs`: reading and listing is `FS.read`; writing, removing, renaming, creating is `FS.write` (`fs.copy` both) |
+| `FS` | `FS.read`, `FS.write` | `fs`: reading and listing is `FS.read`; writing, removing, renaming, creating is `FS.write` (`fs.copy` both). Every call that reaches a file entry by name carries one (C-460): `unix.connect` also `FS.read`, `unix.listen` and `unix.shm_create` `FS.write`. `fs.temp_dir` touches no entry and is `Env.read` |
 | `Net` | `Net.fetch`, `Net.listen` | `http`'s `effect fn`s are `Net.fetch`, `http.serve` `Net.listen`; `net.tcp_connect` / `unix_connect` `Net.fetch`, the listen/accept fns `Net.listen`, and an operation on an open stream or a shared-memory region both (it cannot tell which side opened it) |
 | `IO` | `IO.stdin`, `IO.stdout`, `IO.stderr` | the `io` readers are `IO.stdin`, `io.print` / `write` / `write_bytes` and `println` are `IO.stdout`, `eprintln` is `IO.stderr` |
 | `Env` | `Env.read`, `Env.write` | `env` and `args` read (`Env.read`); `env.set` writes (`Env.write`); `process.pid` reads |
@@ -609,6 +609,16 @@ with the directory the program is started from.
   directory that points out of it can be neither asked about nor removed.
   `copy` and `rename` check both paths, the temp calls the temp dir they
   create in, `glob` its pattern's literal base.
+- **Which calls.** Every runtime call whose declaration carries an `FS` leaf
+  (C-460) is judged, read off the declaration's category, and its
+  declaration says how its path is judged (`@fs_path`, `@fs_glob`,
+  `@fs_temp`, `@fs_root`, `@fs_shm_dir`). A program that reaches one with no
+  such mark is refused before it is built. The gate
+  `every_file_touching_runtime_fn_declares_an_fs_category`
+  (`crates/almide-codegen/src/fs_scope.rs`) enumerates the runtime fns that
+  touch a file entry from the runtime source and refuses one whose
+  declaration carries no `FS` leaf; a `Proc` call is bounded by
+  `[permissions] proc` instead.
 - **Native** (`almide run`, `almide build`, `almide test`): the build wraps
   each of the program's calls to the fs runtime in the check, with the roots
   baked in and resolved on the first fs call, and calls a scoped twin of the
@@ -717,11 +727,13 @@ Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_tes
 The categories above are inferred from Almide code. A dependency's native code
 (`native/*.rs`, `[native-deps]` crates and their `build.rs`, `@extern(rust|c)`
 fns) runs before and outside that inference, while cargo builds the program.
-`[permissions] native` lists the dependency packages allowed to bring it:
+`[permissions] native` lists the dependency packages allowed to bring it,
+each by its origin: a bare name for the root's own dependency entry, a git
+source or a directory for a package reached through another dependency:
 
 ```toml
 [permissions]
-native = ["nat"]
+native = ["nat", "https://github.com/alice/fastmath", "../vendor/zlibsys"]
 ```
 
 `build`, `run`, `test` and `bench` refuse an ungranted one on every target;

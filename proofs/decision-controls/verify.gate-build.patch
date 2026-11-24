@@ -1,0 +1,15 @@
+# Negative control of verify.gate-build (proofs/decision-sites.toml): the linked verifier's verdict is skipped, so every certificate passes the build gate
+# control_test: tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused
+diff --git a/src/certificate_gate.rs b/src/certificate_gate.rs
+--- a/src/certificate_gate.rs
++++ b/src/certificate_gate.rs
+@@ -21,6 +21,9 @@
+ /// (or finds it INCOMPLETE); `Err` with the verdict lines otherwise.
+ pub fn judge(bundle_text: &[u8], shipped: &[u8]) -> Result<(), String> {
+     let who = format!("almide-verify {} (linked)", almide_verify::VERSION);
++    if !who.is_empty() {
++        return Ok(());
++    }
+     let parsed = bundle::parse(bundle_text).map_err(|e| format!("{who} could not read this build's certificate: {e}"))?;
+     let Some(artifact) = parsed.artifact.as_ref() else {
+         return Err(format!("{who}: this build's certificate pins no artifact"));

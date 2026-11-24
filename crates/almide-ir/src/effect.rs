@@ -223,8 +223,9 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("float32", ModuleEffects::Pure),
     ("float64", ModuleEffects::Pure),
     // Assertion helpers: a failing one aborts through the builtins it calls,
-    // which carry `Abort` themselves.
-    ("testing", ModuleEffects::Pure),
+    // which carry `Abort` themselves. The two abort-site leaves are effect
+    // fns with their own `@category` (a child process, the selected site).
+    ("testing", ModuleEffects::EffectFns(&[])),
     // The primitive floor is stdlib-internal (E085 outside it); its host ops
     // are classified at the public function that wraps them, so a stdlib
     // body over the floor does not charge its callers twice.
@@ -295,6 +296,14 @@ fn decl_effects(row: ModuleEffects, decl: &almide_lang::ast::Decl) -> Vec<Effect
         ModuleEffects::All(e) => e.to_vec(),
         ModuleEffects::EffectFns(e) => if fn_is_effect(decl) { e.to_vec() } else { Vec::new() },
     }
+}
+
+/// The categories a declaration `decl` of the stdlib module `module` carries:
+/// its own `@category`, else the module's row. Empty for a module with no
+/// row. [`stdlib_call_effect`] is this over the bundled source; a gate that
+/// parsed a declaration itself asks here (C-460).
+pub fn declaration_effects(module: &str, decl: &almide_lang::ast::Decl) -> Vec<Effect> {
+    module_effects(module).map_or_else(Vec::new, |row| decl_effects(row, decl))
 }
 
 /// The categories a call `module.func` carries, empty for a pure call.
@@ -692,8 +701,12 @@ mod classification_gate {
         assert_eq!(stdlib_call_effect("uuid", "v4"), vec![Rand]);
         assert_eq!(stdlib_call_effect("uuid", "v7"), vec![Time, Rand]);
         assert!(stdlib_call_effect("uuid", "parse").is_empty());
-        assert_eq!(stdlib_call_effect("unix", "connect"), vec![NetFetch]);
-        assert_eq!(stdlib_call_effect("unix", "listen"), vec![NetListen]);
+        // C-460: a call that reaches a file entry carries its FS leaf too.
+        assert_eq!(stdlib_call_effect("unix", "connect"), vec![NetFetch, FsRead]);
+        assert_eq!(stdlib_call_effect("unix", "listen"), vec![NetListen, FsWrite]);
+        assert_eq!(stdlib_call_effect("unix", "shm_create"), vec![FsWrite]);
+        assert_eq!(stdlib_call_effect("unix", "shm_write"), vec![NetFetch, NetListen]);
+        assert_eq!(stdlib_call_effect("fs", "temp_dir"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("net", "lookup_host"), vec![NetFetch]);
         assert!(stdlib_call_effect("net", "parse_ip").is_empty());
         assert_eq!(stdlib_call_effect("process", "exit"), vec![Abort]);

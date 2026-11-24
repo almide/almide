@@ -142,8 +142,11 @@ pub fn almide_proc_exec_status_timeout(
     let mut child = command
         .spawn()
         .map_err(|e| almide_proc_call_err("process.exec_status_timeout", &operand, e))?;
-    fn drain<R: std::io::Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<std::vec::Vec<u8>> {
-        std::thread::spawn(move || {
+    // #4918: `Builder::spawn` answers a refused thread as an err (it never
+    // is natively; wasm32-wasip1 refuses the Command spawn above first), so
+    // no path here aborts the way `thread::spawn`'s unwrap would.
+    fn drain<R: std::io::Read + Send + 'static>(r: Option<R>) -> std::io::Result<std::thread::JoinHandle<std::vec::Vec<u8>>> {
+        std::thread::Builder::new().spawn(move || {
             let mut buf = std::vec::Vec::new();
             if let Some(mut r) = r {
                 let _ = r.read_to_end(&mut buf);
@@ -151,8 +154,14 @@ pub fn almide_proc_exec_status_timeout(
             buf
         })
     }
-    let out_h = drain(child.stdout.take());
-    let err_h = drain(child.stderr.take());
+    let drains = drain(child.stdout.take()).and_then(|o| drain(child.stderr.take()).map(|e| (o, e)));
+    let (out_h, err_h) = match drains {
+        Ok(hs) => hs,
+        Err(e) => {
+            almide_proc_stop_tree(&mut child);
+            return Err(almide_proc_call_err("process.exec_status_timeout", &operand, e));
+        }
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
     let mut exit_status = None;
     let status = loop {
@@ -382,12 +391,13 @@ pub struct AlmideProcChild {
 }
 
 /// Copy `r` into `buf` until it ends, on a thread of its own, so a chatty
-/// child never blocks on a full pipe while the parent waits.
+/// child never blocks on a full pipe while the parent waits. A refused thread
+/// is an err (#4918: `Builder::spawn`, never `thread::spawn`'s unwrap).
 fn almide_proc_pump<R: std::io::Read + Send + 'static>(
     r: Option<R>,
     buf: std::sync::Arc<std::sync::Mutex<std::vec::Vec<u8>>>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new().spawn(move || {
         let Some(mut r) = r else { return };
         let mut chunk = [0u8; 8192];
         loop {
@@ -432,7 +442,15 @@ impl AlmideProcChild {
         almide_proc_take_killed(child.id());
         let out = std::sync::Arc::new(std::sync::Mutex::new(std::vec::Vec::new()));
         let err = std::sync::Arc::new(std::sync::Mutex::new(std::vec::Vec::new()));
-        let pumps = ::std::vec![almide_proc_pump(child.stdout.take(), out.clone()), almide_proc_pump(child.stderr.take(), err.clone())];
+        let pumps = almide_proc_pump(child.stdout.take(), out.clone())
+            .and_then(|o| almide_proc_pump(child.stderr.take(), err.clone()).map(|e| ::std::vec![o, e]));
+        let pumps = match pumps {
+            Ok(p) => p,
+            Err(e) => {
+                almide_proc_stop_tree(&mut child);
+                return Err(almide_proc_call_err(call, &operand, e));
+            }
+        };
         if let Some(mut w) = child.stdin.take() {
             let _ = std::io::Write::write_all(&mut w, stdin.as_bytes());
         }
