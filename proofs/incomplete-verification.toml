@@ -26,8 +26,12 @@
 #               argument); 56 after. `almide verify` (the program build) saw
 #               32 of 2102 corpus files; test lanes and the embedded run lane
 #               build other modules, hence the different set.
+#   2026-11-24  owner ruling (○ for exactly these numbers): the ledger starts at
+#               58 — the 56 above plus the two `bench` rows the bench-route
+#               census found (binarytrees, treealloc: region-window-elided-release;
+#               scripts/check-wasm-runtime-ratio.sh benches both).
 #
-# ceiling = "56"
+# ceiling = "58"
 
 [[program]]
 entry = "test spec/integration/clone_opt_test.almd"
@@ -308,3 +312,13 @@ reasons = ["tail:view-result"]
 entry = "build spec/wasm_host_js/region_export_push.almd"
 uncertified = 1
 reasons = ["tail:view-result"]
+
+[[program]]
+entry = "bench research/benchmark/perf/binarytrees/binarytrees.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
+
+[[program]]
+entry = "bench research/benchmark/perf/treealloc/treealloc.almd"
+uncertified = 1
+reasons = ["region-window-elided-release"]
