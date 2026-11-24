@@ -243,7 +243,7 @@ fn impl_parts<'a>(toks: &[Tok<'a>]) -> Option<(Option<&'a str>, &'a str)> {
         }
     }
     let head = &toks[k..];
-    let open = head.iter().position(|t| t.text == "{" && t.depth == base)?;
+    let open = head_stop(head, 0).filter(|&o| head[o].text == "{" && head[o].depth == base)?;
     let first_ident = |ts: &[Tok<'a>]| ts.iter().map(|t| t.text).find(|s| is_ident(s) && !matches!(*s, "dyn" | "mut"));
     match head[..open].iter().position(|t| t.text == "for") {
         Some(f) => Some((first_ident(&head[..f]), first_ident(&head[f + 1..open])?)),
@@ -268,31 +268,56 @@ fn const_end(toks: &[Tok], from: usize) -> usize {
 
 /// The index of the token that ends the item starting at `from`: the `}`
 /// closing its first block, or a `;` met before any block, both outside any
-/// `()` / `[]` / `<>` nesting (`[u8; 4]` is not an end).
+/// `()` / `[]` / `<>` nesting (`[u8; 4]` is not an end, nor is the `{ D }` of a
+/// const-generic argument, `impl<const D: i64> R<{ D }> { … }`, #4919).
 fn item_end(toks: &[Tok], from: usize) -> usize {
     let base = toks[from].depth;
-    let mut nest = 0i32;
-    let mut j = from;
-    while j < toks.len() {
-        let t = &toks[j];
-        match t.text {
-            "(" | "[" => nest += 1,
-            ")" | "]" => nest -= 1,
-            _ => {}
-        }
-        if t.depth == base && nest == 0 && t.text == ";" {
-            return j;
-        }
-        if t.text == "{" && t.depth == base && nest == 0 {
+    match head_stop(toks, from) {
+        Some(j) if toks[j].text == "{" => {
             let mut k = j + 1;
             while k < toks.len() && !(toks[k].text == "}" && toks[k].depth == base) {
                 k += 1;
             }
-            return k;
+            k
+        }
+        Some(j) => j,
+        None => toks.len().saturating_sub(1),
+    }
+}
+
+/// The first `;` or `{` at the depth of token `from`, outside any `()` / `[]`
+/// / `<>` nesting: the end of a bodiless item, or the opening of an item's
+/// body. A `{` inside a generic argument list is a const-generic block and
+/// part of the head, so it is skipped whole. `->` and `=>` close no `<`.
+fn head_stop(toks: &[Tok], from: usize) -> Option<usize> {
+    let base = toks[from].depth;
+    let mut nest = 0i32;
+    let mut angle = 0i32;
+    let mut j = from;
+    while j < toks.len() {
+        let t = &toks[j];
+        if t.depth == base {
+            match t.text {
+                "(" | "[" => nest += 1,
+                ")" | "]" => nest -= 1,
+                "<" => angle += 1,
+                ">" if j > 0 && matches!(toks[j - 1].text, "-" | "=") && toks[j - 1].off + 1 == t.off => {}
+                ">" => angle = (angle - 1).max(0),
+                ";" if nest == 0 && angle == 0 => return Some(j),
+                "{" if nest == 0 && angle == 0 => return Some(j),
+                "{" => {
+                    // A const-generic block: skip to its closing `}`.
+                    j += 1;
+                    while j < toks.len() && !(toks[j].text == "}" && toks[j].depth == base) {
+                        j += 1;
+                    }
+                }
+                _ => {}
+            }
         }
         j += 1;
     }
-    toks.len().saturating_sub(1)
+    None
 }
 
 /// The Rust param types and return type of a runtime fn item.
