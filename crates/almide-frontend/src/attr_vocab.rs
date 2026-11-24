@@ -63,6 +63,12 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "prim_op",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
+    // A concurrent parameter whose argument is INSTANCE-CLOSED: it runs in
+    // several instances (one per worker, one per request on a wasi:http
+    // host), so it may read no local of the fn passing it (E095, the app of
+    // `http.serve`; crates/almide-frontend concurrent_reach.rs
+    // `stdlib_closed_slots`). Read from the bundled stdlib only
+    "instance_closed",
     // A stdlib fn whose effect on process-local state a sibling fan arm could
     // read (ADR-0024 D3): a fan reaching one runs its arms sequentially
     "ordered",

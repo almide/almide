@@ -117,7 +117,7 @@ fn concurrent_reach_diagnostic(
                 format!("the callback passed to {}{through}", f.wrapper.as_deref().unwrap_or(surface)),
             )
         }
-        SlotKind::Handler { surface } => {
+        SlotKind::Handler { surface, .. } => {
             let base = "a handler cannot share mutable state between requests. For a value fixed before serving, use a top-level `let` instead of `var`, or bind a `let` copy before the handler";
             (
                 format!("this handler can reach `{var}`, a `var` — handlers run concurrently"),
