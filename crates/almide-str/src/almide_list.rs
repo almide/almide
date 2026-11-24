@@ -484,7 +484,7 @@ impl<T> AlmideList<T> {
     /// Removes the elements in `range` and yields them, as `Vec::drain`: in place in a unique block (a shared one is
     /// copied first), with no allocation. The elements not taken are dropped and the tail moves down when the drain is
     /// dropped; while it lives the list holds only `..start`, so forgetting it leaks the rest and is still sound.
-    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> AlmideListDrain<'_, T> where T: Clone {
+    pub fn drain(&mut self, range: impl std::ops::RangeBounds<usize>) -> impl DoubleEndedIterator<Item = T> + ExactSizeIterator + std::iter::FusedIterator + '_ where T: Clone {
         use std::ops::Bound;
         let len = self.len();
         let start = match range.start_bound() {
@@ -540,9 +540,6 @@ impl<T> AlmideList<T> {
     pub fn try_reserve(&mut self, extra: usize) -> Result<(), std::collections::TryReserveError> where T: Clone {
         self.try_reserve_exact(extra)
     }
-
-    /// Nothing to give back: a block keeps its capacity (`Vec::shrink_to_fit` may too).
-    pub fn shrink_to_fit(&mut self) {}
 
     /// Grows to `n` elements with clones of `x`, or truncates to `n`, as `Vec::resize`.
     pub fn resize(&mut self, n: usize, x: T) where T: Clone {
@@ -777,7 +774,7 @@ impl<T: Clone> std::iter::FusedIterator for AlmideListIntoIter<T> {}
 
 /// The iterator of [`AlmideList::drain`]: yields `start..end` by value out of a unique block. On drop it drops the
 /// elements not taken and moves the tail `tail..tail + tail_len` down to `start`.
-pub struct AlmideListDrain<'a, T> {
+pub(crate) struct AlmideListDrain<'a, T> {
     block: NonNull<AlmideListHeader>,
     data: *mut T,
     next: usize,
@@ -898,13 +895,6 @@ impl<'a, T: Clone> AlmideListPusher<'a, T> {
         self.len += 1;
     }
 
-    /// Appends an `Int` lane as one element, converted as the render converts that lane to the element type
-    /// (`Bytes` keeps the low 8 bits).
-    #[inline]
-    pub fn push_lane(&mut self, x: i64) where T: AlmideLaneElem {
-        self.push(T::from_lane(x));
-    }
-
     /// Writes the length back, makes the block unique with room for one more, and reloads the locals.
     #[cold]
     #[inline(never)]
@@ -932,22 +922,19 @@ impl<'a, T: Clone> Drop for AlmideListPusher<'a, T> {
     }
 }
 
-/// An element type an `Int` lane converts to by Rust's `as` cast, as the native render converts it.
-pub trait AlmideLaneElem {
-    fn from_lane(x: i64) -> Self;
-}
-
-impl AlmideLaneElem for u8 {
+// `push_lane` appends an `Int` lane as one element, converted by Rust's `as` cast as the native render converts
+// that lane to the element type: `Bytes` keeps the low 8 bits, a `List[Int]` takes the lane as it is.
+impl AlmideListPusher<'_, u8> {
     #[inline]
-    fn from_lane(x: i64) -> u8 {
-        x as u8
+    pub fn push_lane(&mut self, x: i64) {
+        self.push(x as u8);
     }
 }
 
-impl AlmideLaneElem for i64 {
+impl AlmideListPusher<'_, i64> {
     #[inline]
-    fn from_lane(x: i64) -> i64 {
-        x
+    pub fn push_lane(&mut self, x: i64) {
+        self.push(x);
     }
 }
 
@@ -1217,7 +1204,7 @@ fn almide_list_alloc_zeroed<T>(n: usize) -> NonNull<AlmideListHeader> {
 impl<T> AlmideList<T> {
     /// `n` clones of `x` (`vec![x; n]`): one block at its final capacity, filled in place;
     /// the last element is `x` itself.
-    pub fn from_elem(x: T, n: usize) -> Self where T: Clone {
+    pub(crate) fn from_elem(x: T, n: usize) -> Self where T: Clone {
         if n == 0 {
             return Self::new();
         }
