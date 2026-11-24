@@ -46,7 +46,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "85"
+# unstamped_ceiling     = "84"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "97"
 # failopen_ceiling      = "21"
@@ -190,6 +190,9 @@
 #               effect.e109-value-gate (#4847 fixed: check --effects runs E109) and
 #               env.ci-slice STAMPED with novel tests, probes and controls run on ds-2.
 #               75 stamped; unstamped 89 -> 85, skipped 98 -> 97, fail-open 22 -> 21.
+#   2026-11-24  verify.verify-command STAMPED (its manifest read is the entry's own since
+#               #4830; novel fresh-bytes artifact, probe through `almide verify`, control):
+#               76 stamped, unstamped 85 -> 84.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3265,16 +3268,22 @@ items = [
 ]
 keys = []
 decides = "`almide verify <file>` refuses a program that does not build for wasm, a component-shaped program, and a present artifact that is not byte-identical to this build; with no verifier it fails by name (exit 127)"
-from = "mixed:declaration+text"
+from = "mixed:declaration+reach"
 unknown = "refuse"
-unknown_note = "an unparseable ./almide.toml is refused now (governing_manifest, verify.rs:89-90, #4829); the manifest is still the cwd's, not the entry's project (verify.rs:84-85)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.", build = "n.a.", test = "n.a.", bench = "n.a.", native = "n.a.: --mir certifies MIR, not shipped bytes", wasm = "runs: own command", wasi = "n.a.", component = "refused by name (verify.rs:111-119)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+unknown_note = "the governing manifest is the entry's own project (manifest_for_entry via permissions_project_for, verify.rs:81-88; #4830 fixed) and one that does not parse is refused (#4829); whether the program builds as a core module is read from the build's emitted host-op set (component-shaped -> refused); a present artifact is pinned only when it is byte-identical to this build's module, so a file of any other bytes is refused (novel test with fresh bytes and a fresh stem). from: the manifest is a declaration and the module shape is reach; the pin is byte equality of the artifact, not a name or text match"
+routes = { check = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", check_json = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", check_effects = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", run = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", build = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", test = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", bench = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", native = "n.a.: --mir certifies MIR, not shipped bytes", wasm = "runs: `almide verify {main}` (the probe's argv): the default artifact path holds other bytes and is refused", wasi = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", component = "n.a.: `almide verify` refuses a component-shaped program by name before any bundle is written (verify.rs:108-116); it certifies only the core module `build --target wasm` writes", lsp = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", mcp = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle", emit = "n.a.: the decision is made only by `almide verify` (driven in the wasm column with argv `verify {main}`); this column's command writes no certificate bundle" }
 tests = ["tests/verify_shim_test.rs::without_the_verifier_the_shim_fails_by_name_and_has_no_fallback", "tests/verify_shim_test.rs::the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused", "tests/verify_shim_test.rs::emit_writes_the_bundle_even_without_the_verifier"]
 control_note = "tests/verify_shim_test.rs::the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused (fails with the byte comparison removed)"
 issues = [4829]
-status = "UNSTAMPED"
-reasons = ["c3: manifest_allow reads ./almide.toml (verify.rs:84-91): from outside the project the witness gets no manifest bound while the build half reads the entry's project (issue draft issue-verify-cwd-manifest)", "c2: no novel test", "c4: control_note only (no patch)"]
+status = "STAMPED"
+reasons = []
 note = "#4829 closed for the parse failure. gate_build uses the same function."
+novel = "tests/decision_novel_test.rs::novel_verify_refuses_a_fresh_file_that_is_not_the_built_module"
+control_test = "tests/decision_novel_test.rs::novel_verify_refuses_a_fresh_file_that_is_not_the_built_module"
+control_patch = "proofs/decision-controls/verify.verify-command.patch"
+probe = "tests/decision-probes/verify.verify-command"
+control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
 id = "verify.bundle-parse"
