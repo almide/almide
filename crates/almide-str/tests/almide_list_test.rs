@@ -575,6 +575,80 @@ fn a_panic_while_extending_keeps_the_elements_written_so_far() {
     assert_eq!(&c[..], &[0, 1, 2]);
 }
 
+/// `extend` fills the reserved room through the iterator's own `fold`; an iterator that yields more than its size hint
+/// grows the block out of line, and a panic in the middle still leaves exactly the elements written.
+#[test]
+fn an_extend_past_its_size_hint_grows_and_a_folded_extend_unwinds_cleanly() {
+    struct Liar(std::ops::Range<i64>);
+    impl Iterator for Liar {
+        type Item = i64;
+        fn next(&mut self) -> Option<i64> {
+            self.0.next()
+        }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (1, Some(1))
+        }
+    }
+    let mut a: AlmideList<i64> = AlmideList::from(vec![-1]);
+    a.extend(Liar(0..100));
+    assert_eq!(a.len(), 101);
+    assert!(a.iter().copied().eq(std::iter::once(-1).chain(0..100)));
+    // A shared source folds by clone and keeps its other owner's elements.
+    let src: AlmideList<String> = AlmideList::from(vec!["p".to_string(), "q".to_string(), "boom".to_string()]);
+    let keep = src.clone();
+    let mut b: AlmideList<String> = AlmideList::new();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        b.extend(src.into_iter().map(|s| if s == "boom" { panic!("map") } else { s + "!" }));
+    }));
+    assert!(r.is_err());
+    assert_eq!(b.as_slice(), &["p!".to_string(), "q!".to_string()]);
+    assert_eq!(keep.len(), 3);
+}
+
+/// `map_indexed` and `extend_indexed` fill by the source's count: a unique source's elements move (no clone), a shared
+/// one's are cloned and its other owner keeps them, the fill appends after what the list holds, and a panic in `f`
+/// leaves every element, written or not, dropped exactly once.
+#[test]
+fn an_indexed_fill_moves_or_clones_once_and_unwinds_cleanly() {
+    let _window = MARKING_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+    struct Counted(Rc<Cell<i64>>, Rc<Cell<i64>>, i64);
+    impl Clone for Counted {
+        fn clone(&self) -> Self {
+            self.0.set(self.0.get() + 1);
+            Counted(self.0.clone(), self.1.clone(), self.2)
+        }
+    }
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.1.set(self.1.get() + 1);
+        }
+    }
+    let (clones, drops) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let make = |n: i64| -> AlmideList<Counted> { (0..n).map(|k| Counted(clones.clone(), drops.clone(), k)).collect() };
+
+    let pairs: AlmideList<(i64, i64)> = make(4).map_indexed(|i, c| (i as i64, c.2 * 10));
+    assert_eq!(pairs.as_slice(), &[(0, 0), (1, 10), (2, 20), (3, 30)]);
+    assert_eq!((clones.get(), drops.get()), (0, 4), "a unique source moves each element once");
+
+    let shared = make(3);
+    let keep = shared.clone();
+    let mut out: AlmideList<i64> = AlmideList::from(vec![7]);
+    out.extend_indexed(shared, |i, c| c.2 + 100 * i as i64);
+    assert_eq!(out.as_slice(), &[7, 0, 101, 202]);
+    assert_eq!(clones.get(), 3, "a shared source is cloned once per element");
+    assert_eq!(keep.len(), 3);
+    drop(keep);
+    assert_eq!(drops.get(), 4 + 3 + 3);
+
+    drops.set(0);
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        make(5).map_indexed(|i, c| if i == 3 { panic!("f") } else { c })
+    }));
+    assert!(r.is_err());
+    assert_eq!(drops.get(), 5, "three written, one handed to f, one never taken: each dropped once");
+    assert!(AlmideList::<i64>::new().map_indexed(|_, x| x).is_empty());
+}
+
 #[test]
 fn a_pusher_copies_a_shared_block_at_its_first_push_and_writes_the_length_back() {
     // A shared block: the first push copies it, the other owner keeps its elements.
