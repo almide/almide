@@ -67,6 +67,12 @@ wasmparser = "0.263"
 # `almide verify` pins the SHA-256 of the file it certifies (#4011); almide-verify
 # recomputes it with its own implementation.
 sha2 = "0.11"
+# #4836 (owner ruling 2026-11-24): every wasm route's certificate is judged by
+# the verifier LIBRARY linked here, so a build can never ship unjudged because
+# no almide-verify binary was installed. The crate links no compiler crate (its
+# Cargo.toml), so the judge stays independent code; `almide verify` still execs
+# the standalone binary.
+almide-verify = { path = "crates/almide-verify" }
 # The native build cache's artifact digest (#4180, #4682): BLAKE3 hashes a built
 # binary in about a tenth of SHA-256's time on CPUs without SHA extensions, on
 # every build and every cache hit.
@@ -135,10 +141,6 @@ almide-wasm-vm = { path = "crates/almide-wasm-vm" }
 # The corpus gates' fixture-range sharding (#2381): the switch is parsed in
 # one place, shared with almide-spine's run_parity.
 almide-corpus = { path = "crates/almide-corpus" }
-# DEV-ONLY (#2152): the shim test reads the certificate bundle `almide verify
-# --emit` writes with the verifier's own parser. The almide binary never links
-# it — `almide verify` execs the separate almide-verify binary, no fallback.
-almide-verify = { path = "crates/almide-verify" }
 # The name-keyed-site gate parses the compiler's own source (tests/name_keyed_sites_test.rs),
 # and the inspection fingerprint prints the wasm emitter arms it covers (tests/stdlib_inspection_test.rs).
 syn = { version = "3", default-features = false, features = ["full", "visit", "parsing", "printing", "clone-impls"] }

@@ -65,6 +65,8 @@ pub mod wasm_route;
 pub mod serve_export;
 pub mod project_fetch;
 pub mod native_grant;
+// The native build gate over the linked verifier (#4828, W2).
+pub mod certificate_gate_native;
 pub mod media_grant;
 pub mod trust;
 pub mod git_source;
@@ -73,6 +75,7 @@ pub mod fetch;
 pub mod resolve;
 pub mod source_overlay;
 pub mod effect_value_gate;
+pub mod certificate_gate;
 
 // ── Wall marker: the machine-readable line of a wasm wall's stderr ──
 //

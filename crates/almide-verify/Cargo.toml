@@ -3,7 +3,8 @@ name = "almide-verify"
 # Independently versioned (#2152): this number is the VERIFIER's, not the
 # compiler's. It moves when the checking semantics or the formats it reads
 # move, and never because the compiler shipped a release. `almide verify` is a
-# subprocess shim that execs this binary; it carries no linked copy.
+# subprocess shim that execs this binary; the compiler's build gate links this
+# crate's library (#4836) so no wasm route ships unjudged.
 version = "0.2.0"
 edition = "2021"
 rust-version = "1.89"
