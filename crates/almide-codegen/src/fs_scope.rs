@@ -500,58 +500,7 @@ almide_rt_fs_write(x, y)
             "OpenOptions::new()", "UnixListener::bind(", "UnixStream::connect(", "UnixDatagram::bind(", "almide_sfs::",
             "std::os::unix::fs::symlink(", ".current_dir(",
         ];
-        let mut out = std::collections::BTreeMap::new();
-        for (module, text) in modules {
-            let bodies = fn_bodies(text);
-            for name in bodies.keys() {
-                let mut seen = std::collections::HashSet::new();
-                let mut stack = vec![name.as_str()];
-                let mut touches = false;
-                while let Some(n) = stack.pop() {
-                    if !seen.insert(n) { continue; }
-                    let Some(b) = bodies.get(n) else { continue };
-                    if TOUCH.iter().any(|t| b.contains(t)) { touches = true; break; }
-                    stack.extend(called_names(b).filter(|c| bodies.contains_key(*c)));
-                }
-                if touches { out.insert(name.clone(), *module); }
-            }
-        }
-        out
-    }
-
-    /// Each `fn` of `text` with a body, name -> its bodies joined.
-    fn fn_bodies(text: &str) -> std::collections::HashMap<String, String> {
-        let b = text.as_bytes();
-        let mut out: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        let mut i = 0;
-        while let Some(at) = text[i..].find("fn ").map(|k| k + i) {
-            i = at + 3;
-            if at > 0 && (b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_') { continue; }
-            let name: String = text[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
-            if name.is_empty() { continue; }
-            let (mut j, mut depth) = (i + name.len(), 0i32);
-            while j < b.len() && !(depth == 0 && (b[j] == b'{' || b[j] == b';')) {
-                match b[j] { b'(' | b'[' => depth += 1, b')' | b']' => depth -= 1, _ => {} }
-                j += 1;
-            }
-            if j >= b.len() || b[j] == b';' { continue; }
-            let (mut k, mut braces) = (j, 0i32);
-            while k < b.len() {
-                match b[k] { b'{' => braces += 1, b'}' => { braces -= 1; if braces == 0 { break; } } _ => {} }
-                k += 1;
-            }
-            out.entry(name).or_default().push_str(&text[j..k.min(b.len() - 1) + 1]);
-        }
-        out
-    }
-
-    /// The names `body` calls: `f(`, `.f(`, `m::f(`, `f::<..>(`.
-    fn called_names(body: &str) -> impl Iterator<Item = &str> {
-        crate::rust_idents::identifiers(body).filter(move |id| {
-            let end = id.as_ptr() as usize - body.as_ptr() as usize + id.len();
-            let rest = &body[end..];
-            rest.starts_with('(') || rest.starts_with("::<")
-        })
+        crate::runtime_reach::reaching_fns(modules, TOUCH)
     }
 
     /// C-460, the gate: every runtime fn that touches a filesystem entry and
