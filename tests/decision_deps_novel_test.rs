@@ -519,3 +519,35 @@ fn novel_a_fresh_name_meaning_a_local_module_and_a_dependency_is_refused() {
         assert!(o.status.success(), "control: `import {import}` did not resolve to the dependency:\n{}", text(&o));
     }
 }
+
+/// native.grant-survey c1 (#4834; owner ruling 2026-11-24): a
+/// `[permissions].native` grant names a dependency by its typed origin. A
+/// package reached through another dependency is never granted by the name
+/// it declares: the root's bare-name grant of a fresh name covers only the
+/// root's own dependency entry of that name, and a transitive package that
+/// declares the name is refused, with the origin entry that would grant it.
+/// The entry naming its directory grants it.
+#[test]
+fn novel_a_transitive_package_declaring_a_granted_fresh_name_is_not_granted() {
+    let td = tempfile::TempDir::new().unwrap();
+    let home = home(&td);
+    let (mid, nat, f) = (novel::ident("mid"), novel::ident("nat"), novel::ident("pid"));
+    let m = td.path().join(&mid);
+    write(m.join("almide.toml"), &format!("[package]\nname = \"{mid}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{nat} = {{ path = \"../{nat}\" }}\n"));
+    write(m.join("src/mod.almd"), "pub fn hello() -> String = \"hi\"\n");
+    let n = td.path().join(&nat);
+    write(n.join("almide.toml"), &format!("[package]\nname = \"{nat}\"\nversion = \"0.1.0\"\n"));
+    write(n.join("src/mod.almd"), &format!("@extern(rust, \"std::process\", \"id\")\nfn {f}() -> Int = _\n"));
+    let dir = td.path().join("app");
+    let by_name = format!("\n[permissions]\nnative = [\"{nat}\"]\n");
+    let a = app(&dir, &format!("{mid} = {{ path = \"../{mid}\" }}"), &by_name, &mid);
+    let o = almide(&a, &home, &["emit", "src/main.almd", "--target", "rust"]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "a transitive package rode the root's bare-name grant:\n{t}");
+    assert!(t.contains(&format!("dependency `{nat}` (required by another dependency)")), "{t}");
+    assert!(t.contains("names only this manifest's own dependency of that name") && t.contains(&format!("\"../{nat}\"")), "no origin entry in the refusal:\n{t}");
+    // Control: the entry naming the package's directory grants it.
+    let a = app(&dir, &format!("{mid} = {{ path = \"../{mid}\" }}"), &format!("\n[permissions]\nnative = [\"../{nat}\"]\n"), &mid);
+    let o = almide(&a, &home, &["emit", "src/main.almd", "--target", "rust"]);
+    assert!(o.status.success(), "control: the origin grant did not grant it:\n{}", text(&o));
+}

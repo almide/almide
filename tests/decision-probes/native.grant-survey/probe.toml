@@ -1,0 +1,3 @@
+# A dependency reached through another brings native code; the root grants only its bare
+# name, which covers the root's own dependency entry of that name and nothing else (#4834).
+expect = "brings native code"
