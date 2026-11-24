@@ -611,8 +611,9 @@ id = "pure.e092-reach"
 at = "crates/almide-frontend/src/check/pure_attr.rs::Checker::impure_callee"
 items = [
   "crates/almide-frontend/src/check/pure_attr.rs::Checker::impure_callee",
+  "crates/almide-frontend/src/check/pure_attr.rs::Checker::report_impure_argument",
 ]
-keys = []
+keys = ["crates/almide-frontend/src/check/pure_attr.rs::Checker::report_impure_argument::S1::E092"]
 decides = "a @pure fn is refused when anything it reaches (BFS over checker-resolved calls and fn values, cross-module) is an output/abort builtin, a stdlib fn with a category, or an @extern"
 from = "mixed:reach+name"
 unknown = "allow"
