@@ -530,6 +530,17 @@ pub(crate) fn render_v1_native_or_fallback(
     }
 }
 
+/// W3 (#4006, owner ruling 2026-11-24): a route the verified native render
+/// does not serve — `--target rust` source, `--repr-c` / `--cdylib`, the
+/// rustc `--target wasi` route, the REPL — ships the standard codegen's Rust,
+/// which no certificate covers. It stays, declared unverified (decision row
+/// witness.native-verified-fallback), and says so on every use.
+pub(crate) fn warn_unverified_route(route: &str) {
+    err(&format!(
+        "warning: {route} is an unverified route: it ships the standard codegen's Rust, which no certificate covers (#4006); `almide build` / `almide run` ship the verified native render"
+    ));
+}
+
 fn verbose() -> bool {
     almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG")
 }

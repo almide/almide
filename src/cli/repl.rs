@@ -11,6 +11,7 @@ pub fn run_repl() {
     if interactive {
         out(&format!("Almide REPL v{} — type expressions to evaluate, :q to quit",
                  env!("CARGO_PKG_VERSION")));
+        super::warn_unverified_route("the REPL");
         out("");
     }
 

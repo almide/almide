@@ -331,6 +331,7 @@ pub fn cmd_build(args: BuildArgs) {
         if super::wasm_compile::check_wasi_rustc_availability(pending.ir(), &pending.package).is_err() {
             std::process::exit(1);
         }
+        super::warn_unverified_route("`--target wasi` (the rustc wasm32-wasip1 route)");
         let rs_code = pending.generate();
         let rs_code = match heap_cap {
             Some(n) => inject_heap_cap(&rs_code, n),
@@ -354,6 +355,9 @@ pub fn cmd_build(args: BuildArgs) {
     let rs_code = if native_verified && !repr_c && !cdylib {
         super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {
+        if repr_c || cdylib {
+            super::warn_unverified_route(if cdylib { "`--cdylib`" } else { "`--repr-c`" });
+        }
         pending.generate()
     };
     super::phase_lap("v1-render");
