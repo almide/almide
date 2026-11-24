@@ -1399,12 +1399,15 @@ decides = "the directories the embedded p3 component host preopens: the granted 
 from = "declaration"
 unknown = "refuse"
 unknown_note = "a path outside every preopen is refused by wasmtime-wasi; a root that does not exist at start is not preopened"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (component route of --target wasm)", build = "n.a.: stock runtime uses operator --dir #4816", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "unknown", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-20, inside and outside the project)" }
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs (component route of --target wasm)", build = "n.a.: stock runtime uses operator --dir #4816", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "n.a.: `almide bench` runs the native build, or with --target wasm the core module on the embedded host (bench.rs:39, 123-140: run_wasm_unbounded_args) — never the p3 component host whose preopens this row decides (read 2026-11-24, 23rd)", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "n.a.", component = "runs", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-20, inside and outside the project)" }
 tests = ["tests/fs_scope_test.rs::the_component_host_preopens_only_the_granted_roots", "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"]
 control_note = "NONE"
 issues = [4816]
 status = "UNSTAMPED"
-reasons = ["c3: test / bench cells unknown (does `almide test` / `bench` of an http-importing program run on the component host?)"]
+reasons = [
+  "c3: the probe's OUTSIDE side refuses for an unrelated reason (the relative path names no file from the parent directory, see note), so the route matrix's outside verdicts are vacuous; the probe needs a read whose path resolves from both sides before the cells count (23rd, 2026-11-24). bench is n.a. (read in bench.rs)",
+  "c4: control not re-run on this tree",
+]
 note = "host_fs_scope.rs:83-97; component_host.rs (FsPerms::ReadWrite). Probe: the OUTSIDE side is confounded (the relative path names no file from the parent, so it prints `refused` for another reason) — read the inside side. [argv] run / component drive `run --target wasm`."
 novel = "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"
 control_test = "tests/decision_batch1a_test.rs::novel_the_component_host_preopens_only_a_fresh_granted_root"
