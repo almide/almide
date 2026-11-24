@@ -128,12 +128,27 @@ fn structured_net(seg: &str) -> Option<i64> {
                 continue;
             }
         };
-        // The checker's grouped items hold flat events only.
+        // The checker's grouped items hold flat events only — except a
+        // one-shot branch inside a loop group (#4934): the checker closes it
+        // as its own item while the loop body stays open (`step_plain`), so
+        // it counts as a branch at this level and the body keeps its ops.
         let mut arms: Vec<String> = vec![String::new()];
         loop {
             match chars.next()? {
                 x if x == close => break,
                 '|' if close != ')' && arms.len() == 1 => arms.push(String::new()),
+                '{' if close == ')' => {
+                    let mut inner = String::from("{");
+                    loop {
+                        match chars.next()? {
+                            '}' => break,
+                            '(' | ')' | '{' | '[' | ']' => return None,
+                            x => inner.push(x),
+                        }
+                    }
+                    inner.push('}');
+                    net += structured_net(&inner)?;
+                }
                 '(' | ')' | '{' | '}' | '[' | ']' | '|' => return None,
                 x => arms.last_mut()?.push(x),
             }
@@ -219,6 +234,10 @@ impl Streams {
             // the frame, so the flat concat would erase the exit obligation.
             let seg = if flat_concat_ok(&t, &e) {
                 format!("{t}{e}")
+            } else if t == e && !either_has_delimiter(&t, &e) && !t.contains(['x', 'X', 't', 'T']) {
+                // #4934: two identical arms are the one path they both are
+                // (`{i|i}` is `i`), and a loop body has no reading for a region.
+                t
             } else if either_has_delimiter(&t, &e) {
                 self.poisoned = true;
                 "{i|}".to_string()
@@ -436,6 +455,15 @@ struct CertScan {
     slot_chain: BTreeMap<ValueId, ValueId>,
     /// Per open region: the slot its merge credits, when it is in `slot_chain`.
     merge_credit: Vec<Option<ValueId>>,
+    /// #4934: the released merge destination of each open `IfThen`, credited
+    /// at its `EndIf` — where the arms' values have joined — not at the
+    /// `IfThen`: an arm that leaves the fn (`!`, a guard) never forms the
+    /// merge, so a credit before the region left that exit holding it.
+    merge_pending: Vec<Option<ValueId>>,
+    /// #4934: the heap params the CALLER owns (neither owned nor in-out). Their
+    /// blocks outlive the call, so rebinding a slot that aliased one (`var out
+    /// = raw; out = f(out)`) ends no view of that block.
+    borrowed_params: BTreeSet<ValueId>,
     /// Straight-line slots whose pending rebind is a bare credit (no `(`
     /// opened): their `SetLocal` closes nothing.
     unfolded: BTreeSet<ValueId>,
@@ -612,6 +640,12 @@ impl CertScan {
             self.s.else_branch();
         }
         self.leave_arm(is_end);
+        if is_end {
+            if let Some(d) = self.merge_pending.pop().flatten() {
+                self.s.of.insert(d, d);
+                self.s.event(d, 'i');
+            }
+        }
     }
 
     /// Route `dst`'s event into its loop-carried SLOT stream when it FEEDS one.
@@ -639,7 +673,10 @@ impl CertScan {
         if !self.line_slots.contains(&slot) {
             return false;
         }
-        self.s.frames.is_empty()
+        // #4934: inside a loop the slot's line is already one loop group
+        // (`slot_delimiters_open`); a second `(` would nest groups, which the
+        // format has no reading for.
+        self.s.frames.is_empty() && self.depth == 0
     }
 
     /// A feeder's event routes to its slot stream; anything else opens its OWN
@@ -709,7 +746,21 @@ impl CertScan {
 
     /// Open `(` on every slot stream, remembering which streams were opened.
     fn slot_delimiters_open(&mut self) {
-        let opened: Vec<ValueId> = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+        // One group per OBJECT (#4934): two slots that share one object (two
+        // folds seeded by the same `init`) would otherwise nest `((…))`.
+        let mut opened: Vec<ValueId> = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+        let mut seen = BTreeSet::new();
+        opened.retain(|o| seen.insert(*o));
+        // A slot not yet born at the loop's entry (its value is made inside
+        // the loop: a `var` declared in an outer loop's body) is fresh every
+        // round, so its events are one round's, flat — a group would read an
+        // exit branch inside it ahead of the birth (#4934, the checker closes
+        // a branch as its own item while the loop body stays open).
+        opened.retain(|o| {
+            let born = |seg: &str| seg.chars().any(|c| !matches!(c, '(' | ')' | '{' | '}' | '[' | ']' | '|'));
+            self.s.stream.get(o).is_some_and(|l| born(l))
+                || self.s.frames.iter().any(|f| (if f.in_else { &f.else_ev } else { &f.then_ev }).get(o).is_some_and(|l| born(l)))
+        });
         for &so in &opened {
             self.s.event(so, '(');
         }
@@ -757,7 +808,7 @@ impl CertScan {
                 // call (`M`), so the rebind is the bare credit.
                 self.s.of.insert(dst, so);
                 self.s.event(so, 'i');
-                if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+                if self.straight_line_slot(slot) {
                     self.unfolded.insert(slot);
                 }
                 return;
@@ -788,31 +839,20 @@ impl CertScan {
         if let (Some(d), Some(slot)) = (dst, chained) {
             let so = self.s.object_of(slot);
             self.s.of.insert(d, so);
-            if self.feeder_to_slot.contains_key(&d) && self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+            if self.feeder_to_slot.contains_key(&d) && self.straight_line_slot(slot) {
                 self.s.event(so, '(');
             }
+            self.merge_pending.push(None);
             self.s.open_branch();
             self.enter_branch_scope();
             return;
         }
-        if let Some(d) = dst {
-            self.credit_merge_dst(d);
-        }
+        // A slot-fed merge keeps its credit at the region (`try_feed`); a
+        // released merge destination is credited at the join (`close_arm`).
+        let pending = dst.filter(|d| !self.try_feed(*d, 'i') && self.released_merge_dsts.contains(d));
+        self.merge_pending.push(pending);
         self.s.open_branch();
         self.enter_branch_scope();
-    }
-
-    /// The merge dst's pre-region `i`. try_feed EMITS on success — the early
-    /// return keeps the &&'s exact short-circuit (feed first, fall through
-    /// only on false).
-    fn credit_merge_dst(&mut self, d: ValueId) {
-        if self.try_feed(d, 'i') {
-            return;
-        }
-        if self.released_merge_dsts.contains(&d) {
-            self.s.of.insert(d, d);
-            self.s.event(d, 'i');
-        }
     }
 
     /// A LIVE USE (Borrow / MakeUnique) on an object whose stream HOLDS
