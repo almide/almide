@@ -1,0 +1,9 @@
+fn heads(xs: List[String]) -> String = match xs {
+  [h, ..t] if list.len(t) > 0 => "${h}+${list.len(t)}",
+  [h, ..] => "solo:${h}",
+  [] => "none",
+}
+
+effect fn main() -> Unit = {
+  println(heads(["a", "b", "c"]))
+}

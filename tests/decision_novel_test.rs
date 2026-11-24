@@ -387,3 +387,30 @@ fn every_stdlib_slot_attribute_names_a_parameter() {
     assert!(bad.is_empty(), "stdlib slot attributes naming no parameter: {bad:?}");
     assert_eq!(almide_frontend::concurrent_reach::stdlib_closed_slots("http", "serve"), vec![1], "http.serve's app is not instance-closed");
 }
+
+/// media.e116-header-write (owner ruling 2026-11-24): the response's header
+/// writer refuses an owned header name whatever its source. The name arrives
+/// at run time (argv), in a fresh mix of cases, held by a fresh local — no
+/// literal the check-time E116 could read — and both writers (`set_header`,
+/// `with_headers`) abort on both targets, with the C-275 message.
+#[test]
+fn novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer() {
+    let local = novel::ident("field");
+    let mix = novel::ident("case");
+    let bits: Vec<bool> = mix.bytes().rev().take(12).map(|b| b % 2 == 1).collect();
+    let name: String = "content-type".chars().zip(bits.iter().cycle()).map(|(c, up)| if *up { c.to_ascii_uppercase() } else { c }).collect();
+    let (_t, proj) = project(&[(
+        "src/main.almd",
+        format!(
+            "import env\nimport http\n\neffect fn main() -> Unit = {{\n  let a = env.args()\n  let {local} = list.get(a, 0) ?? \"\"\n  let r = match list.get(a, 1) ?? \"\" {{\n    \"list\" => http.with_headers(200, \"x\", [({local}, \"text/html\")]),\n    _ => http.set_header(http.response(200, \"x\"), {local}, \"text/html\"),\n  }}\n  println(http.body(r))\n}}\n"
+        ),
+    )]);
+    let check = run(&proj, &["check", "src/main.almd"]);
+    assert!(check.status.success(), "the name is not a literal, so check has nothing to refuse:\n{}", text(&check));
+    for target in ["rust", "wasm"] {
+        for (how, writer) in [("set", "http.set_header"), ("list", "http.with_headers")] {
+            let o = run(&proj, &["run", "src/main.almd", "--target", target, "--", &name, how]);
+            refused_with(&o, &format!("{writer}: `{name}` is written from the body's type, never by name"), &format!("{writer} with a run-time name on {target}"));
+        }
+    }
+}

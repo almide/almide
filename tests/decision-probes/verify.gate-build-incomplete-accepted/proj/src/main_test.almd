@@ -1,0 +1,9 @@
+fn heads(xs: List[String]) -> String = match xs {
+  [h, ..t] if list.len(t) > 0 => "${h}+${list.len(t)}",
+  [h, ..] => "solo:${h}",
+  [] => "none",
+}
+
+test "heads" {
+  assert_eq(heads(["x"]), "solo:x")
+}
