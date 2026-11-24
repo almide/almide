@@ -120,16 +120,16 @@ fn first_line_while_running(mut cmd: Command) -> Option<String> {
 /// output. The buffer is line-buffered: a printed line reaches the pipe while
 /// the program still runs.
 ///
-/// The wall is the `Handle`-returning extern: a plain `@extern(rust)` fn
-/// renders natively now, a raw-pointer one does not yet (#4641). The twin
-/// below holds the same promise on the native render.
+/// The wall is an `@export(c)` fn over a `Region` parameter: a plain and a
+/// `Handle` `@extern(rust)` fn both render natively now (#4641, #4006). The
+/// twin below holds the same promise on the native render.
 #[test]
 fn a_line_printed_by_a_long_running_standard_codegen_program_reaches_a_pipe_before_exit() {
     let dir = tempfile::tempdir().unwrap();
     let prog = write(
         dir.path(),
         "spin.almd",
-        "@extern(rust, \"std::thread\", \"yield_now\")\nfn yield_now() -> Unit = _\n@extern(rust, \"std::ptr\", \"null_mut\")\nfn no_handle() -> Handle = _\neffect fn main() -> Unit = {\n  let _ = no_handle()\n  println(\"hello\")\n  var i = 0\n  while i >= 0 { yield_now() }\n}\n",
+        "import ffi\n\n@extern(rust, \"std::thread\", \"yield_now\")\nfn yield_now() -> Unit = _\n@export(c, \"spin_size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\neffect fn main() -> Unit = {\n  println(\"hello\")\n  var i = 0\n  while i >= 0 { yield_now() }\n}\n",
     );
     let exe = dir.path().join("spin");
     let built = Command::new(almide()).arg("build").arg(&prog).arg("-o").arg(&exe).env("ALMIDE_VERBOSE", "1").output().unwrap();

@@ -1,5 +1,5 @@
-//! A Set whose element has no exact runtime equality (`Set[List[Float]]`,
-//! `Set[Option[Int]]`) is refused by the verified native render, which then
+//! A Set whose element has no exact runtime equality (`Set[List[Float]]`) is
+//! refused by the verified native render, which then
 //! builds on the standard codegen (#4799). The refusal arms of the set element
 //! checks became `wall`s; the program-level refusal a user sees must stay the
 //! one it was: the fn naming the set falls outside the native rung subset.
@@ -37,14 +37,16 @@ fn a_set_of_float_lists_is_refused_outside_the_rung_subset() {
     assert!(err.contains("native: fn `has` param `Applied(Set, [Applied(List, [Float])])` type — outside the native rung subset"), "{err}");
 }
 
+/// An Option's `==` is its payload's, so a `Set[Option[Int]]` has an exact
+/// element equality and renders on the verified route (#4006).
 #[test]
-fn a_set_of_options_is_refused_outside_the_rung_subset() {
+fn a_set_of_options_renders_on_the_verified_route() {
     let err = walled_reason(
         "options",
         "fn has(s: Set[Option[Int]], k: Int) -> Bool = set.contains(s, some(k))\n\n\
          effect fn main() -> Unit = {\n  let s = set.from_list([some(1), none, some(1)])\n  \
          println(\"${set.len(s)} ${has(s, 1)} ${has(s, 2)}\")\n}\n",
     );
-    assert!(err.contains("verified native render walled"), "{err}");
-    assert!(err.contains("native: fn `has` param `Applied(Set, [Applied(Option, [Int])])` type — outside the native rung subset"), "{err}");
+    assert!(!err.contains("walled"), "{err}");
+    assert!(err.contains("native: v1 trust-spine render"), "{err}");
 }
