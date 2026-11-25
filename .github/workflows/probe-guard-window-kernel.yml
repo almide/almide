@@ -54,6 +54,52 @@ jobs:
           cd proofs
           if command -v coqc >/dev/null 2>&1; then C="coqc"; else C="rocq compile"; fi
           $C -Q . AlmideTrust GuardWindow.v
+          $C -Q . AlmideTrust GuardFresh.v
+
+  fresh:
+    name: The fresh-block gate on two small modules, end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Measure
+        run: |
+          BIN="$HOME/.opam/${OCAML_VERSION}/bin"
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          export PATH="$BIN:$PATH"
+          sudo apt-get update -q && sudo apt-get install -y -q wabt
+          cargo build -q --release --locked -p almide-anchor-check
+          (cd proofs && coqc -Q . AlmideTrust GuardWindow.v && coqc -Q . AlmideTrust GuardFresh.v)
+          W="$RUNNER_TEMP/fresh"; mkdir -p "$W"
+          printf 'almide-anchors 1\nalloc 0\ninit\nbounds\n' > "$W/a.anchors"
+          printf '# leg accesses\nfixtures 1\n' > "$W/floor.txt"
+          # a record being filled: a 16-byte payload, a store at offset 20 (inside) or 28 (one slot past)
+          for off in 20 28; do
+            printf '(module (memory 1) (func $alloc (param i32) (result i32) i32.const 0) (func $other (param i32) (result i32) local.get 0) (func (param $v i64) (param $w i32) (local $x i32) (local $y i32) i32.const 16 call $alloc local.set $x local.get $w call $other local.set $y local.get $x local.get $v i64.store offset=%s))\n' "$off" > "$W/m$off.wat"
+            wat2wasm "$W/m$off.wat" -o "$W/m$off.wasm"
+            { printf 'MODULE m%s\n' "$off"; ./target/release/almide-anchor-check --fresh "$W/m$off.wasm" "$W/a.anchors"; } > "$W/dump$off"
+            cat "$W/dump$off"
+          done
+          SHIPPED_FRESH_FLOOR="$W/floor.txt" bash proofs/check-shipped-fresh.sh "$W/dump20" "$W/w20" fixtures
+          if SHIPPED_FRESH_FLOOR="$W/floor.txt" bash proofs/check-shipped-fresh.sh "$W/dump28" "$W/w28" fixtures; then
+            echo "the store past the block was accepted"; exit 1
+          else
+            echo "the store past the block is refused, as it must be"
+          fi
 
   mutant:
     name: Windows of one mutant's modules, before and after
