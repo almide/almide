@@ -456,10 +456,14 @@ Proof. exists M32. reflexivity. Qed.
 Lemma low32_below : forall v c, 0 <= c < M32 -> v mod M64 < c -> v mod M32 < c.
 Proof.
   intros v c Hc Hv.
-  assert (H0 : 0 <= v mod M64) by (apply Z.mod_pos_bound; unfold M64; lia).
-  rewrite (Zmod_div_mod M32 M64 v) by (first [exact M32_divides_M64 | unfold M32, M64; lia]).
-  rewrite (Z.mod_small (v mod M64) M32) by lia.
-  exact Hv.
+  assert (H0 : 0 <= v mod M64 < M64) by (apply Z.mod_pos_bound; unfold M64; lia).
+  assert (Hnz : M64 <> 0) by (unfold M64; lia).
+  pose proof (Z.div_mod v M64 Hnz) as E.
+  assert (Eq : v mod M64 = v mod M32).
+  { apply (Z.mod_unique v M32 (M32 * (v / M64)) (v mod M64)).
+    - left. lia.
+    - unfold M32, M64 in *. lia. }
+  rewrite <- Eq. exact Hv.
 Qed.
 
 (* A term the window found zero that leaves the index `ix` below the count
