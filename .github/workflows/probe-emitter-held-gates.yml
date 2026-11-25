@@ -11,7 +11,7 @@ name: Probe — the ledgers for the mutants of the adjacency between an emitted 
 # Not a gate.
 on:
   push:
-    branches: [probe/adjacency-gates]
+    branches: [probe/adjacency-2-gates]
 
 permissions:
   contents: read
