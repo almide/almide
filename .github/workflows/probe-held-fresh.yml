@@ -1,0 +1,88 @@
+name: Probe — the fresh-block rule on a held-out sample of source mutants
+# A one-off measurement on its own branch. A sample of source mutants of the
+# wasm emitter was drawn and judged on another branch, which kept the modules
+# each mutant changed. This job emits the unmutated modules again from that
+# branch's tree, cuts the fresh-block proposals out of both with this branch's
+# cutter, and has the Rocq kernel judge each one (proofs/GuardFresh.v). The
+# rule and the cutter were fixed before that sample's results were read.
+# Not a gate.
+on:
+  push:
+    branches: [probe/held-fresh]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # The tree the sample was drawn over, and the run that judged it.
+  HELD_REF: 3d7f8e7ead6dedbd883a4a1333f359f07f2be28e
+  HELD_RUN: "45536243441"
+
+jobs:
+  fresh:
+    name: Fresh-block proposals of the mutants' modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HELD_REF }}
+          path: held
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: |
+            .
+            held
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Build the cutter
+        run: cargo build -q --release --locked -p almide-anchor-check
+      - name: Build the unmutated compiler and the witness producer
+        working-directory: held
+        run: |
+          cargo build -q --release --locked --bin almide
+          cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
+          ./target/release/almide --version
+      - name: Fetch the modules the sample kept
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --json status,conclusion,headSha --jq '"the sample run: \(.status) \(.conclusion) at \(.headSha)"'
+          mkdir -p "$RUNNER_TEMP/shards"
+          # While the sample is still running there is nothing to fetch: the
+          # unmutated modules are then judged alone (a trial of this job).
+          gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'emitter-mutants-[0-9]*' --dir "$RUNNER_TEMP/shards" || echo "no shard artifact could be fetched"
+          echo "$(find "$RUNNER_TEMP/shards" -type f -path '*/emut/modules/*/*.wasm' | wc -l) kept module(s) in $(ls "$RUNNER_TEMP/shards" | wc -l) shard(s)"
+      - name: Measure
+        run: bash scripts/probe-held-fresh.sh target/release/almide-anchor-check held "$RUNNER_TEMP/shards" "$RUNNER_TEMP/held-fresh"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: held-fresh
+          path: |
+            ${{ runner.temp }}/held-fresh/held-fresh.tsv
+            ${{ runner.temp }}/held-fresh/held-fresh-programs.tsv
+            ${{ runner.temp }}/held-fresh/dump
+            ${{ runner.temp }}/held-fresh/jobs.tsv
+            ${{ runner.temp }}/held-fresh/base-failed
+            ${{ runner.temp }}/held-fresh/kernel.log
+            ${{ runner.temp }}/held-fresh/kernel/verdicts.tsv
+            ${{ runner.temp }}/held-fresh/kernel/summary.txt
