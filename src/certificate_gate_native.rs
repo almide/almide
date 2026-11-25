@@ -23,9 +23,11 @@ pub fn native_bundle(producer: &str, source: &str, rust: &str, certs: &[(String,
 }
 
 /// [`crate::certificate_gate::judge`] over a native v1 render's own
-/// certificates and text.
+/// certificates and text. The bundle declares no uncertified function, so
+/// the verdict is CERTIFIED or REJECTED; an INCOMPLETE one is refused, as
+/// on the wasm routes without `--allow-incomplete-verification` (C-462).
 pub fn judge_native(producer: &str, source: &str, rust: &str, certs: &[(String, String, String)]) -> Result<(), String> {
-    crate::certificate_gate::judge(&native_bundle(producer, source, rust, certs), rust.as_bytes())
+    crate::certificate_gate::judge(&native_bundle(producer, source, rust, certs), rust.as_bytes(), false).map(|_| ())
 }
 
 #[cfg(test)]
@@ -47,7 +49,7 @@ mod tests {
         assert!(leaked.contains("REJECT  ownership"), "{leaked}");
         assert!(judge_native("t", "s", rust, &certs("idd")).is_err(), "a double release is rejected");
         let bundle = super::native_bundle("t", "s", rust, &certs("id"));
-        let other = crate::certificate_gate::judge(&bundle, b"fn main() { println!(); }\n").expect_err("other text");
+        let other = crate::certificate_gate::judge(&bundle, b"fn main() { println!(); }\n", false).expect_err("other text");
         assert!(other.contains("MISMATCH"), "{other}");
         assert!(judge_native("t", "s", rust, &[]).is_err(), "a bundle with no witness is not an accept");
     }
