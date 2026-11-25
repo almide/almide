@@ -9,5 +9,5 @@
 # with the reason in the message.
 #
 # leg       windows
-fixtures    0
-tests       0
+fixtures    353
+tests       163

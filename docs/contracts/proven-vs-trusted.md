@@ -54,7 +54,14 @@ its theorem `window_sound` puts the access inside the block's payload in
 every run, under the machine's own wrap-around
 (`proofs/check-shipped-windows.sh`, every load and store swept, the proven
 count held to a floor; what it trusts is in
-[proofs/TRUSTED_BASE.md](../../proofs/TRUSTED_BASE.md)). What the anchor
+[proofs/TRUSTED_BASE.md](../../proofs/TRUSTED_BASE.md)). For a second shape
+likewise: where a function allocates a constant size into a local, leaves
+the local alone and then reads or writes at that local plus a constant,
+`proofs/GuardFresh.v` reads the three byte strings and its theorem
+`fresh_sound` puts the access inside the block's header and requested
+payload in every run (`proofs/check-shipped-fresh.sh`: every such access is
+proposed with no bound tested, so a store past its block is refused by the
+kernel; the proven count is held to a floor). What the anchor
 check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and
 release routines, the copy-on-write judges), a read of a released block
