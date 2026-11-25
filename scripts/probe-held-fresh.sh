@@ -30,10 +30,20 @@ OUT="$(cd "$4" && pwd)"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ALMIDE="$HELD/target/release/almide"
 PRODUCER="$HELD/target/release/examples/emit_structural_bundle"
-[ -x "$CUT" ] && [ -x "$ALMIDE" ] && [ -x "$PRODUCER" ] || { echo "a binary is missing: $CUT, $ALMIDE or $PRODUCER"; exit 1; }
+# HELD_BASE_DIR: a directory of unmutated modules that were built elsewhere,
+# `<name>.wasm` with `<name>.anchors`; then nothing is emitted here and the
+# compiler of <held-checkout> is not needed (the replayed defects, whose
+# builds a past run kept).
 mkdir -p "$OUT/base" "$OUT/props/base"
 LIST="$OUT/list.txt"
-grep -v -E '^(#|$)' "$HELD/crates/almide-wasm/tests/golden/witness-fixtures.txt" > "$LIST"
+if [ -n "${HELD_BASE_DIR:-}" ]; then
+  [ -x "$CUT" ] || { echo "the cutter is missing: $CUT"; exit 1; }
+  cp "$HELD_BASE_DIR"/*.wasm "$HELD_BASE_DIR"/*.anchors "$OUT/base/"
+  ls "$OUT/base" | sed -n 's/\.wasm$//p' > "$LIST"
+else
+  [ -x "$CUT" ] && [ -x "$ALMIDE" ] && [ -x "$PRODUCER" ] || { echo "a binary is missing: $CUT, $ALMIDE or $PRODUCER"; exit 1; }
+  grep -v -E '^(#|$)' "$HELD/crates/almide-wasm/tests/golden/witness-fixtures.txt" > "$LIST"
+fi
 echo "$(wc -l < "$LIST" | tr -d ' ') contract program(s)"
 
 name_of() { printf '%s' "$1" | tr '/' '_'; }
@@ -62,7 +72,7 @@ export HELD OUT ALMIDE PRODUCER CUT
 
 t0=$(date +%s)
 : > "$OUT/base-failed"
-xargs -P 4 -I{} bash -c 'emit "$1"' _ {} < "$LIST"
+[ -n "${HELD_BASE_DIR:-}" ] || xargs -P 4 -I{} bash -c 'emit "$1"' _ {} < "$LIST"
 echo "unmutated emission: $(( $(date +%s) - t0 )) s; $(ls "$OUT/base" | grep -c '\.anchors$') anchor file(s), $(wc -l < "$OUT/base-failed" | tr -d ' ') program(s) failed"
 
 # Every unmutated module, then every kept module of every mutant.

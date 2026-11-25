@@ -21,6 +21,9 @@ env:
   # hundred programs (45536243441, judged first); this run judged the other
   # thirty-six again and kept every changed module.
   HELD_RUN: "45565891270"
+  # The run that built the replayed defects of the paper, each with and
+  # without its defect.
+  REPLAY_RUN: "45001834111"
 
 jobs:
   fresh:
@@ -97,3 +100,70 @@ jobs:
             ${{ runner.temp }}/held-fresh/win-uniq-dump
             ${{ runner.temp }}/held-fresh/loop-kernel.log
             ${{ runner.temp }}/held-fresh/loop-kernel/verdicts.tsv
+
+  replays:
+    name: The three rules on the replayed defects
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: |
+            .
+            held
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Build the cutter
+        run: cargo build -q --release --locked -p almide-anchor-check
+      - name: Fetch the replayed defects' builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$REPLAY_RUN" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/replays"
+          mkdir -p "$RUNNER_TEMP/rbase" "$RUNNER_TEMP/rshards/replay/emut/modules/bug"
+          for d in "$RUNNER_TEMP"/replays/*/*.base; do
+            n="$(basename "$d" .base)"
+            b="$(dirname "$d")/$n.bug"
+            [ -s "$d/a.anchors.wasm" ] && [ -s "$d/a.anchors" ] && [ -s "$b/a.anchors.wasm" ] || { echo "incomplete: $n"; continue; }
+            cp "$d/a.anchors.wasm" "$RUNNER_TEMP/rbase/$n.wasm"
+            cp "$d/a.anchors" "$RUNNER_TEMP/rbase/$n.anchors"
+            cp "$b/a.anchors.wasm" "$RUNNER_TEMP/rshards/replay/emut/modules/bug/$n.wasm"
+          done
+          ls "$RUNNER_TEMP/rbase" | grep -c '\.wasm$'
+      - name: Measure
+        env:
+          HELD_BASE_DIR: ${{ runner.temp }}/rbase
+        run: bash scripts/probe-held-fresh.sh target/release/almide-anchor-check . "$RUNNER_TEMP/rshards" "$RUNNER_TEMP/replay-rules"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: replay-rules
+          path: |
+            ${{ runner.temp }}/replay-rules/held-fresh.tsv
+            ${{ runner.temp }}/replay-rules/held-fresh-programs.tsv
+            ${{ runner.temp }}/replay-rules/held-loop.tsv
+            ${{ runner.temp }}/replay-rules/held-loop-programs.tsv
+            ${{ runner.temp }}/replay-rules/held-windows.tsv
+            ${{ runner.temp }}/replay-rules/held-windows-programs.tsv
+            ${{ runner.temp }}/replay-rules/jobs.tsv
+            ${{ runner.temp }}/replay-rules/dump
+            ${{ runner.temp }}/replay-rules/kernel.log
+            ${{ runner.temp }}/replay-rules/loop-kernel.log
+            ${{ runner.temp }}/replay-rules/win-kernel.log
