@@ -17,7 +17,10 @@ permissions:
 env:
   # The tree the sample was drawn over, and the run that judged it.
   HELD_REF: 3d7f8e7ead6dedbd883a4a1333f359f07f2be28e
-  HELD_RUN: "45536243441"
+  # The sample run kept the modules of the mutants that change at most a
+  # hundred programs (45536243441, judged first); this run judged the other
+  # thirty-six again and kept every changed module.
+  HELD_RUN: "45565891270"
 
 jobs:
   fresh:
@@ -80,7 +83,6 @@ jobs:
           path: |
             ${{ runner.temp }}/held-fresh/held-fresh.tsv
             ${{ runner.temp }}/held-fresh/held-fresh-programs.tsv
-            ${{ runner.temp }}/held-fresh/dump
             ${{ runner.temp }}/held-fresh/jobs.tsv
             ${{ runner.temp }}/held-fresh/base-failed
             ${{ runner.temp }}/held-fresh/kernel.log
