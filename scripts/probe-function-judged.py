@@ -239,10 +239,25 @@ def gen(listing, work, chunk):
                     swept = l.split()[1]
         a = 4294967295 if alloc is None else alloc
         tot = dict(functions=len(fs), with_access=0, accesses=0, bulk=0, unread=0, candidates=0, cand_accesses=0, unplaced=0, proposals=0)
+        decoded = [instrs(b, s, e) for (s, e) in fs]
+
+        def props_of(i, shift):
+            return [("F", k, parts) for k, parts in fprops.get(i + shift, [])] + [("W", k, parts) for k, parts in wprops.get(i + shift, [])]
+
+        def placed(shift):
+            n = 0
+            for i, (s, e) in enumerate(fs):
+                if decoded[i] is not None:
+                    n += sum(1 for kind, k, parts in props_of(i, shift) if place(bytes(b[s:e]), decoded[i], kind, k, parts))
+            return n
+
+        # The cutters number a function by its place among the module's own
+        # bodies; a dump that counts the imports too is read as well.
+        shift = 0 if imports == 0 or placed(0) >= placed(imports) else imports
         for i, (s, e) in enumerate(fs):
             fidx = imports + i
-            ins = instrs(b, s, e)
-            props = [("F", k, parts) for k, parts in fprops.get(fidx, [])] + [("W", k, parts) for k, parts in wprops.get(fidx, [])]
+            ins = decoded[i]
+            props = props_of(i, shift)
             tot["proposals"] += len(props)
             if ins is None:
                 tot["unread"] += 1
