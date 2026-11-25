@@ -431,8 +431,13 @@ depth. Field attributes are only `@skip` /
 `application/json`, `html.*` builds `text/html`
 (`html.escape` / `html.attr` / `html.url_attr` / `html.script_json`, or
 `html.raw(s)` for trusted markup). Any other media type is
-`http.typed("text/csv", bytes)` with a literal type (E117 for a computed one,
-or for HTML / XML / SVG). SVG comes from a package such as almide/svg, which
+`http.typed("text/csv", bytes)` with a literal type from its closed table of
+standard non-script types (text/plain, text/csv, application/json,
+application/octet-stream, image/png, ...); any other type is E117 unless
+`almide.toml` grants it to the application, `[trust]` `media = { "self" =
+["application/vnd.acme"] }` (E117 always for a computed one, or for HTML / XHTML; a script-capable type such as
+text/javascript or image/svg+xml only when the "self" grant names that exact type, never by a pattern; every
+`http.serve` response carries `X-Content-Type-Options: nosniff`, which a handler cannot replace). SVG also comes from a package such as almide/svg, which
 the application grants in `almide.toml`: `[trust]` `media = { "github.com/almide/svg" =
 ["image/svg+xml"] }` (E118 without it). Content-Type is never written by name: `set_header` /
 `with_headers` refuse it (E116); `set_body` / `http.with_body(resp, body)`

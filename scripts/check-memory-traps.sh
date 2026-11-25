@@ -38,6 +38,9 @@ mode="${1:-spec}"
 # the nightly) runs all of spec/ and every program.
 . scripts/lib/ci-slice.sh
 . scripts/lib/wasm-skip.sh
+# C-462: the corpus programs whose wasm certificate is still INCOMPLETE carry
+# --allow-incomplete-verification (proofs/incomplete-verification.toml).
+. scripts/lib/incomplete-verification.sh
 
 arm() { ALMIDE_REGION_TRAP_STALE=1 "$@"; }
 unarm() { env -u ALMIDE_REGION_TRAP_STALE "$@"; }
@@ -65,10 +68,11 @@ spec)
       if [ "$1" = wasm ] && reason=$(wasm_skip_reason "$2"); then
         printf 'SKIP %s (--target wasm: declared // wasm:skip: %s)\n' "$2" "$reason"; return 0
       fi
-      local o; o=$(ALMIDE_REGION_TRAP_STALE=1 "$ALMIDE" test "$2" --target "$1" 2>&1) && return 0
+      local flag=(); [ "$1" = wasm ] && [ -n "$(incomplete_flag test "$2")" ] && flag=(--allow-incomplete-verification)
+      local o; o=$(ALMIDE_REGION_TRAP_STALE=1 "$ALMIDE" test "$2" --target "$1" ${flag[@]+"${flag[@]}"} 2>&1) && return 0
       printf 'FAIL %s (--target %s):\n%s\n' "$2" "$1" "$o" | head -60; return 1
     }
-    export -f one wasm_skip_reason; export ALMIDE
+    export -f one wasm_skip_reason incomplete_flag; export ALMIDE INCOMPLETE_LEDGER
     for leg in rust wasm; do
       echo "== spec/ CI slice ($n test files) on $leg, ALMIDE_REGION_TRAP_STALE=1"
       xargs -P "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" -I{} bash -c 'one "$@"' _ "$leg" {} < "$sel" || fail=1
@@ -78,7 +82,12 @@ spec)
   echo "== spec/ on native, ALMIDE_REGION_TRAP_STALE=1"
   arm "$ALMIDE" test spec/ --target rust || fail=1
   echo "== spec/ on wasm (the double-free trap is in every build)"
-  arm "$ALMIDE" test spec/ --target wasm || fail=1
+  # C-462: the listed INCOMPLETE programs pass under the flag; a program the
+  # ledger does not list fails the log check.
+  wlog=$(mktemp)
+  arm "$ALMIDE" test spec/ --target wasm --allow-incomplete-verification 2>&1 | tee "$wlog"; [ "${PIPESTATUS[0]}" = 0 ] || fail=1
+  bash scripts/check-incomplete-verification.sh test "$wlog" || fail=1
+  rm -f "$wlog"
   fi
   [ $fail = 0 ] && echo "memory-traps: spec/ passes on both legs with both traps armed"
   exit $fail

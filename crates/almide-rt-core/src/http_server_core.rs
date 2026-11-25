@@ -926,9 +926,10 @@ pub fn http_server_quote(s: &str) -> String {
     out
 }
 
-/// The fields the server owns (the framing and the connection's lifetime):
-/// a handler's are dropped from its response.
-pub const HTTP_SERVER_OWNED_FIELDS: &[&str] = &["connection", "content-length", "transfer-encoding", "keep-alive"];
+/// The fields the server owns (the framing, the connection's lifetime, and
+/// `X-Content-Type-Options`, which it always writes as `nosniff`, C-407): a
+/// handler's are dropped from its response.
+pub const HTTP_SERVER_OWNED_FIELDS: &[&str] = &["connection", "content-length", "transfer-encoding", "keep-alive", "x-content-type-options"];
 
 /// The response bytes for a request of any method but HEAD: see
 /// [`http_server_response_bytes_for`].
@@ -938,7 +939,7 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 
 /// The response bytes: status line, the response's headers in order (a
 /// handler's `Connection` field dropped — the core owns the connection),
-/// `X-Content-Type-Options: nosniff` unless the response has that field,
+/// `X-Content-Type-Options: nosniff` (a handler's own field dropped),
 /// `Connection: close` (one response per connection; keep-alive is #2665),
 /// Content-Length, the body. A HEAD request, a 1xx, a 204 and a 304 get no
 /// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
@@ -953,11 +954,10 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
         }
         out.push_str(&format!("{}: {}\r\n", k, v));
     }
-    // A secure default (C-407, #4134): every response says
-    // `X-Content-Type-Options: nosniff` unless the handler set the field.
-    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("x-content-type-options")) {
-        out.push_str("X-Content-Type-Options: nosniff\r\n");
-    }
+    // A secure field (C-407, #4134, owner ruling 2026-11-25): every response
+    // says `X-Content-Type-Options: nosniff`; a handler's own is dropped above,
+    // so a script-capable body the application granted itself is never sniffed.
+    out.push_str("X-Content-Type-Options: nosniff\r\n");
     out.push_str("Connection: close\r\n");
     let informational = (100..200).contains(&status);
     if !(informational || status == 204) {

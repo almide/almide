@@ -13,13 +13,35 @@
 //! cannot read (an unknown property, record or version), one that pins no
 //! artifact or other bytes, one with no witness, or one with a REJECTed
 //! witness. INCOMPLETE (every witness accepted, some function declared
-//! uncertified) is a pass, as it was with the binary (exit 3).
+//! uncertified) is refused too unless the caller passes `allow_incomplete`
+//! (`--allow-incomplete-verification`, owner ruling 2026-11-24, C-462): then
+//! it passes and the caller reports every uncertified function.
 
 use almide_verify::bundle::{self, Outcome};
 
-/// `Ok(())` when the linked verifier CERTIFIES `bundle_text` over `shipped`
-/// (or finds it INCOMPLETE); `Err` with the verdict lines otherwise.
-pub fn judge(bundle_text: &[u8], shipped: &[u8]) -> Result<(), String> {
+/// A certificate the judge let through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pass {
+    /// Every witness accepted, nothing declared uncertified.
+    Certified,
+    /// INCOMPLETE, let through by `allow_incomplete`: the uncertified
+    /// functions `(function, the producer's reason)`, for the warning the
+    /// caller prints and records.
+    IncompleteAllowed(Vec<(String, String)>),
+}
+
+/// The flag that lets an INCOMPLETE certificate through (C-462).
+pub const ALLOW_INCOMPLETE_FLAG: &str = "--allow-incomplete-verification";
+
+/// One `UNCERTIFIED` line per declared function.
+pub fn uncertified_lines(uncertified: &[(String, String)]) -> Vec<String> {
+    uncertified.iter().map(|(f, why)| format!("UNCERTIFIED  {f}: {why}")).collect()
+}
+
+/// `Ok(Pass::Certified)` when the linked verifier CERTIFIES `bundle_text`
+/// over `shipped`; `Ok(Pass::IncompleteAllowed)` when it finds it INCOMPLETE
+/// and `allow_incomplete` is set; `Err` with the verdict lines otherwise.
+pub fn judge(bundle_text: &[u8], shipped: &[u8], allow_incomplete: bool) -> Result<Pass, String> {
     let who = format!("almide-verify {} (linked)", almide_verify::VERSION);
     let parsed = bundle::parse(bundle_text).map_err(|e| format!("{who} could not read this build's certificate: {e}"))?;
     let Some(artifact) = parsed.artifact.as_ref() else {
@@ -29,7 +51,14 @@ pub fn judge(bundle_text: &[u8], shipped: &[u8]) -> Result<(), String> {
     let (verdicts, outcome) = bundle::verify(&parsed);
     let outcome = if pinned { outcome } else { Outcome::Rejected };
     match outcome {
-        Outcome::Certified | Outcome::Incomplete => Ok(()),
+        Outcome::Certified => Ok(Pass::Certified),
+        Outcome::Incomplete if allow_incomplete => Ok(Pass::IncompleteAllowed(parsed.uncertified.clone())),
+        Outcome::Incomplete => Err(format!(
+            "{who} judged this build's certificate INCOMPLETE: every witness was accepted, but the compiler could not certify {} function(s):\n{}\n  \
+             an incomplete certificate is refused by default; `{ALLOW_INCOMPLETE_FLAG}` lets it pass with a warning",
+            parsed.uncertified.len(),
+            uncertified_lines(&parsed.uncertified).join("\n")
+        )),
         Outcome::Rejected => {
             let mut lines: Vec<String> = verdicts
                 .iter()

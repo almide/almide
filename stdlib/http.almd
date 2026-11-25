@@ -29,6 +29,7 @@ import url
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(handler)
+@instance_closed(handler)
 @category("Net.listen")
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
@@ -39,9 +40,10 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 // type; no header string can relabel it. Content-Type is the header the body
 // owns: `set_header` and `with_headers` refuse it (E116 when the name is a
 // literal, an abort otherwise), read off `@header_write`, which names the
-// owned-header list below. A script-capable media type (HTML, SVG, XML) has
-// no way in but its safe module's type; `typed` takes any other one, as a
-// literal (E117), and refuses a type a safe module owns (`@media_owns`).
+// owned-header list below. A script-capable media type (HTML, SVG, XML,
+// JavaScript) comes in through its safe module's type, or through `typed`
+// only when the application grants itself that exact type; `typed` takes its
+// type as a literal (E117) and refuses a type a safe module owns (`@media_owns`).
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 @sized_by(body)
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
@@ -76,7 +78,7 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
   body.__self_media_type(),
 )
 
-/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+/// A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 @literal_media(media_type)
 fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
   media_type: media_type,
@@ -86,6 +88,11 @@ fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
 /// A body of a declared media type, built only by `http.typed`.
 mod type TypedBody: Body = { media_type: String, bytes: Bytes }
 
+// The closed table of media types a TypedBody may state without a grant
+// (E117, read at each `@literal_media` call whose result is a TypedBody):
+// standard types no browser runs script in. Any other type is refused unless
+// the application grants it to itself in almide.toml `[trust] media`.
+@media_table("text/plain", "text/csv", "text/css", "text/markdown", "text/tab-separated-values", "application/json", "application/octet-stream", "application/zip", "application/gzip", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "audio/mpeg", "audio/ogg", "audio/wav", "video/mp4", "video/webm", "font/woff", "font/woff2")
 fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
 fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes

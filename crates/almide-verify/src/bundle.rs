@@ -43,6 +43,12 @@
 //! site moves, and its ownership lines (proofs/NativeCalls.v). A
 //! `native-calls` record in a bundle before version 5 is refused.
 //!
+//! Version 6 (#1961) is version 5 whose `ownership` (and `rc-sig`) lines may
+//! carry the region reclaim `w` (certificate format v9, `Reclaim` in
+//! proofs/OwnershipChecker.v): the parked temporary of a region window,
+//! discharged by the window's restore. Format v8 skipped a `w` byte as
+//! noise, so a bundle before version 6 carrying one is refused.
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
@@ -63,6 +69,8 @@ pub const MAGIC_V3: &str = "almide-certificate-bundle 3";
 pub const MAGIC_V4: &str = "almide-certificate-bundle 4";
 /// The first line of a version-5 bundle (version 4 + `native-calls` records).
 pub const MAGIC_V5: &str = "almide-certificate-bundle 5";
+/// The first line of a version-6 bundle (version 5 + the region reclaim `w`).
+pub const MAGIC_V6: &str = "almide-certificate-bundle 6";
 
 /// The shipped file a version-2 bundle's witnesses describe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,9 +259,10 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
         Some(MAGIC_V3) => 3,
         Some(MAGIC_V4) => 4,
         Some(MAGIC_V5) => 5,
+        Some(MAGIC_V6) => 6,
         Some(other) => {
             return Err(r.err(format!(
-                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}` or `{MAGIC_V5}`, found `{other}`"
+                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}`, `{MAGIC_V5}` or `{MAGIC_V6}`, found `{other}`"
             )))
         }
         None => return Err(r.err("the bundle is empty")),
@@ -270,6 +279,16 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                 }
                 if version < 4 && property == Property::RcSig {
                     return Err(r.err("an `rc-sig` record in a bundle before version 4"));
+                }
+                // Version 6 (#1961): a region reclaim `w` on an ownership line
+                // (certificate format v9). Every earlier checker skipped `w`
+                // as noise — a line `w` balanced there — so an earlier
+                // bundle carrying one is refused, never read either way.
+                if version < 6
+                    && matches!(property, Property::Ownership | Property::RcSig)
+                    && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b'w'))
+                {
+                    return Err(r.err("a region reclaim `w` in an ownership line of a bundle before version 6"));
                 }
                 if version < 5 && property == Property::NativeCalls {
                     return Err(r.err("a `native-calls` record in a bundle before version 5"));
@@ -379,8 +398,22 @@ mod tests {
     }
 
     #[test]
+    fn a_region_reclaim_is_read_only_in_a_version_six_bundle() {
+        // #1961: format v8 skipped `w`, where a lone `w` line balanced; a
+        // bundle before version 6 carrying one is refused, either case.
+        assert!(parse(format!("{MAGIC_V5}\nwitness ownership 2 main\niw\n").as_bytes()).is_err());
+        assert!(parse(&bundle("witness ownership 2 main\nIW\n")).is_err());
+        let b = parse(format!("{MAGIC_V6}\nwitness ownership 2 main\niw\n").as_bytes()).expect("a v6 bundle carries `w`");
+        assert_eq!(verify(&b).1, Outcome::Certified);
+        let b = parse(format!("{MAGIC_V6}\nwitness ownership 1 main\nw\n").as_bytes()).expect("well-formed");
+        assert_ne!(verify(&b).1, Outcome::Certified);
+        // Another property's `w` is its own byte.
+        assert!(parse(&bundle("witness names 3 main\nw|1\n")).is_ok());
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 6\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 7\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

@@ -1,0 +1,14 @@
+# Negative control of verify.gate-build-incomplete-accepted (proofs/decision-sites.toml): INCOMPLETE passes without --allow-incomplete-verification again
+# control_test: tests/decision_verify_gate_novel_test.rs::novel_an_incomplete_certificate_is_refused_without_the_flag
+diff --git a/src/certificate_gate.rs b/src/certificate_gate.rs
+--- a/src/certificate_gate.rs
++++ b/src/certificate_gate.rs
+@@ -52,7 +52,7 @@
+     let outcome = if pinned { outcome } else { Outcome::Rejected };
+     match outcome {
+         Outcome::Certified => Ok(Pass::Certified),
+-        Outcome::Incomplete if allow_incomplete => Ok(Pass::IncompleteAllowed(parsed.uncertified.clone())),
++        Outcome::Incomplete if allow_incomplete || !allow_incomplete => Ok(Pass::IncompleteAllowed(parsed.uncertified.clone())),
+         Outcome::Incomplete => Err(format!(
+             "{who} judged this build's certificate INCOMPLETE: every witness was accepted, but the compiler could not certify {} function(s):\n{}\n  \
+              an incomplete certificate is refused by default; `{ALLOW_INCOMPLETE_FLAG}` lets it pass with a warning",

@@ -263,7 +263,13 @@ impl Emitter<'_> {
         let Some(w) = self.witness.as_mut() else { return };
         w.convention('b');
         if fresh {
-            w.temp_borrowed();
+            // #1961: the region window site's own parked temporary is born
+            // here and reclaimed by the restore (region.rs), never released.
+            if self.region_site.is_some_and(|d| d + 1 == self.borrowed_temps.len()) {
+                self.region_parked = Some(w.temp_region_parked());
+            } else {
+                w.temp_borrowed();
+            }
         }
     }
 

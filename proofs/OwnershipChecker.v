@@ -83,7 +83,19 @@ Inductive Op : Type :=
      (this guard) and the dynamic count (the shipped test) together give
      exclusivity — `UniqueTake.probe_exclusive`; neither alone does. After a
      Probe the line may only probe again or end in one release (`drained`). *)
-  | Probe : Op.
+  | Probe : Op
+  (* Reclaim = −1 on its line (the `w` byte, certificate format v9): the
+     holder's credit is discharged by a REGION RESTORE, not by a release
+     call. A `consume(produce(scalars))` region window (#1961) parks the
+     producer's result for the consumer's borrowed parameter and never
+     releases it block by block: `RegionRestore` rewinds the bump pointer and
+     the class heads past every block the window took (RuntimeModel.v
+     `region_restore_reclaims`). It folds exactly like Dec — a reclaim of a
+     line holding no credit FAULTS — so, like Alias / MoveOut, it costs the
+     balance theorems nothing; the distinct constructor is the ground fact
+     the RC byte check holds to the shipped restore (almide-anchor-check
+     rc.rs, `w-@<window>`), where a `d` is held to a release call. *)
+  | Reclaim : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -116,6 +128,7 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   | ShareOut :: rest => exec rest rc
   | Take :: rest => exec rest (rc + 1)
   | Probe :: rest => if rc <=? 0 then None else exec rest rc
+  | Reclaim :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -212,6 +225,7 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "s"%char) (Ascii.eqb a "S"%char) then Some ShareOut
   else if orb (Ascii.eqb a "k"%char) (Ascii.eqb a "K"%char) then Some Take
   else if orb (Ascii.eqb a "u"%char) (Ascii.eqb a "U"%char) then Some Probe
+  else if orb (Ascii.eqb a "w"%char) (Ascii.eqb a "W"%char) then Some Reclaim
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -291,6 +305,7 @@ Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
   | ShareOut :: rest => reuses_unique rest rc
   | Take :: rest => reuses_unique rest (rc + 1)
   | Probe :: rest => if rc <=? 0 then true else reuses_unique rest rc
+  | Reclaim :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
   end.
 
 (* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
@@ -310,6 +325,7 @@ Proof.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + apply IH. exact H.
     + apply IH. exact H.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
 Qed.
 
@@ -514,6 +530,7 @@ Proof.
     + apply IH.
     + apply IH.
     + destruct (rc <=? 0). reflexivity. apply IH.
+    + destruct (rc <=? 0). reflexivity. apply IH.
 Qed.
 
 (* exec over a cons = single-op step then the rest. *)
@@ -618,6 +635,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + apply IHHU; exact Hexec.
     + apply IHHU; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
@@ -737,6 +755,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + eapply IHHA; exact Hexec.
     + eapply IHHA; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
@@ -1924,6 +1943,7 @@ Proof.
     rewrite E. replace (rc + 1 - 1) with rc by lia. apply IH. exact Hrc.
   - apply IH. lia.
   - destruct (rc <=? 0); [reflexivity | apply IH; exact Hrc].
+  - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
 Qed.
 
 Theorem check_expand : forall ops, check (expand ops) = check ops.
@@ -1988,6 +2008,9 @@ Proof.
     + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 - 1 + r2 + k) by lia. apply IHHI; auto; lia.
   - destruct o; simpl in Eb, Nb |- *.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
@@ -2006,6 +2029,9 @@ Proof.
     + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 + (r2 - 1) + k) by lia. apply IHHI; auto; lia.
 Qed.
 
 Theorem share_handover_sound :

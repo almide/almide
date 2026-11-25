@@ -349,6 +349,19 @@ def run(cmd, **kw):
     return r
 
 
+def incomplete_flag(almd):
+    """C-462: a program whose wasm certificate is still INCOMPLETE carries
+    --allow-incomplete-verification when proofs/incomplete-verification.toml
+    lists its build (the ledger is shrink-only; every other build refuses)."""
+    ledger = os.path.join(HERE, "..", "..", "..", "proofs", "incomplete-verification.toml")
+    entry = f'entry = "build research/benchmark/perf/{almd}"'
+    try:
+        with open(ledger, encoding="utf-8") as f:
+            listed = any(line.strip() == entry for line in f)
+    except OSError:
+        listed = False
+    return ["--allow-incomplete-verification"] if listed else []
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5)
@@ -418,7 +431,10 @@ def main():
                     ablated_identical[name] = f1.read() == f2.read()
         if "wasm" in row:
             out = os.path.join(work, f"{name}.wasm")
-            run([almide, "build", src, "--target", "wasm", "-o", out])
+            flag = incomplete_flag(almd)
+            r = run([almide, "build", src, "--target", "wasm", "-o", out] + flag)
+            if flag and b"warning[verification-incomplete]" not in r.stderr:
+                sys.exit(f"STALE: {almd} is listed in proofs/incomplete-verification.toml but its wasm build is no longer INCOMPLETE — delete the row and lower the ceiling")
             vs.append((f"{name}/wasm", [wasmtime, "run", out]))
         if "rust" in row:
             for ref in refs:

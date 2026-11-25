@@ -1,0 +1,9 @@
+// Served as text, the source is shown, never run.
+import http
+
+fn script(src: String) -> HttpResponse = http.response(
+  200,
+  http.typed("text/plain", bytes.from_string(src)),
+)
+
+fn main() -> Unit = println(http.body(script("alert(1)")))

@@ -9,10 +9,13 @@
 //   requirement its body dispatches to for the argument's type, so
 //   `set_header` on a request is not a response write.
 // - E117: a fn declared `@literal_media(p)` takes parameter `p` only as a
-//   string literal naming a well-formed media type that is neither owned by
-//   a stdlib `Body` type nor script-capable (`crate::media_owners`, read off
-//   `@media_owns` and html's `@script_capable`). Naming such a fn as a value
-//   is E117 too: its argument could then never be read.
+//   string literal naming a well-formed media type that is neither owned by a
+//   stdlib `Body` type nor script-capable (`crate::media_owners`, read off
+//   `@media_owns` and html's `@script_capable`), and that is one of the
+//   closed `@media_table` its result type's media fn declares or one the
+//   application grants itself (`[trust] media = { "self" = [...] }`); any
+//   other type, and every type when no table is declared, is refused. Naming such a fn as
+//   a value is E117 too: its argument could then never be read.
 //
 // Spliced into check/mod.rs; runs once per program after inference.
 
@@ -25,6 +28,7 @@ struct HeaderWrite {
 
 const HEADER_WRITE_ATTR: &str = "header_write";
 const LITERAL_MEDIA_ATTR: &str = "literal_media";
+const MEDIA_TABLE_ATTR: &str = "media_table";
 
 /// One stdlib fn's declaration, from its bundled module source.
 fn stdlib_fn_decl(module: &str, func: &str) -> Option<&'static ast::Decl> {
@@ -56,6 +60,27 @@ fn listed_strings(module: &str, list_fn: &str) -> Vec<String> {
         .collect()
 }
 
+/// The closed media-type table of what a `@literal_media` fn of `module`
+/// builds: the `@media_table` strings on the module's fn whose first
+/// parameter is of the builder's declared return type (that type's media fn).
+/// None declared: empty, so every type needs the application's grant.
+fn literal_media_table(module: &str, decl: &ast::Decl) -> Vec<String> {
+    let simple = |t: &ast::TypeExpr| match t { ast::TypeExpr::Simple { name } => Some(*name), _ => None };
+    let ast::Decl::Fn { return_type, .. } = decl else { return Vec::new() };
+    let Some(built) = simple(return_type) else { return Vec::new() };
+    let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else { return Vec::new() };
+    program.decls.iter()
+        .filter(|d| matches!(d, ast::Decl::Fn { params, .. } if params.first().and_then(|p| simple(&p.ty)) == Some(built)))
+        .filter_map(|d| fn_attr(d, MEDIA_TABLE_ATTR))
+        .flat_map(|a| a.args.iter().filter_map(|x| match &x.value { ast::AttrValue::String { value } => Some(value.to_ascii_lowercase()), _ => None }))
+        .collect()
+}
+
+/// The table of `http.typed`, the builder the E116 fix writes.
+fn typed_table() -> Vec<String> {
+    stdlib_fn_decl("http", "typed").map(|d| literal_media_table("http", d)).unwrap_or_default()
+}
+
 /// The header-write declaration of `module.func`, if any.
 fn header_write_of(module: &str, func: &str) -> Option<HeaderWrite> {
     let attr = fn_attr(stdlib_fn_decl(module, func)?, HEADER_WRITE_ATTR)?;
@@ -73,8 +98,12 @@ fn is_tchar(c: char) -> bool {
 }
 
 /// Why a literal media type cannot be `@literal_media`'s argument: malformed
-/// (not `type/subtype[; params]`), or owned by a stdlib body type.
-fn media_refusal(value: &str) -> Option<String> {
+/// (not `type/subtype[; params]`), owned by a stdlib body type, script-capable
+/// without the application's grant of that exact type (owner ruling
+/// 2026-11-25: a pattern grant admits none), or neither in the declaration's
+/// closed `table` nor granted by the application to itself (`[trust] media`
+/// "self").
+fn media_refusal(value: &str, table: &[String], granted: &[String]) -> Option<String> {
     let essence = value.split(';').next().unwrap_or("").trim();
     let Some((ty, sub)) = essence.split_once('/') else {
         return Some(format!("`{value}` is not a media type: write `type/subtype`, as `text/csv`"));
@@ -87,9 +116,21 @@ fn media_refusal(value: &str) -> Option<String> {
         let module = owner.split('.').next().unwrap_or(owner);
         return Some(format!("`{essence}` runs script in a browser and is owned by `{module}`: build the body with the `{module}` builders, whose type serves it"));
     }
-    media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)).then(|| {
-        format!("`{essence}` runs script in a browser, so only a type that owns it may serve it: a package's safe type, granted in almide.toml `[trust] media` (ADR-0032 D7)")
-    })
+    if media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)) {
+        if granted.iter().any(|g| *g == t) {
+            return None;
+        }
+        return Some(format!(
+            "`{essence}` runs script in a browser, so it is served only by a type that owns it (a package's safe type) or when the application names this exact type in almide.toml: `[trust] media = {{ \"self\" = [\"{t}\"] }}` (ADR-0032 D7)"
+        ));
+    }
+    if table.iter().any(|x| *x == t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
+        return None;
+    }
+    Some(format!(
+        "`{essence}` is not one of the non-script media types it serves ({}); a type the application serves itself is granted in almide.toml: `[trust] media = {{ \"self\" = [\"{t}\"] }}`",
+        if table.is_empty() { "none listed".to_string() } else { table.join(", ") },
+    ))
 }
 
 use crate::media_owners;
@@ -144,10 +185,11 @@ impl Checker {
             let callee_name = format!("{module}.{func}");
             // E117: the media type of a `@literal_media` fn.
             if let Some(attr) = fn_attr(decl, LITERAL_MEDIA_ATTR) {
+                let table = literal_media_table(&module, decl);
                 for p in positional_idents(attr) {
                     match arg_named(p).map(|a| (&a.kind, a.span)) {
                         Some((ast::ExprKind::String { value, .. }, span)) => {
-                            if let Some(why) = media_refusal(value) {
+                            if let Some(why) = media_refusal(value, &table, &media_owners::self_grants(self.source_file.as_deref())) {
                                 found.push(self.e117(&callee_name, &why, span.or(call.span)));
                             }
                         }
@@ -270,7 +312,7 @@ impl Checker {
                     return None;
                 }
                 let media = lit(&kv[1])?;
-                if media_refusal(&media).is_some() {
+                if media_refusal(&media, &typed_table(), &media_owners::self_grants(self.source_file.as_deref())).is_some() {
                     return None;
                 }
                 Some((span, format!(
@@ -285,7 +327,7 @@ impl Checker {
                 }
                 let pos = params.iter().position(|p| p.name == *value)?;
                 let media = lit(bound.get(pos).copied().flatten()?)?;
-                if media_refusal(&media).is_some() {
+                if media_refusal(&media, &typed_table(), &media_owners::self_grants(self.source_file.as_deref())).is_some() {
                     return None;
                 }
                 let r = slice(resp)?;

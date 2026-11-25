@@ -350,3 +350,67 @@ fn novel_verify_refuses_a_fresh_file_that_is_not_the_built_module() {
     let o = run(&proj, &["verify", &format!("{stem}.almd")]);
     assert!(!text(&o).contains("is not the module"), "control: with no file there is nothing to mismatch:\n{}", text(&o));
 }
+
+/// effect.e095-serve-closure (owner ruling 2026-11-24): the serve app's slot
+/// is the one its declaration marks `@instance_closed`, carried through a
+/// wrapper's inferred slot. A fresh module wraps `http.serve` under a fresh
+/// fn name, and the app its caller passes reads a fresh local: refused, on
+/// the route that runs nothing (check) and on the one that builds.
+#[test]
+fn novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused() {
+    let m = novel::module();
+    let w = novel::ident("serve_on");
+    let local = novel::ident("boot");
+    let (_t, proj) = project(&[
+        (&format!("src/{m}.almd"), format!("import http\n\npub effect fn {w}(port: Int, app: HttpHandler) -> Unit = http.serve(port, app)!\n")),
+        (
+            "src/main.almd",
+            format!(
+                "import http\nimport self.{m}\n\neffect fn main() -> Unit = {{\n  let {local} = \"x\"\n  {m}.{w}(8080, (req) => http.response(200, {local}))!\n}}\n"
+            ),
+        ),
+    ]);
+    for args in [&["check", "src/main.almd"][..], &["build", "src/main.almd", "--target", "wasm", "-o", "app.wasm"][..]] {
+        let o = run(&proj, args);
+        refused_with(&o, "E095", "a fresh serve wrapper's app reading a fresh local");
+        assert!(text(&o).contains(&local), "E095 does not name the local {local}:\n{}", text(&o));
+    }
+}
+
+/// The declarations E095 and E008 read: every `@concurrent` /
+/// `@instance_closed` argument of a bundled stdlib fn names a parameter of
+/// it (an unknown name would silently declare no slot), and the serve app is
+/// one of the instance-closed slots.
+#[test]
+fn every_stdlib_slot_attribute_names_a_parameter() {
+    let bad = almide_frontend::concurrent_reach::stdlib_slot_attributes_naming_no_parameter();
+    assert!(bad.is_empty(), "stdlib slot attributes naming no parameter: {bad:?}");
+    assert_eq!(almide_frontend::concurrent_reach::stdlib_closed_slots("http", "serve"), vec![1], "http.serve's app is not instance-closed");
+}
+
+/// media.e116-header-write (owner ruling 2026-11-24): the response's header
+/// writer refuses an owned header name whatever its source. The name arrives
+/// at run time (argv), in a fresh mix of cases, held by a fresh local — no
+/// literal the check-time E116 could read — and both writers (`set_header`,
+/// `with_headers`) abort on both targets, with the C-275 message.
+#[test]
+fn novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer() {
+    let local = novel::ident("field");
+    let mix = novel::ident("case");
+    let bits: Vec<bool> = mix.bytes().rev().take(12).map(|b| b % 2 == 1).collect();
+    let name: String = "content-type".chars().zip(bits.iter().cycle()).map(|(c, up)| if *up { c.to_ascii_uppercase() } else { c }).collect();
+    let (_t, proj) = project(&[(
+        "src/main.almd",
+        format!(
+            "import env\nimport http\n\neffect fn main() -> Unit = {{\n  let a = env.args()\n  let {local} = list.get(a, 0) ?? \"\"\n  let r = match list.get(a, 1) ?? \"\" {{\n    \"list\" => http.with_headers(200, \"x\", [({local}, \"text/html\")]),\n    _ => http.set_header(http.response(200, \"x\"), {local}, \"text/html\"),\n  }}\n  println(http.body(r))\n}}\n"
+        ),
+    )]);
+    let check = run(&proj, &["check", "src/main.almd"]);
+    assert!(check.status.success(), "the name is not a literal, so check has nothing to refuse:\n{}", text(&check));
+    for target in ["rust", "wasm"] {
+        for (how, writer) in [("set", "http.set_header"), ("list", "http.with_headers")] {
+            let o = run(&proj, &["run", "src/main.almd", "--target", target, "--", &name, how]);
+            refused_with(&o, &format!("{writer}: `{name}` is written from the body's type, never by name"), &format!("{writer} with a run-time name on {target}"));
+        }
+    }
+}

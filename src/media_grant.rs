@@ -82,6 +82,19 @@ pub fn check_grant_key(key: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The `[trust] media` key the application names itself by: its grant is the
+/// media types `http.typed` may label bytes with beyond its table (E117). It
+/// names no dependency, and no dependency may be named by it.
+pub const SELF_KEY: &str = "self";
+
+/// The media types the root manifest of `entry`'s project grants the
+/// application itself (`"self"`); none without a project.
+pub fn self_grants_for(entry: &str) -> Vec<String> {
+    crate::project::permissions_project_for(entry)
+        .map(|p| p.media_grants.into_iter().filter(|g| g.key == SELF_KEY).flat_map(|g| g.media).collect())
+        .unwrap_or_default()
+}
+
 /// Every `@media_owns` pattern declared under `dir`, with its file.
 pub fn owns_under(dir: &Path) -> Vec<(Owned, PathBuf)> {
     let mut files = Vec::new();
@@ -105,7 +118,7 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepMedia> {
             let key = grant_key(fd.source.as_ref(), &fd.pkg_id.name);
             DepMedia {
                 name: fd.pkg_id.name.clone(),
-                granted: proj.media_grants.iter().filter(|g| g.key == key).flat_map(|g| g.media.clone()).collect(),
+                granted: proj.media_grants.iter().filter(|g| g.key == key && g.key != SELF_KEY).flat_map(|g| g.media.clone()).collect(),
                 key,
                 direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
                 owns: owns_under(&fd.source_dir),
@@ -163,7 +176,34 @@ pub fn refusal(proj: &Project, deps: &[DepMedia]) -> Option<String> {
             ));
         }
     }
-    for g in proj.media_grants.iter().filter(|g| !deps.iter().any(|d| d.key == g.key)) {
+    for d in deps.iter().filter(|d| d.key == SELF_KEY) {
+        msg.push_str(&format!(
+            "error[E118]: dependency `{}` is named `{SELF_KEY}`, the key {} reserves for the application's own grant\n  hint: rename the dependency\n",
+            d.name, manifest.display()
+        ));
+    }
+    // The application's own grant: each type well formed, none a stdlib
+    // owner's (which `http.typed` refuses whatever the grant says), and a
+    // script-capable type only by its exact name (owner ruling 2026-11-25):
+    // a pattern reaching one would admit types the application never named.
+    for g in proj.media_grants.iter().filter(|g| g.key == SELF_KEY) {
+        for t in &g.media {
+            let why = if !mo::well_formed_pattern(t) {
+                Some("is not a media type (`type/subtype`)".to_string())
+            } else if t.contains('*') && mo::is_script_capable(t) {
+                Some("is a pattern reaching types a browser runs script in, which the application grants itself only one exact type at a time (as `\"text/javascript\"`)".to_string())
+            } else {
+                mo::stdlib_owners().iter().find(|(p, _)| mo::overlap(t, p)).map(|(_, f)| format!("is owned by `{f}`"))
+            };
+            if let Some(why) = why {
+                msg.push_str(&format!(
+                    "error[E118]: {}:{} grants the application `{t}`, which {why}\n  hint: remove `\"{t}\"` from the `\"{SELF_KEY}\"` entry\n",
+                    manifest.display(), g.line
+                ));
+            }
+        }
+    }
+    for g in proj.media_grants.iter().filter(|g| g.key != SELF_KEY && !deps.iter().any(|d| d.key == g.key)) {
         msg.push_str(&format!(
             "error[E118]: {}:{} grants media types to `{}`, which is not a dependency of this project\n  hint: a grant names a dependency's source by host and full path (`github.com/owner/repo`); remove the entry or fix its source\n",
             manifest.display(), g.line, g.key

@@ -874,7 +874,7 @@ class = "legacy"
 names = 3
 
 [[site]]
-id = "crates/almide-wasm/src/http_call.rs::lower_http_call_leaf::or-pattern"
+id = "crates/almide-wasm/src/http_call.rs::host_leaf::or-pattern"
 class = "legacy"
 names = 2
 
@@ -1054,11 +1054,6 @@ names = 7
 id = "crates/almide-wasm/src/witness_gate_callbacks.rs::inline_callback_subset::or-pattern"
 class = "legacy"
 names = 27
-
-[[site]]
-id = "crates/almide-wasm/src/witness_gate_callbacks.rs::is_self_hosted_hof::or-pattern"
-class = "legacy"
-names = 6
 
 [[site]]
 id = "src/cargo_cfg.rs::expr::or-pattern"

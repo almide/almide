@@ -262,6 +262,12 @@ fn rc_lines(
                             // An `if` site whose anchor did not ship stays a
                             // plain site mark (its arms are then not paired).
                             (None, "(" | "|") => Some(m.to_string()),
+                            // #1961: a region reclaim is held to the restore
+                            // its window names; a window that did not ship
+                            // leaves it nothing to be held to — kept, with
+                            // `?` for its window, so the RC check refuses it
+                            // instead of never seeing it.
+                            (None, m) if m.starts_with('w') => Some(format!("{m}@?")),
                             (None, _) => None,
                         }
                     }
@@ -510,7 +516,9 @@ fn one_line(s: &str) -> String {
 /// the witnesses describe: present, the bundle is version 2 and
 /// almide-verify recomputes the digest from that file and rejects a
 /// mismatch; absent, version 1. A bundle whose ownership witness carries an
-/// arm share-out `s` (#4278) is version 3 either way.
+/// arm share-out `s` (#4278) is version 3 either way; one whose ownership
+/// (or helper) lines carry a region reclaim `w` (#1961, certificate format
+/// v9) is version 6.
 pub fn render(
     producer: &str,
     source: &str,
@@ -523,12 +531,24 @@ pub fn render(
     let share_out = records.iter().any(|r| r.property == "ownership" && r.bytes.contains(['s', 'S']));
     // Version 4 (#4278, B1): a runtime helper's own certificate (`rc-sig`).
     let helper_sig = records.iter().any(|r| r.property == "rc-sig");
+    // Version 6 (#1961): an ownership (or helper) line carries a region
+    // reclaim `w`, a byte every reader before version 6 skipped as noise.
+    let reclaim = records
+        .iter()
+        .any(|r| (r.property == "ownership" || r.property == "rc-sig") && r.bytes.contains(['w', 'W']));
     let mut out = match (artifact, share_out, helper_sig) {
-        (None, false, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        (None, _, sig) => format!("almide-certificate-bundle {}\nproducer {}\nsource {}\n", if sig { 4 } else { 3 }, one_line(producer), one_line(source)),
+        (None, false, false) if !reclaim => {
+            format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source))
+        }
+        (None, _, sig) => format!(
+            "almide-certificate-bundle {}\nproducer {}\nsource {}\n",
+            if reclaim { 6 } else if sig { 4 } else { 3 },
+            one_line(producer),
+            one_line(source)
+        ),
         (Some((hex, path)), _, _) => format!(
             "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
-            if helper_sig { 4 } else if share_out { 3 } else { 2 },
+            if reclaim { 6 } else if helper_sig { 4 } else if share_out { 3 } else { 2 },
             one_line(producer),
             one_line(source),
             one_line(path)

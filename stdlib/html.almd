@@ -159,12 +159,14 @@ fn script_json(v: Value) -> SafeHtml = {
 //
 // `@script_capable` is the one declaration of the media types a browser runs
 // script in: HTML, XHTML, SVG, and, since any XML document can carry the
-// XHTML namespace, XML and every `+xml` subtype (RFC 6839 patterns). `typed`
-// refuses all of them; a type outside the stdlib owning one needs the
-// application's `[trust] media` grant (D7), so SVG is a package's (almide/svg)
-// and XML, with no owner yet (#4310), stays unbuildable.
+// XHTML namespace, XML and every `+xml` subtype (RFC 6839 patterns), and the
+// JavaScript MIME types a browser executes as script. A type outside the
+// stdlib owning one needs the application's `[trust] media` grant (D7), so
+// SVG is a package's (almide/svg); `typed` serves one only when the
+// application names that exact type in its own "self" grant (owner ruling
+// 2026-11-25), and every response then carries `nosniff` (C-407).
 @media_owns("text/html", "application/xhtml+xml")
-@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml", "text/javascript", "application/javascript", "application/ecmascript", "application/x-javascript", "application/x-ecmascript", "text/ecmascript", "text/x-javascript", "text/x-ecmascript", "text/jscript", "text/livescript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
 fn __safe_html_to_bytes(h: SafeHtml) -> Bytes = bytes.from_string(to_string(h))

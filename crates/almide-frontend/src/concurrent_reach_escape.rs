@@ -31,7 +31,7 @@ pub(crate) struct EscapeFinding {
 
 fn surface_of(k: &SlotKind) -> String {
     match k {
-        SlotKind::FanBlock { surface } | SlotKind::FanCallback { surface } | SlotKind::Handler { surface } => {
+        SlotKind::FanBlock { surface } | SlotKind::FanCallback { surface } | SlotKind::Handler { surface, .. } => {
             surface.clone()
         }
     }

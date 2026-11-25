@@ -1,0 +1,6 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[trust]
+media = { "self" = ["application/vnd.acme+json"] }

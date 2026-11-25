@@ -3,7 +3,8 @@
 //! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker and
 //! the `t` arm-abort terminal; format v7 adds the `s` arm share-out, #4278;
 //! format v8 adds the `k` take and the `u` probe with the drain rule,
-//! ADR-0034, and refuses `r` on every line, #4753),
+//! ADR-0034, and refuses `r` on every line, #4753; format v9 adds the `w`
+//! region reclaim, #1961),
 //! with the owned-line resurrection rule (#3229:
 //! on a line born by a top-level `i`, every later `a` must meet a live count).
 //!
@@ -30,6 +31,9 @@ enum Op {
     Take,
     /// `Probe` (ADR-0034, `u`): +0 on the container's line, Borrow's guard.
     Probe,
+    /// `Reclaim` (#1961, `w`, format v9): −1, folds like `Dec` — the credit is
+    /// discharged by a region restore, not a release call.
+    Reclaim,
 }
 
 /// `CertItem` — one element of a parsed certificate line.
@@ -58,6 +62,7 @@ fn parse_byte(b: u8) -> Option<Op> {
         b's' => Some(Op::ShareOut),
         b'k' => Some(Op::Take),
         b'u' => Some(Op::Probe),
+        b'w' => Some(Op::Reclaim),
         _ => None,
     }
 }
@@ -78,8 +83,8 @@ fn exec(ops: &[Op], mut rc: i64) -> Option<i64> {
     for op in ops {
         rc = match op {
             Op::Inc | Op::Alias | Op::Take => rc + 1,
-            Op::Dec | Op::MoveOut if rc <= 0 => return None,
-            Op::Dec | Op::MoveOut => rc - 1,
+            Op::Dec | Op::MoveOut | Op::Reclaim if rc <= 0 => return None,
+            Op::Dec | Op::MoveOut | Op::Reclaim => rc - 1,
             Op::Reuse => return None,
             Op::Borrow | Op::Probe if rc <= 0 => return None,
             Op::Borrow | Op::Probe => rc,
@@ -486,6 +491,19 @@ mod tests {
         assert!(!check_xc(b"sd"));
         assert!(!check_xc(b"ids"));
         assert!(!check_xc(b"s\ni"));
+    }
+
+    #[test]
+    fn a_region_reclaim_discharges_one_credit_like_a_release() {
+        // #1961 `w` (OwnershipChecker.v Reclaim, folds like Dec): the parked
+        // temporary's line `iw` balances; a reclaim of a line holding no
+        // credit faults, and a reclaimed credit is not released again.
+        assert!(check_xc(b"iw"));
+        assert!(check_xc(b"IW"));
+        assert!(!check_xc(b"w"));
+        assert!(!check_xc(b"iwd"));
+        assert!(!check_xc(b"iww"));
+        assert!(!check_xc(b"iiw"));
     }
 
     #[test]

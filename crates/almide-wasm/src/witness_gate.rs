@@ -9,7 +9,7 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 /// The inlined-callback rules (split for the file budget).
 #[path = "witness_gate_callbacks.rs"]
 mod callbacks;
-use callbacks::{inline_callback_subset, is_self_hosted_hof};
+use callbacks::inline_callback_subset;
 /// The built-value rules (split for the file budget).
 #[path = "witness_gate_built.rs"]
 mod built;
@@ -532,15 +532,10 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
     };
     match target {
         almide_ir::CallTarget::Named { name } => {
-            // The http_framed host-op leaves (calls.rs) intercept before
-            // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_")
-                || name.as_str().starts_with("__http_call_")
-                || name.as_str().starts_with("__http_serve_")
-                || name.as_str().starts_with("__proc_")
-            {
-                return Some(Why::Deep("call:host-splice".into()));
-            }
+            // A bodyless host-op leaf (http_call.rs `lower_host_leaf`) is
+            // audited like a module arm: its operands enter through
+            // `lower_arg` and the frame declines when one did not. Its
+            // arguments are judged below like any call's.
             // `__is_null` reads the Value tag of its lowered argument: no
             // argument hook fires, so only an RC-free argument is honest.
             // `panic` concatenates its message into a line and aborts: an
@@ -555,9 +550,7 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
         // any other declines by arm name. A Fn value that arrives as a value
         // (a Var, a call result) is an ordinary argument everywhere.
         almide_ir::CallTarget::Module { module, func, .. } => {
-            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. }))
-                && !is_self_hosted_hof(module.as_str(), func.as_str())
-            {
+            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
                 return inline_callback_subset(module.as_str(), func.as_str(), args);
             }
         }

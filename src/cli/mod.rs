@@ -76,6 +76,7 @@ pub use clean::cmd_clean;
 pub use install::{cmd_install, InstallGrants};
 pub use selfupdate::cmd_self_update;
 pub use verify::cmd_verify;
+pub(crate) use verify::set_allow_incomplete;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
 pub use fix::cmd_fix;
 pub use survive::{cmd_apply, cmd_survive, SurviveArgs};
