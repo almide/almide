@@ -108,7 +108,7 @@ fn load(op: &Op<'_>) -> Option<(&'static str, u32, u64)> {
 
 /// Whether `op` reads or writes memory at an address operand (bulk copies
 /// and fills are not windows).
-fn is_access(op: &Op<'_>) -> bool {
+pub(crate) fn is_access(op: &Op<'_>) -> bool {
     load(op).is_some() || store_width(op).is_some_and(|(w, _)| w <= 8)
 }
 
@@ -287,6 +287,13 @@ fn scaled(t: &Tm) -> (Tm, i128) {
         }
     }
     (t.clone(), 1)
+}
+
+/// Whether `ops[s..=acc]` is a run the proof script's window language reads
+/// from an empty stack, whatever its address is (fresh.rs cuts its tails by
+/// this).
+pub(crate) fn reads(b: &Body<'_>, s: usize, acc: usize) -> bool {
+    run(b, s, acc).is_ok()
 }
 
 /// The proof script's `recog`, as a search test: the address is a base, an
