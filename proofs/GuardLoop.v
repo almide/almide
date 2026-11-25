@@ -541,6 +541,26 @@ Example refuses_open_loop :
     [33;2;32;10;65;1;106;33;10;12;0] = false.
 Proof. vm_compute. reflexivity. Qed.
 
+(* ── the proposal almide-anchor-check's loop cutter prints for its own test
+   module (crates/almide-anchor-check/tests/loops.rs): held, and with
+   nothing in the loop that writes, calls or reads the list's local but the
+   access ── *)
+Example cutter_for_read :
+  loop_class 0 [32;0;16;0]
+    [32;0;40;2;4;65;4;110;33;1]
+    [65;0;33;2;2;64;3;64]
+    [32;2;32;1;79;13;1;32;0;32;2;65;4;108;106;40;2;12]
+    [33;3;32;2;65;1;106;33;2;12;0;11;11] = 15.
+Proof. vm_compute. reflexivity. Qed.
+
+Example refuses_cutter_read_one_slot_further :
+  loop_core
+    [32;0;40;2;4;65;4;110;33;1]
+    [65;0;33;2;2;64;3;64]
+    [32;2;32;1;79;13;1;32;0;32;2;65;4;108;106;40;2;16]
+    [33;3;32;2;65;1;106;33;2;12;0;11;11] = false.
+Proof. vm_compute. reflexivity. Qed.
+
 (* ══ A CONTROL ON THE LENGTH TABLE ════════════════════════════════════ *)
 
 (* The scans rest on `step1` reading each instruction's length as the binary
