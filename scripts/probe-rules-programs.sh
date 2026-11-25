@@ -63,8 +63,8 @@ while IFS= read -r f; do
   [ "$ok" = 1 ] || echo "a cutter failed on $f: $(cat "$a.windows-err" "$a.fresh-err" "$a.loops-err" | head -n 2 | cut -c1-200)"
   for d in window fresh loops; do
     src="$a.${d}s"; [ "$d" = fresh ] && src="$a.fresh"; [ "$d" = loops ] && src="$a.loops"
-    { printf 'MODULE %s\n' "$f"; hew "$src"; } >> "$OUT/$d-dump"
-    [ "$rc" = 0 ] && { printf 'MODULE %s\n' "$f"; hew "$src"; } >> "$OUT/$d-dump.accepted"
+    { printf 'MODULE %s\n' "$f"; cat "$src"; } >> "$OUT/$d-dump"
+    [ "$rc" = 0 ] && { printf 'MODULE %s\n' "$f"; cat "$src"; } >> "$OUT/$d-dump.accepted"
   done
 done < "$OUT/programs.txt"
 echo "== built: $(awk -F'\t' '$2 == "module"' "$OUT/built.tsv" | wc -l | tr -d ' ') of $n ; the byte-level check accepts $(awk -F'\t' '$2 == "module" && $3 == 0' "$OUT/built.tsv" | wc -l | tr -d ' ')"
