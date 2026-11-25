@@ -79,6 +79,27 @@ fn main() {
         }
         return;
     }
+    // `--windows <artifact.wasm>`: the guarded-access windows the cutter
+    // proposes over every load and store of the module (window.rs), one line
+    // of decimal bytes each: the input of the proof script's `window_ok`,
+    // whose verdict is the kernel's. No witness and no anchor file is read.
+    if args.first().map(String::as_str) == Some("--windows") {
+        let Some(w) = args.get(1) else { std::process::exit(2) };
+        let w = std::fs::read(w).unwrap_or_default();
+        match almide_anchor_check::window::shipped(&w) {
+            Ok((accesses, windows)) => {
+                for x in &windows {
+                    println!("WINDOW {} {}{}", x.func, x.access, x.bytes.iter().map(|b| format!(" {b}")).collect::<String>());
+                }
+                println!("ACCESSES {accesses}");
+            }
+            Err(e) => {
+                println!("WINDOWS REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),

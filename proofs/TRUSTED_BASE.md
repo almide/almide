@@ -172,7 +172,7 @@ the row lists where it does not hold yet.
 
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
-The spine has 164 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
+The spine has 165 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra
@@ -438,6 +438,40 @@ value_helpers.rs, json_helpers.rs, map_index.rs 1 each; the empty
 separator's split reads its lead byte after handing the string to
 `$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
+
+GUARDED ACCESSES FROM THE BYTES ALONE (`proofs/GuardWindow.v`). Everything
+above rests on almide-anchor-check, which is unverified Rust. For one shape
+that trust is not needed. A WINDOW is a straight-line run of a function's
+shipped instructions that ends in a load or a store: the compare, its
+aborting arm (`if ... unreachable end`), the address arithmetic and the
+access, with nothing in between that writes memory, calls, or branches.
+`GuardWindow.v` decodes a window from the module's own bytes, runs it
+symbolically from an empty stack and accepts when the address is `base + 12
++ idx * S + o` (`o + width <= S`) under a compare the window aborted on that
+leaves `idx <u len / S`, `len` being the word the window itself read at
+`base + 4`. `window_sound`: in every run of an accepted window that reaches
+the access (any locals, globals, memory and stack beneath, with the
+machine's 32- and 64-bit wrap-around), the access touches only
+`[B + 12, B + 12 + len)`, for `B` the value of the base expression and `len`
+the word at `B + 4`, as long as that range lies in the 32-bit address space.
+No witness and no anchor file is read. `proofs/structural-wall.sh` has the
+cutter (`almide-anchor-check --windows`, window.rs) sweep EVERY load and
+store of every artifact it judges, and the Rocq kernel compute `window_ok`
+on each proposed window's bytes (`proofs/check-shipped-windows.sh`); a
+proposal the kernel refuses fails the gate, and so does a count below the
+leg's floor (`proofs/shipped-windows-floor.txt`), so a change that moves a
+count out of its window (a hoisted length, a call between the compare and
+the access) shows as lost evidence. Trusted for it: the meaning the proof
+gives nine instructions (`usem` / `bsem`: i32 add, mul, shl, div_u, shr_u,
+ge_u, i64 ge_u, wrap, extend_u), that any other one-byte numeric
+instruction is a function of its operands, that a load reads memory and
+changes nothing, and that an arm with no branch that ends in `unreachable`
+does not fall through; of the cutter, that a window's bytes are bytes
+`[lo, hi)` of the module with `lo` and `hi` instruction boundaries of one
+function body at one control depth; and, as everywhere here, that the base
+is a live block whose word at `+ 4` is its payload length. An access whose
+count was read before a loop, or with a copy-on-write judge's call in front
+of it, is not a window and stays with the rules above.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI

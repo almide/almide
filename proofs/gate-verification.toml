@@ -132,7 +132,12 @@
 # UNMAPPED); naming them was ruled on 2026-11-24 to be the #4372 inventory
 # reading, a count that follows the mapping, not a relaxed ratchet. The second
 # is a candidate for a gate of its own.
-# uncompensated_blind_ceiling = "52"
+# 2026-11-25: the shipped-windows gate maps two limits it does not cover (that
+# a window's bytes are an instruction run of one function at one control depth
+# is the cutter's word, and that a window's base is a live block whose word at
+# +4 is its payload length) as UNCOMPENSATED: 52 -> 54. The same inventory
+# reading: the gate is new, and it names what it leaves open.
+# uncompensated_blind_ceiling = "54"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -201,6 +206,18 @@ evidence = "2026-11-24: the verdict is the Rocq kernel's, on a statement per jud
 measures = "for each artifact the structural wall accepts, coqc's verdict on the statement that the bytes of its named runtime routines decode, as shipped, to the proven trees with the indices bound in their roles; the bytes are read from `almide-anchor-check --proved-bytes`, and an empty dump fails"
 varies = "2026-11-24: run 45322029118 read 1,087 ok and 128 FAILED (two-byte callee indices); run 45330083925, after the decoders read indices as LEB128 numbers, read 1,215 ok and 0 FAILED on the same corpus"
 blind = "a routine the anchor file does not name: the gate reads the four roles on the `proved` line and nothing else -> crates/almide-anchor-check/src/proved.rs refuses an anchor file that names release routines and carries no `proved` line; what the imported exit function does to memory before the trap that follows it -> UNCOMPENSATED; that the globals bound in the $line_end and bump-frontier roles hold what the model says -> UNCOMPENSATED"
+
+[[gate]]
+path = "proofs/check-shipped-windows.sh"
+# It splits the cutter's dump into one Rocq goal per window and reads coqc's
+# exit status; the verdict on a window is the kernel's computation.
+reads = "scalar"
+wired_by = "proofs/structural-wall.sh"
+class = "KERNEL_PROVEN"
+evidence = "2026-11-25: the verdict is the Rocq kernel's, on a goal `window_ok <bytes> = true` per window, the bytes being the artifact's own. proofs/GuardWindow.v proves what an accepted window means (window_sound, closed under the global context) and carries the refusing directions as kernel-computed examples: refuses_count_in_bytes, refuses_next_slot, refuses_other_index, refuses_arm_that_falls_through, refuses_arm_that_branches, beside shipped_read_window, a window cut out of a corpus artifact (Actions run 45522171502, the file under Rocq 9.3.0). Red on real input: the first corpus run (45519096811) REFUSED all 516 proposed windows, because the proof's arm reader took only constants, reads and calls and the shipped arm sets a local before its report; the reader was widened to any instruction that cannot leave the arm. crates/almide-anchor-check/tests/window.rs holds the cutter to the same shapes: one window for the emitter's read and for an arm that sets a local and calls before its trap, none for a count read before a call, a store in between, an arm that does not abort, an arm that branches out, another index, a count in bytes, the next slot."
+measures = "for each artifact the structural wall judges, how many of its load and store instructions the kernel computes `window_ok` true for, on the bytes `almide-anchor-check --windows` cut out of it; a proposed window the kernel refuses fails, a module whose dump has no ACCESSES line fails, and a total below the leg's row of proofs/shipped-windows-floor.txt fails"
+varies = "2026-11-25: in the kernel's own reading the same 33 bytes of the emitter's read are accepted and five one-edit variants of them are refused (run 45522171502); on real input run 45519096811 read 516 REFUSED and 0 ok before the arm reader was widened; across a corpus the count is not constant per module: a prototype of the cutter found a window for 353 of the 747 located list accesses of the 1,059 fixtures and 163 of 417 on the stdlib-test leg (run 45515733666)"
+blind = "an access whose compare reads a count taken earlier (before a loop, or with a call in between) is not a window and is not counted, proven or not -> crates/almide-anchor-check/src/operands.rs holds those to their checks; that a window's bytes are an instruction run of one function at one control depth is the cutter's word -> UNCOMPENSATED; that the base is a live block whose word at +4 is its payload length -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-als-pin.sh"

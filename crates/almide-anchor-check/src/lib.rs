@@ -61,8 +61,13 @@
 //! release and the free routine) are held, instruction for instruction, to
 //! the lists the proof script transcribes.
 //!
+//! WINDOWS (window.rs): apart from the verdict above, every load and store
+//! of the module is swept for a straight-line window (a compare, its
+//! aborting arm, the access) and the windows found are printed as bytes for
+//! the Rocq kernel to judge with `proofs/GuardWindow.v`. No witness is read.
+//!
 //! TRUSTED: the representation R (init); the rest of operands.rs's,
-//! routines.rs's and proved.rs's TRUSTED lists.
+//! routines.rs's, proved.rs's and window.rs's TRUSTED lists.
 
 
 use wasmparser::Operator as Op;
@@ -78,6 +83,7 @@ mod operands;
 mod proved;
 pub mod rc;
 mod routines;
+pub mod window;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, proved_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
