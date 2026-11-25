@@ -8,9 +8,10 @@
    position in that body and the lengths of the strings one of the two rules
    reads there. The kernel then
 
-   - walks the body with `step1`, instruction by instruction, and lists every
-     load and store it finds (opcodes 40 to 62). A bulk memory instruction or
-     a byte `step1` does not read ends the walk: the function is not judged;
+   - walks the body with `step1` (and reads a tail call), instruction by
+     instruction, and lists every load and store it finds (opcodes 40 to 62).
+     A bulk memory instruction or a byte the walk does not read ends it: the
+     function is not judged;
    - cuts each claim's strings OUT OF THE BODY ITSELF, at the claimed
      position, requires that position (and, for a fresh-block claim, the two
      inner boundaries) to be where the walk starts an instruction, and asks
@@ -71,6 +72,25 @@ Definition bulk_op (bs : list Z) : bool :=
   | [] => false
   end.
 
+(* One instruction off the front of `bs`: the bytes after it. `step1` reads
+   every instruction the fresh-block scan meets; a tail call ends a function
+   as a call does and is read here (return_call: one index; return_call_indirect:
+   two). *)
+Definition step_any (bs : list Z) : option (list Z) :=
+  match bs with
+  | op :: r =>
+      if op =? 18 then
+        match uleb 5 r with Some (_, r') => Some r' | None => None end
+      else if op =? 19 then
+        match uleb 5 r with
+        | Some (_, r1) => match uleb 5 r1 with Some (_, r') => Some r' | None => None end
+        | None => None
+        end
+      else
+        match step1 bs with Some (_, r') => Some r' | None => None end
+  | [] => None
+  end.
+
 (* One entry per instruction of `bs`, in order: the offset it starts at, the
    offset it ends at, and whether it is a load or a store. `total` is the
    length of the whole body and `off` the offset `bs` starts at. *)
@@ -83,9 +103,9 @@ Fixpoint layout (fuel : nat) (total off : Z) (bs : list Z) : option (list (Z * Z
       | _ :: _ =>
           if bulk_op bs then None
           else
-            match step1 bs with
+            match step_any bs with
             | None => None
-            | Some (_, r) =>
+            | Some r =>
                 match layout f total (total - zlen r 0) r with
                 | Some l => Some ((off, total - zlen r 0, acc_op bs) :: l)
                 | None => None
