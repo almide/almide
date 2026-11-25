@@ -802,8 +802,9 @@ Fixpoint darm (fuel : nat) (bs : list Z) : option (list Z) :=
   end.
 
 (* A window's bytes: its instructions, then the access (kind, memarg
-   offset, width). A store, a call, a branch or a block before the end is
-   not a window. *)
+   offset, width). A store, a call, an unconditional branch or a block
+   before the end is not a window; a `br_if` is read as an exit, like an
+   aborting arm: the run goes on past it only when its condition was zero. *)
 Fixpoint dec (fuel : nat) (bs : list Z) (acc : list ins)
   : option (list ins * akind * Z * Z) :=
   match fuel with
@@ -825,6 +826,9 @@ Fixpoint dec (fuel : nat) (bs : list Z) (acc : list ins)
           else if op =? 66 then
             match sleb 10 r with Some (z, r') => dec f r' (IConst (z mod M64) :: acc) | None => None end
           else if op =? 26 then dec f r (IDrop :: acc)
+          else if op =? 13 then
+            (* br_if: past it the condition was zero, as past an aborting arm *)
+            match uleb 5 r with Some (_, r') => dec f r' (IAbortIf :: acc) | None => None end
           else if op =? 4 then
             match r with
             | bt :: r1 =>
