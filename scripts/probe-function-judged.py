@@ -428,6 +428,12 @@ def checks(work, chunk):
             if i % chunk == 0:
                 f.write(HEAD)
             f.write(f"\nExample {name} : {goal_text(*keys[name])} = {ans[name]}.\nProof. vm_compute. reflexivity. Qed.\n")
+            if ans[name] == "true":
+                # the kernel's own count of the body's loads and stores, against this reader's
+                body = bytes(keys[name][1])
+                ins = instrs(body, 0, len(body)) or []
+                n = sum(1 for x in ins if 0x28 <= x[2] <= 0x3E)
+                f.write(f"Example {name}_n : accesses [{';'.join(str(x) for x in body)}] = Some {n}.\nProof. vm_compute. reflexivity. Qed.\n")
     print(f"{len(asked)} answer(s) to check, {len(keys) - len(asked)} goal(s) without an answer")
 
 
