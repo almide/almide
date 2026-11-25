@@ -86,6 +86,7 @@ one() { # one <leg> <file>
     fi
     { echo "MODULE $leg $f"; grep -E '^(WINDOWHEX|WINDOWALL|WINDOWSWEEP) ' "$W/a.census" || true; } >> "$OUT/window-dump"
     grep '^WINDOWFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/windowrows.tsv" || true
+    grep '^FRESHFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/freshrows.tsv" || true
     grep '^KINDFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/kindrows.tsv" || true
     grep -E '^(FIELDS|RC) OK' "$W/a.anchor" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/okrows.tsv" || true
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true

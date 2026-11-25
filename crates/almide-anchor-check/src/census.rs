@@ -378,3 +378,76 @@ pub fn census_kinds(bodies: &[Body<'_>], anchors: &str) -> Result<Vec<(usize, bo
     }
     Ok(out.into_iter().map(|((f, w, m), n)| (f, w, m, n)).collect())
 }
+
+fn load_width(op: &Op<'_>) -> Option<u64> {
+    Some(match op {
+        Op::I32Load8S { .. } | Op::I32Load8U { .. } | Op::I64Load8S { .. } | Op::I64Load8U { .. } => 1,
+        Op::I32Load16S { .. } | Op::I32Load16U { .. } | Op::I64Load16S { .. } | Op::I64Load16U { .. } => 2,
+        Op::I32Load { .. } | Op::F32Load { .. } | Op::I64Load32S { .. } | Op::I64Load32U { .. } => 4,
+        Op::I64Load { .. } | Op::F64Load { .. } => 8,
+        _ => return None,
+    })
+}
+
+/// Probe only: per function, the loads and stores whose address is a constant
+/// past the result of a call of `alloc` given a constant size `n`, the result
+/// held in one local not assigned since, and the access inside `[0, 12 + n)`
+/// of it. A row is `(func, [stores, straight header, straight payload, any
+/// header, any payload, loads, straight header, straight payload, any
+/// header, any payload])`: `straight` has nothing nested between the call
+/// and the access, `any` allows whole nested blocks that do not assign the
+/// local.
+pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 10])> {
+    let mut out = Vec::new();
+    for (func, b) in bodies.iter().enumerate() {
+        let mut n = [0usize; 10];
+        for (k, op) in b.ops.iter().enumerate() {
+            let (base, w, off) = match (store_width(op), load_width(op)) {
+                (Some((w, off)), _) => (0, u64::from(w), off),
+                (None, Some(w)) => (5, w, offset(op).unwrap_or(0)),
+                _ => continue,
+            };
+            n[base] += 1;
+            let Some(p) = b.args[k].first().copied().flatten() else { continue };
+            let (x, c) = match &b.ops[p] {
+                Op::LocalGet { local_index } => (*local_index, 0i64),
+                Op::I32Add => {
+                    let a: Vec<usize> = b.args[p].iter().copied().flatten().collect();
+                    if a.len() != 2 {
+                        continue;
+                    }
+                    match (&b.ops[a[0]], &b.ops[a[1]]) {
+                        (Op::LocalGet { local_index }, Op::I32Const { value }) | (Op::I32Const { value }, Op::LocalGet { local_index }) => (*local_index, i64::from(*value)),
+                        _ => continue,
+                    }
+                }
+                _ => continue,
+            };
+            // The latest assignment of the local before the access.
+            let Some(j) = (0..p).rev().find(|&t| matches!(&b.ops[t], Op::LocalSet { local_index } | Op::LocalTee { local_index } if *local_index == x)) else { continue };
+            if b.depth[j] != b.depth[k] || (j..=k).any(|t| b.depth[t] < b.depth[j]) {
+                continue;
+            }
+            let Some(q) = b.args[j].first().copied().flatten() else { continue };
+            if !matches!(&b.ops[q], Op::Call { function_index } if *function_index == alloc) {
+                continue;
+            }
+            let Some(a) = b.args[q].first().copied().flatten() else { continue };
+            let Op::I32Const { value: size } = &b.ops[a] else { continue };
+            let (size, lo) = (i64::from(*size), c + off as i64);
+            if size < 0 || c < 0 || lo + w as i64 > 12 + size {
+                continue;
+            }
+            let straight = (q..=k).all(|t| b.depth[t] == b.depth[k]);
+            let slot = if lo < 12 { 0 } else { 1 };
+            n[base + 3 + slot] += 1;
+            if straight {
+                n[base + 1 + slot] += 1;
+            }
+        }
+        if n[0] + n[5] > 0 {
+            out.push((func, n));
+        }
+    }
+    out
+}
