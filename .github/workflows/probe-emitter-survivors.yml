@@ -1,4 +1,4 @@
-name: Probe — the wasm test suite and the differential fuzzer against the surviving source mutants
+name: Probe — the wasm test suite and a fixed fuzz campaign against the second sample's mutants that only a static layer notices
 # A one-off measurement on its own branch: for the mutants of the emitter
 # crate's source that nothing in the first two stages noticed (the seeded
 # sample probe-emitter-mutants.yml draws), does the merge gate's own wasm test
@@ -6,7 +6,7 @@ name: Probe — the wasm test suite and the differential fuzzer against the surv
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-survivors-fresh]
+    branches: [probe/emitter-s2-static-only]
 
 permissions:
   contents: read
