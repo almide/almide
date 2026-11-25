@@ -36,10 +36,9 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// A Float field: its `==` is IEEE (0.0 == -0.0), so it has no canonical
-/// bytes and its set stays on the linear scan. The verified native render has
-/// no element equality that agrees with it, so the native route refuses the
-/// set (E081, C-464); wasm and the standard codegen answer.
+/// A Float field: a Set compares it with the collection key equality
+/// (ALS-C11, 0.0 and -0.0 one key), so the native render writes its canonical
+/// bits as the key bytes and every leg answers 20.
 const FLOAT_SOURCE: &str = r#"type Reading = { at: Int, value: Float }
 
 effect fn main() -> Unit = {
@@ -93,19 +92,10 @@ fn record_keys_answer_the_same_natively_and_on_wasm() {
                 c.args(["--target", "wasm"]);
             }
             let out = c.output().expect("almide run");
-            if name == "float_keys" && !wasm {
-                assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
-                assert!(String::from_utf8_lossy(&out.stderr).contains("error[E081]"), "{}", String::from_utf8_lossy(&out.stderr));
-                continue;
-            }
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
             assert_eq!(String::from_utf8_lossy(&out.stdout), expected, "{name} wasm={wasm}");
         }
-        // The standard codegen (the v0 parity oracle) carries the same keys;
-        // the native route's C-464 refusal holds for its retired leg too.
-        if name == "float_keys" {
-            continue;
-        }
+        // The standard codegen (the v0 parity oracle) carries the same keys.
         let bin = dir.path().join(format!("{name}_v0"));
         let out = Command::new(env!("CARGO_BIN_EXE_almide"))
             .env("ALMIDE_NO_VERIFIED_OK", "1")

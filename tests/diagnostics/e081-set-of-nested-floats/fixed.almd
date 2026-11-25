@@ -1,10 +1,10 @@
-// A Set's membership is its element's `==`, IEEE on every Float inside the
-// element; the verified native render carries a nested Float as its bits, so
-// the native build route refuses the set (C-464). A List keeps the same
-// membership test, `list.contains`.
-fn has(s: List[List[Float]], x: Float) -> Bool = list.contains(s, [x])
+// The element wrapped in a record: its List[List[Float]] field is a field of
+// a generated type, and the native render keys it (ALS-C11).
+type Key = { xs: List[List[Float]] }
+
+fn has(s: List[Key], x: Float) -> Bool = list.contains(s, Key { xs: [[x]] })
 
 effect fn main() -> Unit = {
-  let s = [[1.5], [2.5]]
+  let s = [Key { xs: [[1.5]] }, Key { xs: [[2.5]] }]
   println("${list.len(s)} ${has(s, 1.5)}")
 }

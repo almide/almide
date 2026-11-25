@@ -1667,14 +1667,10 @@ fn float32_collection_boundaries_preserve_value_equality_and_compiled_routes() {
         std::fs::create_dir_all(&dir).unwrap();
         check_routes(&dir, "sized_display_matrix", include_str!("../spec/wasm_cross/sized_display_matrix.almd"),
             include_str!("fixtures/sized_display_matrix.stdout"), "", 0);
-        check_compiled_routes(&dir, "float32_collection_keys", include_str!("fixtures/float32_collection_keys.almd"),
+        // The interpreter answers the Float32 collection core under the
+        // collection key equality (ALS-C11) as the compiled routes do.
+        check_routes(&dir, "float32_collection_keys", include_str!("fixtures/float32_collection_keys.almd"),
             include_str!("fixtures/float32_collection_keys.stdout"), "", 0);
-        // Extra fixture beyond the fixed corpus: the interpreter refuses its
-        // Float32 collection core. Keep the abstention explicit, never a match.
-        let ir = interp_oracle::lower(include_str!("fixtures/float32_collection_keys.almd")).unwrap();
-        let reference = almide_interp::Interpreter::new(&ir).run_main();
-        assert!(matches!(reference.status, almide_interp::RunStatus::Unsupported(ref reason)
-            if reason.starts_with("prim.handle of a container holding a Float element")));
 
         std::fs::remove_dir_all(dir).unwrap();
     }).unwrap().join().unwrap();
