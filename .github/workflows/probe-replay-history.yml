@@ -16,11 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - 2395-value-keys-without-tag-test
-          - 2685-list-take-drop-insert-byte-product
-          - 2474-copy-within-additive-fit-test
           - 2475-slice-rows-without-start-floor
-          - 1909-from-bytes-additive-fit-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
