@@ -201,14 +201,41 @@ def place(body, ins, kind, k, parts):
     return [("W", s, n) for s in found]
 
 
+def tee_claims(b, start, ins, alloc):
+    """Claims for the accesses that may address the value `local.tee x` leaves on
+    the stack right after `i32.const n ; call alloc ; local.tee x`: the next
+    few loads and stores of the straight-line run that follows. Which of them
+    do address it is the kernel's verdict."""
+    out = []
+    stop = {0x02, 0x03, 0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13}
+    for j in range(2, len(ins)):
+        if ins[j][2] != 0x22 or ins[j - 1][2] != 0x10 or ins[j - 2][2] != 0x41:
+            continue
+        callee, _ = uleb(b, start + ins[j - 1][0] + 1)
+        if callee != alloc:
+            continue
+        s, lp, seen = ins[j - 2][0], ins[j][1] - ins[j - 2][0], 0
+        for k in range(j + 1, min(len(ins), j + 61)):
+            if ins[k][2] in stop or ins[k][3]:
+                break
+            if 0x28 <= ins[k][2] <= 0x3E:
+                out.append(("T", s, lp, ins[k][1] - ins[j][1]))
+                seen += 1
+                if seen == 3:
+                    break
+    return out
+
+
 def claim_text(c):
     if c[0] == "F":
         return f"CFresh {c[1]} {c[2]} {c[3]} {c[4]}"
+    if c[0] == "T":
+        return f"CTee {c[1]} {c[2]} {c[3]}"
     return f"CWindow {c[1]} {c[2]}"
 
 
 def claim_end(c):
-    return c[1] + (c[2] + c[3] + c[4] if c[0] == "F" else c[2])
+    return c[1] + sum(c[2:])
 
 
 def goal_text(alloc, body, claims):
@@ -228,7 +255,7 @@ def gen(listing, work, chunk):
             b = open(module, "rb").read()
             imports, fs = bodies(b)
         except (OSError, ValueError, IndexError) as e:
-            mod_rows.append([label, "unreadable", str(e)[:80]] + ["-"] * 9)
+            mod_rows.append([label, "unreadable", str(e)[:80]] + ["-"] * 10)
             continue
         fprops, alloc = read_props(fresh, "F")
         wprops, _ = read_props(windows, "W")
@@ -276,6 +303,9 @@ def gen(listing, work, chunk):
                 if not got:
                     tot["unplaced"] += 1
                 claims.update(got)
+            tees = tee_claims(b, s, ins, a)
+            tot["tee_claims"] = tot.get("tee_claims", 0) + len(tees)
+            claims.update(tees)
             claims = sorted(claims)
             ends = {claim_end(c) for c in claims}
             if bulk:
@@ -295,13 +325,13 @@ def gen(listing, work, chunk):
                     order.append(key)
                 name = names[key]
             fn_rows.append([label, str(fidx), str(e - s), str(len(ins)), str(len(acc)), str(len(props)), str(len(claims)), state, name])
-        mod_rows.append([label, "read", str(a), swept] + [str(tot[k]) for k in ("functions", "with_access", "accesses", "bulk", "unread", "candidates", "cand_accesses", "unplaced")])
+        mod_rows.append([label, "read", str(a), swept] + [str(tot.get(k, 0)) for k in ("functions", "with_access", "accesses", "bulk", "unread", "candidates", "cand_accesses", "unplaced", "tee_claims")])
     with open(f"{work}/functions.tsv", "w", encoding="utf-8") as f:
         f.write("module\tfunction\tbody_bytes\tinstructions\taccesses\tproposals\tclaims\tstate\tgoal\n")
         for r in fn_rows:
             f.write("\t".join(r) + "\n")
     with open(f"{work}/modules.tsv", "w", encoding="utf-8") as f:
-        f.write("module\tstate\tallocator\tcutter_swept\tfunctions\twith_access\taccesses\tbulk\tunread\tasked\tasked_accesses\tunplaced_proposals\n")
+        f.write("module\tstate\tallocator\tcutter_swept\tfunctions\twith_access\taccesses\tbulk\tunread\tasked\tasked_accesses\tunplaced_proposals\ttee_claims\n")
         for r in mod_rows:
             f.write("\t".join(r) + "\n")
     write_goals(work, "Ask", [(names[k], goal_text(*k)) for k in order], chunk)

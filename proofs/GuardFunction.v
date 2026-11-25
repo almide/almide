@@ -15,6 +15,10 @@
      position, requires that position (and, for a fresh-block claim, the two
      inner boundaries) to be where the walk starts an instruction, and asks
      the rule (`fresh_ok`, `window_ok`) about the strings it cut;
+   - reads one more shape with the fresh-block rule: `pre` ends in
+     `local.tee x` and the access that follows addresses the value the tee
+     left on the stack. The kernel asks `fresh_ok` about `pre`, an empty
+     `mid`, and the tail with `local.get x` put in front of it;
    - accepts when every load and store it listed ends exactly where an
      accepted claim ends.
 
@@ -30,7 +34,9 @@
    the module has it; that `step1` reads each instruction's length as the
    binary format has it, and that the rules' own decoders read the same
    instructions inside a claim; what the function's callees do (a call is not
-   an access of this body); and everything the two rules trust. *)
+   an access of this body); for the tee shape, that `local.tee x` leaves on
+   the stack the value it stores, so that what runs after it is what runs
+   after `local.set x ; local.get x`; and everything the two rules trust. *)
 
 From Stdlib Require Import ZArith List Lia Bool.
 From AlmideTrust Require Import GuardWindow GuardFresh.
@@ -91,7 +97,15 @@ Fixpoint layout (fuel : nat) (total off : Z) (bs : list Z) : option (list (Z * Z
 (* A claim: where in the body a rule's strings start, and their lengths. *)
 Inductive claim : Type :=
   | CFresh (s lp lm lt : Z)    (* pre, mid, tail of GuardFresh.v *)
+  | CTee (s lp lt : Z)         (* pre ending in local.tee x, then the tail *)
   | CWindow (s n : Z).         (* one window of GuardWindow.v *)
+
+Fixpoint list_eqb (a b : list Z) : bool :=
+  match a, b with
+  | [], [] => true
+  | x :: a', y :: b' => (x =? y) && list_eqb a' b'
+  | _, _ => false
+  end.
 
 Definition slice (s n : Z) (body : list Z) : list Z :=
   firstn (Z.to_nat n) (skipn (Z.to_nat s) body).
@@ -109,6 +123,18 @@ Definition claim_end (alloc total : Z) (body : list Z) (lay : list (Z * Z * bool
          && fresh_ok alloc (slice s lp body) (slice (s + lp) lm body) (slice (s + lp + lm) lt body)
       then Some (s + lp + lm + lt)
       else None
+  | CTee s lp lt =>
+      match fresh_pre alloc (slice s lp body) with
+      | Some (x, _) =>
+          if (0 <=? s) && (2 <? lp) && (0 <? lt) && (s + lp + lt <=? total)
+             && starts_at lay s && starts_at lay (s + lp)
+             && (0 <=? x) && (x <? 128)
+             && list_eqb (slice (s + lp - 2) 2 body) [34; x]
+             && fresh_ok alloc (slice s lp body) [] (32 :: x :: slice (s + lp) lt body)
+          then Some (s + lp + lt)
+          else None
+      | None => None
+      end
   | CWindow s n =>
       if (0 <=? s) && (0 <? n) && (s + n <=? total) && starts_at lay s
          && window_ok (slice s n body)
