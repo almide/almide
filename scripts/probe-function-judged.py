@@ -5,6 +5,8 @@ store (proofs/GuardFunction.v).
   probe-function-judged.py gen <modules.tsv> <work-dir> <chunk>
   probe-function-judged.py controls <work-dir> <how many>
   probe-function-judged.py join <work-dir> <out-dir>
+  probe-function-judged.py alloc-like <base.wasm> <base.anchors> <module.wasm> <out.anchors>
+  probe-function-judged.py compare <out-dir>
 
 <modules.tsv>: label, module (.wasm), fresh-block proposals (the output of
 `almide-anchor-check --fresh`, or `-`), window proposals (the output of
@@ -429,6 +431,97 @@ def checks(work, chunk):
     print(f"{len(asked)} answer(s) to check, {len(keys) - len(asked)} goal(s) without an answer")
 
 
+def alloc_like(base_wasm, base_anchors, module, out):
+    """An anchor file for a module that has none of its own: the base module's,
+    with the allocator's index replaced by the index of the function of
+    `module` whose instructions equal, byte for byte, those of the base
+    module's allocator. Nothing is written when there is no such function."""
+    lines = open(base_anchors, encoding="utf-8").read().split("\n")
+    at = [i for i, l in enumerate(lines) if l.startswith("alloc ")]
+    if len(at) != 1 or not lines[at[0]].split()[1].isdigit():
+        print("no-base-allocator")
+        return 1
+    alloc = int(lines[at[0]].split()[1])
+    b = open(base_wasm, "rb").read()
+    bi, bf = bodies(b)
+    if not 0 <= alloc - bi < len(bf):
+        print("no-base-allocator")
+        return 1
+    s, e = bf[alloc - bi]
+    want = bytes(b[s:e])
+    m = open(module, "rb").read()
+    mi, mf = bodies(m)
+    same = [mi + i for i, (s, e) in enumerate(mf) if bytes(m[s:e]) == want]
+    if alloc in same:
+        same = [alloc]
+    if len(same) != 1:
+        print("none" if not same else "several")
+        return 1
+    lines[at[0]] = f"alloc {same[0]}"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"found {same[0]}")
+    return 0
+
+
+def compare(out):
+    """Per mutant (labels `<set>|<id>|<program>` against `base|<program>`, or
+    against `<set>|<id>|<program>|base` when the pair brought its own base):
+    in how many programs fewer functions are judged than without the mutant."""
+    rows = [l.rstrip("\n").split("\t") for l in open(f"{out}/modules.tsv", encoding="utf-8")]
+    head = rows[0]
+    col = {k: i for i, k in enumerate(head)}
+    mods = {r[0]: r for r in rows[1:]}
+    per, detail = {}, []
+    for label, r in sorted(mods.items()):
+        t = label.split("|")
+        if t[0] == "base" or t[-1] == "base" or len(t) != 3:
+            continue
+        base = mods.get(label + "|base") or mods.get("base|" + t[2])
+        m = per.setdefault((t[0], t[1]), dict(programs=0, no_base=0, unreadable=0, no_allocator=0, fewer=0, more=0, same=0, lost=0, gained=0, base_judged=0, judged=0, refused=0))
+        m["programs"] += 1
+        if base is None or base[col["state"]] != "read":
+            m["no_base"] += 1
+            continue
+        if r[col["state"]] != "read":
+            m["unreadable"] += 1
+            continue
+        jb, jm = int(base[col["judged"]]), int(r[col["judged"]])
+        lost_alloc = r[col["allocator"]] == "4294967295" and base[col["allocator"]] != "4294967295"
+        m["no_allocator"] += lost_alloc
+        m["base_judged"] += jb
+        m["judged"] += jm
+        m["refused"] += int(r[col["refused"]])
+        m["fewer"] += jm < jb
+        m["more"] += jm > jb
+        m["same"] += jm == jb
+        m["lost"] += max(0, jb - jm)
+        m["gained"] += max(0, jm - jb)
+        if jm != jb or int(r[col["refused"]]) or lost_alloc:
+            detail.append([t[0], t[1], t[2], str(jb), str(jm), base[col["judged_accesses"]], r[col["judged_accesses"]], r[col["refused"]], "allocator not found" if lost_alloc else "-"])
+    keys = ("programs", "no_base", "unreadable", "no_allocator", "base_judged", "judged", "fewer", "more", "same", "lost", "gained", "refused")
+    with open(f"{out}/mutants.tsv", "w", encoding="utf-8") as f:
+        f.write("set\tmutant\t" + "\t".join(keys) + "\n")
+        for (st, mid), m in sorted(per.items()):
+            f.write(f"{st}\t{mid}\t" + "\t".join(str(m[k]) for k in keys) + "\n")
+    with open(f"{out}/mutants-programs.tsv", "w", encoding="utf-8") as f:
+        f.write("set\tmutant\tprogram\tbase_judged\tjudged\tbase_judged_accesses\tjudged_accesses\trefused\tnote\n")
+        for d in detail:
+            f.write("\t".join(d) + "\n")
+    sets = {}
+    for (st, mid), m in per.items():
+        t = sets.setdefault(st, dict(mutants=0, compared=0, fewer=0, more=0, refused=0, no_allocator=0))
+        t["mutants"] += 1
+        t["compared"] += (m["programs"] - m["no_base"] - m["unreadable"]) > 0
+        t["fewer"] += m["fewer"] > 0
+        t["more"] += m["more"] > 0
+        t["refused"] += m["refused"] > 0
+        t["no_allocator"] += m["no_allocator"] > 0
+    for st in sorted(sets):
+        t = sets[st]
+        print(f"{st}: {t['mutants']} mutant(s), {t['compared']} with a program compared; some program has fewer judged functions under {t['fewer']}, more under {t['more']}; the kernel refuses an asked function under {t['refused']}; an allocator is not found under {t['no_allocator']}")
+
+
 def join(work, out):
     os.makedirs(out, exist_ok=True)
     ans = answers(work, "Ask")
@@ -490,6 +583,10 @@ elif sys.argv[1] == "controls":
     controls(sys.argv[2], int(sys.argv[3]))
 elif sys.argv[1] == "checks":
     checks(sys.argv[2], int(sys.argv[3]))
+elif sys.argv[1] == "alloc-like":
+    sys.exit(alloc_like(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]))
+elif sys.argv[1] == "compare":
+    compare(sys.argv[2])
 elif sys.argv[1] == "join":
     join(sys.argv[2], sys.argv[3])
 else:

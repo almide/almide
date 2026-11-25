@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   judge:
@@ -46,7 +47,7 @@ jobs:
           cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
           cargo build -q --release --locked -p almide-anchor-check
       - name: Measure
-        run: bash scripts/probe-function-judged.sh "$RUNNER_TEMP/fj"
+        run: bash scripts/probe-function-judged.sh corpus "$RUNNER_TEMP/fj"
       - name: Upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -57,8 +58,7 @@ jobs:
             ${{ runner.temp }}/fj/summary.txt
             ${{ runner.temp }}/fj/modules.tsv
             ${{ runner.temp }}/fj/functions.tsv
-            ${{ runner.temp }}/fj/no-module.txt
-            ${{ runner.temp }}/fj/no-anchors.txt
+            ${{ runner.temp }}/fj/not-emitted.txt
             ${{ runner.temp }}/fj/cutter-failed.txt
             ${{ runner.temp }}/fj/work/*.rc
             ${{ runner.temp }}/fj/work/*.err
@@ -67,3 +67,96 @@ jobs:
             ${{ runner.temp }}/fj/work/Ask_0000.out
             ${{ runner.temp }}/fj/work/Control_0000.v
             ${{ runner.temp }}/fj/work/Control_0000.out
+
+  pairs:
+    name: Kept modules of mutants and replayed defects, with and without
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      # The tree the paired deletions and the held-out sample were applied to.
+      HELD_REF: probe/adjacency
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: probe/adjacency
+          path: held
+      - uses: ./.github/actions/root-tmpdir
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: |
+            .
+            held
+          prefix-key: "trust-spine"
+      - name: Build the cutter
+        run: cargo build -q --release --locked -p almide-anchor-check
+      - name: Build the unmutated compiler and the witness producer
+        working-directory: held
+        run: |
+          cargo build -q --release --locked --bin almide
+          cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
+          ./target/release/almide --version
+      - name: Fetch the kept modules and the replayed defects' builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          S="$RUNNER_TEMP/sets"
+          mkdir -p "$S"
+          : > "$RUNNER_TEMP/sets.tsv"
+          # set, the run that kept its mutants' modules, the mutant ids to take (all when empty)
+          while read -r set run ids; do
+            [ -n "$set" ] || continue
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'emitter-mutants-[0-9]*' --dir "$S/$set" || echo "nothing fetched for $set"
+            echo "$set: $(find "$S/$set" -type f -path '*/emut/modules/*/*.wasm' | wc -l) kept module(s)"
+            printf '%s\t%s\t%s\n' "$set" "$S/$set" "$ids" >> "$RUNNER_TEMP/sets.tsv"
+          done <<'EOF'
+          adjacency 45688174781
+          adjacency2 45706369535
+          s3 45536243441
+          s3wide 45565891270 m0210
+          EOF
+          R="$RUNNER_TEMP/replays"
+          mkdir -p "$R"
+          for run in 45706009094 45676377343 45677866679 45653617765; do
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'replay-*' --dir "$RUNNER_TEMP/replay-$run" || echo "nothing fetched from $run"
+            for d in "$RUNNER_TEMP/replay-$run"/replay-*; do
+              [ -d "$d" ] && mv "$d" "$R/$(basename "$d")@$run"
+            done
+          done
+          ls "$R"
+      - name: Measure
+        run: bash scripts/probe-function-judged.sh pairs "$RUNNER_TEMP/fp" held "$RUNNER_TEMP/sets.tsv" "$RUNNER_TEMP/replays"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: function-judged-pairs
+          path: |
+            ${{ runner.temp }}/fp/coqc.log
+            ${{ runner.temp }}/fp/summary.txt
+            ${{ runner.temp }}/fp/modules.tsv
+            ${{ runner.temp }}/fp/functions.tsv
+            ${{ runner.temp }}/fp/mutants.tsv
+            ${{ runner.temp }}/fp/mutants-programs.tsv
+            ${{ runner.temp }}/fp/jobs.tsv
+            ${{ runner.temp }}/fp/base-list.tsv
+            ${{ runner.temp }}/fp/not-emitted.txt
+            ${{ runner.temp }}/fp/cutter-failed.txt
+            ${{ runner.temp }}/fp/work/*.rc
+            ${{ runner.temp }}/fp/work/*.err
+            ${{ runner.temp }}/fp/work/*.tsv
