@@ -70,7 +70,11 @@ the access from locals in which the count's local holds the captured count
 (`proofs/check-shipped-loops.sh`: the kernel also computes whether the loop
 leaves memory alone, holds its own share of the block or reads the block's
 local nowhere else; a read with none of the three is counted against a
-ceiling, and so is a read the kernel cannot place inside the block). What
+ceiling, and so is a read the kernel cannot place inside the block). That
+the byte strings these three gates judge are instruction runs of the function
+they name is re-derived from each artifact by a second decoder, with forged
+dumps refused on every run (`proofs/check-shipped-slices.sh`: two decoders
+agreeing, not a proof). What
 the anchor
 check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and

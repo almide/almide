@@ -466,9 +466,10 @@ gives nine instructions (`usem` / `bsem`: i32 add, mul, shl, div_u, shr_u,
 ge_u, i64 ge_u, wrap, extend_u), that any other one-byte numeric
 instruction is a function of its operands, that a load reads memory and
 changes nothing, and that an arm with no branch that ends in `unreachable`
-does not fall through; of the cutter, that a window's bytes are bytes
-`[lo, hi)` of the module with `lo` and `hi` instruction boundaries of one
-function body at one control depth; and, as everywhere here, that the base
+does not fall through; that a window's bytes are bytes `[lo, hi)` of the
+module with `lo` and `hi` instruction boundaries of one function body at one
+control depth, which is no longer the cutter's word alone
+(`proofs/check-shipped-slices.sh`, below); and, as everywhere here, that the base
 is a live block whose word at `+ 4` is its payload length. An access whose
 count was read before a loop, or with a copy-on-write judge's call in front
 of it, is not a window and stays with the rules above.
@@ -499,9 +500,10 @@ the leg's floor (`proofs/shipped-fresh-floor.txt`). Trusted for it: what the
 window language trusts above; that an instruction the scan lets through
 leaves the local alone (only `local.set` and `local.tee` assign one) and
 that the third string is reached only through the first, an argument from
-the instruction set and structured control and not a theorem; of the
-cutter, that the three strings are consecutive bytes of one function body
-cut at instruction boundaries; that the function at the allocator's index
+the instruction set and structured control and not a theorem; that the
+three strings are consecutive bytes of one function body cut at instruction
+boundaries (`proofs/check-shipped-slices.sh`, below, re-derives them); that
+the function at the allocator's index
 returns a block of `12 + n` bytes, which `proofs/check-shipped-routines.sh`
 ties to the proven allocator tree, itself proved over unbounded integers;
 and it says nothing about whether the block is still live at the access. An
@@ -550,8 +552,9 @@ Trusted for it: what the window language trusts above; that the scans' table
 reads each instruction's length as the binary format has it; the step from
 "no instruction in between assigns `b` or `n`" to "at the test `n` holds the
 captured count", an argument from the instruction set and structured control
-and not a theorem; of the cutter, that the strings are consecutive bytes of
-one function body cut at instruction boundaries; for a held loop, that no
+and not a theorem; that the strings are consecutive bytes of one function
+body cut at instruction boundaries (`proofs/check-shipped-slices.sh`, below,
+re-derives them); for a held loop, that no
 routine writes the length word of a block with a second holder and that the
 share is not given up inside the loop (the ownership witness's subject), and
 that the function at the increment's index is the proven routine
@@ -564,6 +567,22 @@ and, as for a window, that `b` is a live block whose length word does not
 exceed its payload. A read guarded by another shape (a cursor walked to an
 end pointer, a countdown, a bound that comes from an enclosing test) is not
 proposed and stays with the rules above.
+
+WHERE THE JUDGED BYTES ARE (`proofs/check-shipped-slices.sh`). The three
+gates above hand the kernel byte strings that almide-anchor-check cut out of
+an artifact by the decoder library's offsets, and each theorem is about those
+bytes run as instructions of one function. That they are such a run was the
+cutter's word. `proofs/structural-wall.sh` now has a second decoder, written
+in the gate's own script with no library (the module's sections, the code
+section's bodies, every instruction's length), re-derive every proposal from
+the artifact: the function and the access exist and the access is a load or
+a store; the strings, end to end, are the module's bytes inside that one
+body; each starts where an instruction starts; a window stays at its
+access's control depth. On every run the wall then alters one proposal at a
+time (a start or a cut moved inside an instruction, a byte changed, another
+function named, a module's block removed) and requires each forged dump to
+be refused for its own reason. Not a proof: two decoders agreeing. Trusted
+for it: that no instruction's length is wrong in both tables the same way.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
