@@ -539,9 +539,13 @@ anchor file gives one number, the increment routine's function index.
 loops.rs) propose every access addressed by the captured block's local and
 the tested counter, testing no bound, stride, offset or width, and the Rocq
 kernel prove each distinct proposal's class (`proofs/check-shipped-loops.sh`):
-a proposal whose core the kernel refuses fails the gate, and so do a count of
-accepted reads below the leg's floor and more reads with nothing behind the
-length word than the leg's ceiling (`proofs/shipped-loops-floor.txt`).
+a count of accepted reads below the leg's floor fails the gate, and so do
+more reads with nothing behind the length word than the leg's first ceiling
+and more reads whose core the kernel refuses than its second
+(`proofs/shipped-loops-floor.txt`). The refusals the corpus holds are loops
+that count bytes and read 4- or 8-byte elements: in bounds because length
+and counter are multiples of the element size, which the rule does not know
+and so does not accept.
 Trusted for it: what the window language trusts above; that the scans' table
 reads each instruction's length as the binary format has it; the step from
 "no instruction in between assigns `b` or `n`" to "at the test `n` holds the

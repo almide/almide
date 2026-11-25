@@ -331,9 +331,9 @@ bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE
 # the test and the access from locals in which the count's local holds the
 # captured count, and `loop_class` says what stands behind the length word.
 # The cutter proposes every access addressed by the captured block's local
-# and the tested counter; a proposal whose core the kernel refuses fails, and
-# so do a count below the leg's floor and more reads with nothing behind the
-# length word than the leg's ceiling.
+# and the tested counter; a count of accepted reads below the leg's floor
+# fails, and so do more reads with nothing behind the length word, or more
+# reads the kernel refuses, than the leg's ceilings.
 echo "== the reads a loop's exit test guards, proven inside the looped block from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/loops-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for loop reads — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE" | sed 's/^/  /'
