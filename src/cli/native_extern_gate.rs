@@ -89,12 +89,14 @@ fn rust_region_returns(ir: &IrProgram) -> Vec<(String, Option<usize>)> {
 }
 
 /// #4006 (owner ruling 2026-11-24, the flip): a `Set` whose element holds a
-/// `Float` below its top level (`Set[List[Float]]`, `Set[Option[Float]]`, a
-/// record or tuple with a Float field). Set membership is the element's `==`,
-/// IEEE on every Float inside it (`[0.0] == [-0.0]`, `[nan] != [nan]`); the
-/// native render carries a nested Float as its bits, so it has no element
-/// equality that agrees, and refuses the set. A top-level `Float` element is
-/// a real `f64` in the set and is served.
+/// `Float` the native render has no key equality for. Set membership is the
+/// collection key equality (ALS-C11, ADR-0039: every NaN one key, -0.0 the
+/// key 0.0). A top-level `Float` element and a `List` / `Option` of Floats
+/// hold real floats in the set, and a record, tuple or variant whose Float
+/// components are its own fields (a Float, a `List[Float]`, or such a type)
+/// writes canonical key bytes; all are served. A Float deeper inside a runtime
+/// container (`Set[List[List[Float]]]`, a record field `Option[Float]`) rides
+/// a lane the render cannot tell from an Int one, so the set is refused.
 fn inexact_sets(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
     use almide::ir::{IrExpr, IrStmt, IrStmtKind, IrTypeDecl, IrTypeDeclKind, IrVariantKind, IrVisitor};
     use almide::types::{Ty, TypeConstructorId};
@@ -120,11 +122,53 @@ fn inexact_sets(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
             _ => false,
         })
     }
+    // A generated type whose every Float-holding field is a Float, a
+    // `List[Float]`, or such a type again (render_native_eq.rs
+    // `float_key_type`).
+    fn keyed(t: &Ty, decls: &[&IrTypeDecl], seen: &mut Vec<String>) -> bool {
+        let field = |f: &Ty, seen: &mut Vec<String>| {
+            !holds_float(f, decls, &mut Vec::new())
+                || matches!(f, Ty::Float | Ty::Float32 | Ty::Float64)
+                || matches!(f, Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64))
+                || keyed(f, decls, seen)
+        };
+        match t {
+            Ty::Tuple(es) => es.iter().all(|e| field(e, seen)),
+            Ty::Record { fields } => fields.iter().all(|(_, f)| field(f, seen)),
+            Ty::Named(name, _) => {
+                if seen.iter().any(|s| s == name.as_str()) {
+                    return true;
+                }
+                seen.push(name.to_string());
+                let mut found = decls.iter().filter(|d| d.name == *name).peekable();
+                found.peek().is_some()
+                    && found.all(|d| match &d.kind {
+                        IrTypeDeclKind::Record { fields } => fields.iter().all(|f| field(&f.ty, seen)),
+                        IrTypeDeclKind::Alias { target } => keyed(target, decls, seen),
+                        IrTypeDeclKind::Variant { cases, .. } => cases.iter().all(|c| match &c.kind {
+                            IrVariantKind::Unit => true,
+                            IrVariantKind::Tuple { fields } => fields.iter().all(|f| field(f, seen)),
+                            IrVariantKind::Record { fields } => fields.iter().all(|f| field(&f.ty, seen)),
+                        }),
+                    })
+            }
+            _ => false,
+        }
+    }
+    // A List or Option of Floats: the native set holds its real floats.
+    fn float_carrier(t: &Ty) -> bool {
+        matches!(t, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, a) if a.len() == 1 && matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64))
+    }
     let inexact = |t: &Ty| -> Option<Ty> {
         let mut found = None;
         t.any_node(&mut |n| {
             if let Ty::Applied(TypeConstructorId::Set, a) = n {
-                if a.len() == 1 && !matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64) && holds_float(&a[0], &decls, &mut Vec::new()) {
+                if a.len() == 1
+                    && !matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64)
+                    && holds_float(&a[0], &decls, &mut Vec::new())
+                    && !keyed(&a[0], &decls, &mut Vec::new())
+                    && !float_carrier(&a[0])
+                {
                     found = Some(n.clone());
                     return true;
                 }
@@ -181,8 +225,8 @@ pub(crate) fn refusals(ir: &IrProgram, file: &str) -> Vec<(&'static str, String)
     let sets = inexact_sets(ir).into_iter().map(|(name, ty, line)| {
         ("E081", format!(
             "error[E081]: fn `{name}` holds a `{ty}`, which has no implementation on the native target{}\n  \
-             reason: a Set's membership is its element's `==`, IEEE on every Float inside the element; the verified native render carries a nested Float as its bits and has no element equality that agrees\n  \
-             try: key the set by a value without a nested Float (an `Int` or `String` key), use a `List` and `list.contains`, or build it for wasm (`--target wasm`)",
+             reason: a Set's membership is the collection key equality (every NaN one key, -0.0 the key 0.0); the verified native render carries a Float inside a List or Option element as its bits and has no key equality for it\n  \
+             try: wrap the element in a record (`type Key = {{ xs: List[List[Float]] }}`), whose Float fields the native render keys, or build it for wasm (`--target wasm`)",
             at(line)
         ))
     });

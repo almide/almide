@@ -107,6 +107,18 @@ pub(crate) fn derive_records(
     if d.uses_matrix {
         names.push(MATRIX_KEY.to_string());
     }
+    // ALS-C11: a Set of a List or Option of Floats holds real `f64` / `f32`
+    // elements (the top-level `Set[Float]` form, #4795), whose key equality the
+    // runtime decides; their list / option carriers are generated here.
+    for n in &set {
+        if d.sets.contains(n) {
+            if let Some(k) = float_container_key(&d.decls[n].1[0].1[0]) {
+                if !names.contains(&k) {
+                    names.push(k);
+                }
+            }
+        }
+    }
     let mut decls: Vec<RecDecl> = names.iter().map(|n| d.decl_of(n, &names, &set, &rank)).collect();
     d.source_equalities(&mut decls, &names);
     decls
@@ -331,8 +343,11 @@ impl Derive<'_> {
         loop {
             let before = set.len();
             set = set.iter().filter(|n| self.fields_of(n).iter().all(|t| self.kind(t, &set).is_some()) && self.res_free(n, &set)
-                && (!self.maps.contains(*n) || matches!(self.decls[*n].1[0].1[0], almide_lang::types::Ty::Float32) || self.exact_eq_type(&self.decls[*n].1[0].1[0], &mut Default::default()))
-                && (!self.sets.contains(*n) || set_element_kind(&self.decls[*n].1[0].1[0]).is_some() || self.set_element_type(&self.decls[*n].1[0].1[0]).is_ok())).cloned().collect();
+                && (!self.maps.contains(*n) || matches!(self.decls[*n].1[0].1[0], almide_lang::types::Ty::Float32) || self.exact_eq_type(&self.decls[*n].1[0].1[0], &mut Default::default())
+                    // A generated key whose Float fields compare per field
+                    // keys by its canonical bytes (ALS-C11).
+                    || self.float_key_type(&self.decls[*n].1[0].1[0], &mut Default::default()))
+                && (!self.sets.contains(*n) || set_element_kind(&self.decls[*n].1[0].1[0]).is_some() || float_container_key(&self.decls[*n].1[0].1[0]).is_some() || self.set_element_type(&self.decls[*n].1[0].1[0]).is_ok())).cloned().collect();
             if set.len() == before {
                 break;
             }
@@ -442,6 +457,9 @@ impl Derive<'_> {
         if n == MATRIX_KEY {
             return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideMatrix"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
+        if let Some(decl) = float_container_decl(n) {
+            return decl;
+        }
         if n == BYTES_KEY {
             return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: Some("AlmideList<u8>"), default_tag: None, option_of: None, result_of: None, map_of: None, eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
@@ -453,7 +471,12 @@ impl Derive<'_> {
             return RecDecl { name: n.to_string(), fields: Vec::new(), cases: None, list_of: None, alias: None, default_tag: None, option_of: None, result_of: None, map_of: Some((k, v)), eq_safe: false, ord_safe: false, set_of: None, closure_of: None, cell_of: None, eq_fields: None, record_labels: None };
         }
         if self.sets.contains(n) {
-            return RecDecl { name: n.to_string(), set_of: Some(set_element_kind(&cases[0].1[0]).unwrap_or_else(|| spell(&cases[0].1[0]))), ..RecDecl::default() };
+            let e = &cases[0].1[0];
+            let kind = match float_container_key(e) {
+                Some(k) => NTy::Rec(names.iter().position(|x| *x == k).expect("float container named") as u16),
+                None => set_element_kind(e).unwrap_or_else(|| spell(e)),
+            };
+            return RecDecl { name: n.to_string(), set_of: Some(kind), ..RecDecl::default() };
         }
         if self.options.contains(n) {
             let p = spell(&cases[0].1[0]);
@@ -564,6 +587,36 @@ pub(crate) fn scalar_carrier_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
 #[path = "render_native_carrier_types_test.rs"]
 mod carrier_types_test;
 
+/// A Set element that is a List or Option of Floats (ALS-C11): the table key
+/// of its real-float carrier (`List<F64>`, `Option<F32>`, the names
+/// `list_type_of` / `option_type_of` intern), else `None`.
+pub(crate) fn float_container_key(t: &almide_lang::types::Ty) -> Option<String> {
+    use almide_lang::types::{constructor::TypeConstructorId as C, Ty};
+    let lane = |t: &Ty| match t {
+        Ty::Float | Ty::Float64 => Some(NTy::F64),
+        Ty::Float32 => Some(NTy::F32),
+        _ => None,
+    };
+    match t {
+        Ty::Applied(C::List, a) if a.len() == 1 => lane(&a[0]).map(|k| format!("List<{k:?}>")),
+        Ty::Applied(C::Option, a) if a.len() == 1 => lane(&a[0]).map(|k| format!("Option<{k:?}>")),
+        _ => None,
+    }
+}
+
+/// The generated decl of a [`float_container_key`] name.
+fn float_container_decl(n: &str) -> Option<RecDecl> {
+    let k = |s: &str| match s {
+        "F64>" => Some(NTy::F64),
+        "F32>" => Some(NTy::F32),
+        _ => None,
+    };
+    if let Some(e) = n.strip_prefix("List<").and_then(k) {
+        return Some(RecDecl { name: n.to_string(), list_of: Some(e), ..RecDecl::default() });
+    }
+    n.strip_prefix("Option<").and_then(k).map(|p| RecDecl { name: n.to_string(), option_of: Some(p), ..RecDecl::default() })
+}
+
 /// The runtime kind of a scalar Set element whose lane is not its value: a
 /// Float32 / Float / Bool element is a real `f32` / `f64` / `bool` (#4795).
 pub(crate) fn set_element_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
@@ -579,13 +632,23 @@ pub(crate) fn set_element_kind(t: &almide_lang::types::Ty) -> Option<NTy> {
 /// Exact runtime representations admitted as a Set element, recursively;
 /// any other element is refused (#4799: a `wall`, not a bare `false`).
 fn native_set_element_type(t: &almide_lang::types::Ty) -> Result<(), crate::lower::LowerError> {
+    // A List / Option of Floats, the element itself, holds real floats in the
+    // set (ALS-C11); deeper down a Float rides its lane and is refused.
+    if float_container_key(t).is_some() {
+        return Ok(());
+    }
+    exact_set_component(t)
+}
+
+fn exact_set_component(t: &almide_lang::types::Ty) -> Result<(), crate::lower::LowerError> {
     use almide_lang::types::{Ty, constructor::TypeConstructorId};
     match t {
         Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => Ok(()),
         // An Option's `==` is its payload's (`Option<T>: PartialEq`), so an
         // Option of an exact element is exact (`Set[Option[Int]]`, #4799).
-        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set | TypeConstructorId::Option, a) if a.len() == 1 => native_set_element_type(&a[0]),
-        Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if RECS.with(|r| r.borrow().iter().any(|d| d.name == block_key(t) && d.eq_safe)) {
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set | TypeConstructorId::Option, a) if a.len() == 1 => exact_set_component(&a[0]),
+        // A source-compared type (Float fields, ALS-C11) is a key as well.
+        Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if RECS.with(|r| r.borrow().iter().any(|d| d.name == block_key(t) && (d.eq_safe || d.eq_fields.is_some()))) {
             Ok(())
         } else {
             Err(crate::render_native::wall("native: a Set element type with no exact runtime representation"))
@@ -598,7 +661,7 @@ fn native_set_element_type(t: &almide_lang::types::Ty) -> Result<(), crate::lowe
 pub(crate) fn native_set_element_kind(t: NTy) -> bool {
     match t {
         NTy::I64 | NTy::Str | NTy::Vec | NTy::VecStr | NTy::Bool | NTy::F64 | NTy::Opt => true,
-        NTy::Rec(i) => is_bytes(t) || RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.eq_safe))
+        NTy::Rec(i) => is_bytes(t) || RECS.with(|r| r.borrow().get(i as usize).is_some_and(|d| d.eq_safe || d.eq_fields.is_some()))
             || list_elem(i).or_else(|| set_elem(i)).or_else(|| option_payload(i)).is_some_and(native_set_element_kind),
         _ => false,
     }
@@ -620,8 +683,12 @@ mod set_element_tests {
         assert_eq!(set_element_kind(&Ty::Float), Some(NTy::F64));
         // A Bool or Float bit lane nested in an element must not silently
         // acquire Int equality or repr.
-        for e in [Ty::list(Ty::Float32), Ty::set_of(Ty::Float32), Ty::list(Ty::Bool), Ty::list(Ty::Float), Ty::set_of(Ty::Bool)] {
+        for e in [Ty::set_of(Ty::Float32), Ty::list(Ty::Bool), Ty::set_of(Ty::Bool)] {
             assert!(!is_native_set(&Ty::set_of(e.clone())), "{e:?}");
+        }
+        // A List of Floats holds real floats in the set (ALS-C11).
+        for e in [Ty::list(Ty::Float32), Ty::list(Ty::Float)] {
+            assert!(is_native_set(&Ty::set_of(e.clone())), "{e:?}");
         }
     }
 }

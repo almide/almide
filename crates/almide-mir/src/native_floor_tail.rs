@@ -9,7 +9,7 @@ use crate::render_native::{as_f64_arg, as_str_arg, wall, NTy};
 fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
     if let Some(code) = crate::native_value_repr::scalar_recode(code, got, want) { return Some(code); }
     Some(match (want, got) {
-        (NTy::F32, NTy::F32) | (NTy::Bool, NTy::Bool) => code.to_string(),
+        (NTy::F32, NTy::F32) | (NTy::Bool, NTy::Bool) | (NTy::F64, NTy::F64) => code.to_string(),
         (NTy::I64, NTy::I64) => code.to_string(),
         (NTy::I64, NTy::F64) => format!("{code}.to_bits() as i64"),
         (NTy::Str, NTy::Str) => format!("{code}.clone()"),
@@ -18,7 +18,10 @@ fn owned_arg(want: NTy, code: &str, got: NTy) -> Option<String> {
         (NTy::VecStr, NTy::VecStr | NTy::VecStrRef) => format!("{code}.to_list()"),
         (a @ (NTy::Opt | NTy::Res | NTy::ResStr), b) if a == b => format!("{code}.clone()"),
         (NTy::Rec(i), NTy::Rec(j) | NTy::RecRef(j)) if i == j => format!("{code}.clone()"),
-        _ => return crate::native_value_repr::tuple_copy(code, got, want),
+        _ => match float_carrier_recode(want, code, got) {
+            Some(code) => code,
+            None => return crate::native_value_repr::tuple_copy(code, got, want),
+        },
     })
 }
 
@@ -577,5 +580,44 @@ mod tests {
     fn a_name_after_a_range_is_read_by_its_name() {
         let f = declared("string.drop_end").expect("drop_end is on the floor");
         assert!(f.items.iter().any(|t| t.contains("fn almide_string_tail_start")), "{:?}", f.items);
+    }
+}
+
+/// ALS-C11: a Set of a List or Option of Floats holds real floats
+/// (`render_native_rec_b.rs` `float_container_key`); the program's own list /
+/// option carries them as their lane bits. The value converted either way.
+fn float_carrier_recode(want: NTy, code: &str, got: NTy) -> Option<String> {
+    use crate::render_native_rec::{list_elem, option_payload};
+    let from = |k: NTy| match k {
+        NTy::F64 => Some("f64::from_bits(*x as u64)"),
+        NTy::F32 => Some("f32::from_bits(*x as u32)"),
+        _ => None,
+    };
+    let real = |t: NTy| match t {
+        NTy::Rec(i) | NTy::RecRef(i) => list_elem(i).map(|e| (true, e)).or_else(|| option_payload(i).map(|p| (false, p))),
+        _ => None,
+    };
+    match (want, got) {
+        (NTy::Rec(_), NTy::Vec | NTy::VecRef) => {
+            let (true, e) = real(want)? else { return None };
+            let f = from(e)?;
+            Some(format!("({code}).iter().map(|x| {f}).collect::<AlmideList<_>>()"))
+        }
+        (NTy::Rec(_), NTy::Opt) => {
+            let (false, e) = real(want)? else { return None };
+            let f = from(e)?;
+            Some(format!("({code}).iter().map(|x| {f}).next()"))
+        }
+        (NTy::Vec, NTy::Rec(_) | NTy::RecRef(_)) => {
+            let (true, e) = real(got)? else { return None };
+            from(e)?;
+            Some(format!("({code}).iter().map(|x| x.to_bits() as i64).collect::<AlmideList<i64>>()"))
+        }
+        (NTy::Opt, NTy::Rec(_) | NTy::RecRef(_)) => {
+            let (false, e) = real(got)? else { return None };
+            from(e)?;
+            Some(format!("({code}).iter().map(|x| x.to_bits() as i64).next()"))
+        }
+        _ => None,
     }
 }
