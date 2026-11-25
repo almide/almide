@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn the_script_capable_set_is_read_from_html() {
-        for t in ["text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "application/atom+xml"] {
+        for t in ["text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "application/atom+xml", "text/javascript"] {
             assert!(is_script_capable(t), "{t}");
         }
         assert!(!is_script_capable("text/csv"));

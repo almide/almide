@@ -72,10 +72,42 @@ fn novel_an_unlisted_type_is_refused_until_the_application_grants_it() {
 
 #[test]
 fn a_self_grant_cannot_name_a_type_only_its_owner_serves() {
-    for t in ["text/html", "image/svg+xml", "not-a-type"] {
+    for t in ["text/html", "application/xhtml+xml", "not-a-type"] {
         let dir = project("owner", &format!("\n[trust]\nmedia = {{ \"self\" = [\"{t}\"] }}\n"), "text/plain");
         let out = almide(&dir, &["check", "src/main.almd"]);
         assert!(!out.status.success(), "a self grant of {t} was accepted:\n{}", text(&out));
+        assert!(text(&out).contains("E118") && text(&out).contains(t), "{t}: {}", text(&out));
+    }
+}
+
+#[test]
+fn a_script_type_is_admitted_only_by_its_exact_self_grant() {
+    // Owner ruling 2026-11-25: a script-capable type is served when, and only
+    // when, the application names that exact type; without the grant, or
+    // with another script type granted, it stays E117.
+    for t in ["text/javascript", "image/svg+xml", "application/rss+xml"] {
+        let dir = project("script-none", "", t);
+        let out = almide(&dir, &["check", "src/main.almd"]);
+        assert!(!out.status.success() && text(&out).contains("E117"), "{t} admitted without a grant:\n{}", text(&out));
+        assert!(text(&out).contains(&format!("\"self\" = [\"{t}\"]")), "the refusal names the exact grant: {}", text(&out));
+
+        let dir = project("script-other", "\n[trust]\nmedia = { \"self\" = [\"text/ecmascript\"] }\n", t);
+        let out = almide(&dir, &["check", "src/main.almd"]);
+        assert!(!out.status.success() && text(&out).contains("E117"), "{t} admitted by another type's grant:\n{}", text(&out));
+
+        let dir = project("script-exact", &format!("\n[trust]\nmedia = {{ \"self\" = [\"{t}\"] }}\n"), t);
+        let out = almide(&dir, &["run", "src/main.almd"]);
+        assert!(out.status.success(), "{t} refused under its exact grant:\n{}", text(&out));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), t);
+    }
+}
+
+#[test]
+fn a_self_grant_pattern_over_a_script_type_is_refused() {
+    for t in ["*/*+xml", "text/*", "application/*"] {
+        let dir = project("script-pattern", &format!("\n[trust]\nmedia = {{ \"self\" = [\"{t}\"] }}\n"), "text/plain");
+        let out = almide(&dir, &["check", "src/main.almd"]);
+        assert!(!out.status.success(), "a self grant of the pattern {t} was accepted:\n{}", text(&out));
         assert!(text(&out).contains("E118") && text(&out).contains(t), "{t}: {}", text(&out));
     }
 }
