@@ -97,7 +97,19 @@ Definition step1 (bs : list Z) : option (what * list Z) :=
       else if op =? 16 then one_uleb WCall r
       else if op =? 17 then
         match uleb 5 r with Some (_, r1) => one_uleb WCall r1 | None => None end
-      else if (op =? 32) || (op =? 35) || (op =? 36) then one_uleb WOther r
+      else if op =? 28 then
+        match uleb 5 r with
+        | Some (n, r1) =>
+            if (0 <=? n) && (n <=? Z.of_nat (length r1)) then
+              match drop_bytes (Z.to_nat n) r1 with Some r2 => Some (WOther, r2) | None => None end
+            else None
+        | None => None
+        end
+      else if (op =? 32) || (op =? 35) || (op =? 36) || (op =? 37) || (op =? 38) || (op =? 210) then
+        one_uleb WOther r
+      else if op =? 208 then
+        match sleb 5 r with Some (_, r') => Some (WOther, r') | None => None end
+      else if op =? 209 then Some (WOther, r)
       else if (op =? 33) || (op =? 34) then
         match uleb 5 r with Some (x, r') => Some (WSet x, r') | None => None end
       else if (40 <=? op) && (op <=? 53) then memarg WOther r
@@ -125,6 +137,15 @@ Definition step1 (bs : list Z) : option (what * list Z) :=
               | a :: r2 => if a =? 0 then Some (WStore, r2) else None
               | _ => None
               end
+            else if sub =? 8 then
+              match uleb 5 r1 with
+              | Some (_, a :: r2) => if a =? 0 then Some (WStore, r2) else None
+              | _ => None
+              end
+            else if (sub =? 12) || (sub =? 14) then
+              match uleb 5 r1 with Some (_, r2) => one_uleb WOther r2 | None => None end
+            else if (sub =? 9) || (sub =? 13) || ((15 <=? sub) && (sub <=? 17)) then
+              one_uleb WOther r1
             else None
         | None => None
         end
