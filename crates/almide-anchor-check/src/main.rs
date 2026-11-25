@@ -300,6 +300,13 @@ fn main() {
         }
     }
     if census {
+        if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_kinds(&bodies, &a)) {
+            for (func, write, mask, n) in rows {
+                println!("KINDFN {func} {} {mask} {n}", u8::from(write));
+            }
+        }
+    }
+    if census {
         if let Ok(rows) = almide_anchor_check::decode(&w).and_then(|bodies| almide_anchor_check::census_writes(&bodies, &a)) {
             for (func, n) in rows {
                 println!("STOREFN {func} {}", n.map(|x| x.to_string()).join(" "));

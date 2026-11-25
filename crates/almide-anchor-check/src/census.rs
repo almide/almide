@@ -344,3 +344,37 @@ pub fn census_writes(bodies: &[Body<'_>], anchors: &str) -> Result<Vec<(usize, [
     }
     Ok(out)
 }
+
+/// Probe only: per function, its memory accesses by which witnesses locate
+/// them. A row is `(func, write, mask, n)`: `mask` has bit 1 for init, 2
+/// for bounds, 4 for fields, and 8 when it is the located CALL right after
+/// the access that carries those bits (the census's before-call rule).
+pub fn census_kinds(bodies: &[Body<'_>], anchors: &str) -> Result<Vec<(usize, bool, u8, usize)>, String> {
+    let (_, init, bounds, _, _, _) = parse_anchors_held(anchors)?;
+    let fields = crate::fields_anchors(anchors);
+    let mut by: std::collections::HashMap<At, u8> = std::collections::HashMap::new();
+    for (bit, line) in [(1u8, init.as_str()), (2, bounds.as_str()), (4, fields.as_str())] {
+        for t in line.split(|c: char| c.is_whitespace() || c == ';' || c == '|').filter(|t| !t.is_empty()) {
+            if let Ok(Some(at)) = parse_at(t) {
+                *by.entry(at).or_insert(0) |= bit;
+            }
+        }
+    }
+    let mut out: std::collections::BTreeMap<(usize, bool, u8), usize> = std::collections::BTreeMap::new();
+    for (func, b) in bodies.iter().enumerate() {
+        for (k, op) in b.ops.iter().enumerate() {
+            let bulk = matches!(op, Op::MemoryCopy { .. } | Op::MemoryFill { .. });
+            if offset(op).is_none() && !bulk {
+                continue;
+            }
+            let write = bulk || store_width(op).is_some();
+            let mask = match by.get(&At { func, op: k }) {
+                Some(&m) => m,
+                None if b.ops.get(k + 1).is_some_and(|o| matches!(o, Op::Call { .. })) => by.get(&At { func, op: k + 1 }).map_or(0, |&m| m | 8),
+                None => 0,
+            };
+            *out.entry((func, write, mask)).or_insert(0) += 1;
+        }
+    }
+    Ok(out.into_iter().map(|((f, w, m), n)| (f, w, m, n)).collect())
+}

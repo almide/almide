@@ -56,6 +56,8 @@ jobs:
             ${{ runner.temp }}/census/mutrows.tsv
             ${{ runner.temp }}/census/mutrows-old.tsv
             ${{ runner.temp }}/census/storerows.tsv
+            ${{ runner.temp }}/census/kindrows.tsv
+            ${{ runner.temp }}/census/okrows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
             ${{ runner.temp }}/census/windowrows.tsv
             ${{ runner.temp }}/census/window-dump
