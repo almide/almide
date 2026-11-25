@@ -1,0 +1,49 @@
+name: Probe — compile the guarded-window proof
+# A one-off on its own branch: compiles proofs/GuardWindow.v with the pinned
+# Rocq and prints what the kernel says. Not a gate.
+on:
+  push:
+    branches: [probe/guard-window]
+
+permissions:
+  contents: read
+
+env:
+  # The same toolchain pins as trust-spine.yml, so its opam cache is restored.
+  OPAM_CACHE_VERSION: v1
+  OCAML_VERSION: "5.4.1"
+  ROCQ_CORE_VERSION: "9.3.0"
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
+
+jobs:
+  compile:
+    name: Compile GuardWindow.v
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/${OCAML_VERSION}/bin"
+          if [ ! -x "$BIN/rocq" ] && [ ! -x "$BIN/coqc" ]; then
+            echo "the opam cache was not restored (hit: ${{ steps.opam-cache.outputs.cache-hit }})" >&2
+            ls "$HOME/.opam" 2>&1 | head -20 >&2 || true
+            exit 1
+          fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Compile
+        run: |
+          cd proofs
+          if command -v coqc >/dev/null 2>&1; then C="coqc"; else C="rocq compile"; fi
+          $C --version || true
+          rc=0
+          $C -Q . AlmideTrust GuardWindow.v > "$RUNNER_TEMP/guard-window.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/guard-window.log"
+          echo "exit $rc"
+          exit "$rc"
