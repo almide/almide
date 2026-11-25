@@ -297,7 +297,7 @@ Proof.
   - (* the aborting arm: past it the condition was zero *)
     destruct st as [|c r]; cbn [sstep cstep senv sstk sfacts map app] in Hss, Hcs;
       [discriminate Hss|].
-    destruct (den c mod M32 =? 0) eqn:E; rewrite E in Hcs; [|discriminate Hcs].
+    destruct (den c mod M32 =? 0) eqn:E; try rewrite E in Hcs; [|discriminate Hcs].
     injection Hss as Es. injection Hcs as El Ek. subst s' loc' stk'.
     cbn [sstk senv sfacts].
     split; [reflexivity | split; [exact Hl |]].
@@ -319,9 +319,9 @@ Proof.
     injection Hss as Es. injection Hcs as El Ek. subst s' loc' stk'.
     cbn [sstk senv sfacts]. split; [exact Hs | split; [exact Hl | exact Hf]].
   - cbn [srun crun] in Hss, Hcs.
-    destruct (sstep i (mkS e st fs)) as [[e1 st1 fs1]|] eqn:E1; rewrite E1 in Hss;
+    destruct (sstep i (mkS e st fs)) as [[e1 st1 fs1]|] eqn:E1; try rewrite E1 in Hss;
       [|discriminate Hss].
-    destruct (cstep i (loc, stk)) as [[loc1 stk1]|] eqn:E2; rewrite E2 in Hcs;
+    destruct (cstep i (loc, stk)) as [[loc1 stk1]|] eqn:E2; try rewrite E2 in Hcs;
       [|discriminate Hcs].
     destruct (step_sound i loc stk e st fs rest loc1 stk1 (mkS e1 st1 fs1) Hs Hl Hf E1 E2)
       as [H1 [H2 H3]].
@@ -503,7 +503,7 @@ Proof.
     rewrite (Z.mod_small (len_of b / s) M32 Hc) in Hz.
     destruct (den ix mod M32 <? len_of b / s) eqn:E.
     + apply Z.ltb_lt in E. exact E.
-    + rewrite E in Hz. vm_compute in Hz. discriminate Hz.
+    + try rewrite E in Hz. vm_compute in Hz. discriminate Hz.
   - (* i64.ge_u against the zero-extended count *)
     apply andb_true_iff in H. destruct H as [H1 H].
     apply Z.eqb_eq in H1. subst op.
@@ -520,7 +520,7 @@ Proof.
     assert (Hlt : den y mod M64 < len_of b / s).
     { destruct (den y mod M64 <? len_of b / s) eqn:E.
       - apply Z.ltb_lt in E. exact E.
-      - rewrite E in Hz. vm_compute in Hz. discriminate Hz. }
+      - try rewrite E in Hz. vm_compute in Hz. discriminate Hz. }
     apply orb_true_iff in H4. destruct H4 as [H4 | H4].
     + (* the index is the wrapped i64 *)
       destruct ix as [| | | |o3 x2|]; try discriminate H4.
@@ -657,11 +657,11 @@ Proof.
   revert H Ha. destruct (flat a) as [xs c]. cbn [fst snd]. intros H Ha.
   destruct xs as [|x [|y [|z r]]]; try discriminate H.
   cbv beta iota in H. cbn [sumd] in Ha.
-  destruct (try_pair facts x y c off w) eqn:E1; rewrite E1 in H.
+  destruct (try_pair facts x y c off w) eqn:E1; try rewrite E1 in H.
   - injection H as Eb. subst b.
     apply (pair_sound facts x y c off w (den a) E1 Hf); [| exact Hfit].
     rewrite Ha. f_equal; lia.
-  - destruct (try_pair facts y x c off w) eqn:E2; rewrite E2 in H; [|discriminate H].
+  - destruct (try_pair facts y x c off w) eqn:E2; try rewrite E2 in H; [|discriminate H].
     injection H as Eb. subst b.
     apply (pair_sound facts y x c off w (den a) E2 Hf); [| exact Hfit].
     rewrite Ha. f_equal; lia.
