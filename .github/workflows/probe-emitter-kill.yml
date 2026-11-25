@@ -1,10 +1,11 @@
 name: Probe — programs written for the surviving source mutants
 # A one-off measurement on its own branch: five programs written to make a
 # surviving mutant of the emitter visible (scripts/probe-emitter-kill/), run
-# against the thirteen mutants read as harmful or undecided. Not a gate.
+# against the five mutants they make visible, each program's module also
+# given to the proved checkers and the byte-level check. Not a gate.
 on:
   push:
-    branches: [probe/emitter-kill]
+    branches: [probe/emitter-kill-judge-s1]
 
 permissions:
   contents: read
@@ -65,4 +66,6 @@ jobs:
             ${{ runner.temp }}/kill/m*/*.stock
             ${{ runner.temp }}/kill/m*/*.err
             ${{ runner.temp }}/kill/m*/*.build
+            ${{ runner.temp }}/kill/base/judge
+            ${{ runner.temp }}/kill/m*/judge
             ${{ runner.temp }}/pick/index.tsv

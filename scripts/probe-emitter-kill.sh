@@ -26,7 +26,43 @@ ALMIDE="$TD/release/almide"
 T_RUN="${T_RUN:-180}"
 PROGS="$(ls scripts/probe-emitter-kill/*.almd)"
 
-build() { cargo build -q --release --locked --bin almide 2> "$OUT/build.err"; }
+PRODUCER="$TD/release/examples/emit_structural_bundle"
+VERIFY="$OUT/bin/almide-verify"
+ANCHORCHECK="$OUT/bin/almide-anchor-check"
+
+# The compiler and the witness producer: both hold the emitter, so a mutant
+# rebuilds both.
+build() {
+  cargo build -q --release --locked --bin almide 2> "$OUT/build.err" \
+    && cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle 2>> "$OUT/build.err"
+}
+
+# judge <dir>: per program, the module with the witness bundle and the anchor
+# file this compiler emits for it, and what the proved checkers and the
+# byte-level check answer (<dir>/judge/<name>.vrc and .arc hold their exit
+# codes, .verify and .anchor their whole output).
+judge() {
+  local d="$1/judge" p n rc v a
+  mkdir -p "$d"
+  for p in $PROGS; do
+    n="$(basename "$p" .almd)"
+    rc=0; v=-; a=-
+    timeout "$T_RUN" "$ALMIDE" build "$p" --target wasm -o "$d/$n.wasm" > "$d/$n.cerr" 2>&1 < /dev/null || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      timeout "$T_RUN" "$PRODUCER" "$p" --artifact "$d/$n.wasm" --anchors "$d/$n.anchors" > "$d/$n.bundle" 2> "$d/$n.perr" < /dev/null || rc=$((1000 + $?))
+    fi
+    if [ "$rc" -eq 0 ]; then
+      v=0; a=0
+      timeout "$T_RUN" "$VERIFY" bundle "$d/$n.bundle" > "$d/$n.verify" 2>&1 < /dev/null || v=$?
+      timeout "$T_RUN" "$ANCHORCHECK" --census "$d/$n.wasm" "$d/$n.bundle" "$d/$n.anchors" > "$d/$n.anchor" 2>&1 < /dev/null || a=$?
+    fi
+    echo "$rc" > "$d/$n.rc"; echo "$v" > "$d/$n.vrc"; echo "$a" > "$d/$n.arc"
+    printf -- '-- %s: emit %s, proved checkers %s, byte-level check %s\n' "$n" "$rc" "$v" "$a"
+    [ "$a" = 0 ] || [ "$a" = - ] || grep -v '^census' "$d/$n.anchor" | head -n 6 | cut -c1-240
+    [ "$v" = 0 ] || [ "$v" = - ] || tail -n 4 "$d/$n.verify" | cut -c1-240
+    [ "$rc" -eq 0 ] || { cat "$d/$n.cerr" "$d/$n.perr" 2>/dev/null | grep -m2 -i -E 'error|overflow|panic' | cut -c1-240; }
+  done
+}
 
 # run_all <dir>: per program, <name>.embedded and <name>.stock hold stdout and
 # a last line `EXIT <code>`; a compile that fails leaves `COMPILE <code>`.
@@ -55,7 +91,18 @@ build || { echo "baseline build failed"; tail -40 "$OUT/build.err"; exit 1; }
 echo "baseline build: $(( $(date +%s) - t0 )) s"
 "$ALMIDE" --version
 wasmtime --version
+# The two checkers are built once, from the unmutated tree. The driver judges
+# a build's certificate itself when it finds a verifier beside its own
+# executable or on PATH; each layer is asked separately here, so the driver
+# must find none.
+cargo build -q --release --locked -p almide-verify -p almide-anchor-check 2>> "$OUT/build.err" || { echo "checker build failed"; tail -20 "$OUT/build.err"; exit 1; }
+mkdir -p "$OUT/bin"
+cp "$TD/release/almide-verify" "$TD/release/almide-anchor-check" "$OUT/bin/"
+rm -f "$TD/release/almide-verify"
+if command -v almide-verify > /dev/null 2>&1; then echo "a verifier is on PATH: $(command -v almide-verify)"; exit 1; fi
 run_all "$OUT/base"
+echo "== the unmutated compiler: what the checkers answer"
+judge "$OUT/base"
 echo "== the unmutated compiler"
 for p in $PROGS; do
   n="$(basename "$p" .almd)"
@@ -72,6 +119,8 @@ while IFS=$'\t' read -r -u 3 id file line genre name; do
   fi
   if build; then
     run_all "$OUT/$id"
+    echo "== $id: what the checkers answer"
+    judge "$OUT/$id"
     for p in $PROGS; do
       n="$(basename "$p" .almd)"
       for rt in embedded stock; do
