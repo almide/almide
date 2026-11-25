@@ -1,0 +1,20 @@
+# Per corpus leg of proofs/structural-wall.sh: the least number of reads a
+# loop's exit test guards that the Rocq kernel must accept from the shipped
+# bytes alone (proofs/GuardLoop.v, `loop_class` above 4), and the greatest
+# number of such reads whose core holds while nothing stands behind the
+# block's length word (`loop_class` 4).
+#
+# proofs/check-shipped-loops.sh fails a run that accepts fewer than the
+# floor: a change that takes a loop out of the shape (the count captured some
+# other way, the test or the read rewritten) is lost evidence, and shows here
+# instead of passing unseen. It fails a run with more than the ceiling: a
+# count captured before a loop that neither holds the block, nor leaves
+# memory alone, nor keeps the block's address to itself is the shape of a
+# stale count.
+#
+# Raise a floor or lower a ceiling whenever a run allows it. Lower a floor or
+# raise a ceiling only in its own commit, with the reason in the message.
+#
+# leg       accepted   nothing-behind
+fixtures    0          1000000
+tests       0          1000000

@@ -230,6 +230,17 @@ while IFS= read -r f; do
       sed 's/^/  /' "$OUT/$N.fresh-err" >&2
       exit 1
     fi
+    # The reads a loop's exit test guards against a count captured before
+    # the loop: the anchor file is read for the increment routine's index
+    # only, no bound is tested here, and the kernel judges each one after
+    # the loop (check-shipped-loops.sh).
+    printf 'MODULE %s\n' "$f" >> "$OUT/loops-dump"
+    if ! "$ANCHORCHECK" --loops "$OUT/$N.wasm" "$OUT/$N.anchors" >> "$OUT/loops-dump" 2> "$OUT/$N.loops-err"; then
+      echo "STRUCTURAL WALL FAIL: $f: the shipped bytes could not be swept for loop reads:" >&2
+      hew "$OUT/loops-dump" --tail 1 | sed 's/^/  /' >&2
+      sed 's/^/  /' "$OUT/$N.loops-err" >&2
+      exit 1
+    fi
   fi
   # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
   # what it certifies must be the translation of the shipped functions
@@ -310,6 +321,22 @@ bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "
 echo "== accesses into a block just allocated, proven inside it from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/fresh-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for fresh-block accesses — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE" | sed 's/^/  /'
+
+# THE READS A LOOP'S EXIT TEST GUARDS, FROM THE BYTES ALONE: a `for` reads its
+# count once, before the loop, so no straight-line window holds the length
+# read and the access, and the bounds witness's loop-exit events are held to
+# the instructions by almide-anchor-check's shapes. The Rocq kernel reads the
+# capture, the test and the access, and every instruction in between with
+# GuardLoop.v: `loop_sound` puts the access inside the payload in every run of
+# the test and the access from locals in which the count's local holds the
+# captured count, and `loop_class` says what stands behind the length word.
+# The cutter proposes every access addressed by the captured block's local
+# and the tested counter; a proposal whose core the kernel refuses fails, and
+# so do a count below the leg's floor and more reads with nothing behind the
+# length word than the leg's ceiling.
+echo "== the reads a loop's exit test guards, proven inside the looped block from the shipped bytes alone (Rocq kernel) =="
+[ -s "$OUT/loops-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for loop reads — the check went blind" >&2; exit 1; }
+bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE" | sed 's/^/  /'
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"
