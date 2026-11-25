@@ -34,7 +34,10 @@ use wasmparser::{BinaryReader, Operator as Op, OperatorsReader, Parser, Payload,
 
 use crate::decode::Body;
 
-const PROOF: &str = include_str!("../../../proofs/StructuralDecode.v");
+// The proof script, as this crate's build script snapshots it under the
+// package (#3361): `scripts/check-build-inputs-in-package.sh --regen` holds
+// the snapshot equal to `proofs/StructuralDecode.v`.
+const PROOF: &str = include_str!("generated/StructuralDecode.v");
 
 /// The anchor file's `proved` line: the flat release and the free routine, as
 /// function indices of the shipped module (`None`: the routine did not ship).
