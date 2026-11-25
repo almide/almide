@@ -69,17 +69,16 @@ fn room_test(f: &IrFunction) -> Option<(usize, usize, usize)> {
     let IrExprKind::BinOp { op: BinOp::Gte, left: p0, right: zero } = &left.kind else { return None };
     let IrExprKind::BinOp { op: BinOp::Lte, left: p1, right: room } = &right.kind else { return None };
     let IrExprKind::BinOp { op: BinOp::SubInt, left: len, right: w } = &room.kind else { return None };
-    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &len.kind else { return None };
-    let [b] = args.as_slice() else { return None };
-    if module.as_str() != "bytes" || func.as_str() != "len" || !matches!(zero.kind, IrExprKind::LitInt { value: 0 }) {
-        return None;
-    }
+    // The same reading of `bytes.len(b)` as `Emitter::proven_room`'s.
+    let IrExprKind::Call { target: CallTarget::Module { module: lm, func: lf, .. }, args: largs, .. } = &len.kind else { return None };
+    let [b] = largs.as_slice() else { return None };
+    let reads_len = lm.as_str() == "bytes" && lf.as_str() == "len" && matches!(zero.kind, IrExprKind::LitInt { value: 0 });
     let param = |e: &IrExpr| match e.kind {
         IrExprKind::Var { id } => f.params.iter().position(|p| p.var == id),
         _ => None,
     };
     let (pi, bi, wi) = (param(p0)?, param(b)?, param(w)?);
-    (param(p1)? == pi).then_some((bi, pi, wi))
+    (reads_len && param(p1)? == pi).then_some((bi, pi, wi))
 }
 
 /// The body of a checked reader (see the module doc) as the scalar `if guard

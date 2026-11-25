@@ -9,6 +9,21 @@ use crate::bytes::{byte_k, BYTES};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// A byte buffer's scalar READ on the structural leg (#4944): a position
+/// read of the typed byte IO matrix (`bytes.__read_*`, not the `_at` /
+/// `_array` forms, which answer a block), its fused `?? d` form
+/// (`bytes.__read_*#or`) and the room test (`front_desugar::BYTES_ROOM`).
+/// Each takes the buffer by borrow, answers a scalar and writes nothing, so a
+/// call site may hand the buffer to a `mut` param right after it
+/// (writeback_move.rs `other_arg_holds`).
+pub(crate) fn is_scalar_buffer_read(module: &str, func: &str) -> bool {
+    let read = |f: &str| f.starts_with("__read_") && !f.ends_with("_at") && !f.ends_with("_array");
+    module == "bytes"
+        && (func == crate::emit::front_desugar::BYTES_ROOM
+            || func.strip_suffix(crate::bytes::READ_OR_SUFFIX).is_some_and(read)
+            || (read(func) && !func.contains('#')))
+}
+
 impl Emitter<'_> {
 
     /// chunks: `b.chunks(size)` — size <= 0 yields the empty list; a
