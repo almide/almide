@@ -1,4 +1,4 @@
-name: Probe — a dynamic heap oracle on the held-out sample's module-changing mutants
+name: Probe — a dynamic heap oracle on the mutants of the adjacency between an emitted share and its record
 # Probe only: the project's checked allocator (frees poisoned, a canary past
 # each block; scripts/wasm-checked-alloc.sh) as a dynamic oracle for the
 # held-out sample's module-changing mutants. Per mutant, every contract
@@ -8,7 +8,7 @@ name: Probe — a dynamic heap oracle on the held-out sample's module-changing m
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-held-oracle]
+    branches: [probe/adjacency-oracle]
 
 permissions:
   contents: read
@@ -50,12 +50,8 @@ jobs:
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
-      - name: Fetch the sample run's listing
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --name emitter-mutants-list --dir "$RUNNER_TEMP/list"
-      - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-oracle-ids.txt)"
+      - name: Write this shard's mutants
+        run: python3 -I scripts/probe-adjacency-pick.py "$RUNNER_TEMP/pick" ${{ matrix.shard }} "$SHARDS"
       - name: Measure
         run: bash scripts/probe-emitter-oracle.sh "$RUNNER_TEMP/oracle" "$RUNNER_TEMP/pick" ${{ matrix.shard }} "$SHARDS"
       - name: Upload results
