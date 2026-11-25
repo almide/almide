@@ -12,6 +12,20 @@ pub(super) fn len(l: &T) -> Option<(&T, usize)> {
     }
 }
 
+/// `t` is a read, with no single reaching definition, of the variable `blk`
+/// was read through (the outermost one: the list's own variable, where the
+/// count's load read it). Such a read is what a loop that rewrites the
+/// variable leaves behind — a judge's verdict, a grown block, a fresh one —
+/// and nothing here shows that the variable now holds another block, so it
+/// is taken to hold this one (`Flow::mentions`). Without this a list built in
+/// a temporary was known by that temporary and by the instruction that built
+/// it only, and a count read before a loop stayed accepted while the loop
+/// resized the list through its rewritten variable: a store of the count
+/// word through a judge's block, a call handed it.
+pub(super) fn may_be_its_variable(t: &T, blk: &T) -> bool {
+    matches!((pl(t), chain(blk).first()), (T::Local(l, _), Some(&(Src::Local(v), _))) if *l == v)
+}
+
 /// `0 <= I && I <= len(B) - w` (signed): `(I, I again, (B, its count's
 /// load), w)`.
 fn room_of(room: &T) -> Option<(&T, &T, (&T, usize), i64)> {

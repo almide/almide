@@ -59,6 +59,9 @@ pub fn records(
 /// holds <one token per list `for` loop's +1 on its subject (#4280)>
 /// ```
 ///
+/// followed by the `rcfns` block, the `prims` and `selfhost` lines, and
+/// `proved <flat release index | -> <free routine index | ->`.
+///
 /// laid out exactly as the witness texts (`;` between sites / stretches,
 /// one token per event). `position` is the defined function's position in
 /// the shipped module, `ordinal` the instruction's index in its body; `-`
@@ -146,6 +149,21 @@ fn records_inner(
         // #4005 A4: each self-host body's heap-typed parameters, by its
         // shipped position (a body that did not ship is left out).
         + &format!("selfhost {}\n", locate.heaps(&pick(heap_params)))
+        // The flat release and the free routine, as they ship: with
+        // `alloc` and the `rcfns` line's rc_inc, the four routines the
+        // proof script transcribes (almide-anchor-check proved.rs).
+        + &{
+            let (ei, si) = (
+                cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
+                cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
+            );
+            let ship = |f: u32| {
+                f.checked_sub(ei)
+                    .and_then(|d| fmap.get(d as usize).copied().flatten())
+                    .map_or("-".to_string(), |j| (j + si).to_string())
+            };
+            format!("proved {} {}\n", ship(crate::F_DEC_FLAT), ship(crate::F_FREE))
+        }
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();

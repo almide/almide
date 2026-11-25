@@ -59,6 +59,26 @@ fn main() {
         }
         return;
     }
+    // `--proved-bytes <artifact.wasm> <anchors>`: the runtime routines the
+    // anchor file names, as they ship (proved.rs), one line of decimal bytes
+    // each: the input of the proof script's shipped-form decoder.
+    if args.first().map(String::as_str) == Some("--proved-bytes") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        match almide_anchor_check::shipped_routines(&w, &a) {
+            Ok((routines, exit)) => {
+                for (name, index, code) in routines {
+                    println!("SHIPPED {name} {index}{}", code.iter().map(|b| format!(" {b}")).collect::<String>());
+                }
+                println!("EXIT {}", exit.map_or_else(|| "-".to_string(), |x| x.to_string()));
+            }
+            Err(e) => {
+                println!("PROVED REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),
@@ -92,6 +112,14 @@ fn main() {
             println!(
                 "FIELDS OK: {} site(s) / {} store(s), {} access(es) ({} case field(s) under their tag test), {} tag read(s), {} unlocated",
                 r.field_sites, r.field_stores, r.field_accesses, r.field_guarded, r.field_tags, r.field_unlocated
+            );
+            // Per held routine: its call sites and global sites that carry
+            // another index than the list's, its out-of-memory addresses
+            // other than the probe's, and the exit calls in front of its traps.
+            println!(
+                "PROVED OK: {} runtime routine(s) held to the proof script's bytes{}",
+                r.proved.len(),
+                r.proved.iter().map(|(n, d)| format!(" {n}:{}/{}/{}/{}", d.calls, d.globals, d.addresses, d.exits)).collect::<String>()
             );
             match &counted {
                 Some(Ok(c)) => println!(

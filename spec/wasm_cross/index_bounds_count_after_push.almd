@@ -1,0 +1,20 @@
+// @contract: C-067
+// A list GROWN in place inside the loop that indexes it. `list.push` takes the
+// list as a `mut` receiver and the wasm emitter writes the block back itself,
+// so the loop body holds no assignment to `xs`: what keeps the element count
+// from being read once before the loop (crates/almide-wasm/src/len_hoist.rs)
+// is only that the list is handed to a call. A count read before the loop
+// would check index 3 against the three elements the list started with and
+// abort. Every read here is below the length at that moment, so C-067 asks
+// for the sum.
+effect fn main() -> Unit = {
+  var xs = [10, 20, 30]
+  var total = 0
+  var i = 0
+  while i < 6 {
+    if i >= 2 then list.push(xs, 100 + i) else ()
+    total = total + xs[i]
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

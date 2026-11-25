@@ -1,0 +1,27 @@
+// @contract: C-067
+// A list SHORTENED in place inside the loop that indexes it, one `list.pop`
+// per turn. On the fifth turn three elements are left and the index is 4, so
+// the read aborts with the unified message and exit 1, before anything is
+// printed. A count read once before the loop (see
+// index_bounds_count_after_push.almd for why only the call stands in the way)
+// would pass eight reads, four of them past the end, and print 360.
+effect fn main() -> Unit = {
+  var xs = [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80
+  ]
+  var total = 0
+  var i = 0
+  while i < 8 {
+    let _ = list.pop(xs)
+    total = total + xs[i]
+    i = i + 1
+  }
+  println(int.to_string(total))
+}

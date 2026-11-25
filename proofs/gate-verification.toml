@@ -125,7 +125,14 @@
 # not cover (a cited test that holds the invalid corpus without routing it into
 # its producer, and an unevidenced none / message / typed / obligation verdict
 # that is wrong) as UNCOMPENSATED: 44 -> 46, a newly mapped blind spot.
-# uncompensated_blind_ceiling = "50"
+# 2026-11-24: the shipped-routines gate maps two limits it does not cover (what
+# the imported exit function does before the trap that follows it, and what the
+# globals bound in the two roles hold) as UNCOMPENSATED: 50 -> 52. Both limits
+# predate the gate (they sat unlisted under check-structural-bytes.sh's
+# UNMAPPED); naming them was ruled on 2026-11-24 to be the #4372 inventory
+# reading, a count that follows the mapping, not a relaxed ratchet. The second
+# is a candidate for a gate of its own.
+# uncompensated_blind_ceiling = "52"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -182,6 +189,18 @@ evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in Structur
 measures = "byte equality of the emitter's $inc/$dec_flat/$free/$alloc code bodies with the byte lists parsed out of StructuralDecode.v"
 varies = "#576 slice-3 landing (2026-08-28): inc_bytes 65;1 -> 65;2 in the .v read as a one-byte diff against the emitter, equal when restored"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "proofs/check-shipped-routines.sh"
+# It splits the anchor checker's dump into one Rocq statement per module and
+# reads coqc's exit status; the comparison itself is the kernel's.
+reads = "scalar"
+wired_by = "proofs/structural-wall.sh"
+class = "KERNEL_PROVEN"
+evidence = "2026-11-24: the verdict is the Rocq kernel's, on a statement per judged artifact that its own $inc / $dec_flat / $free / $alloc bytes decode with StructuralShipped.v's decoders to the proven trees, with one global in the $line_end role, $dec_flat freeing through the function whose bytes decode as $free, and every inserted exit call naming the proc_exit import. Red on real input: the first full run (Actions run 45322029118) FAILED 128 of 1,263 modules and named them; in the one read, the allocator's exit callee has index 195, two LEB128 bytes where the decoders read one; with indices read as numbers (the `tokens` layer) run 45330083925 reads 1,215 ok, 0 failed, 48 naming no routine. StructuralShipped.v carries the refusing directions as theorems: dec_freeing_elsewhere_is_refused, dec_exiting_elsewhere_is_refused, a_changed_constant_is_not_the_tree, a_dropped_guard_is_not_the_tree, a_call_without_the_block_does_not_decode, an_unknown_opcode_is_no_token_list."
+measures = "for each artifact the structural wall accepts, coqc's verdict on the statement that the bytes of its named runtime routines decode, as shipped, to the proven trees with the indices bound in their roles; the bytes are read from `almide-anchor-check --proved-bytes`, and an empty dump fails"
+varies = "2026-11-24: run 45322029118 read 1,087 ok and 128 FAILED (two-byte callee indices); run 45330083925, after the decoders read indices as LEB128 numbers, read 1,215 ok and 0 FAILED on the same corpus"
+blind = "a routine the anchor file does not name: the gate reads the four roles on the `proved` line and nothing else -> crates/almide-anchor-check/src/proved.rs refuses an anchor file that names release routines and carries no `proved` line; what the imported exit function does to memory before the trap that follows it -> UNCOMPENSATED; that the globals bound in the $line_end and bump-frontier roles hold what the model says -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-als-pin.sh"
