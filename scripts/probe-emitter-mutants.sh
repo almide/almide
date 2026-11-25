@@ -215,6 +215,15 @@ one_mutant() {
   # Behaviour, for the programs whose module changed. Stop counting once
   # three differ: a mutant that hangs every program would otherwise cost
   # T_RUN for each of them.
+  # Keep every module this mutant changed, for rules written after the
+  # sample was first judged (this rerun exists for that and changes nothing
+  # else of the measurement).
+  if [ -s "$OUT/changed.txt" ]; then
+    mkdir -p "$OUT/modules/$id"
+    while IFS= read -r f; do
+      cp "$d/$(name_of "$f").wasm" "$OUT/modules/$id/" 2> /dev/null || true
+    done < "$OUT/changed.txt"
+  fi
   : > "$OUT/behave.tsv"
   if [ -s "$OUT/changed.txt" ]; then
     while [ -s "$OUT/changed.txt" ] && [ "$bdiff" -lt 3 ] && [ "$(date +%s)" -lt "$deadline" ]; do
