@@ -49,5 +49,5 @@ effect_export_scalar 5700
 # init(); shipped only to a module that imports an fs op.
 fs_preopens 27500
 # #4943: pub fns named like the glue's own bindings, platform globals and JS reserved
-# words, each a `$<name>` binding exported under its own name (11 wrappers).
+# words, each a `$<name>` binding exported under its own name (10 wrappers).
 glue_names 6750
