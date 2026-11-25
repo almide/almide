@@ -140,7 +140,7 @@ Definition judged (alloc : Z) (body : list Z) (cs : list claim) : bool :=
    body is not read to its end). *)
 Definition accesses (body : list Z) : option Z :=
   match layout (S (length body)) (zlen body 0) 0 body with
-  | Some lay => Some (zlen (filter (fun t => match t with (_, _, a) => a end) lay) 0)
+  | Some lay => Some (Z.of_nat (length (filter (fun t => match t with (_, _, a) => a end) lay)))
   | None => None
   end.
 
