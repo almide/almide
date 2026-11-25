@@ -604,7 +604,9 @@ impl<'x, 'a> Frame<'x, 'a> {
     fn reclaim_holds(&self, e: usize) -> bool {
         let Some((a, z)) = self.ev.evwin[e] else { return false };
         let ops = &self.b.ops;
-        let Some(z) = z.min(ops.len()).checked_sub(1).filter(|&z| a <= z) else { return false };
+        // The window's last instruction, clamped to the body (never one
+        // short of it: the restore's last op is the save block's free).
+        let Some(z) = ops.len().checked_sub(1).map(|last| z.min(last)).filter(|&z| a <= z) else { return false };
         let rc_call = |k: usize| self.calls.iter().any(|c| c.0 == k);
         let copies = (a..=z).any(|k| matches!(ops[k], Op::MemoryCopy { .. }));
         let rewinds: Vec<(usize, u32)> = (a + 2..=z)

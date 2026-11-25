@@ -215,8 +215,8 @@ Fixpoint frees_above (b0 : Z) (ops : list WOp) : Prop :=
   | cons (WFree a) r => b0 <= a /\ frees_above b0 r
   end.
 
-Definition region_save (s : RgAlloc) : RgAlloc := {| rg_bump := rg_bump s; rg_heads := nil |}.
-Definition region_restore (saved _cur : RgAlloc) : RgAlloc := saved.
+Definition rg_save (s : RgAlloc) : RgAlloc := {| rg_bump := rg_bump s; rg_heads := nil |}.
+Definition rg_restore (saved _cur : RgAlloc) : RgAlloc := saved.
 
 Lemma walloc_above :
   forall s sz b0, 0 <= sz -> b0 <= rg_bump s -> Forall (fun a => b0 <= a) (rg_heads s) ->
@@ -226,7 +226,7 @@ Proof.
   intros s sz b0 Hsz Hb Hh. unfold walloc.
   destruct (rg_heads s) as [| x t] eqn:Eh; cbn.
   - split; [exact Hb | split; [lia | constructor]].
-  - rewrite Eh in Hh. inversion Hh as [| y l Hx Ht]; subst.
+  - inversion Hh as [| y l Hx Ht]; subst.
     split; [exact Hx | split; [exact Hb | exact Ht]].
 Qed.
 
@@ -252,16 +252,16 @@ Qed.
 Theorem region_restore_reclaims :
   forall s ops,
     Forall (fun a => a < rg_bump s) (rg_heads s) -> frees_above (rg_bump s) ops ->
-    region_restore s (fst (wrun (region_save s) ops)) = s /\
-    Forall (fun a => rg_bump s <= a /\ ~ In a (rg_heads s)) (snd (wrun (region_save s) ops)).
+    rg_restore s (fst (wrun (rg_save s) ops)) = s /\
+    Forall (fun a => rg_bump s <= a /\ ~ In a (rg_heads s)) (snd (wrun (rg_save s) ops)).
 Proof.
   intros s ops Hh Hf. split; [reflexivity |].
-  assert (H : Forall (fun a => rg_bump s <= a) (snd (wrun (region_save s) ops))).
-  { apply wrun_above; [unfold region_save; cbn; lia | unfold region_save; cbn; constructor | exact Hf]. }
+  assert (H : Forall (fun a => rg_bump s <= a) (snd (wrun (rg_save s) ops))).
+  { apply wrun_above; [unfold rg_save; cbn; lia | unfold rg_save; cbn; constructor | exact Hf]. }
   apply Forall_forall. intros a Ha.
   pose proof (proj1 (Forall_forall _ _) H a Ha) as Hge.
   split; [exact Hge |]. intro Hin.
-  pose proof (proj1 (Forall_forall _ _) Hh a Hin) as Hlt. lia.
+  pose proof (proj1 (Forall_forall _ _) Hh a Hin) as Hlt. cbv beta in Hge, Hlt. lia.
 Qed.
 
 (* A reclaimed line's account: `w` steps like `d` on the holder's credit. *)
