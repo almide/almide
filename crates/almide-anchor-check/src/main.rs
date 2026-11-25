@@ -341,6 +341,27 @@ fn main() {
                 let bytes: Vec<String> = module[*lo..*hi].iter().map(|x| x.to_string()).collect();
                 println!("WINDOWHEX {func} {acc} {}", bytes.join(" "));
             }
+            // Every load and store of the module, located by a witness or not:
+            // the ones a straight-line window proves on its own.
+            if let Ok(bodies) = almide_anchor_check::decode(&module) {
+                let (mut seen, mut proved) = (0usize, 0usize);
+                for (func, b) in bodies.iter().enumerate() {
+                    for j in 0..b.ops.len() {
+                        if !almide_anchor_check::window::is_access(&b.ops[j]) {
+                            continue;
+                        }
+                        seen += 1;
+                        let (ok, shape, start) = almide_anchor_check::window::prove(b, j, j);
+                        if ok {
+                            proved += 1;
+                            let hi = if j + 1 < b.at.len() { b.at[j + 1] } else { b.end };
+                            let bytes: Vec<String> = module[b.at[start]..hi].iter().map(|x| x.to_string()).collect();
+                            println!("WINDOWALL {func} {j} {shape} {}", bytes.join(" "));
+                        }
+                    }
+                }
+                println!("WINDOWSWEEP {seen} {proved}");
+            }
             println!(
                 "ANCHORS OK: init {} site(s) / {} store(s), {} fill(s), {} unlocated; bounds {} check(s), {} access(es), {} unlocated, {} operand pair(s)",
                 r.init_sites, r.init_stores, r.fill_sites, r.init_unlocated, r.bounds_checks, r.bounds_accesses, r.bounds_unlocated, r.bounds_operands

@@ -359,6 +359,12 @@ fn recognise(r: &Run) -> Result<&'static str, String> {
     }
 }
 
+/// Whether `op` reads or writes memory at an address operand (a load or a
+/// store; bulk copies and fills are not windows).
+pub fn is_access(op: &Op<'_>) -> bool {
+    load(op).is_some() || store_width(op).is_some()
+}
+
 /// The access instruction an `a` / `w` anchored at `acc0` names: an `a`
 /// anchored at the call that consumes a loaded element is the load before it.
 pub fn access_op(b: &Body<'_>, acc0: usize) -> usize {

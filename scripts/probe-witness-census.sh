@@ -84,7 +84,7 @@ one() { # one <leg> <file>
     if [ "${CENSUS_LIGHT:-0}" != 1 ]; then
       "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
     fi
-    { echo "MODULE $leg $f"; grep '^WINDOWHEX' "$W/a.census" || true; } >> "$OUT/window-dump"
+    { echo "MODULE $leg $f"; grep -E '^(WINDOWHEX|WINDOWALL|WINDOWSWEEP) ' "$W/a.census" || true; } >> "$OUT/window-dump"
     grep '^WINDOWFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/windowrows.tsv" || true
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true
     if [ -n "$ANCHOROLD" ]; then
