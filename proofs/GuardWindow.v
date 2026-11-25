@@ -170,8 +170,8 @@ Definition cstep (i : ins) (c : conf) : option conf :=
                 end
   end.
 
-Fixpoint crun (is : list ins) (c : conf) : option conf :=
-  match is with
+Fixpoint crun (ws : list ins) (c : conf) : option conf :=
+  match ws with
   | [] => Some c
   | i :: r => match cstep i c with Some c' => crun r c' | None => None end
   end.
@@ -221,8 +221,8 @@ Definition sstep (i : ins) (s : sym) : option sym :=
                 end
   end.
 
-Fixpoint srun (is : list ins) (s : sym) : option sym :=
-  match is with
+Fixpoint srun (ws : list ins) (s : sym) : option sym :=
+  match ws with
   | [] => Some s
   | i :: r => match sstep i s with Some s' => srun r s' | None => None end
   end.
@@ -304,17 +304,17 @@ Proof.
     constructor; [unfold zero32; apply Z.eqb_eq; exact E | exact Hf].
 Qed.
 
-Lemma run_sound : forall is loc stk e st fs rest loc' stk' s',
+Lemma run_sound : forall ws loc stk e st fs rest loc' stk' s',
   stk = map den st ++ rest ->
   (forall x, loc x = den (look e x)) ->
   Forall zero32 fs ->
-  srun is (mkS e st fs) = Some s' ->
-  crun is (loc, stk) = Some (loc', stk') ->
+  srun ws (mkS e st fs) = Some s' ->
+  crun ws (loc, stk) = Some (loc', stk') ->
   stk' = map den (sstk s') ++ rest
   /\ (forall x, loc' x = den (look (senv s') x))
   /\ Forall zero32 (sfacts s').
 Proof.
-  induction is as [|i r IH]; intros loc stk e st fs rest loc' stk' s' Hs Hl Hf Hss Hcs.
+  induction ws as [|i r IH]; intros loc stk e st fs rest loc' stk' s' Hs Hl Hf Hss Hcs.
   - cbn [srun crun] in Hss, Hcs.
     injection Hss as Es. injection Hcs as El Ek. subst s' loc' stk'.
     cbn [sstk senv sfacts]. split; [exact Hs | split; [exact Hl | exact Hf]].
@@ -680,8 +680,8 @@ Definition addr_of {A : Type} (k : akind) (stk : list A) : option A :=
   | _, _ => None
   end.
 
-Definition check (is : list ins) (k : akind) (off w : Z) : option tm :=
-  match srun is (mkS [] [] []) with
+Definition check (ws : list ins) (k : akind) (off w : Z) : option tm :=
+  match srun ws (mkS [] [] []) with
   | Some s =>
       match addr_of k (sstk s) with
       | Some a => recog (sfacts s) a off w
@@ -693,21 +693,21 @@ Definition check (is : list ins) (k : akind) (off w : Z) : option tm :=
 (* Every run of an accepted window that reaches its access touches only the
    payload of the block at the base the check names, as long as that block
    lies in the address space. *)
-Theorem check_sound : forall is k off w b rest loc stk,
-  check is k off w = Some b ->
-  crun is (L0, rest) = Some (loc, stk) ->
+Theorem check_sound : forall ws k off w b rest loc stk,
+  check ws k off w = Some b ->
+  crun ws (L0, rest) = Some (loc, stk) ->
   exists av,
     addr_of k stk = Some av
     /\ (den b mod M32 + PAYLOAD + len_of b <= M32 ->
         den b mod M32 + PAYLOAD <= av mod M32 + off
         /\ av mod M32 + off + w <= den b mod M32 + PAYLOAD + len_of b).
 Proof.
-  intros is k off w b rest loc stk. unfold check.
-  destruct (srun is (mkS [] [] [])) as [[e st fs]|] eqn:Es; [| intro H0; discriminate H0].
+  intros ws k off w b rest loc stk. unfold check.
+  destruct (srun ws (mkS [] [] [])) as [[e st fs]|] eqn:Es; [| intro H0; discriminate H0].
   cbn [sstk sfacts].
   destruct (addr_of k st) as [a|] eqn:Ea; [| intro H0; discriminate H0].
   intros H Hrun.
-  destruct (run_sound is L0 rest [] [] [] rest loc stk (mkS e st fs)
+  destruct (run_sound ws L0 rest [] [] [] rest loc stk (mkS e st fs)
               eq_refl (fun x => eq_refl) (Forall_nil zero32) Es Hrun) as [Hs [_ Hf]].
   cbn [sstk sfacts] in Hs, Hf.
   exists (den a). split.
@@ -850,7 +850,7 @@ Fixpoint dec (fuel : nat) (bs : list Z) (acc : list ins)
    inside, or nothing. *)
 Definition window (bs : list Z) : option tm :=
   match dec (S (length bs)) bs [] with
-  | Some (is, k, off, w) => check is k off w
+  | Some (ws, k, off, w) => check ws k off w
   | None => None
   end.
 
@@ -861,20 +861,20 @@ Definition window_ok (bs : list Z) : bool :=
    any state, reach the access only inside the payload. *)
 Theorem window_sound : forall L0 G memf uo bo,
   (forall a, 0 <= memf 40 a < M32) ->
-  forall bs b is k off w,
-  dec (S (length bs)) bs [] = Some (is, k, off, w) ->
+  forall bs b ws k off w,
+  dec (S (length bs)) bs [] = Some (ws, k, off, w) ->
   window bs = Some b ->
   forall rest loc stk,
-  crun G memf uo bo is (L0, rest) = Some (loc, stk) ->
+  crun G memf uo bo ws (L0, rest) = Some (loc, stk) ->
   exists av,
     addr_of k stk = Some av
     /\ (den L0 G memf uo bo b mod M32 + PAYLOAD + len_of L0 G memf uo bo b <= M32 ->
         den L0 G memf uo bo b mod M32 + PAYLOAD <= av mod M32 + off
         /\ av mod M32 + off + w <= den L0 G memf uo bo b mod M32 + PAYLOAD + len_of L0 G memf uo bo b).
 Proof.
-  intros L0 G memf uo bo Hmem bs b is k off w Hd Hw rest loc stk Hrun.
+  intros L0 G memf uo bo Hmem bs b ws k off w Hd Hw rest loc stk Hrun.
   unfold window in Hw. rewrite Hd in Hw.
-  exact (check_sound L0 G memf uo bo Hmem is k off w b rest loc stk Hw Hrun).
+  exact (check_sound L0 G memf uo bo Hmem ws k off w b rest loc stk Hw Hrun).
 Qed.
 
 (* ── the emitter's read `xs[i]` as it ships (the figure in the docs): the
