@@ -369,7 +369,7 @@ impl Emitter<'_> {
             return unsup("bytes-read-or-read");
         }
         self.f.instructions().else_();
-        self.lower(d, Some(ty))?;
+        self.lower_arg(d, Some(ty), ArgMode::Borrow)?;
         self.f.instructions().end();
         Ok(Some(Lowered::scalar(ty)))
     }
