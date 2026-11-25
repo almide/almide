@@ -8,8 +8,8 @@ modules the mutant changed, against the unmutated modules.
 and whether its increment routine was found (`LOOPINC <index | none>`);
 <verdicts.tsv> is the kernel's class per proposal (mutant id | base, program
 name, function, access, write, located, bytes scanned, class: 0 refused,
-4 the core holds with nothing behind the length word, 5 pure, 6 held,
-7 both). <shards-dir> holds `emut/windows/<id>.tsv`, one line per program
+4 the core holds with nothing behind the length word, more than 4 accepted:
+4 plus 1 pure, plus 2 held, plus 8 kept). <shards-dir> holds `emut/windows/<id>.tsv`, one line per program
 whose module the mutant changed.
 
 Writes <out-dir>/held-loop-programs.tsv (mutant, program, increment routine,
@@ -36,9 +36,10 @@ ok, core, bad = collections.Counter(), collections.Counter(), collections.Counte
 for line in open(verdicts, encoding="utf-8"):
     t = line.rstrip("\n").split("\t")
     k = (t[0], t[1])
-    if t[-1] in ("5", "6", "7"):
+    c = int(t[-1])
+    if c > 4:
         ok[k] += 1
-    elif t[-1] == "4":
+    elif c == 4:
         core[k] += 1
     else:
         bad[k] += 1
