@@ -9,7 +9,6 @@ export async function after(m) {
   assert.equal(m.hooks(1), 3);
   assert.equal(m.imports(1), 4);
   assert.equal(m.flush(1), 5);
-  assert.equal(m.memory(1), 6);
   assert.equal(m.fetch(1), 7);
   assert.equal(m.instance(1), 8);
   assert.equal(m.ready(1), 9);

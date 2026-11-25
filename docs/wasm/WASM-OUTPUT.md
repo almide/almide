@@ -342,7 +342,11 @@ marshalling. `app.js` is a dependency-free ES module:
   `regionRelease`, `files`) are reserved: a `pub fn` with one of those names
   is a build-time refusal that names it and lists the glue's exports for that
   build (read off the generated glue, not a fixed list); write `local fn`
-  to keep it off the JS surface.
+  to keep it off the JS surface. So is a `pub fn` named like an export the
+  toolchain writes into the module itself (`memory`, `_start`, the `__`
+  space — `host_exports::is_reserved_export`, #3490): the module does not
+  export it, so no wrapper could call it; `@export(wasm, "<name>")` exports
+  it under a name of its own.
 - Each wrapper marshals `Int` ↔ `number` (a `RangeError` outside
   ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
   wider value exact), `Float`, `Bool`, `String`, `Unit`, and (#3354) the block

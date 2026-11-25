@@ -84,6 +84,11 @@ pub(crate) struct HostSurface {
     /// `@extern(wasm, "js", name, returns: promise)` (#3371; #3353 took
     /// them from a build flag).
     pub async_imports: Vec<String>,
+    /// Pub fns the module does not export because their name is one the
+    /// toolchain writes into the module itself (`memory`, `_start`, the `__`
+    /// space: `host_exports::is_reserved_export`, #3490). No wrapper can
+    /// call them, so `--host js` refuses them by name (#4943).
+    pub unexported: Vec<String>,
 }
 
 impl HostSurface {
@@ -139,11 +144,16 @@ impl HostSurface {
             // pub fns not synthesized by the compiler and not named into the
             // toolchain's own export space; monomorphic, not tests.
             let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm");
-            let exports = declared.is_some()
-                || (matches!(f.visibility, almide_ir::IrVisibility::Public)
-                    && !almide_ir::is_synthesized_entry_fn(f.name.as_str())
-                    && !almide_wasm::host_exports::is_reserved_export(name));
-            if !exports || f.is_test || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
+            let public = matches!(f.visibility, almide_ir::IrVisibility::Public) && !almide_ir::is_synthesized_entry_fn(f.name.as_str());
+            let reserved = almide_wasm::host_exports::is_reserved_export(name);
+            let exports = declared.is_some() || (public && !reserved);
+            if f.is_test || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
+                continue;
+            }
+            if !exports {
+                if public && reserved {
+                    s.unexported.push(name.to_string());
+                }
                 continue;
             }
             // `@export(wasm, "sym")` (#2752) renames the module's export,
@@ -710,6 +720,11 @@ pub(crate) fn generate(
     let sigs = wasm_sigs(bytes)?;
     check_marshallable(surface)?;
     check_imports_served(&sigs, surface)?;
+    if let Some(name) = surface.unexported.first() {
+        return Err(format!(
+            "error: --host js cannot export `{name}`: the toolchain writes an export of that name into the module itself (its memory, `_start`, `main`, `cabi_realloc` or the `__` runtime space, #3490), so the module does not export the fn and no wrapper can call it\n  hint: write `local fn {name}` to keep it internal, or `@export(wasm, \"<another name>\")` to export it under a name of its own"
+        ));
+    }
     let wrapped = surface.exports.iter().map(|f| f.name.clone()).chain(std::iter::once("_start".to_string())).collect();
     let suspension = jspi::analyse(bytes, &surface.async_imports, &wrapped)?;
 
@@ -735,7 +750,7 @@ pub(crate) fn generate(
         needs_values |= plan.needs_values();
         let entry = suspension.entry(&f.name);
         region_release |= plan.ret.hands_out_share();
-        wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
+        wrappers.push_str(&exports::wrapper_js(f, wrapped.len(), sig, owned, &plan, entry)?);
         wrapped.push(&f.name);
         export_dts.push_str(&exports::export_dts(f, &plan, entry));
     }

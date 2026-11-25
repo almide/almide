@@ -280,10 +280,14 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String 
 /// function. A block argument the CALLEE owns (the recorded ownership) is
 /// its to release; a borrowed one is released here after the call, with
 /// the children it was the last owner of.
-pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &ExportPlan, entry: Entry) -> Result<String, String> {
+///
+/// `idx` is the wrapper's position among the glue's wrappers: its shape
+/// constants are `S<idx>p<i>` / `S<idx>r`, glue names that carry no source
+/// spelling (#4943).
+pub(super) fn wrapper_js(f: &HostFn, idx: usize, sig: &WasmSig, owned: &[bool], plan: &ExportPlan, entry: Entry) -> Result<String, String> {
     let mut consts = String::new();
     let mut shape_const = |key: String, s: &AbiShape| {
-        let name = format!("S_{}_{key}", f.name);
+        let name = format!("S{idx}{key}");
         consts.push_str(&format!("const {name} = {};\n", shape_js(s)));
         name
     };
@@ -336,7 +340,7 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
         (RetPlan::Unwrap(s), _) => {
             block_result("Result block")?;
             let res = format!(r#"{{k:"res",ok:{},err:{{k:"str"}}}}"#, shape_js(s));
-            let c = format!("S_{}_r", f.name);
+            let c = format!("S{idx}r");
             consts.push_str(&format!("const {c} = {res};\n"));
             format!("    return takeResult({call}, {c}, \"{}\");\n", f.name)
         }
