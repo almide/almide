@@ -8,7 +8,7 @@ name: Probe — the fresh-block rule on a held-out sample of source mutants
 # Not a gate.
 on:
   push:
-    branches: [probe/held-fresh-rss]
+    branches: [probe/replay-rules]
 
 permissions:
   contents: read
@@ -18,13 +18,19 @@ env:
   # The sample run kept the modules of the mutants that change at most a
   # hundred programs (45536243441, judged first); this run judged the other
   # thirty-six again and kept every changed module.
-  # The run that built the replayed defects of the paper, each with and
+  # The runs that built five replayed bound-test defects, each with and
   # without its defect.
-  REPLAY_RUN: "45001834111"
+  REPLAYS: >-
+    45651221492:2685-list-take-drop-insert-byte-product
+    45651221492:2474-copy-within-additive-fit-test
+    45653617765:2475-slice-rows-without-start-floor
+    45651221492:1909-from-bytes-additive-fit-test
+    45651221492:2395-value-keys-without-tag-test
 
 jobs:
   fresh:
     name: Fresh-block proposals of the mutants' modules (${{ matrix.sample }})
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -117,7 +123,6 @@ jobs:
 
   replays:
     name: The three rules on the replayed defects
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -150,7 +155,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$REPLAY_RUN" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/replays"
+          for pair in $REPLAYS; do
+            run="${pair%%:*}"
+            name="${pair#*:}"
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" -n "replay-$name" --dir "$RUNNER_TEMP/replays/replay-$name"
+          done
           mkdir -p "$RUNNER_TEMP/rbase" "$RUNNER_TEMP/rshards/replay/emut/modules/bug"
           for d in "$RUNNER_TEMP"/replays/*/*.base; do
             n="$(basename "$d" .base)"
