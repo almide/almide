@@ -114,6 +114,9 @@ python3 -I "$ROOT/scripts/probe-held-fresh-join.py" "$OUT/dump" "$OUT/kernel/ver
 # The loop reads (proofs/GuardLoop.v) of the same modules: `--fresh-like`
 # also prints `LOOPINC <index | none>` and the `LOOPHEX` proposals, and the
 # kernel is asked once per distinct proposal.
+echo "located: allocator by its bytes in $(grep -c '^FRESHALLOC [0-9]* bytes' "$OUT/dump") module(s), by its shape in $(grep -c '^FRESHALLOC [0-9]* shape' "$OUT/dump"), not found in $(grep -c '^FRESHALLOC none' "$OUT/dump"); increment by its bytes in $(grep -c '^LOOPINC [0-9]* bytes' "$OUT/dump"), by its shape in $(grep -c '^LOOPINC [0-9]* shape' "$OUT/dump"), not found in $(grep -c '^LOOPINC none' "$OUT/dump")"
+# Which way each mutant's modules were located (id, bytes, shape, none).
+awk '$1 == "MODULE" { id = $2 } $1 == "FRESHALLOC" { k = ($2 == "none" || $2 == "unreadable" || $2 == "no-base") ? "none" : $3; n[id "\t" k]++; ids[id] = 1 } END { for (i in ids) printf "%s\t%d\t%d\t%d\n", i, n[i "\tbytes"], n[i "\tshape"], n[i "\tnone"] }' "$OUT/dump" | sort > "$OUT/held-located.tsv"
 echo "loop dump: $(grep -c '^LOOPHEX' "$OUT/dump") proposal(s); increment routine not found in $(grep -c '^LOOPINC none' "$OUT/dump") module(s)"
 bash "$ROOT/scripts/probe-loop-kernel.sh" "$OUT/dump" "$OUT/loop-kernel" > "$OUT/loop-kernel.log" 2>&1 || { echo "the loop kernel run failed"; tail -n 20 "$OUT/loop-kernel.log"; exit 1; }
 grep -E 'proposal\(s\) in the dump|kernel time|Closed under' "$OUT/loop-kernel.log"

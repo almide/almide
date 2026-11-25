@@ -156,15 +156,28 @@ fn main() {
         let (bi, mi) = (almide_anchor_check::function_imports(&b), almide_anchor_check::function_imports(&m));
         // The module's function whose instructions are those of the base's
         // function `role` (the same index first).
-        let locate = |role: u32| -> Option<u32> {
+        // When no function has those bytes (the prune renumbers the calls
+        // and globals of a routine when the mutant changes what is live):
+        // the ONE function whose shape is the base routine's, a call read as
+        // its callee's shape and global indices and large constants masked.
+        // Two candidates are no answer.
+        let locate = |role: u32| -> Option<(u32, &'static str)> {
             let want = role.checked_sub(bi).and_then(|p| code(&b, &bb, p as usize))?;
             let same = |p: &usize| code(&m, &mb, *p).as_ref() == Some(&want);
-            role.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same)).map(|p| mi + p as u32)
+            if let Some(p) = role.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same)) {
+                return Some((mi + p as u32, "bytes"));
+            }
+            let shape = body_shape(&bb, bi, role, &mut std::collections::HashMap::new(), 1);
+            let hits: Vec<u32> = (0..mb.len() as u32).map(|p| mi + p).filter(|f| body_shape(&mb, mi, *f, &mut std::collections::HashMap::new(), 1) == shape).collect();
+            match hits.as_slice() {
+                [f] => Some((*f, "shape")),
+                _ => None,
+            }
         };
         let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
         match locate(alloc) {
-            Some(f) => {
-                println!("FRESHALLOC {f}");
+            Some((f, how)) => {
+                println!("FRESHALLOC {f} {how}");
                 for fr in almide_anchor_check::fresh_windows(&m, &mb, "", f) {
                     println!("FRESHHEX {} {} {f} {} {} | {} | {} | {}", fr.func, fr.access, u8::from(fr.write), fr.located, hex(&fr.pre), hex(&fr.mid), hex(&fr.tail));
                 }
@@ -174,8 +187,9 @@ fn main() {
         // The loop reads (proofs/GuardLoop.v): the hold is a call of the
         // function whose instructions are those of the base's increment
         // routine; without one, no proposal carries a hold.
-        let inc = rc.and_then(|r| r.0).and_then(locate);
-        println!("LOOPINC {}", inc.map_or_else(|| "none".to_string(), |f| f.to_string()));
+        let inc_how = rc.and_then(|r| r.0).and_then(locate);
+        let inc = inc_how.map(|x| x.0);
+        println!("LOOPINC {}", inc_how.map_or_else(|| "none".to_string(), |(f, how)| format!("{f} {how}")));
         for l in almide_anchor_check::loop_windows(&m, &mb, "", inc) {
             println!(
                 "LOOPHEX {} {} {} {} {} | {} | {} | {} | {} | {}",

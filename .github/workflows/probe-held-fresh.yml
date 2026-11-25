@@ -86,6 +86,7 @@ jobs:
           path: |
             ${{ runner.temp }}/held-fresh/held-fresh.tsv
             ${{ runner.temp }}/held-fresh/held-fresh-programs.tsv
+            ${{ runner.temp }}/held-fresh/held-located.tsv
             ${{ runner.temp }}/held-fresh/jobs.tsv
             ${{ runner.temp }}/held-fresh/base-failed
             ${{ runner.temp }}/held-fresh/kernel.log
