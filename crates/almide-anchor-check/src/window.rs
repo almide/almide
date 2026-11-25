@@ -130,8 +130,11 @@ fn pop(stack: &mut Vec<Tm>) -> Result<Tm, Stop> {
     stack.pop().ok_or(Stop::Underflow)
 }
 
-/// Run `ops[s..=acc]` from an empty stack; `acc` is the access.
-fn run(b: &Body<'_>, s: usize, acc: usize) -> Result<Run, Stop> {
+/// Run `ops[s..=acc]` from an empty stack; `acc` is the access. With
+/// `exits`, a conditional branch is read as the proof script reads it: an
+/// exit, past which its condition was zero (loops.rs cuts by this; a window
+/// holds none).
+fn run(b: &Body<'_>, s: usize, acc: usize, exits: bool) -> Result<Run, Stop> {
     let d = b.depth[acc];
     let mut stack: Vec<Tm> = Vec::new();
     let mut env: HashMap<u32, Tm> = HashMap::new();
@@ -195,6 +198,7 @@ fn run(b: &Body<'_>, s: usize, acc: usize) -> Result<Run, Stop> {
             Op::Drop => {
                 pop(&mut stack)?;
             }
+            Op::BrIf { .. } if exits => facts.push(pop(&mut stack)?),
             _ => {
                 if let Some((k, _, off)) = load(op) {
                     let a = pop(&mut stack)?;
@@ -293,7 +297,13 @@ fn scaled(t: &Tm) -> (Tm, i128) {
 /// from an empty stack, whatever its address is (fresh.rs cuts its tails by
 /// this).
 pub(crate) fn reads(b: &Body<'_>, s: usize, acc: usize) -> bool {
-    run(b, s, acc).is_ok()
+    run(b, s, acc, false).is_ok()
+}
+
+/// [`reads`], with conditional branches read as exits (loops.rs cuts the run
+/// from a loop's exit test to its access by this).
+pub(crate) fn reads_past_exits(b: &Body<'_>, s: usize, acc: usize) -> bool {
+    run(b, s, acc, true).is_ok()
 }
 
 /// The proof script's `recog`, as a search test: the address is a base, an
@@ -325,7 +335,7 @@ fn propose(b: &Body<'_>, acc: usize) -> Option<usize> {
         if b.depth[s] < d {
             return None;
         }
-        match run(b, s, acc) {
+        match run(b, s, acc, false) {
             Err(Stop::Underflow) => {}
             Err(Stop::Blocked) => return None,
             Ok(r) if recognised(&r) => return Some(s),

@@ -172,7 +172,7 @@ the row lists where it does not hold yet.
 
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
-The spine has 166 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
+The spine has 167 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra
@@ -508,6 +508,58 @@ and it says nothing about whether the block is still live at the access. An
 access through a copy of the pointer, into a block of computed size, or
 with the allocation at another control depth is not proposed and stays with
 the rules above.
+
+THE READS A LOOP'S EXIT TEST GUARDS, FROM THE BYTES ALONE
+(`proofs/GuardLoop.v`). A `for` over a list or a string reads the count once,
+before the loop, into a local, and every turn tests its counter against that
+local and leaves the loop when it is not below; no window holds both the
+length read and the access. `GuardLoop.v` takes four consecutive byte
+strings: the capture (`local.get b ; i32.load 4 ; [i32.const s ; i32.div_u ;]
+local.set n`), everything up to the exit test, the test and the access (a run
+in the window language, in which a `br_if` is read as an exit: past it its
+condition was zero), and everything from there to the `end` of the outermost
+block opened since the capture. `loop_core` decodes the capture (`loop_pre`),
+runs GuardWindow's check on the capture's instructions followed by those of
+the test and the access, and scans every other instruction with its length
+(`scan_keep`: none assigns `b` or `n`, the nesting closes what it opened and
+never leaves the block the capture stands in). `loop_sound`: if `loop_core`
+accepts, the capture decodes, the scans hold, and from ANY locals in which
+`n` holds what the capture would store there (any globals, any memory, any
+stack beneath, with 32-bit wrap-around), every run of the test and the
+access that reaches the access touches only the payload that memory's
+length word gives the block at `b`, as long as it lies in the 32-bit address
+space. `loop_class` then computes, with no theorem of its own, which of
+three things stands behind the length word at the access being the one the
+capture read: no instruction in between writes memory or calls (pure), the
+capture is preceded by `local.get b ; call $inc` (held), or local `b` is read
+nowhere in between but for the access, whose run assigns no local and leaves
+nothing computed from `b` on the stack (kept). No witness is read, and the
+anchor file gives one number, the increment routine's function index.
+`proofs/structural-wall.sh` has the cutter (`almide-anchor-check --loops`,
+loops.rs) propose every access addressed by the captured block's local and
+the tested counter, testing no bound, stride, offset or width, and the Rocq
+kernel prove each distinct proposal's class (`proofs/check-shipped-loops.sh`):
+a proposal whose core the kernel refuses fails the gate, and so do a count of
+accepted reads below the leg's floor and more reads with nothing behind the
+length word than the leg's ceiling (`proofs/shipped-loops-floor.txt`).
+Trusted for it: what the window language trusts above; that the scans' table
+reads each instruction's length as the binary format has it; the step from
+"no instruction in between assigns `b` or `n`" to "at the test `n` holds the
+captured count", an argument from the instruction set and structured control
+and not a theorem; of the cutter, that the strings are consecutive bytes of
+one function body cut at instruction boundaries; for a held loop, that no
+routine writes the length word of a block with a second holder and that the
+share is not given up inside the loop (the ownership witness's subject), and
+that the function at the increment's index is the proven routine
+(`proofs/check-shipped-routines.sh`); for a kept loop, that code which was
+not handed what `b` holds reaches the block only through another reference
+(another local may hold the same address), that such a reference makes the
+block shared, and that no other store lands on its length word — what the
+anchor check's own Count rule assumes;
+and, as for a window, that `b` is a live block whose length word does not
+exceed its payload. A read guarded by another shape (a cursor walked to an
+end pointer, a countdown, a bound that comes from an enclosing test) is not
+proposed and stays with the rules above.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
