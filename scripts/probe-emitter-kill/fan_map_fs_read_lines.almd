@@ -1,0 +1,12 @@
+// Probe: `fan.map` whose callback is a one-argument `fs` call that is not
+// `fs.read_text`. Each element must be the file's list of lines.
+import fs
+
+effect fn main() -> Unit = {
+  fs.write_text("probe_fan_lines_a.txt", "one\ntwo\nthree\n")!
+  fs.write_text("probe_fan_lines_b.txt", "four\nfive\n")!
+  let got = fan.map(["probe_fan_lines_a.txt", "probe_fan_lines_b.txt"], (p) => fs.read_lines(p))!
+  for lines in got {
+    println("${list.len(lines)} ${list.join(lines, "|")}")
+  }
+}

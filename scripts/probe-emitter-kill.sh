@@ -121,6 +121,20 @@ run_all() {
   done
 }
 
+# cargo_tests <label>: the project's own integration tests named in
+# CARGO_TESTS (`<test file>:<name filter>`), run against the compiler now
+# built. One line per test file in <out>/cargo-tests.tsv.
+cargo_tests() {
+  local label="$1" t file filter rc
+  for t in ${CARGO_TESTS:-}; do
+    file="${t%%:*}"; filter="${t#*:}"
+    rc=0
+    timeout 2400 cargo test -q --release --locked --test "$file" "$filter" > "$OUT/$label.cargo-$file.out" 2>&1 < /dev/null || rc=$?
+    printf '%s\t%s\t%s\t%s\n' "$label" "$t" "$rc" "$(grep -m1 -E '^test result' "$OUT/$label.cargo-$file.out" | cut -c1-120)" >> "$OUT/cargo-tests.tsv"
+    echo "$label: cargo test $t -> exit $rc: $(grep -E '^test result|FAILED|panicked' "$OUT/$label.cargo-$file.out" | head -n 4 | tr '\n' ' ' | cut -c1-300)"
+  done
+}
+
 t0=$(date +%s)
 build || { echo "baseline build failed"; tail -40 "$OUT/build.err"; exit 1; }
 echo "baseline build: $(( $(date +%s) - t0 )) s"
@@ -145,6 +159,7 @@ for p in $PROGS; do
   echo "-- $n (embedded)"; cat "$OUT/base/$n.embedded" | cut -c1-200
   echo "-- $n (stock)"; cat "$OUT/base/$n.stock" | cut -c1-200
 done
+cargo_tests base
 
 RES="$OUT/results.tsv"
 printf 'id\tprogram\truntime\tnoticed\tbaseline_last\tmutant_last\terr\n' > "$RES"
@@ -170,6 +185,7 @@ while IFS=$'\t' read -r -u 3 id file line genre name; do
       done
     done
     echo "$id: $(awk -F'\t' -v i="$id" '$1 == i && $4 == "yes" { printf "%s/%s ", $2, $3 }' "$RES")"
+    case " ${CARGO_TEST_IDS:-} " in *" $id "*) cargo_tests "$id" ;; esac
   else
     printf '%s\t-\t-\tno-build\t-\t-\t-\n' "$id" >> "$RES"; echo "$id no-build"; tail -3 "$OUT/build.err"
   fi

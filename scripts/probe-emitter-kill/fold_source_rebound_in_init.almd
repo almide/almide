@@ -1,0 +1,13 @@
+// Probe: a fold whose initial value is a block that rebinds the folded
+// variable and then allocates. The fold walks the list the variable held
+// when the call began, so the answer is 36.
+effect fn main() -> Unit = {
+  var xs = [1, 2, 3, 4, 5, 6, 7, 8]
+  let total = list.fold(xs, {
+    xs = [100, 200, 300, 400, 500, 600, 700, 800]
+    let ys = [9, 9, 9, 9, 9, 9, 9, 9]
+    list.len(ys) - 8
+  }, (acc, x) => acc + x)
+  println(int.to_string(total))
+  println(int.to_string(list.len(xs)))
+}

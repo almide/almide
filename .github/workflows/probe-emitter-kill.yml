@@ -1,10 +1,9 @@
 name: Probe — programs written for the surviving source mutants
-# A one-off measurement on its own branch: three programs written for one
-# mutant of the second sample that only the byte-level check noticed — it lets
-# a list's element count be read once before a loop although the loop hands
-# the list to a call (scripts/probe-emitter-kill/). Two of them shorten the
-# list inside the loop and must stop on the next index; the third only reads
-# it. Not a gate.
+# A one-off measurement on its own branch: programs written after reading the
+# mutants of the second sample that no layer noticed although they change a
+# module (scripts/probe-emitter-kill/), run by the unmutated compiler and by
+# each mutant read as changing behaviour; two of the mutants are also given
+# the project's own integration test of the path they change. Not a gate.
 on:
   push:
     branches: [probe/emitter-kill-fresh]
@@ -54,20 +53,11 @@ jobs:
           cargo mutants --list --json --package almide-wasm > "$RUNNER_TEMP/mutants/mutants.json"
           python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/mutants/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" 0 1 "$(paste -sd, scripts/probe-emitter-kill-ids.txt)"
           cat "$RUNNER_TEMP/pick/index.tsv" | cut -f1,2,3,5
-      - name: Install the module printer
-        run: |
-          cargo install --locked wasm-tools
-          wasm-tools --version
       - name: Measure
         env:
-          # The two contract programs whose module the byte-level check
-          # rejected under this mutant: their text is printed for both
-          # compilers so the changed instructions can be read.
-          # The last one is unrelated to the mutant: its module holds a function
-          # with the shape of the proved decrement routine that the anchor file
-          # does not name, and the module text and anchor file are wanted to
-          # read why.
-          INSPECT: "spec/wasm_cross/json_many_keys.almd spec/wasm_cross/sql_highlight_tokens.almd spec/wasm_cross/bigint_protocol_order.almd spec/wasm_cross/bigint_text_and_pow_limits.almd spec/wasm_cross/effect_unwrap_in_loop.almd spec/wasm_cross/guard_jump_in_value_fn.almd spec/wasm_cross/top_let_fn_value_closure_param.almd"
+          # `<integration test file>:<name filter>` and the mutants it is run against.
+          CARGO_TESTS: "map_flood_fallback_test:wasm"
+          CARGO_TEST_IDS: "m0257 m0258"
         run: bash scripts/probe-emitter-kill.sh "$RUNNER_TEMP/kill" "$RUNNER_TEMP/pick"
       - name: Upload results
         if: always()
@@ -76,6 +66,8 @@ jobs:
           name: emitter-kill
           path: |
             ${{ runner.temp }}/kill/results.tsv
+            ${{ runner.temp }}/kill/cargo-tests.tsv
+            ${{ runner.temp }}/kill/*.cargo-*.out
             ${{ runner.temp }}/kill/base
             ${{ runner.temp }}/kill/m*/*.embedded
             ${{ runner.temp }}/kill/m*/*.stock

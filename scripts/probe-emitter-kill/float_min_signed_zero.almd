@@ -1,0 +1,8 @@
+// Probe: the minimum of the two zeros is the negative one, in either order.
+effect fn main() -> Unit = {
+  let a = float.min(0.0 - 0.0, 0.0)
+  let nz = 0.0 * -1.0
+  println(float.to_string(1.0 / float.min(nz, 0.0)))
+  println(float.to_string(1.0 / float.min(0.0, nz)))
+  println(float.to_string(a))
+}

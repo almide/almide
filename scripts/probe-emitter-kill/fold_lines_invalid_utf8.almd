@@ -1,0 +1,15 @@
+// Probe: a streamed fold over a file whose second line is not UTF-8. The
+// walk must answer err, as reading the whole file does.
+import fs
+
+effect fn main() -> Unit = {
+  fs.write_bytes("probe_bad_utf8.txt", bytes.from_list([97, 10, 255, 254, 10, 98, 10]))!
+  println(match fs.fold_lines("probe_bad_utf8.txt", 0, (acc, line) => acc + string.len(line)) {
+    ok(n) => "ok(${n})",
+    err(_) => "err",
+  })
+  println(match fs.read_text("probe_bad_utf8.txt") {
+    ok(t) => "ok(${string.len(t)})",
+    err(_) => "err",
+  })
+}

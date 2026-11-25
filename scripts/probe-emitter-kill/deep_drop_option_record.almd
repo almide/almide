@@ -1,0 +1,21 @@
+// Probe: a two-million-deep value of a record that holds itself through an
+// Option, released when `main` returns.
+type Node = { value: Int, next: Node? }
+
+fn build(n: Int) -> Node? = {
+  var head: Node? = none
+  for i in 0..<n {
+    head = some(Node { value: i, next: head })
+  }
+  head
+}
+
+fn first(o: Node?) -> Int = match o {
+  some(node) => node.value,
+  none => -1,
+}
+
+effect fn main() -> Unit = {
+  let h = build(2000000)
+  println(int.to_string(first(h)))
+}

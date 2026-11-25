@@ -1,0 +1,26 @@
+// Probe: a function that removes a key from its caller's map through a `mut`
+// parameter. The caller then reads the map every way: the removed keys are
+// gone and the others keep their order.
+fn strip(mut m: Map[String, Int], k: String) -> Unit = {
+  m = map.remove(m, k)
+}
+
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.new()
+  m["a"] = 1
+  m["b"] = 2
+  m["c"] = 3
+  m["d"] = 4
+  m["e"] = 5
+  strip(m, "b")
+  strip(m, "d")
+  println(int.to_string(map.len(m)))
+  println(list.join(map.keys(m), ","))
+  println(list.join(map.values(m) |> list.map((v) => int.to_string(v)), ","))
+  for (k, v) in m {
+    println("${k}=${v}")
+  }
+  m["f"] = 6
+  println(list.join(map.keys(m), ","))
+  println("${map.contains(m, "b")} ${map.get(m, "c") ?? 0} ${map.get(m, "f") ?? 0}")
+}

@@ -1,0 +1,7 @@
+// Probe: a two-call recursion whose right call steps by one, three million
+// deep. As an accumulator loop it needs no stack; the answer is 3000001.
+fn deep(n: Int) -> Int = if n < 1 then 1 else deep(n - 5000000) + deep(n - 1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(deep(3000000)))
+}

@@ -1,0 +1,12 @@
+// Probe: a value of a recursive type as a map key.
+type Chain =
+  | End
+  | Link(Int, Chain)
+
+effect fn main() -> Unit = {
+  var m: Map[Chain, Int] = map.new()
+  m[Link(1, End)] = 5
+  m[Link(2, Link(1, End))] = 6
+  println(int.to_string(map.len(m)))
+  println(int.to_string(map.get(m, Link(1, End)) ?? -1))
+}
