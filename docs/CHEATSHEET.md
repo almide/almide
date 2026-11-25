@@ -625,6 +625,12 @@ m["key"]                   // index read (returns Option[V])
 m["key"] = value           // index write (var only)
 ```
 
+Set members and Map keys compare with the collection key equality: every NaN
+is one key and `-0.0` is the key `0.0`, also inside List / tuple / record /
+variant / Option components (`set.from_list([nan, nan, 0.0, -0.0])` has 2
+members; the first-stored member stays). `==` stays IEEE (`nan == nan` is
+false), and so do `list.contains` / `index_of` / `unique` / `dedup`.
+
 ### String interpolation
 ```
 "hello ${name}, result=${1 + 1}"

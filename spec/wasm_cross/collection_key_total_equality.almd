@@ -1,0 +1,95 @@
+// @contract: C-466
+// ALS-C11: a Set element and a Map key compare with the collection key
+// equality — every NaN (any sign, any producer) is one key and -0.0 is the key
+// 0.0, through every List / tuple / record / variant / Option component of the
+// element or key — while `==` and the list equality family stay IEEE (ALS-C3,
+// C-289). A member or key already present keeps the value first stored.
+// Every Float is built at run time; a zero's sign is read through float.signum.
+// Each comment gives the line the println under it prints.
+type P = { x: Float, tag: String }
+
+type Shape =
+  | Dot(Float)
+  | Seg(Float, Float)
+
+fn sign(x: Float) -> String = if float.signum(x) < 0.0 then "-" else "+"
+
+fn signs(s: Set[Float]) -> String = set.to_list(s) |> list.map((x) => if x == x then sign(x) else "n") |> list.join("")
+
+fn main() -> Unit = {
+  let one: Float = float.abs(-1.0)
+  let pz: Float = one * 0.0
+  let mz: Float = (0.0 - one) * 0.0
+  let nan: Float = pz / pz
+  let neg_nan: Float = -nan
+  let inf: Float = one / pz
+  let inf_nan: Float = inf - inf
+  // Set[Float]: three NaNs are one member, the two zeros are one member
+  let s = set.from_list([
+    nan,
+    mz,
+    neg_nan,
+    pz,
+    inf_nan,
+    one
+  ])
+  // set 3 n-+
+  println("set ${set.len(s)} ${signs(s)}")
+  let found = [set.contains(s, neg_nan), set.contains(s, pz), set.contains(s, 2.0 * one)]
+  // contains [true, true, false]
+  println("contains ${found}")
+  let grown = set.insert(s, pz)
+  // insert 3 n-+ 3
+  println("insert ${set.len(grown)} ${signs(grown)} ${set.len(set.insert(s, inf_nan))}")
+  // remove 2 2
+  println("remove ${set.len(set.remove(s, inf_nan))} ${set.len(set.remove(s, pz))}")
+  let t = set.from_list([pz, neg_nan])
+  let sizes = [set.len(set.union(s, t)), set.len(set.intersection(s, t)), set.len(set.difference(s, t))]
+  // algebra [3, 2, 1] true true
+  println("algebra ${sizes} ${set.is_subset(t, s)} ${set.is_disjoint(t, set.from_list([one]))}")
+  // set eq true true
+  println("set eq ${s == s} ${t == set.from_list([nan, mz])}")
+  // nested Floats: the same key equality on every component
+  let lists = set.from_list([
+    [pz, nan],
+    [mz, neg_nan],
+    [one],
+    [one, inf_nan]
+  ])
+  // lists 3 true
+  println("lists ${set.len(lists)} ${set.contains(lists, [mz, inf_nan])}")
+  let a1 = P { x: nan, tag: "a" }
+  let a2 = P { x: neg_nan, tag: "a" }
+  let b1 = P { x: mz, tag: "b" }
+  let b2 = P { x: pz, tag: "b" }
+  let recs = set.from_list([a1, a2, b1, b2])
+  // records 2 true
+  println("records ${set.len(recs)} ${set.contains(recs, P { x: inf_nan, tag: "a" })}")
+  let opts = set.from_list([some(nan), some(neg_nan), none, some(mz), some(pz)])
+  // options 3 true
+  println("options ${set.len(opts)} ${set.contains(opts, some(inf_nan))}")
+  let shapes = set.from_list([Dot(nan), Dot(neg_nan), Seg(mz, one), Seg(pz, one), Seg(one, mz)])
+  // variants 3 true
+  println("variants ${set.len(shapes)} ${set.contains(shapes, Seg(pz, one))}")
+  let pairs = set.from_list([(nan, 1), (neg_nan, 1), (mz, 2), (pz, 2), (pz, 3)])
+  // tuples 3 true
+  println("tuples ${set.len(pairs)} ${set.contains(pairs, (inf_nan, 1))}")
+  // Map keys: Float32, alone and nested
+  let z = float32.from(pz)
+  let nz = float32.from(mz)
+  let n32 = z / z
+  let m: Map[Float32, Int] = map.from_list([(z, 1), (nz, 2), (n32, 3), (-n32, 4)])
+  // map 2 some(2) some(4) true
+  println("map ${map.len(m)} ${map.get(m, nz)} ${map.get(m, n32)} ${map.contains(m, -n32)}")
+  let m2 = map.set(m, nz, 9)
+  // map set 2 some(9) 1 true
+  println("map set ${map.len(m2)} ${map.get(m2, z)} ${map.len(map.remove(m, n32))} ${m == m}")
+  let nested: Map[(Float32, String), Int] = map.from_list([((n32, "k"), 1), ((-n32, "k"), 2), ((nz, "k"), 3)])
+  // map nested 2 some(3) some(2)
+  println("map nested ${map.len(nested)} ${map.get(nested, (z, "k"))} ${map.get(nested, (n32, "k"))}")
+  // `==` and the list equality family stay IEEE
+  // ieee false true false false
+  println("ieee ${nan == nan} ${mz == pz} ${[nan] == [nan]} ${a1 == P { x: nan, tag: "a" }}")
+  // lists ieee false 2 1
+  println("lists ieee ${list.contains([nan], nan)} ${list.len(list.unique([nan, nan]))} ${list.len(list.unique([mz, pz]))}")
+}
