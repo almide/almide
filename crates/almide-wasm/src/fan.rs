@@ -353,6 +353,9 @@ impl Emitter<'_> {
         for (k, arm) in exprs.iter().enumerate() {
             let got = match &overlap {
                 Some(calls) => {
+                    // The arm's call is the overlap's (its hook ran in phase A):
+                    // the node is the arm's argument, never lowered.
+                    self.witness_prefetch_open(arm);
                     self.f.instructions().local_get(slots[k]);
                     self.fan_take(&calls[k])?
                 }

@@ -746,7 +746,7 @@ fn emit_program_pass(
         stubs: declared.iter().map(|d| d.index).collect(),
     });
     let creators = decls_rec::Creators { fns: &fn_lambdas, main: main_lambdas.clone(), lambdas: &lambda_children, entry_fn_indices: &entry_fn_indices };
-    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, &bytes);
+    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, (&pre_declare, &bytes));
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
 }

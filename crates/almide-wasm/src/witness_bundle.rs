@@ -127,12 +127,21 @@ fn records_inner(
     let anchor_file = match fmap {
         None => String::new(),
         Some(fmap) => {
-    let locate = Locator::new(emitted, shipped, seals, remaps, fmap)?;
+    // The anchors name the bodies as the emitter wrote them: before the
+    // declare post-pass re-encoded every call (#2275), when it ran.
+    let (anchored, anchored_map) = if decls.stubs.is_empty() {
+        (emitted, fmap.to_vec())
+    } else {
+        let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
+        (decls.pre_declare.as_slice(), pre_declare_map(&decls.pre_declare, &decls.stubs, ei, fmap)?)
+    };
+    let locate = Locator::new(anchored, shipped, seals, remaps, &anchored_map)?;
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
-            let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
+            let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
+            let d = (post_declare(crate::F_ALLOC, &decls.stubs, ei) - ei) as usize;
             match fmap.get(d).copied().flatten() {
                 Some(j) => (j + cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?).to_string(),
                 None => "-".to_string(),
@@ -143,7 +152,7 @@ fn records_inner(
         locate.text(&pick(fields_anchors))?,
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers })?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers, stubs: &decls.stubs })?
         // #4005 A4: every self-host prim access the pass emitted, located.
         + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
         // #4005 A4: each self-host body's heap-typed parameters, by its
@@ -158,7 +167,8 @@ fn records_inner(
                 cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
             );
             let ship = |f: u32| {
-                f.checked_sub(ei)
+                post_declare(f, &decls.stubs, ei)
+                    .checked_sub(ei)
                     .and_then(|d| fmap.get(d as usize).copied().flatten())
                     .map_or("-".to_string(), |j| (j + si).to_string())
             };
@@ -226,6 +236,36 @@ struct RcRecords<'w> {
     routines: &'w [(u64, usize, usize)],
     window_ids: &'w std::collections::HashMap<u64, (u64, usize, usize)>,
     helpers: &'w [(u32, String, String)],
+    /// The pre-declare indices of the stubs that became imports.
+    stubs: &'w [u32],
+}
+
+/// The function map of the module BEFORE the declare post-pass: its
+/// defined body `i` is the post-declare body [`post_declare`] names (a stub
+/// became an import: no body, `None`), then through `fmap` as it ships.
+fn pre_declare_map(pre: &[u8], stubs: &[u32], ei: u32, fmap: &[Option<u32>]) -> Result<Vec<Option<u32>>, String> {
+    use crate::cert_project as cp;
+    let base = cp::function_imports(pre).map_err(|e| format!("imports: {e}"))?;
+    let n = bodies(pre)?.len() as u32;
+    Ok((0..n)
+        .map(|i| {
+            let f = base + i;
+            if stubs.contains(&f) {
+                return None;
+            }
+            fmap.get((post_declare(f, stubs, ei) - ei) as usize).copied().flatten()
+        })
+        .collect())
+}
+
+/// Where a function the emitter numbered BEFORE the `imports::declare`
+/// post-pass (#2275) is in the finished module `emitted` (`ei` function
+/// imports): an `@extern(wasm, …)` hook's stub and a JS-host fan protocol
+/// helper become imports, so every defined function moves. The runtime
+/// routines (`F_ALLOC`, `F_INC`, the releases, a helper body) are named by
+/// their emit-time index; with no stub the map is the identity.
+fn post_declare(f: u32, stubs: &[u32], ei: u32) -> u32 {
+    crate::imports::remap_index(f, stubs, ei.saturating_sub(stubs.len() as u32))
 }
 
 fn rc_lines(
@@ -237,13 +277,13 @@ fn rc_lines(
     releases: &std::collections::BTreeSet<u32>,
     records: RcRecords<'_>,
 ) -> Result<String, String> {
-    let RcRecords { arms, routines, window_ids, helpers } = records;
+    let RcRecords { arms, routines, window_ids, helpers, stubs } = records;
     use crate::cert_project as cp;
     let (ei, si) = (
         cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
         cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
     );
-    let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
+    let ship = |f: u32| post_declare(f, stubs, ei).checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
     let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
     let mut rc: Vec<String> = frames
