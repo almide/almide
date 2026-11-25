@@ -46,7 +46,16 @@ it is not linked into `almide` or `almide-verify`, so a user's build is not
 anchor-checked, #4849) — the bounds, init and fields events located
 one by one (#4011 (d)), the ownership witness's RC events matched one to one
 to the rc_inc and release calls on the values they name, every matched
-release its local's last read (#4277). What it still trusts there: that the
+release its local's last read (#4277). That check is unverified code. For
+one shape the Rocq kernel judges the shipped bytes itself, with no witness:
+where a compare, its aborting arm and the access lie in one straight-line
+run of instructions, `proofs/GuardWindow.v` decodes that window's bytes and
+its theorem `window_sound` puts the access inside the block's payload in
+every run, under the machine's own wrap-around
+(`proofs/check-shipped-windows.sh`, every load and store swept, the proven
+count held to a floor; what it trusts is in
+[proofs/TRUSTED_BASE.md](../../proofs/TRUSTED_BASE.md)). What the anchor
+check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and
 release routines, the copy-on-write judges), a read of a released block
 through another local or a slot that holds it without its own credit, and
