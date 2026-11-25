@@ -1,9 +1,9 @@
-fn heads(xs: List[String]) -> String = match xs {
-  [h, ..t] if list.len(t) > 0 => "${h}+${list.len(t)}",
-  [h, ..] => "solo:${h}",
-  [] => "none",
-}
+fn tagged(line: String) -> String =
+  match string.split_once(line, ";") {
+    some((k, v)) => if k == "x" then v else k,
+    none => line,
+  }
 
-test "heads" {
-  assert_eq(heads(["x"]), "solo:x")
+test "tagged" {
+  assert_eq(tagged("a;b"), "a")
 }

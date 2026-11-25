@@ -1,6 +1,8 @@
-# The probe of verify.gate-build-incomplete-accepted (C-462): a list-rest
-# pattern is a frame the wasm ownership witness does not certify yet
-# (`pattern:list-rest`), so the module's certificate is INCOMPLETE; every
+# The probe of verify.gate-build-incomplete-accepted (C-462): a match tail
+# whose arm selects between two borrowed views is a frame the wasm ownership
+# witness does not certify yet (`tail:view-result`; the guarded list rest this
+# probe used certifies since the 29th integrator), so the module's
+# certificate is INCOMPLETE; every
 # route that makes or runs the module refuses it without the flag. Each
 # column names --target wasm itself.
 expect = "certificate-incomplete"
