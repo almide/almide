@@ -193,7 +193,7 @@ impl<'a> Interpreter<'a> {
         let mut out: Vec<Value> = Vec::new();
         for item in items {
             let r = val!(self.apply_closure(&clo, vec![item]));
-            if !out.contains(&r) {
+            if !out.iter().any(|m| crate::value::key_eq(m, &r)) {
                 out.push(r);
             }
         }

@@ -117,6 +117,9 @@ fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &
     // emitted with the codegen's own meter and its runtime, so the Rust stands
     // alone — the region delegates point at a module only the CLI links.
     let metered = t == codegen::pass::Target::Rust && almide::ir::runtime_use::uses_metered_prims(ir);
+    if t == codegen::pass::Target::Rust {
+        super::warn_unverified_route("`--target rust` source");
+    }
     let opts = codegen::CodegenOptions { repr_c, allow_unverified: false, trace: trace_map, meter_in_codegen: metered };
     match codegen::codegen_with(ir, t, &opts) {
         codegen::CodegenOutput::Source(code) => {

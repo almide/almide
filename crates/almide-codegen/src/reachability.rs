@@ -92,6 +92,14 @@ pub fn registered_keys(module: Option<&str>, fname: &str) -> Vec<String> {
     }
 }
 
+/// Every function name `expr` could call or reference as a value (the
+/// collector the reachability walk follows edges with).
+pub fn called_names(expr: &IrExpr) -> HashSet<String> {
+    let mut out = HashSet::new();
+    CallNameCollector { out: &mut out }.visit_expr(expr);
+    out
+}
+
 /// Collect the call-names directly referenced by a single root expression
 /// (a top-level `let` initializer, which `__init_globals` runs at startup).
 pub(super) fn names_called_in(expr: &IrExpr, out: &mut HashSet<String>) {
@@ -160,6 +168,31 @@ fn bfs_reachable(
     }
 
     reachable
+}
+
+/// Reachable-function names of a native PROGRAM (C-461): what its binary can
+/// run — `main`, every `@export(c)` fn (a C caller reaches it from outside
+/// the Almide call graph) and every fn a top-level `let` initializer names.
+/// Tests and plain `pub fn`s are not roots: a native build of the program
+/// runs neither, so a call only they make cannot fail it.
+pub fn reachable_native_program(program: &IrProgram) -> HashSet<String> {
+    let is_c_export = |f: &almide_ir::IrFunction| f.export_attrs.iter().any(|a| a.target.as_str() == "c");
+    let mut roots: HashSet<String> = HashSet::new();
+    for f in program.functions.iter().filter(|f| !f.is_test) {
+        if f.name.as_str() == "main" || is_c_export(f) {
+            roots.insert(f.name.to_string());
+        }
+    }
+    for m in &program.modules {
+        let mname = m.name.to_string();
+        for f in m.functions.iter().filter(|f| !f.is_test && is_c_export(f)) {
+            roots.extend(registered_keys(Some(&mname), f.name.as_str()));
+        }
+    }
+    for tl in program.top_lets.iter().chain(program.modules.iter().flat_map(|m| &m.top_lets)) {
+        names_called_in(&tl.value, &mut roots);
+    }
+    compute_reachable_fn_names(program, roots)
 }
 
 /// Reachable-function name set for a whole program, using the SAME roots the WASM

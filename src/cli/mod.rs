@@ -50,6 +50,7 @@ mod cargo_toml;
 mod crate_inputs;
 pub(crate) use crate_inputs::native_rust_text;
 mod native_target;
+mod native_extern_gate;
 mod std_split;
 mod js_host;
 mod wasm_debug;
@@ -470,7 +471,20 @@ pub(crate) fn render_v1_native_or_fallback(
     // whole program renders — the differential that holds the two routes'
     // spends equal (tests/fan_meter_splice_test.rs).
     let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
-    match rendered.map(|(rust, _)| rust) {
+    // #4828, #4930 (owner ruling 2026-11-24 W2): the v1 render's own
+    // certificates — of the MIR it rendered — are judged by the linked
+    // verifier against the exact Rust text that ships, before rustc sees it.
+    // A rejection is a compiler bug: the build stops.
+    let rendered = rendered.map(|(rust, certs)| {
+        if let Err(e) = almide::certificate_gate_native::judge_native(&format!("almide {}", env!("ALMIDE_VERSION_LINE")), "native v1 render", &rust, &certs) {
+            err(&format!(
+                "error[certificate-rejected]: the native v1 render's own certificate does not hold, which is a compiler bug — please report it\n  {e}"
+            ));
+            std::process::exit(1);
+        }
+        rust
+    });
+    match rendered {
         Ok(_) if force_splice => {
             let ir = metered.expect("force_splice implies a metered program");
             link_metered_regions(&source_text, rs_code(), "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
@@ -514,6 +528,17 @@ pub(crate) fn render_v1_native_or_fallback(
             rs_code()
         }
     }
+}
+
+/// W3 (#4006, owner ruling 2026-11-24): a route the verified native render
+/// does not serve — `--target rust` source, `--repr-c` / `--cdylib`, the
+/// rustc `--target wasi` route, the REPL — ships the standard codegen's Rust,
+/// which no certificate covers. It stays, declared unverified (decision row
+/// witness.native-verified-fallback), and says so on every use.
+pub(crate) fn warn_unverified_route(route: &str) {
+    err(&format!(
+        "warning: {route} is an unverified route: it ships the standard codegen's Rust, which no certificate covers (#4006); `almide build` / `almide run` ship the verified native render"
+    ));
 }
 
 fn verbose() -> bool {

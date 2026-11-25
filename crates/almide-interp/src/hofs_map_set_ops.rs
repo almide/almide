@@ -106,7 +106,7 @@ impl<'a> Interpreter<'a> {
         match (args.first(), args.get(1)) {
             (Some(Value::Map(e)), Some(k)) => Flow::val(Value::Option(
                 e.iter()
-                    .find(|(ek, _)| ek == k)
+                    .find(|(ek, _)| crate::value::key_eq(ek, k))
                     .map(|(_, v)| Box::new(v.clone())),
             )),
             _ => Flow::Abort("internal: map.get bad args".into()),
@@ -116,7 +116,7 @@ impl<'a> Interpreter<'a> {
     fn map_contains_key(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
             (Some(Value::Map(e)), Some(k)) => {
-                Flow::val(Value::Bool(e.iter().any(|(ek, _)| ek == k)))
+                Flow::val(Value::Bool(e.iter().any(|(ek, _)| crate::value::key_eq(ek, k))))
             }
             _ => Flow::Abort("internal: map.contains_key bad args".into()),
         }
@@ -174,8 +174,18 @@ impl<'a> Interpreter<'a> {
             "intersection" => Some(self.set_intersection(args)),
             "difference" => Some(self.set_difference(args)),
             "symmetric_difference" => Some(self.set_symmetric_difference(args)),
+            // ALS-C11: answered here under the key equality rather than by
+            // the self-host bodies, which compare an element's raw bits.
+            "remove" => Some(self.set_remove(args)),
+            "is_subset" => Some(self.set_relation(args, "is_subset")),
+            "is_disjoint" => Some(self.set_relation(args, "is_disjoint")),
             _ => None,
         }
+    }
+
+    /// Set membership under the collection key equality (ALS-C11).
+    fn set_has(members: &[Value], x: &Value) -> bool {
+        members.iter().any(|m| crate::value::key_eq(m, x))
     }
 
     fn set_pair<'v>(
@@ -195,7 +205,7 @@ impl<'a> Interpreter<'a> {
         };
         let mut out = (**a).clone();
         for x in b.iter() {
-            if !out.contains(x) {
+            if !Self::set_has(&out, x) {
                 out.push(x.clone());
             }
         }
@@ -207,7 +217,7 @@ impl<'a> Interpreter<'a> {
             Ok(p) => p,
             Err(f) => return f,
         };
-        let out: Vec<Value> = a.iter().filter(|x| b.contains(x)).cloned().collect();
+        let out: Vec<Value> = a.iter().filter(|x| Self::set_has(b, x)).cloned().collect();
         Flow::val(Value::Set(Rc::new(out)))
     }
 
@@ -216,7 +226,7 @@ impl<'a> Interpreter<'a> {
             Ok(p) => p,
             Err(f) => return f,
         };
-        let out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
+        let out: Vec<Value> = a.iter().filter(|x| !Self::set_has(b, x)).cloned().collect();
         Flow::val(Value::Set(Rc::new(out)))
     }
 
@@ -225,9 +235,32 @@ impl<'a> Interpreter<'a> {
             Ok(p) => p,
             Err(f) => return f,
         };
-        let mut out: Vec<Value> = a.iter().filter(|x| !b.contains(x)).cloned().collect();
-        out.extend(b.iter().filter(|x| !a.contains(x)).cloned());
+        let mut out: Vec<Value> = a.iter().filter(|x| !Self::set_has(b, x)).cloned().collect();
+        out.extend(b.iter().filter(|x| !Self::set_has(a, x)).cloned());
         Flow::val(Value::Set(Rc::new(out)))
+    }
+
+    fn set_remove(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Set(e)), Some(x)) => {
+                let out: Vec<Value> = e.iter().filter(|m| !crate::value::key_eq(m, x)).cloned().collect();
+                Flow::val(Value::Set(Rc::new(out)))
+            }
+            _ => Flow::Abort("internal: set.remove bad args".into()),
+        }
+    }
+
+    fn set_relation(&mut self, args: &[Value], op: &str) -> Flow {
+        let (a, b) = match Self::set_pair(args, op) {
+            Ok(p) => p,
+            Err(f) => return f,
+        };
+        let answer = if op == "is_subset" {
+            a.iter().all(|x| Self::set_has(b, x))
+        } else {
+            !a.iter().any(|x| Self::set_has(b, x))
+        };
+        Flow::val(Value::Bool(answer))
     }
 
     fn set_is_empty(&mut self, args: &[Value]) -> Flow {
@@ -256,7 +289,7 @@ impl<'a> Interpreter<'a> {
             Some(items) => {
                 let mut out: Vec<Value> = Vec::new();
                 for x in items {
-                    if !out.contains(&x) {
+                    if !Self::set_has(&out, &x) {
                         out.push(x);
                     }
                 }
@@ -268,7 +301,7 @@ impl<'a> Interpreter<'a> {
 
     fn set_contains(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
-            (Some(Value::Set(e)), Some(x)) => Flow::val(Value::Bool(e.contains(x))),
+            (Some(Value::Set(e)), Some(x)) => Flow::val(Value::Bool(Self::set_has(e, x))),
             _ => Flow::Abort("internal: set.contains bad args".into()),
         }
     }
@@ -277,7 +310,7 @@ impl<'a> Interpreter<'a> {
         match (args.first(), args.get(1)) {
             (Some(Value::Set(e)), Some(x)) => {
                 let mut new = (**e).clone();
-                if !new.contains(x) {
+                if !Self::set_has(&new, x) {
                     new.push(x.clone());
                 }
                 Flow::val(Value::Set(Rc::new(new)))

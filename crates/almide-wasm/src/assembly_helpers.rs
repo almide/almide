@@ -58,7 +58,8 @@ pub(crate) fn helper_body_unsigned(h: &Helper, work: &FnWork, helper_snapshot: &
     Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
     Helper::StringSplitByte => value_helpers::emit_string_split_byte_helper(),
-    Helper::ScanF64 => runtime::emit_scan_f64(),
+    Helper::ScanF64 => runtime::emit_scan_f64(false),
+    Helper::ScanF64Key => runtime::emit_scan_f64(true),
     Helper::MapReserve => runtime_alloc::emit_map_reserve(),
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
@@ -102,7 +103,7 @@ pub(crate) fn resolve_extras(
             | Helper::Utf8Lossy
             | Helper::ErrText
             | Helper::BytesToString { .. } => vec![ValType::I32],
-            Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
+            Helper::ScanF64 | Helper::ScanF64Key => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }

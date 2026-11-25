@@ -276,7 +276,8 @@ impl crate::emitter::Emitter<'_> {
         use crate::work::{Helper, NamedOp};
         let gq = global(self.work, EQ_Q);
         let gd = global(self.work, EQ_DEPTH);
-        let me = self.work.helper(Helper::NamedOp { op: NamedOp::Eq, ti });
+        let op = if self.key_eq { NamedOp::KeyEq } else { NamedOp::Eq };
+        let me = self.work.helper(Helper::NamedOp { op, ti });
         let slot = self.work.slot(TableEntry::Direct(me));
         let eq_ty = self.work.itype(vec![ValType::I32, ValType::I32], Some(ValType::I32));
         let q = self.hold_i32()?;

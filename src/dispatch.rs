@@ -118,6 +118,15 @@ fn dispatch_check(args: CheckCmd) {
         refuse_build_switches_under_critical();
     }
     let check_target = check_target_route(target.as_deref());
+    // C-463 (#4006, owner ruling 2026-11-24 W3): the critical profile admits
+    // only routes a certificate covers. The rustc `--target wasi` route ships
+    // the standard codegen's Rust, a declared unverified route.
+    if critical.is_some() && check_target == cli::CheckTarget::Wasi {
+        eprintln!(
+            "error: --profile critical refuses --target wasi: the rustc wasm32-wasip1 route is an unverified route, it ships the standard codegen's Rust, which no certificate covers (#4006)\n  hint: judge the verified routes instead, `--target wasm` or `--target native`"
+        );
+        std::process::exit(1);
+    }
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
     // same entries in the same order (#2253): every row already names its
@@ -201,14 +210,16 @@ fn refuse_build_switches_under_critical() {
 }
 
 /// `almide check --target`: `wasm` adds the wasm build route's verdicts,
-/// `wasi` the rustc wasm32-wasip1 route's (#4913); nothing else is accepted.
+/// `wasi` the rustc wasm32-wasip1 route's (#4913), `native` the native build
+/// route's (C-461); nothing else is accepted.
 fn check_target_route(target: Option<&str>) -> cli::CheckTarget {
     match target {
         None => cli::CheckTarget::Native,
         Some("wasm") => cli::CheckTarget::Wasm,
         Some("wasi") => cli::CheckTarget::Wasi,
+        Some("native") => cli::CheckTarget::NativeRoute,
         Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm` or `wasi` (got `{other}`) — the native target is what `almide check` already judges");
+            eprintln!("error: `almide check --target` accepts only `wasm`, `wasi` or `native` (got `{other}`)");
             std::process::exit(1);
         }
     }

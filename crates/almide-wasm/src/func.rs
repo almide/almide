@@ -350,6 +350,7 @@ pub(crate) fn lower_fn(
             hold_f64_base,
             hold_f64_depth: 0,
             scr_f64_local,
+            key_eq: false,
             loop_ctl: None,
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),

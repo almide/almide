@@ -27,7 +27,8 @@ impl Emitter<'_> {
             INT => Ok(F_SCAN_W64),
             BOOL => Ok(F_SCAN_W32),
             STR => Ok(F_SCAN_STR),
-            FLOAT => Ok(self.work.helper(Helper::ScanF64)),
+            // ALS-C11: membership is the collection key equality.
+            FLOAT => Ok(self.work.helper(Helper::ScanF64Key)),
             // Every other shape `==` compares is an i32 word (a handle, or
             // Unit's zero) the deep scan loads and compares with the
             // type-directed equality (#4578).

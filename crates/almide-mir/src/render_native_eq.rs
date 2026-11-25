@@ -11,8 +11,11 @@ impl Derive<'_> {
         use almide_lang::types::{constructor::TypeConstructorId as C, Ty};
         match t {
             Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::String | Ty::Bytes => Ok(()),
-            Ty::Applied(C::List | C::Set, a) if a.len() == 1 => self.set_element_type(&a[0]),
-            Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if self.exact_eq_type(t, &mut Default::default()) {
+            Ty::Applied(C::List | C::Set | C::Option, a) if a.len() == 1 => self.set_element_type(&a[0]),
+            // A generated type whose Float components compare per field
+            // (`source_equalities`) is a key too: its key bytes encode each
+            // Float canonically (ALS-C11, render_native_key_encode.rs).
+            Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => if self.exact_eq_type(t, &mut Default::default()) || self.float_key_type(t, &mut Default::default()) {
                 Ok(())
             } else {
                 Err(crate::render_native::wall("native: a Set element type with no exact equality"))
@@ -30,6 +33,32 @@ impl Derive<'_> {
         let ok = cases.iter().all(|(_, fs)| fs.iter().all(|t| self.exact_eq_type(t, visiting)));
         visiting.remove(n);
         ok
+    }
+
+    /// A generated type every field of which `field_eq` compares by its source
+    /// type: exact, a Float or Float32 lane, a List of one, or such a type.
+    fn float_key_type(&self, t: &almide_lang::types::Ty, visiting: &mut std::collections::BTreeSet<String>) -> bool {
+        use almide_lang::types::{constructor::TypeConstructorId as C, Ty};
+        let field = |t: &Ty, visiting: &mut std::collections::BTreeSet<String>| match t {
+            Ty::Float | Ty::Float32 | Ty::Float64 => true,
+            Ty::Applied(C::List, a) if a.len() == 1 && matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64) => true,
+            Ty::Named(..) | Ty::Tuple(_) | Ty::Record { .. } => self.exact_eq_type(t, &mut Default::default()) || self.float_key_type(t, visiting),
+            t => self.exact_eq_type(t, &mut Default::default()),
+        };
+        match t {
+            Ty::Tuple(es) => es.iter().all(|t| field(t, visiting)),
+            Ty::Record { fields } => fields.iter().all(|(_, t)| field(t, visiting)),
+            Ty::Named(..) => {
+                let n = block_key(t);
+                if REGION_NAMES.with(|r| r.borrow().contains(&n)) { return false; }
+                let Some((_, cases)) = self.decls.get(&n) else { return false };
+                if !visiting.insert(n.clone()) { return true; }
+                let ok = cases.iter().all(|(_, fs)| fs.iter().all(|t| field(t, visiting)));
+                visiting.remove(&n);
+                ok
+            }
+            _ => false,
+        }
     }
 
     fn exact_eq_type(&self, t: &almide_lang::types::Ty, visiting: &mut std::collections::BTreeSet<String>) -> bool {
@@ -201,17 +230,21 @@ mod equality_tests {
     fn aggregate_set_members_require_source_field_equality() {
         let layouts = crate::lower::RecordLayouts::from([
             ("Good".into(), (vec![], vec![(sym("name"), Ty::String), (sym("count"), Ty::Int)])),
-            ("Bad".into(), (vec![], vec![(sym("value"), Ty::Float)])),
+            ("Floats".into(), (vec![], vec![(sym("value"), Ty::Float)])),
+            ("Bad".into(), (vec![], vec![(sym("value"), Ty::option(Ty::Float))])),
         ]);
         let good = Ty::Named(sym("Good"), Default::default());
+        let floats = Ty::Named(sym("Floats"), Default::default());
         let bad = Ty::Named(sym("Bad"), Default::default());
         let pair = Ty::Tuple(vec![Ty::Int, Ty::String].into());
         let mut roots = Vec::new();
-        for ty in [&good, &bad, &pair] { collect_tuples(&Ty::set_of(ty.clone()), &mut roots); }
+        for ty in [&good, &floats, &bad, &pair] { collect_tuples(&Ty::set_of(ty.clone()), &mut roots); }
         let decls = derive_records(&layouts, &Default::default(), &roots);
         assert!(!decls.iter().any(|d| d.name == block_key(&Ty::set_of(bad.clone()))));
         let _guard = install(decls);
-        for ty in [good, pair] {
+        // A Float field compares per field and keys by its canonical bits
+        // (ALS-C11); an Option[Float] field rides a lane no key equality reads.
+        for ty in [good, floats, pair] {
             assert!(is_native_set(&Ty::set_of(ty.clone())));
             let i = rec_index(&block_key(&ty)).expect("the block's record is registered");
             assert!(native_set_element_kind(NTy::Rec(i)));
@@ -219,18 +252,26 @@ mod equality_tests {
         assert!(!is_native_set(&Ty::set_of(bad)));
     }
 
-    /// A Set element with no exact equality or runtime representation
-    /// (`Set[List[Float]]`, `Set[Option[Int]]`) is refused by a `wall`
-    /// (#4799): no set table is derived for it and it is not a native set.
+    /// A Set element with no key equality or runtime representation (a
+    /// Float two runtime containers deep, `Set[List[List[Float]]]`) is refused
+    /// by a `wall` (#4799): no set table is derived for it and it is not a
+    /// native set. A List or Option of Floats holds real floats (ALS-C11) and
+    /// an Option of an exact element is exact (`Set[Option[Int]]`, #4006).
     #[test]
     fn a_set_element_without_exact_equality_is_a_wall() {
         let floats = Ty::set_of(Ty::list(Ty::Float));
+        let float_options = Ty::set_of(Ty::option(Ty::Float));
         let options = Ty::set_of(Ty::option(Ty::Int));
+        let deep = Ty::set_of(Ty::list(Ty::list(Ty::Float)));
+        let deep_options = Ty::set_of(Ty::list(Ty::option(Ty::Float)));
         let mut roots = Vec::new();
-        for t in [&floats, &options] { collect_tuples(t, &mut roots); }
+        for t in [&floats, &float_options, &options, &deep, &deep_options] { collect_tuples(t, &mut roots); }
         let decls = derive_records(&Default::default(), &Default::default(), &roots);
         let _guard = install(decls);
-        for t in [floats, options] {
+        for t in [&options, &floats, &float_options] {
+            assert!(is_native_set(t), "{t:?}");
+        }
+        for t in [deep, deep_options] {
             assert!(!is_native_set(&t), "{t:?}");
             let Ty::Applied(_, a) = &t else { unreachable!() };
             let err = native_set_element_type(&a[0]).expect_err("refused");

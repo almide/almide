@@ -1,0 +1,13 @@
+// A Rust host fn declared to return a Region: the Rust host ABI lends a
+// Region in as its `(ptr, len)` for the call, and nothing defines one coming
+// back, so the native build route refuses it (C-464). The host returns the
+// bytes instead, and the program takes their Region.
+import ffi
+
+@extern(rust, "crate::host", "make")
+fn make(n: Int) -> Bytes
+
+effect fn main() -> Unit = {
+  let r = ffi.region(make(4))
+  println(int.to_string(ffi.len(r)))
+}

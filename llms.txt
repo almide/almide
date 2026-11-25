@@ -389,6 +389,13 @@ Almide uses operators for comparison and equality. There is no
 `int.gt`, `int.lt`, `int.eq`, etc. Use `>`, `<`, `==`, `!=`, `>=`, `<=`.
 Equality (`==` / `!=`) works on equality-capable types, recursively for supported containers and data types. Function values are not comparable (E016); only direct `Secret[String]` / `Secret[Bytes]` equality uses the constant-time comparison; other Secret equality and generic structural comparisons of Secret-containing types are rejected (E103).
 
+Set membership and Map key lookup use the collection key equality
+(ALS-C11): every NaN is one key and `-0.0` is the key `0.0`, through every
+List / tuple / record / variant / Option component of the element or key —
+`set.len(set.from_list([nan, nan, 0.0, -0.0]))` is 2. A member or key already
+present keeps its first-stored value. `==` stays IEEE (`nan == nan` is
+false), and so do `list.contains` / `index_of` / `unique` / `dedup`.
+
 ### sqrt, abs, etc.
 
 `int.sqrt` does not exist. Convert, sqrt, optionally convert back:

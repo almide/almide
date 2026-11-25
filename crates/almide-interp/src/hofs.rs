@@ -250,7 +250,7 @@ impl<'a> Interpreter<'a> {
         let mut out: Vec<(Value, Value)> = Vec::new();
         for x in xs.iter() {
             let k = val!(self.apply_closure(&clo, vec![x.clone()]));
-            match out.iter_mut().find(|(ek, _)| *ek == k) {
+            match out.iter_mut().find(|(ek, _)| crate::value::key_eq(ek, &k)) {
                 Some((_, Value::List(group))) => {
                     let mut g = (**group).clone();
                     g.push(x.clone());
@@ -328,7 +328,7 @@ impl<'a> Interpreter<'a> {
         let mut out = (*entries).clone();
         let mut found = false;
         for pair in out.iter_mut() {
-            if pair.0 == key {
+            if crate::value::key_eq(&pair.0, &key) {
                 let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
                 pair.1 = nv;
                 found = true;
@@ -358,7 +358,7 @@ impl<'a> Interpreter<'a> {
         };
         let mut out = (*entries).clone();
         for pair in out.iter_mut() {
-            if pair.0 == key {
+            if crate::value::key_eq(&pair.0, &key) {
                 let nv = val!(self.apply_closure(&clo, vec![pair.1.clone()]));
                 pair.1 = nv;
                 break;

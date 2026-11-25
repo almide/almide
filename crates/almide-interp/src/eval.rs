@@ -570,7 +570,7 @@ fn map_lookup(o: Value, k: Value) -> Flow {
     let Value::Map(entries) = o else {
         return Flow::Abort(format!("internal: map-access on {}", o.type_name()));
     };
-    let found = entries.iter().find(|(ek, _)| ek == &k);
+    let found = entries.iter().find(|(ek, _)| crate::value::key_eq(ek, &k));
     Flow::val(Value::Option(found.map(|(_, v)| Box::new(v.clone()))))
 }
 

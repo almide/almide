@@ -187,6 +187,13 @@ pub(crate) fn certificate_lines(func: &MirFunction) -> (Vec<(ValueId, String)>, 
         slot_chain,
         moved_slots,
         merge_credit: Vec::new(),
+        merge_pending: Vec::new(),
+        borrowed_params: func
+            .params
+            .iter()
+            .filter(|p| p.repr.is_heap() && !func.owned_params.contains(&p.value) && !func.inout_params.contains(&p.value))
+            .map(|p| p.value)
+            .collect(),
         unfolded: BTreeSet::new(),
         loop_streams: Vec::new(),
     };
@@ -485,6 +492,11 @@ impl CertScan {
             return;
         }
         let slot = self.s.object_of(local);
+        // The slot aliased a borrowed param's block: the caller keeps that
+        // block alive, so its views stay live (#4934, `wf.chain_param`).
+        if self.borrowed_params.contains(&slot) {
+            return;
+        }
         let mut ended: Vec<ValueId> = self.child_of.keys().copied().filter(|&c| self.viewed_from_slot(c, slot)).collect();
         ended.extend(self.addr_of.iter().filter(|(_, &o)| o == slot).map(|(&a, _)| a));
         ended.extend(self.paths.carriers.iter().copied().filter(|&c| c != local && self.s.of.contains_key(&c) && self.s.object_of(c) == slot));

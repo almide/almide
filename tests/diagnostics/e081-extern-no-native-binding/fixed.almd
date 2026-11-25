@@ -1,0 +1,11 @@
+// A JS-host hook declared for the wasm target only: a native binary has
+// nothing to run when `main` calls it, so the native build route refuses it
+// (C-461) instead of building a program that aborts at the call. With an
+// Almide body the JS host still binds the import on wasm, and the native
+// build runs the body.
+@extern(wasm, "js", "js_log")
+fn js_log(msg: String) -> Unit = println(msg)
+
+fn main() -> Unit = {
+  js_log("hello")
+}

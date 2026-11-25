@@ -1,0 +1,13 @@
+# Native walls and rejected native certificates, corpus-wide (#4006,
+# decision row witness.native-verified-fallback). Held by
+# scripts/check-native-walls.sh: every .almd with a `main` under spec/,
+# research/benchmark/perf/ and research/benchmark/exercises/ through
+# `almide verify <f> --mir` (the frontend and v1 native render `almide build`
+# takes, judged by almide-verify).
+#
+# SHRINK-ONLY. A program that walls or is rejected without a row here fails
+# the gate; a row whose program now renders and is accepted fails it too and
+# is deleted in the change that fixed it. Never add a row.
+#
+# class<TAB>program
+#

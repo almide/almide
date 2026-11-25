@@ -58,6 +58,7 @@ mod native_capture_borrow;
 mod native_never;
 mod native_fn_aliases;
 mod native_region;
+mod native_unbound_externs;
 mod render_native_closure;
 mod render_native_rec;
 mod render_native_append;

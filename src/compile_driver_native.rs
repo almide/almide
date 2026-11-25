@@ -88,9 +88,17 @@ pub(crate) fn host_source(ir: &almide::ir::IrProgram, opts: &codegen::CodegenOpt
 
 pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput, fs_scope: Option<Vec<String>>) -> Result<String, String> {
     let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text).with_host_source(host);
-    let (rust, _) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
+    let (rust, certs) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
         source, ir, checker, fs_scope,
     ).map_err(|error| format!("native v1 test render: {error:?}"))?;
+    // Owner ruling 2026-11-24 (#4932): the test harness ships its render's
+    // certificates to the same linked verifier as build/run/bench; a
+    // rejection is a compiler bug and the test binary is not built.
+    almide::certificate_gate_native::judge_native(
+        &format!("almide {}", env!("ALMIDE_VERSION_LINE")), "native v1 test render", &rust, &certs,
+    ).map_err(|e| format!(
+        "error[certificate-rejected]: the native v1 test render's own certificate does not hold, which is a compiler bug — please report it\n  {e}"
+    ))?;
     if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
         eprintln!("native: v1 trust-spine render (test harness)");
     }

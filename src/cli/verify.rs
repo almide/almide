@@ -268,6 +268,8 @@ fn one_line(s: &str) -> String {
 fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
     let opts = crate::codegen::CodegenOptions { repr_c: false, allow_unverified: false, trace: false, meter_in_codegen: false };
     let (mut pending, _metered, _outside) = crate::try_compile_pending(file, false, &opts).map_err(|_| 1)?;
+    // C-461: the native route refuses the program before any render.
+    super::native_extern_gate::check(pending.ir(), file).map_err(|()| 1)?;
     let (_callbacks, _source, rendered) = super::render_v1_native_certified(&mut pending);
     let mut text = format!(
         "almide-certificate-bundle 5\nproducer almide {} (native MIR certificates)\nsource {}\n",

@@ -63,11 +63,14 @@ pub(crate) struct RecDecl {
 
 /// A type the MIR carries in one i64 lane, read off its `Repr` (the layout
 /// decision `lower::repr_of` makes once): Int, Bool, the sized integers, and
-/// the floats as their bits. A `RawPtr` is an address, not a value, so it has
-/// no native spelling and stays out.
+/// the floats as their bits, and a `Handle` (`RawPtr`) as its exposed address
+/// (ADR-0031: an opaque foreign token, never read through by Almide code).
+/// The address leaves and re-enters a pointer only at a foreign boundary
+/// (`native_foreign_values.rs`), through Rust's exposed-provenance API; no
+/// comparison or thread crossing reads it as an Int (`render_native_eq`,
+/// `fan_native::thread_crossable` refuse it).
 pub(crate) fn is_lane_scalar(t: &almide_lang::types::Ty) -> bool {
-    !matches!(t, almide_lang::types::Ty::RawPtr)
-        && matches!(crate::lower::repr_of(t), Ok(crate::Repr::Scalar { .. }))
+    matches!(crate::lower::repr_of(t), Ok(crate::Repr::Scalar { .. }))
 }
 
 /// A lane scalar the native render holds as a real `f64` (the 64-bit floats;

@@ -178,14 +178,16 @@ fn mir_emits_the_certificates_of_the_mir_the_native_route_ships() {
 
 #[test]
 fn a_program_the_native_route_walls_is_reported_uncertified() {
-    // #4909: a host import the native render does not serve walls the whole
-    // program. The bundle names the wall and holds no witness, and the
-    // command fails — nothing falls back to another producer.
+    // #4909: a shape the native render does not serve walls the whole
+    // program (here an `@export(c)` fn over a Region parameter, a row the
+    // native C adapters do not cover yet). The bundle names the wall and
+    // holds no witness, and the command fails — nothing falls back to
+    // another producer.
     let stage = Stage::new("mir-wall", true);
     let src = stage.dir.join("walled.almd");
     std::fs::write(
         &src,
-        "@extern(wasm, \"js\", \"js_half\")\nfn js_half(x: Float) -> Float\n\nfn main() -> Unit = println(float.to_string(js_half(5.0)))\n",
+        "import ffi\n\n@export(c, \"walled_size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\n\neffect fn main() -> Unit = println(\"walled\")\n",
     )
     .expect("source");
     let out = stage.dir.join("walled.bundle");
@@ -195,6 +197,25 @@ fn a_program_the_native_route_walls_is_reported_uncertified() {
     let written = String::from_utf8(std::fs::read(&out).expect("bundle written")).expect("utf-8");
     assert!(written.lines().any(|l| l.starts_with("uncertified (program) native:")), "{written}");
     assert!(!written.lines().any(|l| l.starts_with("witness ")), "{written}");
+}
+
+#[test]
+fn an_extern_with_no_native_binding_is_refused_before_the_render() {
+    // C-461: a host import declared only for the JS host, with no Almide
+    // body, has nothing a native binary could run. The native route refuses
+    // the program with E081 before it renders anything: no bundle is written.
+    let stage = Stage::new("mir-unbound", true);
+    let src = stage.dir.join("unbound.almd");
+    std::fs::write(
+        &src,
+        "@extern(wasm, \"js\", \"js_half\")\nfn js_half(x: Float) -> Float\n\nfn main() -> Unit = println(float.to_string(js_half(5.0)))\n",
+    )
+    .expect("source");
+    let out = stage.dir.join("unbound.bundle");
+    let o = stage.verify(&["--mir", &src.display().to_string(), "--emit", &out.display().to_string()]);
+    assert_eq!(o.status.code(), Some(1), "{:?}: {}", o.status, text(&o.stderr));
+    assert!(text(&o.stderr).contains("error[E081]: `js_half` has no implementation on the native target"), "{}", text(&o.stderr));
+    assert!(!out.exists(), "no bundle for a refused program");
 }
 
 #[test]

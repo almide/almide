@@ -367,6 +367,15 @@ jobs:
           path: target/release/almide
           retention-days: 1
 
+      # Its own artifact, so only the job that asks for it puts the verifier
+      # beside almide (the native-walls gate). Absent on the prose lane.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.prose-cache.outputs.reused != 'true'
+        with:
+          name: almide-verify-linux
+          path: target/release/almide-verify
+          retention-days: 1
+
   # The release binary, the test archive and the warning ratchets used to be
   # one job, run one after another: ~8 min release build, ~6 min test build,
   # ~3.5 min ratchets, ~19 min before any test could start. They share no
@@ -2181,6 +2190,22 @@ jobs:
       - name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native; the module and glue ship only the program's surface)
         if: env.PROSE_LANE != 'true'
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-js-host.sh
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: env.PROSE_LANE != 'true'
+        with:
+          name: almide-verify-linux
+          path: /tmp/almide-verify-bin
+      # #4006: every corpus program through the v1 native render, its
+      # certificates judged by almide-verify. proofs/native-walls.txt is the
+      # shrink-only set of walls and rejected certificates (never a new row).
+      - name: Native walls (#4006 — the corpus's native v1 walls and rejected certificates are exactly the shrink-only rows of proofs/native-walls.txt)
+        if: env.PROSE_LANE != 'true'
+        run: |
+          mkdir -p /tmp/almide-native-walls
+          cp /tmp/almide-bin/almide /tmp/almide-verify-bin/almide-verify /tmp/almide-native-walls/
+          chmod +x /tmp/almide-native-walls/almide /tmp/almide-native-walls/almide-verify
+          ALMIDE_BIN=/tmp/almide-native-walls/almide bash scripts/check-native-walls.sh
 
       # #2205: the ALMIDE_* switches are one registry. The grep half refuses an
       # unregistered name anywhere in the tree and a direct std::env read in
