@@ -270,6 +270,8 @@ impl<'b, 'a> Bounds<'b, '_, 'a> {
                     _ => "other",
                 };
                 rep.bounds_shapes.push((at, shape, kind == 'w'));
+                let (ok, detail, start) = crate::window::prove(&self.ctx.bodies[at.func], cmp, at.op);
+                rep.windows.push((at, shape, kind == 'w', ok, detail, start));
             }
         }
         Ok(())

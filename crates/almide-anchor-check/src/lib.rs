@@ -74,6 +74,7 @@ mod operands;
 pub mod proven;
 pub mod rc;
 mod routines;
+pub mod window;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_by_function, census_detail, census_with, census_writes, located, located_by, Census, FnRow, Tally};
@@ -122,6 +123,10 @@ pub struct Report {
     /// Probe only: each located bounds access, its guard's shape, and
     /// whether it writes.
     pub bounds_shapes: Vec<(At, &'static str, bool)>,
+    /// Probe only: per located bounds access, whether a straight-line window
+    /// of the shipped instructions alone proves it (window.rs), the shape or
+    /// the reason, and where the window starts.
+    pub windows: Vec<(At, &'static str, bool, bool, String, usize)>,
     /// #4013 / #4279: the fields witness's located construction sites,
     /// their field stores, field accesses (of which `field_guarded` are
     /// variant case fields held to their tag test), tag reads, and events

@@ -353,6 +353,16 @@ fn main() {
                     println!("SHAPEFN {func} {shape} {} {n}", u8::from(wr));
                 }
             }
+            for (at, shape, wr, ok, detail, start) in &r.windows {
+                println!(
+                    "WINDOWFN {} {} {shape} {} {} {start} {}",
+                    at.func,
+                    at.op,
+                    u8::from(*wr),
+                    if *ok { "P" } else { "N" },
+                    detail.replace(['\t', '\n'], " ")
+                );
+            }
             match &counted {
                 Some(Ok(c)) => println!(
                     "CENSUS: frames {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk; routines {} access(es), {} located ({} by the linear certificate), {} header word(s), {} bulk",

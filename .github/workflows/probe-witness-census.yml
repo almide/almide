@@ -27,6 +27,8 @@ jobs:
       - name: Install wabt
         run: sudo apt-get update -q && sudo apt-get install -y -q wabt
       - name: Measure
+        env:
+          CENSUS_LIGHT: "1"
         run: bash scripts/probe-witness-census.sh "$RUNNER_TEMP/census"
       - name: Upload rows and rejected artifacts
         if: always()
@@ -44,6 +46,7 @@ jobs:
             ${{ runner.temp }}/census/mutrows-old.tsv
             ${{ runner.temp }}/census/storerows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
+            ${{ runner.temp }}/census/windowrows.tsv
             ${{ runner.temp }}/census/routinerows.tsv
             ${{ runner.temp }}/census/mutctx.txt
             ${{ runner.temp }}/census/keep
