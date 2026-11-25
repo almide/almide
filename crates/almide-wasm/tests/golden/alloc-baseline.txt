@@ -124,6 +124,7 @@
 71392	spec/wasm_cross/codec_variant_roundtrip.almd
 69552	spec/wasm_cross/codec_variant_tuple_arity.almd
 70048	spec/wasm_cross/codec_whitespace_tolerance.almd
+68000	spec/wasm_cross/collection_key_total_equality.almd
 66656	spec/wasm_cross/collection_literals.almd
 66048	spec/wasm_cross/composition_fuzz_batch.almd
 68384	spec/wasm_cross/compound_eq.almd
