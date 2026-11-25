@@ -137,7 +137,13 @@
 # is the cutter's word, and that a window's base is a live block whose word at
 # +4 is its payload length) as UNCOMPENSATED: 52 -> 54. The same inventory
 # reading: the gate is new, and it names what it leaves open.
-# uncompensated_blind_ceiling = "54"
+# 2026-11-25: the shipped-fresh gate maps three limits it does not cover (that
+# its three byte strings are consecutive instruction runs of one function is
+# the cutter's word, that the instructions its scan lets through leave the
+# local alone is an argument from the instruction set and not a theorem, and
+# that the block is still live at the access) as UNCOMPENSATED: 54 -> 57. The
+# same inventory reading: the gate is new, and it names what it leaves open.
+# uncompensated_blind_ceiling = "57"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -218,6 +224,19 @@ evidence = "2026-11-25: the verdict is the Rocq kernel's, on a goal `window_ok <
 measures = "for each artifact the structural wall judges, how many of its load and store instructions the kernel computes `window_ok` true for, on the bytes `almide-anchor-check --windows` cut out of it; a proposed window the kernel refuses fails, a module whose dump has no ACCESSES line fails, and a total below the leg's row of proofs/shipped-windows-floor.txt fails"
 varies = "2026-11-25: in the kernel's own reading the same 33 bytes of the emitter's read are accepted and five one-edit variants of them are refused (run 45522171502); on real input run 45519096811 read 516 REFUSED and 0 ok before the arm reader was widened; after the widening the kernel accepts every proposal of a sweep over all loads and stores: 353 of 244,858 in the 1,059 fixtures (92 modules hold one) and 163 of 125,647 in 191 stdlib-test modules (17 hold one), run 45522299922; and the count moves with the emitter: with the element count hoisted past an in-place push / pop / clear (the #4933 shape) twelve programs go from 34 accepted windows to 18, each of the three that read through the stale count from 1 to 0 (run 45522309728); and with one byte of an accepted window changed at a time (plus one, minus one, each bit flipped: 167,514 distinct strings over the 516) the kernel refuses 117,749, still accepts 49,765 (39,380 of them differ inside an aborting arm, 4,963 in an alignment hint) and answers on every one (run 45539869357) -- the first such run exhausted the machine (run 45536832715): the slot-count match built `2 ^ k` beside the test of `k`, so a constant of thirty binary digits where a shift amount could stand cost its whole value; the power now sits under the test, and refuses_a_huge_divisor holds the file to it"
 blind = "an access whose compare reads a count taken earlier (before a loop, or with a call in between) is not a window and is not counted, proven or not -> crates/almide-anchor-check/src/operands.rs holds those to their checks; that a window's bytes are an instruction run of one function at one control depth is the cutter's word -> UNCOMPENSATED; that the base is a live block whose word at +4 is its payload length -> UNCOMPENSATED"
+
+
+[[gate]]
+path = "proofs/check-shipped-fresh.sh"
+# It splits the cutter's dump into one Rocq goal per distinct triple of byte
+# strings and reads coqc's exit status; the verdict is the kernel's computation.
+reads = "scalar"
+wired_by = "proofs/structural-wall.sh"
+class = "KERNEL_PROVEN"
+evidence = "2026-11-25: the verdict is the Rocq kernel's, on a goal `fresh_ok <allocator> <bytes> <bytes> <bytes> = true` per distinct triple, the bytes being the artifact's own. proofs/GuardFresh.v proves what an accepted triple means (fresh_sound, closed under the global context: the first string decodes to the allocation of n bytes into local x, the scan of the second holds for x, and every run of the third touches only [x, x + 12 + n)) and carries the refusing directions as kernel-computed examples: refuses_store_past_the_block, refuses_reassigned_local, refuses_other_callee, refuses_mid_that_closes_a_block, refuses_other_base, refuses_cutter_store_past_the_block, beside cutter_fresh_store, the triple crates/almide-anchor-check/tests/fresh.rs holds the cutter to byte for byte (Actions run 45542343649, the file under Rocq 9.3.0). The cutter tests no bound, so a store past its block reaches the kernel and is refused there: tests/fresh.rs::a_store_past_the_block_is_still_proposed"
+measures = "for each artifact the structural wall judges, how many of its loads and stores address a local plus a constant where that local was last assigned `i32.const n ; call <allocator> ; local.set` at the same control depth, and the kernel computes `fresh_ok` true for the three byte strings `almide-anchor-check --fresh` cut out of it; a proposal the kernel refuses fails, a module whose dump has no ALLOCATOR line fails, and a total below the leg's row of proofs/shipped-fresh-floor.txt fails"
+varies = "2026-11-25: in the kernel's own reading the same store is accepted at offset 20 of a 16-byte payload and refused at offset 28, and four other one-edit variants are refused (run 45542343649); over a corpus, a prototype of this cutter proposed 17,716 accesses in the 1,059 fixtures of the measured revision (857 modules hold one) and 11,601 in 191 stdlib-test modules, and the kernel accepted every one (run 45538112724) -- 3,729 and 1,546 of them accesses at which no witness event is located"
+blind = "an access through a copy of the pointer in another local, into a block of computed size, or with the allocation at another control depth is not proposed and not counted, proven or not -> crates/almide-anchor-check/src/init.rs and src/fields.rs hold the located ones to their shapes; that the function at the allocator's index returns a block of 12 + n bytes -> proofs/check-shipped-routines.sh has the kernel decode that function to the proven tree, whose theorems are over unbounded integers; that the three strings are consecutive instruction runs of one function body is the cutter's word -> UNCOMPENSATED; that an instruction the scan lets through leaves the local alone (only local.set and local.tee assign one) and that the third string is reached only through the first is an argument from the instruction set and structured control, not a theorem -> UNCOMPENSATED; that the block is still live at the access -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-als-pin.sh"
