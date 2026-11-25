@@ -112,6 +112,38 @@ fn main() {
         args.remove(at);
         if at < args.len() { args.remove(at) } else { std::process::exit(2) }
     });
+    // Probe only: `--fresh-like <module.wasm> <base.wasm> <base.anchors>` —
+    // the fresh-block proposals of a module that has no anchor file of its
+    // own. Its allocator is the function whose instructions are, byte for
+    // byte, those of the function the base module's anchor file names (the
+    // same index first); without one, nothing is proposed.
+    if args.first().map(String::as_str) == Some("--fresh-like") {
+        let (Some(m), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
+        let (m, b) = (std::fs::read(m).unwrap_or_default(), std::fs::read(b).unwrap_or_default());
+        let a = String::from_utf8_lossy(&std::fs::read(a).unwrap_or_default()).into_owned();
+        let (Ok(mb), Ok(bb), Ok((alloc, ..))) = (almide_anchor_check::decode(&m), almide_anchor_check::decode(&b), almide_anchor_check::parse_anchors_held(&a)) else {
+            println!("FRESHALLOC unreadable");
+            return;
+        };
+        let code = |w: &[u8], bodies: &[almide_anchor_check::Body<'_>], p: usize| bodies.get(p).and_then(|x| x.at.first().map(|s| w[*s..x.end].to_vec()));
+        let (bi, mi) = (almide_anchor_check::function_imports(&b), almide_anchor_check::function_imports(&m));
+        let want = alloc.checked_sub(bi).and_then(|p| code(&b, &bb, p as usize));
+        let found = want.as_ref().and_then(|want| {
+            let same = |p: &usize| code(&m, &mb, *p).as_ref() == Some(want);
+            alloc.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same))
+        });
+        let Some(p) = found else {
+            println!("FRESHALLOC none");
+            return;
+        };
+        let f = mi + p as u32;
+        println!("FRESHALLOC {f}");
+        let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
+        for fr in almide_anchor_check::fresh_windows(&m, &mb, "", f) {
+            println!("FRESHHEX {} {} {f} {} {} | {} | {} | {}", fr.func, fr.access, u8::from(fr.write), fr.located, hex(&fr.pre), hex(&fr.mid), hex(&fr.tail));
+        }
+        return;
+    }
     // `--lin-skel <artifact.wasm> <anchors>`: the linear certificate's
     // translation of every self-host body (lin.rs), holes as `_`.
     // Probe only: single-byte mutants of the located instructions, each judged.
