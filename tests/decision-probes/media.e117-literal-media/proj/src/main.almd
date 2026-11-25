@@ -1,6 +1,6 @@
 import http
 
 effect fn main() -> Unit = {
-  let r = http.response(200, http.typed("text/javascript", bytes.from_string("alert(1)")))
+  let r = http.response(200, http.typed("application/vnd.other+json", bytes.from_string("{}")))
   println(http.body(r))
 }
