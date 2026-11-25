@@ -398,8 +398,22 @@ mod tests {
     }
 
     #[test]
+    fn a_region_reclaim_is_read_only_in_a_version_six_bundle() {
+        // #1961: format v8 skipped `w`, where a lone `w` line balanced; a
+        // bundle before version 6 carrying one is refused, either case.
+        assert!(parse(format!("{MAGIC_V5}\nwitness ownership 2 main\niw\n").as_bytes()).is_err());
+        assert!(parse(&bundle("witness ownership 2 main\nIW\n")).is_err());
+        let b = parse(format!("{MAGIC_V6}\nwitness ownership 2 main\niw\n").as_bytes()).expect("a v6 bundle carries `w`");
+        assert_eq!(verify(&b).1, Outcome::Certified);
+        let b = parse(format!("{MAGIC_V6}\nwitness ownership 1 main\nw\n").as_bytes()).expect("well-formed");
+        assert_ne!(verify(&b).1, Outcome::Certified);
+        // Another property's `w` is its own byte.
+        assert!(parse(&bundle("witness names 3 main\nw|1\n")).is_ok());
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 6\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 7\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

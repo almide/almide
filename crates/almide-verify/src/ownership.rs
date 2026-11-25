@@ -494,6 +494,19 @@ mod tests {
     }
 
     #[test]
+    fn a_region_reclaim_discharges_one_credit_like_a_release() {
+        // #1961 `w` (OwnershipChecker.v Reclaim, folds like Dec): the parked
+        // temporary's line `iw` balances; a reclaim of a line holding no
+        // credit faults, and a reclaimed credit is not released again.
+        assert!(check_xc(b"iw"));
+        assert!(check_xc(b"IW"));
+        assert!(!check_xc(b"w"));
+        assert!(!check_xc(b"iwd"));
+        assert!(!check_xc(b"iww"));
+        assert!(!check_xc(b"iiw"));
+    }
+
+    #[test]
     fn a_taken_over_param_through_sibling_exits() {
         // A param taken over (`i`) by a body whose nested tail branch is
         // spelled as sibling early returns (almide-mir `native_tail_unnest`):
