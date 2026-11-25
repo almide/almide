@@ -111,3 +111,46 @@ jobs:
             ${{ runner.temp }}/dump-mutant
             ${{ runner.temp }}/win-base/verdicts.tsv
             ${{ runner.temp }}/win-mutant/verdicts.tsv
+
+  controls:
+    name: Negative and differential controls of the window checker
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Controls
+        run: |
+          BIN="$HOME/.opam/${OCAML_VERSION}/bin"
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          export PATH="$BIN:$PATH"
+          (cd proofs && coqc -Q . AlmideTrust GuardWindow.v)
+          O="$RUNNER_TEMP/controls"
+          # the nine interpreted instructions, against the engine in Node
+          python3 -I scripts/probe-window-controls.py vectors "$O"
+          coqc -Q proofs AlmideTrust "$O/sem/Sem.v" > "$O/sem/Sem.out"
+          node --version
+          node scripts/probe-window-diff9.js "$O/sem/vectors.json" > "$O/sem/engine.out"
+          python3 -I scripts/probe-window-controls.py compare "$O"
+          # every one-byte mutant of the accepted windows
+          python3 -I scripts/probe-window-controls.py mutants probe-data/windows-516.txt "$O"
+          export O
+          t0=$(date +%s)
+          ls "$O"/mut/Mut_*.v | xargs -P 4 -I{} bash -c 'coqc -Q proofs AlmideTrust "$1" > "${1%.v}.out" 2> "${1%.v}.err" || echo "FAIL $1"' _ {}
+          echo "kernel time on the mutants: $(( $(date +%s) - t0 )) s (4 at a time)"
+          python3 -I scripts/probe-window-controls.py verdicts "$O"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: window-controls
+          path: |
+            ${{ runner.temp }}/controls/accepted.tsv
+            ${{ runner.temp }}/controls/by-role.tsv
+            ${{ runner.temp }}/controls/sem/Sem.out
+            ${{ runner.temp }}/controls/sem/engine.out
+            ${{ runner.temp }}/controls/sem/vectors.json
