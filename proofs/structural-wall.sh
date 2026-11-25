@@ -226,7 +226,7 @@ while IFS= read -r f; do
     printf 'MODULE %s\n' "$f" >> "$OUT/fresh-dump"
     if ! "$ANCHORCHECK" --fresh "$OUT/$N.wasm" "$OUT/$N.anchors" >> "$OUT/fresh-dump" 2> "$OUT/$N.fresh-err"; then
       echo "STRUCTURAL WALL FAIL: $f: the shipped bytes could not be swept for fresh-block accesses:" >&2
-      hew "$OUT/fresh-dump" --tail 1 | sed 's/^/  /' >&2
+      tail -1 "$OUT/fresh-dump" | sed 's/^/  /' >&2
       sed 's/^/  /' "$OUT/$N.fresh-err" >&2
       exit 1
     fi
@@ -237,7 +237,7 @@ while IFS= read -r f; do
     printf 'MODULE %s\n' "$f" >> "$OUT/loops-dump"
     if ! "$ANCHORCHECK" --loops "$OUT/$N.wasm" "$OUT/$N.anchors" >> "$OUT/loops-dump" 2> "$OUT/$N.loops-err"; then
       echo "STRUCTURAL WALL FAIL: $f: the shipped bytes could not be swept for loop reads:" >&2
-      hew "$OUT/loops-dump" --tail 1 | sed 's/^/  /' >&2
+      tail -1 "$OUT/loops-dump" | sed 's/^/  /' >&2
       sed 's/^/  /' "$OUT/$N.loops-err" >&2
       exit 1
     fi
