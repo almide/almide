@@ -3649,13 +3649,15 @@ tests = [
 ]
 control_note = "tests/diagnostic_harness_test.rs runs each broken.almd with check --target native; the control patch drops refusals' rows, and the novel test (check --target native and build, three fresh subjects) turns red"
 issues = [4006]
-status = "UNSTAMPED"
-reasons = ["c3: no control patch yet"]
+status = "STAMPED"
+reasons = []
 note = "C-461 (W1) and C-464 (owner ruling 2026-11-24: the shapes outside the corpus are rendered or refused before the flip)."
 probe = "tests/decision-probes/witness.native-route-refusals"
 novel = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
 control_patch = "proofs/decision-controls/witness.native-route-refusals.patch"
 control_test = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
+control_seen = "0e28f10590 2026-11-25 bm-1: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on check_json, run, build, bench and native inside and outside the project, and every n.a. cell observed admitting (28th integrator)"
+stamp = "0e28f10590 2026-11-25"
 
 [[site]]
 id = "witness.codegen-ownership-certifier"
