@@ -1,4 +1,4 @@
-name: Probe — a fixed differential-fuzz campaign against the first sample's surviving source mutants
+name: Probe — the wasm test suite and a fixed fuzz campaign against the first sample's mutants that only a static layer notices
 # A one-off measurement on its own branch: for the mutants of the emitter
 # crate's source that nothing in the first two stages noticed (the seeded
 # sample probe-emitter-mutants.yml draws), does the merge gate's own wasm test
@@ -6,7 +6,7 @@ name: Probe — a fixed differential-fuzz campaign against the first sample's su
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-survivors-fuzz1]
+    branches: [probe/emitter-s1-static-only]
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ env:
   # order they run in, are scripts/probe-emitter-survivors-ids.txt.
   SAMPLE_N: "480"
   SAMPLE_SEED: "20261122"
-  SHARDS: "8"
+  SHARDS: "16"
 
 jobs:
   list:
@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -86,7 +86,7 @@ jobs:
         run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-survivors-ids.txt)"
       - name: Measure
         env:
-          STAGES: "fuzz"
+          STAGES: "tests fuzz"
           FUZZ_COUNT: "600"
           FUZZ_SEED: "20261125"
         run: bash scripts/probe-emitter-survivors.sh "$RUNNER_TEMP/survivors" "$RUNNER_TEMP/pick" scripts/probe-emitter-survivors-ids.txt
