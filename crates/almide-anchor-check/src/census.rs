@@ -379,7 +379,7 @@ pub fn census_kinds(bodies: &[Body<'_>], anchors: &str) -> Result<Vec<(usize, bo
     Ok(out.into_iter().map(|((f, w, m), n)| (f, w, m, n)).collect())
 }
 
-fn load_width(op: &Op<'_>) -> Option<u64> {
+fn plain_load_width(op: &Op<'_>) -> Option<u64> {
     Some(match op {
         Op::I32Load8S { .. } | Op::I32Load8U { .. } | Op::I64Load8S { .. } | Op::I64Load8U { .. } => 1,
         Op::I32Load16S { .. } | Op::I32Load16U { .. } | Op::I64Load16S { .. } | Op::I64Load16U { .. } => 2,
@@ -402,7 +402,7 @@ pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 12])
     for (func, b) in bodies.iter().enumerate() {
         let mut n = [0usize; 12];
         for (k, op) in b.ops.iter().enumerate() {
-            let (base, w, off) = match (store_width(op), load_width(op)) {
+            let (base, w, off) = match (store_width(op), plain_load_width(op)) {
                 (Some((w, off)), _) => (0, u64::from(w), off),
                 (None, Some(w)) => (5, w, offset(op).unwrap_or(0)),
                 _ => continue,
