@@ -499,6 +499,79 @@ fn a_select_site_over_an_anchored_if_pairs_too() -> Result<(), String> {
     Ok(())
 }
 
+/// A NESTED select (`if c then (if d then x else y) else z`, the derived
+/// select of a borrowed `if` whose arm is itself one): the one call past the
+/// outer join takes one event per LEAF path, each in the recorder arm of the
+/// inner site opened directly inside the outer arm that shipped that inner
+/// `if`, each naming its own leaf's shipped value. Mispaired — leaves
+/// swapped, the inner site outside its outer arm or under the other one, a
+/// leaf missing, or an unanchored inner site — it is refused.
+#[test]
+fn a_nested_select_pairs_one_event_per_leaf_path() -> Result<(), String> {
+    // 0 lg2, 1 if, 2 lg3, 3 if, 4 lg0, 5 else, 6 lg1, 7 end, 8 else, 9 lg4,
+    // 10 end, 11 call.
+    let body = "local.get 2 (if (result i32) (then local.get 3 (if (result i32) (then local.get 0) (else local.get 1))) (else local.get 4)) call $alloc drop";
+    let bytes = module("(local i32 i32 i32 i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-8 (@3-5 d0 |@3-5 d1 ) |@1-8 d4 )")?;
+    assert!(run("(@1-8 (@3-5 d1 |@3-5 d0 ) |@1-8 d4 )").is_err(), "inner leaves swapped");
+    assert!(run("(@1-8 d4 |@1-8 (@3-5 d0 |@3-5 d1 ) )").is_err(), "inner site under the other outer arm");
+    assert!(run("(@3-5 d0 |@3-5 d1 ) (@1-8 |@1-8 d4 )").is_err(), "inner site outside the outer arm");
+    assert!(run("(@1-8 (@3-5 d0 |@3-5 ) |@1-8 d4 )").is_err(), "a leaf without its event");
+    assert!(run("(@1-8 ( d0 | d1 ) |@1-8 d4 )").is_err(), "inner site unanchored");
+    assert!(run("(@1-8 (@3-5 d0 |@3-5 d1 ) |@1-8 d1 )").is_err(), "outer leaf names another value");
+    assert!(run("(@1-8 (@3-5 d0 d0 |@3-5 d1 ) |@1-8 d4 )").is_err(), "two events on one leaf path");
+    // Both outer arms nested.
+    let body = "local.get 2 (if (result i32) (then local.get 3 (if (result i32) (then local.get 0) (else local.get 1))) (else local.get 3 (if (result i32) (then local.get 4) (else local.get 0)))) call $alloc drop";
+    let bytes = module("(local i32 i32 i32 i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    // 1 if, 3 if, 5 else, 7 end, 8 else, 10 if, 12 else, 14 end, 15 end.
+    run("(@1-8 (@3-5 d0 |@3-5 d1 ) |@1-8 (@10-12 d4 |@10-12 d0 ) )")?;
+    assert!(run("(@1-8 (@10-12 d4 |@10-12 d0 ) |@1-8 (@3-5 d0 |@3-5 d1 ) )").is_err(), "inner sites crossed");
+    assert!(run("(@1-8 (@3-5 d0 |@3-5 d1 ) |@1-8 (@10-12 d0 |@10-12 d4 ) )").is_err(), "second inner leaves swapped");
+    Ok(())
+}
+
+/// A select's leaf events may first be matched to calls a later anchored
+/// site's events also fit (the same locals, released in its arms): the
+/// pairing hands those calls to the later events and takes its leaves back,
+/// so every event and call is still one-to-one. With the later site's arms
+/// swapped its events fit no call in their shipped arms, and it is refused.
+#[test]
+fn a_select_takes_back_leaves_a_later_site_can_replace() -> Result<(), String> {
+    // 1 if, 3 else, 5 end, 6 call; 9 if, 11 call, 13 else, 15 call, 17 end.
+    let body = "local.get 2 (if (result i32) (then local.get 0) (else local.get 1)) call $alloc drop local.get 2 (if (then local.get 1 call $alloc drop) (else local.get 0 call $alloc drop))";
+    let bytes = module("(local i32 i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    let run = |ev: &str| check_rc(&bodies, 0, RcFns { inc: None, releases: &releases, sigs: &Default::default(), judges: &[], alloc: None }, &[(1, ev.into())], &[vec![], vec![]], &mut RcReport::default());
+    run("(@1-3 |@1-3 ) (@1-3 d0 |@1-3 d1 ) ( ^@9-9 d1 | ^@13-13 d0 )")?;
+    assert!(run("(@1-3 |@1-3 ) (@1-3 d0 |@1-3 d1 ) ( ^@9-9 d0 | ^@13-13 d1 )").is_err(), "later arms swapped");
+    assert!(run("(@1-3 |@1-3 ) (@1-3 d1 |@1-3 d0 ) ( ^@9-9 d1 | ^@13-13 d0 )").is_err(), "select leaves swapped");
+    Ok(())
+}
+
+/// Exclusive rebinds share one release while the variable's own release
+/// takes the other: the share is found even when an earlier exclusive event
+/// already shares the call the displaced rebind moves to (three arms, or the
+/// leaves of a nested select). A second release on the variable is still
+/// one release too many, and events on one path never share a call.
+#[test]
+fn exclusive_rebinds_share_a_call_a_displaced_one_can_still_join() -> Result<(), String> {
+    // Both values are read before either release (each release is the
+    // local's last read).
+    let body = "local.get 0 local.get 0 call $alloc drop call $alloc drop";
+    rc(body, "( o0 | o0 ) d0")?;
+    rc(body, "( o0 | o0 | o0 ) d0")?;
+    rc(body, "( ( o0 | o0 ) | ( o0 | o0 ) ) d0")?;
+    assert!(rc(body, "( o0 | o0 | o0 ) d0 d0").is_err(), "one release too many");
+    assert!(rc(body, "d0 d0 ( d0 | d0 )").is_err(), "events on one path never share");
+    Ok(())
+}
+
 /// #4631: an arm the recorder anchors (`^@<x>-<x>`: the `if`, `else` or
 /// fall-through `end` whose arm it is) holds its events to that shipped
 /// arm: a dropped or moved arm separator, or arms swapped, put an event in
