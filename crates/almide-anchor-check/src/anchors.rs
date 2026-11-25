@@ -202,7 +202,7 @@ pub fn prims_anchors(text: &str) -> String {
 /// The anchor file's `proved` line: the flat release and the free routine as
 /// function indices of the shipped module (`-`: the routine did not ship).
 /// `None` when the file has no such line.
-pub fn proved_anchors(text: &str) -> Result<Option<(Option<u32>, Option<u32>)>, String> {
+pub(crate) fn proved_anchors(text: &str) -> Result<Option<(Option<u32>, Option<u32>)>, String> {
     let Some(rest) = text.lines().find_map(|l| l.strip_prefix("proved ")) else {
         return Ok(None);
     };
