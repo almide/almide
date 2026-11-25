@@ -272,7 +272,7 @@ impl WitnessRecorder {
     /// #1961: a fresh temporary lent to a region window's consumer: born
     /// here; its credit is discharged by the window's restore
     /// ([`Self::region_reclaimed`]), not by a release after the call.
-    pub fn temp_region_parked(&mut self) -> u32 {
+    pub(crate) fn temp_region_parked(&mut self) -> u32 {
         let o = self.new_obj();
         self.ops(o, "i");
         o
