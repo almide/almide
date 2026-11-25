@@ -962,4 +962,14 @@ Example refuses_arm_that_falls_through :
       32; 0; 32; 1; 167; 65; 8; 108; 106; 41; 3; 12 ] = false.
 Proof. vm_compute. reflexivity. Qed.
 
+(* A constant of thirty-one binary digits where the slot size stands. The
+   count match once built `2 ^ k` for such a `k` before it tested `k < 32`,
+   and a run on these bytes did not end; it is refused like the others. *)
+Example refuses_a_huge_divisor :
+  window_ok
+    [ 32; 1; 32; 0; 40; 2; 4; 65; 255; 255; 255; 255; 7; 110; 173; 90;
+      4; 64; 65; 128; 8; 16; 3; 0; 11;
+      32; 0; 32; 1; 167; 65; 8; 108; 106; 41; 3; 12 ] = false.
+Proof. vm_compute. reflexivity. Qed.
+
 Print Assumptions window_sound.
