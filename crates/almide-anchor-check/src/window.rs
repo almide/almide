@@ -207,7 +207,8 @@ fn run(b: &Body<'_>, s: usize, acc: usize) -> Result<Run, Stop> {
             Op::Drop => {
                 pop(&mut stack)?;
             }
-            Op::Nop => {}
+            // A conditional branch is an exit: past it the condition was zero.
+            Op::BrIf { .. } => facts.push(pop(&mut stack)?),
             _ => {
                 if let Some(n) = un(op) {
                     let a = pop(&mut stack)?;
