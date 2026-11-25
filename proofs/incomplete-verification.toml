@@ -45,13 +45,15 @@
 #               cen28 on ds-2): spec/lang/fallible_lambda_test.almd certifies;
 #               fan_mapper_effect_callback_forms' one frame now declines on its
 #               fan.map callback instead.
+#   2026-11-25  36 -> 25: a region window's parked temporary is certified as
+#               reclaimed by the restore (29th: the `w` event, certificate format
+#               v9 / bundle 6, proofs/RuntimeModel.v region_restore_reclaims, the
+#               anchor check holding `w` to the shipped restore). Every
+#               region-window-elided-release row runs its route without the flag
+#               on ds-2 (5 test, 4 build, 2 bench), and each build's anchor check
+#               reads RC OK with its `w`.
 #
-# ceiling = "36"
-
-[[program]]
-entry = "test spec/integration/clone_opt_test.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
+# ceiling = "25"
 
 [[program]]
 entry = "test spec/lang/annotated_result_branch_value_test.almd"
@@ -79,24 +81,9 @@ uncertified = 1
 reasons = ["pattern:list-rest"]
 
 [[program]]
-entry = "test spec/lang/option_tuple_drop_test.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "test spec/lang/region_window_test.almd"
-uncertified = 8
-reasons = ["region-window-elided-release"]
-
-[[program]]
 entry = "test spec/lang/result_option_matrix_test.almd"
 uncertified = 2
 reasons = ["bind:view-result"]
-
-[[program]]
-entry = "test spec/lang/type_system_test.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
 
 [[program]]
 entry = "test spec/lang/unwrap_operators_test.almd"
@@ -112,11 +99,6 @@ reasons = ["assign:spends-var"]
 entry = "test spec/stdlib/bigint_test.almd"
 uncertified = 1
 reasons = ["effect:carrier:ok-borrowed"]
-
-[[program]]
-entry = "test spec/stdlib/bounded_profile_test.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
 
 [[program]]
 entry = "test spec/stdlib/codec_field_matrix_test.almd"
@@ -197,33 +179,3 @@ reasons = ["effect:carrier:ok-borrowed"]
 entry = "run spec/embedded_cross/process_start_run_end_stops_children.almd"
 uncertified = 1
 reasons = ["effect:carrier:ok-borrowed"]
-
-[[program]]
-entry = "build research/benchmark/perf/binarytrees/binarytrees.almd"
-uncertified = 2
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "build research/benchmark/perf/btrees/btrees.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "build research/benchmark/perf/treealloc/treealloc.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "build research/benchmark/perf/v1-shapes/tree_window.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "bench research/benchmark/perf/binarytrees/binarytrees.almd"
-uncertified = 2
-reasons = ["region-window-elided-release"]
-
-[[program]]
-entry = "bench research/benchmark/perf/treealloc/treealloc.almd"
-uncertified = 1
-reasons = ["region-window-elided-release"]
