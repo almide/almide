@@ -33,9 +33,6 @@ env:
 jobs:
   gates:
     name: Ledgers, shard ${{ matrix.shard }}
-    # Answered by an earlier run of this workflow; off while one mutant's
-    # behaviour on five named programs is asked below.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
