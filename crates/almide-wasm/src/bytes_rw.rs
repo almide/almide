@@ -345,6 +345,35 @@ impl Emitter<'_> {
             _ => Ok(None),
         }
     }
+    /// `bytes.__read_*#or(b, pos, w, d)` (#4944): a checked reader's `?? d`
+    /// read in place — the room test of the `w`-byte window once, then the
+    /// read (its own test skipped: the window is proven, the read no wider),
+    /// or `d`. `b` and `pos` are variables or literals (the inliner binds
+    /// anything else), so the read's re-lowering of them reads the same
+    /// values; `d` is a literal or a variable, lowered only on the none path.
+    pub(crate) fn lower_bytes_read_or(&mut self, read: &str, args: &[IrExpr]) -> ArmResult {
+        let [b, pos, w, d] = args else { return unsup("bytes-read-or-arity") };
+        let Some(ty) = crate::ty::slice_ty_of(&d.ty, self.types) else { return unsup("bytes-read-or-type") };
+        let IrExprKind::LitInt { value: width } = w.kind else { return unsup("bytes-read-or-width") };
+        // The original argument nodes, never copies: the module-call audit
+        // (`witness_module_result`) looks for the hook each one fired.
+        self.lower_bytes_room_test(b, pos, w)?;
+        self.f.instructions().if_(BlockType::Result(ty.val_type()));
+        self.room_proven = match (&b.kind, &pos.kind) {
+            (IrExprKind::Var { id: bid }, IrExprKind::Var { id: pid }) => Some((*bid, *pid, width)),
+            _ => None,
+        };
+        let lowered = self.lower_bytes_rw(read, &args[..2]);
+        self.room_proven = None;
+        if !matches!(lowered?, Some(Some(_))) {
+            return unsup("bytes-read-or-read");
+        }
+        self.f.instructions().else_();
+        self.lower(d, Some(ty))?;
+        self.f.instructions().end();
+        Ok(Some(Lowered::scalar(ty)))
+    }
+
     /// A unit `if` whose condition is the room test of a byte window and
     /// whose then-arm is exactly one in-place set of that window — what a
     /// checked writer becomes once inlined (inline_calls.rs `writer_body`):
@@ -374,6 +403,21 @@ impl Emitter<'_> {
             return None;
         };
         let var = |e: &IrExpr, v: &VarId| matches!(&e.kind, IrExprKind::Var { id } if id == v);
+        // The room test as one op (`front_desugar::BYTES_ROOM`, #4944).
+        if let IrExprKind::Call { target: CallTarget::Module { module: rm, func: rf, .. }, args: ra, .. } = &cond.kind
+            && rm.as_str() == "bytes"
+            && rf.as_str() == crate::emit::front_desugar::BYTES_ROOM
+        {
+            return match ra.as_slice() {
+                [rb, rp, rw] => match (&rb.kind, &rp.kind, &rw.kind) {
+                    (IrExprKind::Var { id: rb }, IrExprKind::Var { id: rp }, IrExprKind::LitInt { value: w }) => {
+                        (rb == b && rp == p && *w > 0).then_some((*b, *p, *w))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+        }
         let IrExprKind::BinOp { op: BinOp::And, left, right } = &cond.kind else { return None };
         let IrExprKind::BinOp { op: BinOp::Gte, left: l0, right: zero } = &left.kind else { return None };
         let IrExprKind::BinOp { op: BinOp::Lte, left: l1, right: room } = &right.kind else { return None };

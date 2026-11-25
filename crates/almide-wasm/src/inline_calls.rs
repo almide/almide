@@ -600,7 +600,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         }
         if let Some(m) = module
             && !calls_itself(&f.body, name)
-            && let Some(body) = reader_body(f, &names, m)
+            && let Some(body) = reader_body(f, &names, m, fns)
         {
             let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
             let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
