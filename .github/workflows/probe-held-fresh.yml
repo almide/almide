@@ -8,7 +8,7 @@ name: Probe — the fresh-block rule on a held-out sample of source mutants
 # Not a gate.
 on:
   push:
-    branches: [probe/replay-rules]
+    branches: [probe/rules-on-replays-2]
 
 permissions:
   contents: read
@@ -21,11 +21,11 @@ env:
   # The runs that built five replayed bound-test defects, each with and
   # without its defect.
   REPLAYS: >-
-    45651221492:2685-list-take-drop-insert-byte-product
-    45651221492:2474-copy-within-additive-fit-test
-    45653617765:2475-slice-rows-without-start-floor
-    45651221492:1909-from-bytes-additive-fit-test
-    45651221492:2395-value-keys-without-tag-test
+    45676377343:1786-closure-call-borrowed-arg.record-dropped
+    45676377343:1786-closure-call-borrowed-arg.record-kept
+    45676377343:2613-cell-occupant-stored-without-share
+    45677866679:2613-cell-occupant-stored-without-share.record-dropped
+    45676377343:4476-call-rebinds-global-read-earlier
 
 jobs:
   fresh:
@@ -178,7 +178,32 @@ jobs:
               cp "$b/a.anchors.wasm" "$RUNNER_TEMP/rshards/replay/emut/modules/bug/$n+own.wasm"
             fi
           done
+          # The programs written for surviving mutants of the first two samples:
+          # each compiler's module and anchor file for every program, as the
+          # two runs that asked the static checkers kept them.
+          for pair in s1:45673801224 s2:45540870071; do
+            s="${pair%%:*}"
+            gh run download "${pair#*:}" --repo "$GITHUB_REPOSITORY" -n emitter-kill --dir "$RUNNER_TEMP/kill-$s"
+            K="$RUNNER_TEMP/kill-$s/kill"
+            for b in "$K"/base/judge/*.wasm; do
+              n="$(basename "$b" .wasm)"
+              [ -s "$K/base/judge/$n.anchors" ] || continue
+              cp "$b" "$RUNNER_TEMP/rbase/$s-$n.wasm"
+              cp "$K/base/judge/$n.anchors" "$RUNNER_TEMP/rbase/$s-$n.anchors"
+            done
+            for d in "$K"/m*/judge; do
+              mid="$(basename "$(dirname "$d")")"
+              mkdir -p "$RUNNER_TEMP/rshards/kill/emut/modules/$s-$mid"
+              for w in "$d"/*.wasm; do
+                n="$(basename "$w" .wasm)"
+                [ -s "$w" ] && [ -s "$RUNNER_TEMP/rbase/$s-$n.wasm" ] || continue
+                cmp -s "$w" "$RUNNER_TEMP/rbase/$s-$n.wasm" && continue
+                cp "$w" "$RUNNER_TEMP/rshards/kill/emut/modules/$s-$mid/$s-$n.wasm"
+              done
+            done
+          done
           ls "$RUNNER_TEMP/rbase" | grep -c '\.wasm$'
+          find "$RUNNER_TEMP/rshards" -name '*.wasm' | sed "s#$RUNNER_TEMP/rshards/##" | sort
       - name: Measure
         env:
           HELD_BASE_DIR: ${{ runner.temp }}/rbase
