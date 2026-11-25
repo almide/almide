@@ -6,6 +6,9 @@
 //! example with coverage instrumentation and reads which render paths the
 //! perf gate's corpus reaches; the verdicts let it confirm the corpus it
 //! meant to run actually rendered.
+//! A program governed by an `almide.toml` with `[permissions] fs` renders
+//! under those roots — the build's own lookup (`project::permissions_project_for`),
+//! so a scoped shape bench reaches the same scoped render the perf gate builds.
 //! `--reasons` appends the full refusal reason to WALL rows, for planning
 //! coverage work without grouping distinct unsupported shapes together.
 
@@ -23,7 +26,8 @@ fn main() {
                     continue;
                 }
                 let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-                let verdict = match almide_mir::pipeline::try_render_rust_source(&src) {
+                let roots = almide::project::permissions_project_for(path).and_then(|p| p.fs_allow);
+                let verdict = match almide_mir::pipeline::try_render_rust_source_scoped(&src, roots) {
                     Ok(_) => "OK".to_string(),
                     Err(e) if reasons => format!("WALL\t{}", e.to_string().replace(['\t', '\n', '\r'], " ")),
                     Err(_) => "WALL".to_string(),

@@ -1,0 +1,12 @@
+// #4928: a function passed to a `@pure` fn by name is judged as a
+// positional one is.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let n = apply(x: 2, f: (y) => {
+    println("side effect")
+    y + 1
+  })
+  println("${n}")
+}

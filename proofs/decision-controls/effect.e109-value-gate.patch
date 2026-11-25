@@ -1,0 +1,13 @@
+# Negative control of effect.e109-value-gate (proofs/decision-sites.toml): the effect-flow violations of fns reached through values are dropped, so no E109 is reported
+# control_test: tests/decision_novel_test.rs::novel_a_pure_fn_running_a_fresh_effect_fn_through_a_value_is_refused
+diff --git a/src/effect_value_gate.rs b/src/effect_value_gate.rs
+--- a/src/effect_value_gate.rs
++++ b/src/effect_value_gate.rs
+@@ -75,6 +75,7 @@
+ /// E109 alone.
+ pub fn effect_fn_value_diagnostics(ir: &IrProgram, file: &str) -> Vec<Diagnostic> {
+     let mut violations = crate::codegen::effect_flow::effect_value_violations(ir);
++    violations.clear();
+     violations.sort_by(|a, b| a.function.cmp(&b.function));
+     violations
+         .into_iter()

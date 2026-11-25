@@ -36,6 +36,21 @@ impl WitnessRecorder {
         }
     }
 
+    /// `ok(x)` in an effect fn's raw position over a borrowed `x` (data.rs
+    /// `lower_err_raise`): the node's `rc_inc` is the consumer's credit, so
+    /// `x`'s line records the share-out `s`, as an arm's (#4278). `None`: no
+    /// frame variable — a view's own line takes it.
+    pub fn carrier_share_out(&mut self, local: Option<u32>) -> bool {
+        match local {
+            Some(l) => self.held_ops(l, "s"),
+            None => {
+                let o = self.view_obj();
+                self.ops(o, "s");
+                true
+            }
+        }
+    }
+
     /// The share a borrowed `!` carrier takes before it propagates.
     pub fn share_local(&mut self, local: u32) -> bool {
         self.held_ops(local, "a")

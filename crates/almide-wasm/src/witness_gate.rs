@@ -14,6 +14,10 @@ use callbacks::{inline_callback_subset, is_self_hosted_hof};
 #[path = "witness_gate_built.rs"]
 mod built;
 use built::built_value_subset;
+/// The effect-body carrier rule (split for the file budget).
+#[path = "witness_gate_effect.rs"]
+mod effect;
+pub use effect::effect_subset;
 
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
@@ -743,45 +747,6 @@ fn ends_in_loop_ctl(e: &IrExpr) -> bool {
         ),
         _ => false,
     }
-}
-
-/// #2758: the gate for an EFFECT frame. Its body lowers at the raw ok type
-/// and func.rs wraps the result in the ok carrier (both recorded there), so
-/// the straight-line rules apply unchanged — except to a constructor of the
-/// carrier itself. Inside an effect body, where the raw type is expected:
-///
-/// - `err(e)` RAISES through the frame's error exit (data.rs
-///   `lower_err_raise`): the err block is built (its payload store is
-///   `witness_store`), the exit plan's releases are recorded like a `!`
-///   propagation's, and the block leaves (`witness_err_raise`). Admitted.
-/// - `ok(v)` is transparent — the value IS `v` — while every consumer reads
-///   the node as a fresh construction (`rc_owned_result`). That agrees only
-///   when `v` is a scalar or certainly fresh itself, so any other `ok(v)`
-///   declines as `effect:carrier:ok-borrowed`.
-pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
-    struct Carrier(bool);
-    impl almide_ir::visit::IrVisitor for Carrier {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            // A call's droppable result is its callee's handed-over credit
-            // (#1986); one an arm declares a View declines at emission
-            // (data.rs `lower_err_raise`).
-            if let IrExprKind::ResultOk { expr } = &e.kind
-                && !scalar_ty(&expr.ty)
-                && !crate::rc_ownership::rc_certainly_fresh(&expr.kind)
-                && !matches!(expr.kind, IrExprKind::Call { .. })
-            {
-                self.0 = true;
-            } else if !self.0 {
-                almide_ir::visit::walk_expr(self, e);
-            }
-        }
-    }
-    let mut c = Carrier(false);
-    almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
-    if c.0 {
-        return Some("effect:carrier:ok-borrowed".into());
-    }
-    straightline_subset(body, raw_is_heap)
 }
 
 /// Is `t` a Result / Option carrier type?

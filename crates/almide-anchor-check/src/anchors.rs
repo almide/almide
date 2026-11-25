@@ -87,10 +87,11 @@ pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
     let (init, bounds) = (field("init")?, field("bounds")?);
     // The optional `fields` line (#4279) is read by `fields_anchors`.
     // So are the optional `prims` and `selfhost` lines (#4005 A4), read by
-    // `prims_anchors` and lin.rs.
+    // `prims_anchors` and lin.rs, and the `proved` line, read by
+    // `proved_anchors`.
     let mut rest: Vec<&str> = lines
         .filter(|l| {
-            !["fields", "prims", "selfhost"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
+            !["fields", "prims", "selfhost", "proved"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
         })
         .collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
@@ -196,4 +197,21 @@ pub fn prims_anchors(text: &str) -> String {
         .find_map(|l| if l == "prims" { Some("") } else { l.strip_prefix("prims ") })
         .unwrap_or("")
         .to_string()
+}
+
+/// The anchor file's `proved` line: the flat release and the free routine as
+/// function indices of the shipped module (`-`: the routine did not ship).
+/// `None` when the file has no such line.
+pub(crate) fn proved_anchors(text: &str) -> Result<Option<(Option<u32>, Option<u32>)>, String> {
+    let Some(rest) = text.lines().find_map(|l| l.strip_prefix("proved ")) else {
+        return Ok(None);
+    };
+    let mut names = rest.split_whitespace().map(|t| match t {
+        "-" => Ok(None),
+        x => x.parse::<u32>().map(Some).map_err(|_| format!("anchors: bad `proved` index `{x}`")),
+    });
+    match (names.next(), names.next(), names.next()) {
+        (Some(dec), Some(free), None) => Ok(Some((dec?, free?))),
+        _ => Err("anchors: the `proved` line names the flat release and the free routine".into()),
+    }
 }

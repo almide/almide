@@ -1,0 +1,4 @@
+@dialect(1000001)
+test "probe" {
+  assert(true)
+}

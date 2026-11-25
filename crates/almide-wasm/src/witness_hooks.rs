@@ -470,7 +470,9 @@ impl Emitter<'_> {
             return;
         }
         let src = self.witness_tail_src(tail);
-        let view = crate::witness_unwrap::is_extraction_view(tail);
+        // A top-let GLOBAL holds its own credit for the program's life: the
+        // ret-inc on it is a view's share, moved out (as `witness_share_or_move`).
+        let view = crate::witness_unwrap::is_extraction_view(tail) || self.witness_top_let_ty(crate::rc_ownership::rc_tail(tail)).is_some();
         if src.is_none() && !view && self.witness_share_select(tail) {
             return;
         }

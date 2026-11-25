@@ -1,0 +1,4 @@
+// The probe of native.grant-survey: a transitive native dependency granted only by its name.
+import mid
+
+effect fn main() -> Unit = println(mid.hello())

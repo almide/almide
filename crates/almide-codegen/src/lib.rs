@@ -802,6 +802,7 @@ mod runtime_namespace;
 pub use runtime_namespace::RUNTIME_MODULE;
 pub mod rust_idents;
 pub mod fs_scope;
+pub mod runtime_reach;
 pub mod test_harness;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +

@@ -80,6 +80,20 @@ fn http_call_caps(op: i32) -> Option<&'static [u32]> {
 /// testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a site
 /// on a fresh instance — a child, the native leg's re-exec — and op 118
 /// reads which site this instance was launched to run.
+/// The unix family (ops 104..=116, `net_call.rs`): `connect` (104) looks the
+/// socket file up, `listen` (105) makes it, `shm_create` (113) makes its
+/// backing file and reaches no network (C-460); the rest act on an open
+/// descriptor.
+fn unix_shm_caps(op: i32) -> Option<&'static [u32]> {
+    Some(match op {
+        104 => &[NET, FS_READ],
+        105 => &[NET, FS_WRITE],
+        113 => &[FS_WRITE],
+        106..=116 => &[NET],
+        _ => return None,
+    })
+}
+
 fn abort_site_caps(op: i32) -> Option<&'static [u32]> {
     Some(if op == 117 { &[CAP_PROC] } else { &[ENV] })
 }
@@ -141,8 +155,9 @@ op_families! {
     /// The tcp family (#3620).
     TCP = 91..=103 => OpCaps::All(&[NET]);
     /// The interim unix-socket and shm ops (#3620): inter-process channels,
-    /// accounted as the network capability.
-    UNIX_SHM = 104..=116 => OpCaps::All(&[NET]);
+    /// accounted as the network capability; the ones that reach a file entry
+    /// count its fs capability too (C-460).
+    UNIX_SHM = 104..=116 => OpCaps::PerOp(unix_shm_caps);
     /// `testing.assert_aborts`'s site pair (ADR-0029).
     ABORT_SITE = 117..=118 => OpCaps::PerOp(abort_site_caps);
     /// The rooted fs family by descriptor (#4084).
@@ -242,7 +257,15 @@ mod tests {
         }
         // The families #4338 moved into the table reach the network.
         for op in TCP.chain(UNIX_SHM).chain(UDP) {
-            assert_eq!(caps_of(op), Some(&[NET][..]), "op {op}");
+            let want: &[u32] = match op {
+                // C-460: unix connect / listen reach a socket file, shm_create
+                // makes its backing file and reaches no network.
+                104 => &[NET, FS_READ],
+                105 => &[NET, FS_WRITE],
+                113 => &[FS_WRITE],
+                _ => &[NET],
+            };
+            assert_eq!(caps_of(op), Some(want), "op {op}");
         }
         assert_eq!(caps_of(119), None, "an op no family declares");
     }

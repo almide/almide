@@ -1,0 +1,13 @@
+# Second control of native.grant-survey (proofs/decision-sites.toml): a grant also covers any package whose declared name it spells, so a transitive package rides the root's bare-name grant
+# control_test: tests/decision_deps_novel_test.rs::novel_a_transitive_package_declaring_a_granted_fresh_name_is_not_granted
+diff --git a/src/native_grant.rs b/src/native_grant.rs
+--- a/src/native_grant.rs
++++ b/src/native_grant.rs
+@@ -221,6 +221,7 @@
+ /// transitive package that declares that name, is not covered.
+ fn is_granted(proj: &Project, fd: &FetchedDep) -> bool {
+     proj.native_grants.iter().any(|(_, g)| g.covers(&proj.dependencies, &fd.origin))
++        || proj.native_grants.iter().any(|(entry, _)| *entry == fd.pkg_id.name)
+ }
+ 
+ /// `to` written relative to `from` (both absolute), `..` per step up.

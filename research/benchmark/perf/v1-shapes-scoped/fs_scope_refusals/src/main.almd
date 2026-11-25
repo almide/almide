@@ -1,0 +1,21 @@
+import fs
+
+// A scoped shape bench for the native v1 perf gates (#4006): the project
+// grants ./src only, so a build renders the program under its fs scope and
+// every read below passes through the scope guard. A path outside the grant
+// is refused before any file is opened, so the run touches no file and reads
+// the same on every machine.
+effect fn refusals(i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k = match fs.read_text("/almide-perf-outside-${i % 7}.txt") {
+      ok(s) => string.len(s),
+      err(e) => string.len(e),
+    }
+    refusals(i + 1, n, acc + k)!
+  }
+
+effect fn main() -> Unit = {
+  let total = refusals(0, 20000, 0)!
+  println("${total}")
+}

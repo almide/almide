@@ -1,0 +1,13 @@
+# Negative control of native.install-allow-native (proofs/decision-sites.toml): an installed package's file the scan cannot read or parse counts as bringing no native code
+# control_test: tests/decision_deps_novel_test.rs::novel_an_installed_package_file_the_native_scan_cannot_parse_needs_allow_native
+diff --git a/src/native_grant.rs b/src/native_grant.rs
+--- a/src/native_grant.rs
++++ b/src/native_grant.rs
+@@ -51,7 +51,6 @@
+ impl NativeCode {
+     pub fn is_empty(&self) -> bool {
+         self.modules.is_empty() && self.assets == 0 && self.crates.is_empty() && self.externs.is_empty() && self.templates.is_empty()
+-            && self.unscanned.is_empty()
+     }
+ 
+     /// One line naming every piece, e.g.

@@ -1,0 +1,17 @@
+# Negative control of critical.profile-arming (proofs/decision-sites.toml): an unknown profile name arms the critical profile instead of being refused
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_profile_name_or_grant_is_refused
+diff --git a/src/dispatch.rs b/src/dispatch.rs
+--- a/src/dispatch.rs
++++ b/src/dispatch.rs
+@@ -163,10 +163,7 @@
+             None
+         }
+         Some("critical") => Some(expand_capability_grants(allow)),
+-        Some(other) => {
+-            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
+-            std::process::exit(1);
+-        }
++        Some(_other) => Some(expand_capability_grants(allow)),
+     }
+ }
+ 

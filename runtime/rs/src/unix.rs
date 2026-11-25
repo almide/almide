@@ -94,13 +94,13 @@ pub fn almide_rt_unix___os_accept(listener: i64) -> Result<i64, AlmideString> { 
 
 pub fn almide_rt_unix___os_send(sock: i64, data: &[u8], fds: &[i64]) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_unix_io(&[&[sock][..], fds].concat(), |t| t.unix_send(sock, data, fds)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_unix___os_recv(sock: i64, max: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<std::vec::Vec<u8>, String> = (|| { almide_unix_io(&[sock], |t| t.unix_recv(sock, max)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_unix___os_recv(sock: i64, max: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { almide_unix_io(&[sock], |t| t.unix_recv(sock, max)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_unix___os_take_fds(sock: i64) -> AlmideList<i64> {
-    AlmideList::from(almide_unix(|t| t.unix_take_fds(sock)))
+    almide_unix(|t| t.unix_take_fds(sock))
 }
 
-pub fn almide_rt_unix___os_wait(fds: &[i64], timeout_ms: i64) -> Result<AlmideList<i64>, AlmideString> { let __almide_r: Result<std::vec::Vec<i64>, String> = (|| { almide_unix_io(fds, |t| t.unix_wait(fds, timeout_ms)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_unix___os_wait(fds: &[i64], timeout_ms: i64) -> Result<AlmideList<i64>, AlmideString> { let __almide_r: Result<AlmideList<i64>, String> = (|| { almide_unix_io(fds, |t| t.unix_wait(fds, timeout_ms)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_unix___os_close(fd: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_unix(|t| t.unix_close(fd)) })(); __almide_r.map_err(Into::into) }
 
@@ -110,4 +110,4 @@ pub fn almide_rt_unix___os_shm_resize(fd: i64, size: i64) -> Result<(), AlmideSt
 
 pub fn almide_rt_unix___os_shm_write(fd: i64, offset: i64, data: &[u8]) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_unix(|t| t.shm_write(fd, offset, data)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_unix___os_shm_read(fd: i64, offset: i64, len: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<std::vec::Vec<u8>, String> = (|| { almide_unix(|t| t.shm_read(fd, offset, len)) })(); __almide_r.map(AlmideList::from).map_err(Into::into) }
+pub fn almide_rt_unix___os_shm_read(fd: i64, offset: i64, len: i64) -> Result<AlmideList<u8>, AlmideString> { let __almide_r: Result<AlmideList<u8>, String> = (|| { almide_unix(|t| t.shm_read(fd, offset, len)) })(); __almide_r.map_err(Into::into) }

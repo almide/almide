@@ -386,6 +386,9 @@
 65760	spec/wasm_cross/if_let_forms.almd
 66032	spec/wasm_cross/if_let_guard_let.almd
 65872	spec/wasm_cross/index_bounds.almd
+66000	spec/wasm_cross/index_bounds_count_after_clear.almd
+66000	spec/wasm_cross/index_bounds_count_after_pop.almd
+65936	spec/wasm_cross/index_bounds_count_after_push.almd
 65872	spec/wasm_cross/index_bounds_i64.almd
 65936	spec/wasm_cross/index_bounds_loop_invariant.almd
 65904	spec/wasm_cross/index_bounds_write_heap.almd
@@ -588,7 +591,7 @@
 66864	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
 68624	spec/wasm_cross/matrix_shape_family.almd
 68432	spec/wasm_cross/matrix_shape_precondition_family.almd
-68320	spec/wasm_cross/matrix_slice_rows_domain.almd
+68352	spec/wasm_cross/matrix_slice_rows_domain.almd
 68320	spec/wasm_cross/matrix_zero_cols_rows.almd
 79920	spec/wasm_cross/memory_stress.almd
 66496	spec/wasm_cross/merge_runs_shadowed_scrutinee.almd

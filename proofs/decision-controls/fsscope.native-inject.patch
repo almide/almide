@@ -1,0 +1,14 @@
+# Negative control of fsscope.native-inject (proofs/decision-sites.toml): no call makes the scope apply, so a program reaching an FS call is built without it.
+# control_test: crates/almide-codegen/tests/fs_category_scope_test.rs::novel_every_fs_category_call_makes_the_scope_apply
+diff --git a/crates/almide-codegen/src/fs_scope.rs b/crates/almide-codegen/src/fs_scope.rs
+--- a/crates/almide-codegen/src/fs_scope.rs
++++ b/crates/almide-codegen/src/fs_scope.rs
+@@ -44,7 +44,7 @@
+     pub fn applies_to(code: &str) -> bool {
+         let guards = fs_runtime_guards();
+         let judged = fs_judged_symbols();
+-        crate::rust_idents::identifiers(code).any(|id| guards.contains_key(id) || judged.contains(id))
++        crate::rust_idents::identifiers(code).any(|id| (guards.contains_key(id) || judged.contains(id)) && false)
+     }
+ 
+     /// `Err` when a guarded fn is named other than as a direct call (a fn

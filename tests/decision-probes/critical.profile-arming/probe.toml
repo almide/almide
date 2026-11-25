@@ -1,0 +1,3 @@
+# The probe of critical.profile-arming: a profile name that is not `critical`.
+expect = "unknown profile `novelprofile`"
+args = ["--profile", "novelprofile"]

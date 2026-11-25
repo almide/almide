@@ -1,0 +1,8 @@
+# The probe of verify.wasi-e081-availability: the rustc-wasip1 route refuses a
+# reachable call whose runtime aborts on wasm32-wasip1 (#4913, #4918). Each
+# column names --target wasi itself.
+expect = "E081"
+
+[argv]
+check = ["check", "{main}", "--target", "wasi"]
+check_json = ["check", "--json", "--target", "wasi", "{main}"]

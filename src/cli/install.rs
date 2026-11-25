@@ -48,22 +48,8 @@ pub fn cmd_install(
         }
     };
 
-    // #4184: the package is built as the root project, so its own native
-    // code (which `[permissions] native` does not cover: it gates
-    // dependencies) is compiled with the user's rights. Say what it is, and
-    // build it only when asked.
-    let native = crate::native_grant::native_code_of(&src_dir, &src_dir.join("src"));
-    if !native.is_empty() {
-        if !allow_native {
-            err(&format!(
-                "error: refusing to install {spec}: it compiles native code, which runs with your rights at build time\n  native code: {}\n  hint: read it, then rerun with --allow-native if you trust it",
-                native.describe()
-            ));
-            std::process::exit(1);
-        }
-        err(&format!("note: --allow-native: building its native code: {}", native.describe()));
-    }
-
+    // The manifest and the name are read first: a manifest that does not
+    // parse is reported as such, not as unscannable native code.
     let almide_toml = src_dir.join("almide.toml");
     if !almide_toml.is_file() {
         err(&format!(
@@ -95,6 +81,22 @@ pub fn cmd_install(
     if let Err(e) = check_bin_name(&bin_name) {
         err(&format!("error: the package name {e}; pass --name with a plain name"));
         std::process::exit(1);
+    }
+
+    // #4184: the package is built as the root project, so its own native
+    // code (which `[permissions] native` does not cover: it gates
+    // dependencies) is compiled with the user's rights. Say what it is, and
+    // build it only when asked.
+    let native = crate::native_grant::native_code_of(&src_dir, &src_dir.join("src"));
+    if !native.is_empty() {
+        if !allow_native {
+            err(&format!(
+                "error: refusing to install {spec}: it compiles native code, which runs with your rights at build time\n  native code: {}\n  hint: read it, then rerun with --allow-native if you trust it",
+                native.describe()
+            ));
+            std::process::exit(1);
+        }
+        err(&format!("note: --allow-native: building its native code: {}", native.describe()));
     }
 
     let install_dir = bin_dir

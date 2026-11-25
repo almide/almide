@@ -1,25 +1,10 @@
 # Negative control of net.unix-path-unscoped (c2, proofs/decision-sites.toml): a socket path is not judged (no @fs_path mark on the unix leaves natively, no gate on the embedded host)
 # control_test: tests/fs_scope_test.rs::novel_a_socket_path_in_a_fresh_directory_outside_the_grant_is_refused
-diff --git a/stdlib/unix.almd b/stdlib/unix.almd
---- a/stdlib/unix.almd
-+++ b/stdlib/unix.almd
-@@ -90,12 +90,10 @@
- 
- // ── The runtime leaves (the descriptor's raw OS number) ──
- @intrinsic("almide_rt_unix___os_connect")
--@fs_path(path)
- @category("Net.fetch")
- effect fn __os_connect(path: String) -> Result[Int, String] = _
- 
- @intrinsic("almide_rt_unix___os_listen")
--@fs_path(path)
- @category("Net.listen")
- effect fn __os_listen(path: String) -> Result[Int, String] = _
- 
 diff --git a/crates/almide-rt-core/src/net_unix_core.rs b/crates/almide-rt-core/src/net_unix_core.rs
+index 7af54c9053..f48ccae659 100644
 --- a/crates/almide-rt-core/src/net_unix_core.rs
 +++ b/crates/almide-rt-core/src/net_unix_core.rs
-@@ -160,14 +160,12 @@
+@@ -160,14 +160,12 @@ impl AlmideUnixTables {
  
      /// Connect a stream socket to the listener at `path`; its descriptor.
      pub fn unix_connect(&mut self, path: &str) -> Result<i64, String> {
@@ -34,3 +19,23 @@ diff --git a/crates/almide-rt-core/src/net_unix_core.rs b/crates/almide-rt-core/
          let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({}): {e}", almide_rt_errtext_escape(path)))?;
          Ok(self.hold(std::os::fd::OwnedFd::from(l)))
      }
+diff --git a/stdlib/unix.almd b/stdlib/unix.almd
+index b2483fdb13..e640595722 100644
+--- a/stdlib/unix.almd
++++ b/stdlib/unix.almd
+@@ -93,13 +93,11 @@ local fn __raw(f: Fd) -> Int = match f {
+ 
+ // ── The runtime leaves (the descriptor's raw OS number) ──
+ @intrinsic("almide_rt_unix___os_connect")
+-@fs_path(path)
+-@category("Net.fetch", "FS.read")
++@category("Net.fetch")
+ effect fn __os_connect(path: String) -> Result[Int, String] = _
+ 
+ @intrinsic("almide_rt_unix___os_listen")
+-@fs_path(path)
+-@category("Net.listen", "FS.write")
++@category("Net.listen")
+ effect fn __os_listen(path: String) -> Result[Int, String] = _
+ 
+ @intrinsic("almide_rt_unix___os_accept")

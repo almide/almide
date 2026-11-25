@@ -1,0 +1,9 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+mid = { path = "mid" }
+
+[permissions]
+native = ["nat"]

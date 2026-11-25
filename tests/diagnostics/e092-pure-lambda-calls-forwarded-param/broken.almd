@@ -1,0 +1,16 @@
+// #4928: a parameter called inside a lambda that is handed to a `@pure` fn
+// runs inside that promise too.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn wrap(f: (Int) -> Int, x: Int) -> Int = apply((y) => f(y) * 2, x)
+
+fn noisy(y: Int) -> Int = {
+  println("side effect")
+  y + 1
+}
+
+fn main() -> Unit = {
+  let n = wrap(noisy, 2)
+  println("${n}")
+}

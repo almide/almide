@@ -1,0 +1,13 @@
+// #4928: a lambda bound to a local and then handed to a `@pure` fn runs
+// inside its promise as a written-in-place lambda does.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let g = (y) => {
+    println("side effect")
+    y + 1
+  }
+  let n = apply(g, 2)
+  println("${n}")
+}

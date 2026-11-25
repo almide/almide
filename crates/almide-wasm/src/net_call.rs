@@ -45,6 +45,8 @@ const OP_SHM_RESIZE: i32 = host_ops::nth(host_ops::UNIX_SHM, 10);
 const OP_SHM_WRITE: i32 = host_ops::nth(host_ops::UNIX_SHM, 11);
 const OP_SHM_READ: i32 = host_ops::nth(host_ops::UNIX_SHM, 12);
 const _: () = assert!(OP_SHM_READ == *host_ops::UNIX_SHM.end());
+// `host_ops::unix_shm_caps` counts the fs capability of these three by number.
+const _: () = assert!(OP_UNIX_CONNECT == 104 && OP_UNIX_LISTEN == 105 && OP_SHM_CREATE == 113);
 
 /// The udp and name-lookup ops (#4306): the embedded host serves them with
 /// the net core (crates/almide-wasm-run/src/net_host.rs); a stock artifact
@@ -115,14 +117,124 @@ fn unix_op(name: &str) -> Option<i32> {
     })
 }
 
+/// The host op a net / udp / unix / shm leaf lowers to — the one lookup the
+/// emitter and the category agreement gate (#4916) both read.
+pub(crate) fn leaf_op(name: &str) -> Option<i32> {
+    tcp_op(name).or_else(|| udp_op(name)).or_else(|| unix_op(name))
+}
+
 impl Emitter<'_> {
     /// A net leaf, or `Ok(None)` when `name` is not one.
     pub(crate) fn lower_net_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        let Some(op) = tcp_op(name).or_else(|| udp_op(name)).or_else(|| unix_op(name)) else { return Ok(None) };
+        let Some(op) = leaf_op(name) else { return Ok(None) };
         let [a, b] = args else { return unsup("net-leaf-arity") };
         let b_ty = if SENDS_BYTES.contains(&op) { crate::bytes::BYTES } else { STR };
         self.fs_call_two((a, STR), (b, b_ty), op)?;
         let t = if READS.contains(&op) { self.fs_result_bytes()? } else { self.fs_result_string()? };
         Ok(Some(t))
+    }
+}
+
+#[cfg(test)]
+mod category_agreement {
+    //! #4916, the wasm leg: every `@implements("m.f")` body of the net / unix
+    //! wasm lowering reaches its leaves' host ops, and those ops' declared
+    //! capabilities (`host_ops::caps_of`) must be exactly what the checker's
+    //! categories for `m.f` name. The wrappers and the leaves they call are
+    //! read from the sources; no fn is listed here.
+    use super::leaf_op;
+    use crate::cert_project::cap::{CLOCK, ENTROPY, ENV, FS_READ, FS_WRITE, NET, PROC, STDIN, STDOUT};
+    use almide_ir::effect::{stdlib_call_effect, Effect};
+    use std::collections::BTreeSet;
+
+    fn leaf_cap(e: Effect) -> Option<u32> {
+        Some(match e {
+            Effect::FsRead => FS_READ,
+            Effect::FsWrite => FS_WRITE,
+            Effect::NetFetch | Effect::NetListen => NET,
+            Effect::IoStdin => STDIN,
+            Effect::IoStdout | Effect::IoStderr => STDOUT,
+            Effect::EnvRead | Effect::EnvWrite => ENV,
+            Effect::Proc => PROC,
+            Effect::Time => CLOCK,
+            Effect::Rand => ENTROPY,
+            Effect::Fan | Effect::Abort => return None,
+        })
+    }
+
+    /// `(implemented fn, the caps its leaves reach)` for every `@implements`
+    /// body of `src` that calls at least one leaf.
+    fn wrappers(src: &str) -> Vec<(String, BTreeSet<u32>)> {
+        let mut out = Vec::new();
+        for chunk in src.split("@implements(\"").skip(1) {
+            let Some((target, rest)) = chunk.split_once('"') else { continue };
+            // `rest` opens with the attribute's `)`; the declaration line
+            // follows, and the body runs to the next top-level declaration.
+            let mut lines = rest.lines().skip(1);
+            let first = lines.next().unwrap_or("");
+            let body: String = lines.take_while(|l| !(l.starts_with("fn ") || l.starts_with("effect fn ") || l.starts_with('@'))).collect::<Vec<_>>().join("\n");
+            let text = format!("{}\n{body}", first.split_once('=').map_or("", |(_, b)| b));
+            let mut caps = BTreeSet::new();
+            let mut hit = false;
+            for (i, _) in text.match_indices("__") {
+                let name: String = text[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if text[i + name.len()..].starts_with('(') {
+                    if let Some(op) = leaf_op(&name) {
+                        hit = true;
+                        caps.extend(crate::host_ops::caps_of(op).unwrap_or_else(|| panic!("op {op} of {name} has no caps")).iter().copied());
+                    }
+                }
+            }
+            if hit {
+                out.push((target.to_string(), caps));
+            }
+        }
+        out
+    }
+
+    fn disagreements(rows: &[(String, BTreeSet<u32>)]) -> Vec<String> {
+        rows.iter().filter_map(|(target, caps)| {
+            let (m, f) = target.split_once('.').expect("m.f");
+            let cats: BTreeSet<u32> = stdlib_call_effect(m, f).into_iter().filter_map(leaf_cap).collect();
+            (cats != *caps).then(|| format!("{target}: host ops reach {caps:?}, checker categories {cats:?}"))
+        }).collect()
+    }
+
+    fn rows() -> Vec<(String, BTreeSet<u32>)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+        let mut rows = Vec::new();
+        for f in std::fs::read_dir(&dir).expect("stdlib dir") {
+            let p = f.expect("entry").path();
+            if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with("_wasm.almd")) {
+                rows.extend(wrappers(&std::fs::read_to_string(&p).expect("read")));
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn every_net_leaf_wrapper_reaches_the_capabilities_its_categories_name() {
+        let rows = rows();
+        assert!(rows.len() >= 25, "only {} leaf wrappers read: the scan went blind", rows.len());
+        let bad = disagreements(&rows);
+        assert!(bad.is_empty(), "wasm leaf capabilities disagree with the checker's categories (#4916):\n{}", bad.join("\n"));
+    }
+
+    /// The control: each wrapper's reach with one capability added (and, when
+    /// it has one, one dropped) is caught.
+    #[test]
+    fn a_wrapper_whose_reach_drifts_from_its_categories_is_caught() {
+        let rows = rows();
+        for (i, (t, caps)) in rows.iter().enumerate() {
+            let extra = [STDOUT, ENTROPY, ENV, FS_READ, FS_WRITE, CLOCK, STDIN, NET, PROC].into_iter().find(|c| !caps.contains(c)).expect("a cap");
+            let mut added = rows.clone();
+            added[i].1.insert(extra);
+            assert!(disagreements(&added).iter().any(|l| l.starts_with(&format!("{t}:"))), "{t} + {extra} not caught");
+            if let Some(c) = caps.iter().next().copied() {
+                let mut dropped = rows.clone();
+                dropped[i].1.remove(&c);
+                assert!(disagreements(&dropped).iter().any(|l| l.starts_with(&format!("{t}:"))), "{t} - {c} not caught");
+            }
+        }
     }
 }

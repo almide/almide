@@ -1,0 +1,4 @@
+# The probe of verify.verify-command: the default artifact path holds bytes
+# that are not the module this build produces.
+expect = "is not the module"
+argv = { wasm = ["verify", "{main}"] }

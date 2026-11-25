@@ -191,7 +191,7 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     };
     // The ONE rendering of a test module — proofs/structural-wall.sh's
     // stdlib-test leg judges exactly these bytes.
-    // #4836: judged by the installed verifier like the module `build` writes.
+    // #4836: judged by the linked verifier like the module `build` writes.
     let mut walled: Option<(&'static str, String)> = None;
     let routed = super::verify::certified_test(test_file, || {
         match almide::wasm_route::route_wasm_tests(test_file, source_text, &wasm_test_dep_paths(test_file), run_filter, declared_tests > 0, &gate) {
@@ -912,7 +912,7 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     // file reaches the per-file route and its E081 (the empty package set is
     // the stricter reading: a false hit only costs the split).
     super::wasm_compile::embedded_leg_availability(&ir, &std::collections::HashSet::new()).map_err(|_| "an embedded-leg availability refusal".to_string())?;
-    // #4836: judged by the installed verifier like the module `build` writes.
+    // #4836: judged by the linked verifier like the module `build` writes.
     let mut emit_err = String::new();
     let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {
         almide_wasm::emit_program_with_ops(&ir).map(|(b, ops)| (b, ops.into_iter().collect())).map_err(|e| emit_err = format!("emit: {e:?}"))

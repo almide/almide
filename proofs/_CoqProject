@@ -29,6 +29,7 @@ LargeTree.v
 StructuralRuntime.v
 StructuralAlloc.v
 StructuralDecode.v
+StructuralShipped.v
 StructuralRun.v
 MemorySafe.v
 SpatialCert.v

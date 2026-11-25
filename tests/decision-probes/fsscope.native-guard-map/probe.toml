@@ -1,0 +1,20 @@
+# The probe of the native fs scope rows (fsscope.native-guard-map,
+# -wrap-calls, -inject, -v1-native-plan): `[permissions] fs` grants ./data
+# only, and the program reads a path outside it (C-393) through a call the
+# scope judges because its declaration carries an FS leaf (C-460). The
+# program prints the refusal (exit 0); build runs the built binary.
+expect = 'fs: "/almide-probe-outside.txt" is outside [permissions] fs'
+exit = "any"
+exec_out = ["build"]
+
+[expect_by]
+# the test route: the refusal-asserting test passes
+test = "All 1 test file(s) passed"
+# bench: the run's output is checked before it is timed
+bench = "output verified identical across all runs"
+# emit: the emitted Rust wraps the call in its scope guard
+emit = "__almide_fs_path!("
+# wasi / component: a wasm artifact cannot carry the scope, so the build is
+# refused before any module is written (#4816)
+wasi = "cannot be carried into a wasm module"
+component = "cannot be carried into a wasm module"

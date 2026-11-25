@@ -592,6 +592,7 @@ impl Checker {
         self.reject_arg_placeholders(&**callee, args.as_slice(), span);
         self.arm_call_expect(expr.id);
         let ty = self.infer_call(callee, args, named_args, type_args);
+        self.record_purity_args(callee, None, args, named_args);
         self.pending_call_ret = None;
         self.call_span_hint = prev_call;
         // A generic collection constructor whose element type NO argument
@@ -882,7 +883,10 @@ impl Checker {
             self.expect_lambda(body, r);
             self.expect_expr(body, r);
         }
+        // #4928: the lambda's calls are its own too, for a `@pure` callee it is passed to.
+        let purity_lambda = self.enter_purity_lambda(lambda_id);
         let ret_ty = self.infer_expr(body);
+        self.exit_purity_lambda(purity_lambda);
         self.env.can_call_effect = saved_can_call_effect;
         self.env.in_effect_slot_lambda = saved_in_slot;
         // Single-condition decisions (MC/DC ledger): || as if/else.
@@ -1680,7 +1684,7 @@ impl Checker {
         }
         let right_id = right.id;
         match &mut right.kind {
-            ExprKind::Call { callee, args, .. } => {
+            ExprKind::Call { callee, args, named_args, .. } => {
                 // #1521: the pipe path inferred its args BARE, without #653's
                 // expected-type-directed lambda pinning, so a lambda param in
                 // pipe position stayed an unresolved var through its whole
@@ -1721,6 +1725,7 @@ impl Checker {
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
                 self.pending_call_ret = right_expect;
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
+                self.record_purity_args(callee, Some(&**left), args, named_args);
                 self.pending_call_ret = None;
                 self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))

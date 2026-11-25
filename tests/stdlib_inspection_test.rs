@@ -745,9 +745,11 @@ fn almide_items(src: &str) -> BTreeMap<String, String> {
         // A `@sized_by(p, …)` line is read only by the checker's @bounded
         // shape rule (owner ruling 2026-11-22): declaring it does not change
         // what the function computes, so it is not part of the fingerprint.
+        // A `@category(…)` line is likewise read only by the capability check
+        // (owner ruling 2026-11-23).
         let block = lines[start..end]
             .iter()
-            .filter(|l| !l.starts_with("///") && !l.starts_with("@sized_by("))
+            .filter(|l| !l.starts_with("///") && !l.starts_with("@sized_by(") && !l.starts_with("@category("))
             .copied()
             .collect::<Vec<_>>()
             .join("\n");

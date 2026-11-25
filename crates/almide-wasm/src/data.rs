@@ -227,11 +227,37 @@ impl Emitter<'_> {
             && let IrExprKind::ResultOk { expr } = &e.kind
             && matches!(self.fn_ret, Some(SliceTy::Result(..)))
         {
-            self.lower(expr, Some(raw))?;
             // #2758: the consumer reads `ok(x)` as fresh; under this ABI the
-            // value is x's own, so only an owned x keeps that true.
+            // value is x's own, so an owned x keeps that true by itself. A
+            // borrowed x (a parameter, a local still read after) takes its
+            // share HERE, so the node hands its consumer one credit as a
+            // construction would: without it the epilogue's release of x
+            // freed the block the caller received (a wasm trap, #4936). The share
+            // is the carrier's share-out (#4278): its `rc_inc` lies in this
+            // node's window, and x's line records `s`.
+            // Read after lowering: a module call's ownership is the mark its
+            // dispatch leaves on the node.
+            self.lower(expr, Some(raw))?;
             if self.rc_droppable(raw) && !self.rc_owned_result(expr) {
-                self.witness_decline("effect:carrier:ok-borrowed");
+                let from = self.f.byte_len();
+                let window = crate::witness::rc::window_open();
+                self.rc_inc_top();
+                // Only a frame variable's share-out is recorded; any other
+                // borrowed payload (a View an arm answered) still declines.
+                if matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Var { .. }) {
+                    // x's line records the share-out `s` (#4278's event, held
+                    // to the `rc_inc` in this window); a frame variable the
+                    // recorder does not hold poisons.
+                    let src = self.witness_src_local(expr);
+                    if let Some(w) = self.witness.as_mut()
+                        && !w.carrier_share_out(src)
+                    {
+                        w.poison();
+                    }
+                } else {
+                    self.witness_decline("effect:carrier:ok-borrowed");
+                }
+                crate::witness::rc::arm(window, from, self.f.byte_len());
             }
             return Ok(raw);
         }

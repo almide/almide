@@ -56,8 +56,13 @@
 //! to the copy-on-write judge's body and the one a `holds` site calls to
 //! `$inc`'s, before any check reads a site as one.
 //!
-//! TRUSTED: that `alloc <index>` names `$alloc`, and the representation R
-//! (init); the rest of operands.rs's and routines.rs's TRUSTED lists.
+//! PROVED (proved.rs): the function `alloc <index>` names, the `rcfns`
+//! line's rc_inc and the two routines the `proved` line names (the flat
+//! release and the free routine) are held, instruction for instruction, to
+//! the lists the proof script transcribes.
+//!
+//! TRUSTED: the representation R (init); the rest of operands.rs's,
+//! routines.rs's and proved.rs's TRUSTED lists.
 
 
 use wasmparser::Operator as Op;
@@ -70,14 +75,17 @@ mod fields;
 mod init;
 pub mod lin;
 mod operands;
+mod proved;
 pub mod rc;
 mod routines;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
+pub use proved::{shipped_routines, Differences, Shipped};
 pub use routines::check_named_routines;
-use anchors::helper_sigs;
+use anchors::{helper_sigs, proved_anchors};
+use proved::check_proved_routines;
 pub use decode::{branch_target, decode, function_imports, store_width, Body};
 pub use fields::check_fields;
 pub use init::check_init;
@@ -129,6 +137,9 @@ pub struct Report {
     pub field_unlocated: usize,
     /// #4277, when the anchor file carries `rc` lines.
     pub rc: Option<RcReport>,
+    /// The runtime routines held to the proof script's lists, each with
+    /// where it is not its list byte for byte (proved.rs).
+    pub proved: Vec<(&'static str, Differences)>,
 }
 
 struct Ctx<'b, 'a> {
@@ -269,6 +280,22 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     // The routines the `judges` and `holds` lines name, before any check
     // reads a site as one (routines.rs).
     check_named_routines(&bodies, function_imports(wasm), alloc, &judges, &holds)?;
+    // The routines the proof script transcribes, held to its lists
+    // (proved.rs). A file that names the reference-count routines names
+    // the flat release and the free routine too: an absent line is refused,
+    // not read as nothing to hold.
+    let proved_line = proved_anchors(anchors)?;
+    if rc_lines.is_some() && proved_line.is_none() {
+        return Err("anchors: an `rcfns` line and no `proved` line (the flat release and the free routine are not named)".into());
+    }
+    rep.proved = check_proved_routines(
+        wasm,
+        &bodies,
+        function_imports(wasm),
+        (alloc != u32::MAX).then_some(alloc),
+        rc_lines.as_ref().and_then(|l| l.0),
+        proved_line.unwrap_or((None, None)),
+    )?;
     check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds, imports: function_imports(wasm) }, alloc, &mut rep)?;
     check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {

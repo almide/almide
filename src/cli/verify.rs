@@ -166,19 +166,12 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
     })
 }
 
-/// Is an independent verifier installed (next to this executable, or on
-/// PATH)? `almide build --target wasm` judges its own certificate when one is.
-pub(super) fn verifier_present() -> bool {
-    locate_verifier().is_some()
-}
-
 /// The build gate on a route that RUNS the module it makes instead of
 /// writing it (#4836): `run`, `bench` and `test` on wasm judged nothing, so a
-/// module `almide build` refuses ran. With a verifier installed, the witness
-/// sinks are armed for `make`, and the module is run only when
-/// [`gate_build`] accepts it; a rejection exits 1. The sinks are process-wide,
-/// so a parallel test lane makes and judges one module at a time while a
-/// verifier is installed; without one nothing changes.
+/// module `almide build` refuses ran. The witness sinks are armed for `make`,
+/// and the module is run only when [`gate_build`] accepts it; a rejection
+/// exits 1. The sinks are process-wide, so a parallel test lane makes and
+/// judges one module at a time.
 pub(super) fn certified(file: &str, make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
     certified_with(file, &[], make)
 }
@@ -200,9 +193,6 @@ pub(super) fn certified_test(file: &str, make: impl FnOnce() -> Result<(Vec<u8>,
 
 fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Vec<u8>, Vec<i32>), ()>) -> Result<(Vec<u8>, Vec<i32>), ()> {
     static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    if !verifier_present() {
-        return make();
-    }
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|p| p.into_inner());
     super::wasm_run_cache::reset_judged();
     almide_wasm::witness::start_collecting();
@@ -223,76 +213,41 @@ fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Ve
     Ok((bytes, rest))
 }
 
-/// The installed verifier's identity — its path, size and mtime — for the
-/// run cache's judged entries (hashing it would cost more than a render).
+/// The judging verifier's identity for the run cache's judged entries: the
+/// linked `almide-verify` library's version and formats.
 pub(super) fn verifier_identity() -> String {
-    let Some(p) = locate_verifier() else { return "none".into() };
-    let meta = std::fs::metadata(&p).ok();
-    let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-    format!("{} {} {mtime}", p.display(), meta.map_or(0, |m| m.len()))
+    format!("linked almide-verify {} ({})", almide_verify::VERSION, almide_verify::FORMATS)
 }
 
 /// The build gate (#4011, row 3 of the security table): the certificate of
 /// the build that just ran — the witness sinks were armed before it — pinned
-/// to the exact bytes about to be written, judged by the installed
-/// `almide-verify`. `Ok(())` when it CERTIFIES the bundle, or reports it
-/// INCOMPLETE (exit 3: every witness accepted, some function declared
-/// uncertified — nothing is contradicted); `Err` with the verifier's report
-/// when it REJECTS a witness or the bundle (exit 1 / 2), or cannot be run:
-/// the build then refuses to write the artifact. The compiler still never
-/// judges its own certificate — the verdict is the separate binary's.
+/// to the exact bytes about to be written, judged by the `almide-verify`
+/// library linked into this binary (#4836, owner ruling 2026-11-24: a
+/// verifier that may be absent left the build unjudged — "not installed"
+/// cannot happen now). `Ok(())` when it CERTIFIES the bundle, or reports it
+/// INCOMPLETE (every witness accepted, some function declared uncertified —
+/// nothing is contradicted); `Err` with the verdict lines when it REJECTS a
+/// witness, the artifact's hash, or cannot read the bundle: the build then
+/// refuses to write the artifact. The verifier crate links no compiler crate
+/// (crates/almide-verify/Cargo.toml), so the judge stays independent code;
+/// `almide verify` still hands a bundle to the standalone binary.
 pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<(), String> {
-    let Some(verifier) = locate_verifier() else { return Ok(()) };
     let allow = manifest_allow(file).map(|mut a| {
         a.extend(runner.iter().map(|g| g.to_string()));
         a
     });
     let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
-    // #4853: the bytes and bundle the verifier judges live in a directory only
-    // this user can enter, created fresh — never at a predictable shared name.
-    let dir = almide_base::private_dir::private_scratch_dir("almide-build")
-        .map_err(|e| format!("cannot make a private directory for the certificate: {e}"))?;
-    let (art, bun) = (dir.join("artifact.wasm"), dir.join("certificate.bundle"));
-    let cleanup = || {
-        let _ = std::fs::remove_dir_all(&dir);
-    };
     use sha2::Digest;
     let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
-    // The verifier runs in the hand-off dir and is handed both files by
-    // name: the dir sits under TMPDIR, which need not be UTF-8, and its
-    // argv and the bundle's artifact line must be text.
-    let art_path = art.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let text = almide_wasm::witness::bundle::render(
         &format!("almide {}", env!("ALMIDE_VERSION_LINE")),
         file,
-        Some((hex.as_str(), art_path.as_str())),
+        Some((hex.as_str(), "artifact.wasm")),
         &records,
         &uncertified,
     );
-    if let Err(e) = std::fs::write(&art, shipped).and_then(|()| std::fs::write(&bun, text)) {
-        cleanup();
-        return Err(format!("cannot write the certificate for {}: {e}", verifier.display()));
-    }
-    let mut cmd = Command::new(&verifier);
-    if let (Some(dir), Some(name)) = (bun.parent(), bun.file_name()) {
-        cmd.current_dir(dir).arg("bundle").arg(name);
-    } else {
-        cmd.arg("bundle").arg(&bun);
-    }
-    let run = cmd.output();
-    cleanup();
-    let out = run.map_err(|e| format!("could not start {}: {e}", verifier.display()))?;
-    match out.status.code() {
-        Some(0 | 3) => Ok(()),
-        code => Err(format!(
-            "{} judged this build's certificate and did not accept it (exit {}):\n{}{}",
-            verifier.display(),
-            code.map_or_else(|| "signal".to_string(), |c| c.to_string()),
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        )),
-    }
+    almide::certificate_gate::judge(text.as_bytes(), shipped)
 }
 
 /// One framing-safe line: a name or reason may not break the bundle's lines.
