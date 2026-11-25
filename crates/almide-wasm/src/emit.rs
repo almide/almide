@@ -77,6 +77,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     let ir = erased.as_ref().unwrap_or(ir);
     let desugared = front_desugar::desugar(ir);
     let ir = desugared.as_ref().unwrap_or(ir);
+    // #4944: a checked reader's Option taken apart on the spot is read in
+    // place (inline_calls/readers.rs), before arg_temps names the Option.
+    let read_in_place = crate::inline_calls::inline_checked_readers(ir);
+    let ir = read_in_place.as_ref().unwrap_or(ir);
     // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
     // arms inline (eta.rs) — one HOF lowering, never a second call path.
     let expanded = eta::eta_expand_callbacks(ir);

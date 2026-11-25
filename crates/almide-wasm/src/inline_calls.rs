@@ -68,6 +68,12 @@
 //! A `tail` call inside the callee becomes a plain call: it is no longer the
 //! frame's last act (the emitter still returns through a call in the
 //! caller's own tail position).
+//!
+//! Two byte-IO shapes are admitted at their own sites, decided from each
+//! declaration's body: a checked in-place WRITER at its write-back site
+//! (inline_calls/writers.rs, #4550) and a checked READER where its Option is
+//! taken apart on the spot, `?? d` or a `match` (inline_calls/readers.rs,
+//! #4944, run by `inline_checked_readers` before arg_temps names the Option).
 
 use std::collections::{HashMap, HashSet};
 
@@ -75,8 +81,11 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrProgram, IrStmt, I
 use almide_ir::visit_mut::IrMutVisitor as _;
 use almide_types::types::Ty;
 
+mod readers;
 mod writers;
+pub use readers::reader_sites;
 pub use writers::writer_sites;
+use readers::reader_body;
 use writers::writer_body;
 
 /// Inline a callee this small (in weighted body nodes) at every site: its
@@ -261,6 +270,9 @@ struct Callee {
     /// index: admitted only at a write-back site of `module.fn(..)`
     /// (`Rewriter::splice_writers`), its own module's calls respelled.
     writer: Option<usize>,
+    /// A checked reader (see `reader_body`): admitted only where its Option
+    /// is taken apart on the spot (`Rewriter::reader_site`).
+    reader: bool,
 }
 
 /// A module call with scalar arguments that reads no byte view: admitted only
@@ -432,6 +444,9 @@ struct Rewriter<'a> {
     this: &'a str,
     vt: &'a mut VarTable,
     changed: bool,
+    /// The checked-reader pass (`inline_checked_readers`): only reader
+    /// sites are rewritten.
+    readers_only: bool,
 }
 
 impl Rewriter<'_> {
@@ -444,7 +459,7 @@ impl Rewriter<'_> {
                     return None;
                 }
                 let c = self.callees.get(name.as_str())?;
-                if c.writer.is_some() {
+                if c.writer.is_some() || c.reader {
                     return None;
                 }
                 (c, args)
@@ -452,7 +467,7 @@ impl Rewriter<'_> {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
             | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, args } => {
                 let c = self.cross.get(&format!("{}.{}", module.as_str(), func.as_str()))?;
-                if c.writer.is_some() {
+                if c.writer.is_some() || c.reader {
                     return None;
                 }
                 // Another file's spans would name lines of that file in this
@@ -517,6 +532,11 @@ impl Rewriter<'_> {
     }
 
     fn expr(&mut self, e: &mut IrExpr) {
+        if self.readers_only {
+            almide_ir::visit_mut::walk_expr_mut(self, e);
+            self.changed |= self.reader_site(e);
+            return;
+        }
         if let IrExprKind::Block { stmts, expr } = &mut e.kind {
             self.splice_writers(stmts, expr.as_deref());
             self.splice_binds(stmts);
@@ -574,8 +594,17 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
             let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
             out.insert(
                 name.to_string(),
-                Callee { params, infos, body, portable: true, ordered_forwarder: false, writer: Some(k) },
+                Callee { params, infos, body, portable: true, ordered_forwarder: false, writer: Some(k), reader: false },
             );
+            continue;
+        }
+        if let Some(m) = module
+            && !calls_itself(&f.body, name)
+            && let Some(body) = reader_body(f, &names, m)
+        {
+            let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
+            let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
+            out.insert(name.to_string(), Callee { params, infos, body, portable: true, ordered_forwarder: false, writer: None, reader: true });
             continue;
         }
         if !is_scalar(&f.ret_ty) {
@@ -611,7 +640,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
         let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
         let infos = f.params.iter().map(|p| vt.get(p.var).clone()).collect();
         let portable = module.is_some_and(|m| is_portable(&f.body, &format!("{m}.{name}"), &pvars));
-        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable, ordered_forwarder, writer: None });
+        out.insert(name.to_string(), Callee { params, infos, body: f.body.clone(), portable, ordered_forwarder, writer: None, reader: false });
     }
     out
 }
@@ -644,10 +673,10 @@ pub(crate) fn inline_small_scalar_calls(ir: &IrProgram) -> Option<IrProgram> {
             }
         }
         let callees = callees_of(&out.functions, &HashSet::new(), &out.var_table, None);
-        changed |= rewrite_space(&mut out.functions, &callees, &cross, &mut out.var_table);
+        changed |= rewrite_space(&mut out.functions, &callees, &cross, &mut out.var_table, false);
         for m in out.modules.iter_mut() {
             let callees = callees_of(&m.functions, &entry_names, &m.var_table, Some(m.name.as_str()));
-            changed |= rewrite_space(&mut m.functions, &callees, &cross, &mut m.var_table);
+            changed |= rewrite_space(&mut m.functions, &callees, &cross, &mut m.var_table, false);
         }
         any |= changed;
         if !changed {
@@ -657,7 +686,43 @@ pub(crate) fn inline_small_scalar_calls(ir: &IrProgram) -> Option<IrProgram> {
     any.then_some(out)
 }
 
-fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, cross: &HashMap<String, Callee>, vt: &mut VarTable) -> bool {
+/// #4944: every checked-reader site — a reader's Option taken apart by `??`
+/// or `match` on the spot (inline_calls/readers.rs) — read in place. Runs
+/// BEFORE the argument-temporary binder (arg_temps.rs), which names such an
+/// Option first and so hides the site; the guard's own calls inline later,
+/// in `inline_small_scalar_calls`. None when nothing changed.
+pub(crate) fn inline_checked_readers(ir: &IrProgram) -> Option<IrProgram> {
+    if crate::fuel::program_has_regions(ir) || almide_base::env::flag("ALMIDE_INLINE_OFF") {
+        return None;
+    }
+    let entry_names: HashSet<String> = ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
+    let readers = |c: HashMap<String, Callee>| -> HashMap<String, Callee> { c.into_iter().filter(|(_, c)| c.reader).collect() };
+    let mut cross: HashMap<String, Callee> = HashMap::new();
+    for m in &ir.modules {
+        let mname = m.name.as_str();
+        for (name, c) in readers(callees_of(&m.functions, &entry_names, &m.var_table, Some(mname))) {
+            cross.insert(format!("{mname}.{name}"), c);
+        }
+    }
+    if cross.is_empty() {
+        return None;
+    }
+    let mut out = ir.clone();
+    let mut changed = rewrite_space(&mut out.functions, &HashMap::new(), &cross, &mut out.var_table, true);
+    for m in out.modules.iter_mut() {
+        let callees = readers(callees_of(&m.functions, &entry_names, &m.var_table, Some(m.name.as_str())));
+        changed |= rewrite_space(&mut m.functions, &callees, &cross, &mut m.var_table, true);
+    }
+    changed.then_some(out)
+}
+
+fn rewrite_space(
+    fns: &mut [IrFunction],
+    callees: &HashMap<String, Callee>,
+    cross: &HashMap<String, Callee>,
+    vt: &mut VarTable,
+    readers_only: bool,
+) -> bool {
     if callees.is_empty() && cross.is_empty() {
         return false;
     }
@@ -669,9 +734,9 @@ fn rewrite_space(fns: &mut [IrFunction], callees: &HashMap<String, Callee>, cros
             continue;
         }
         let this = f.name.as_str().to_string();
-        let mut r = Rewriter { callees, cross, this: &this, vt, changed: false };
+        let mut r = Rewriter { callees, cross, this: &this, vt, changed: false, readers_only };
         let muts: Vec<VarId> = f.params.iter().filter(|p| p.is_mut).map(|p| p.var).collect();
-        if !muts.is_empty() {
+        if !readers_only && !muts.is_empty() {
             r.splice_tail_writers(&mut f.body, &muts);
         }
         almide_ir::visit_mut::IrMutVisitor::visit_expr_mut(&mut r, &mut f.body);

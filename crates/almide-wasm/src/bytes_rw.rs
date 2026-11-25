@@ -128,6 +128,14 @@ impl Emitter<'_> {
         signed: bool,
         be: bool,
     ) -> Result<(), EmitError> {
+        // The arm of an `if` whose condition already asked this window's
+        // room (`proven_room`, #4944): the read skips its own test, as a set does.
+        let proven = match (self.room_proven.take(), &b.kind, &pos.kind) {
+            (Some((pb, pp, w)), IrExprKind::Var { id: bid }, IrExprKind::Var { id: pid }) => {
+                pb == *bid && pp == *pid && i64::from(width) <= w
+            }
+            _ => false,
+        };
         self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
@@ -135,7 +143,11 @@ impl Emitter<'_> {
         let ih = self.hold_i64()?;
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(ih);
-        self.bytes_room(bh, ih, width);
+        if proven {
+            self.f.instructions().i32_const(1);
+        } else {
+            self.bytes_room(bh, ih, width);
+        }
         let mut i = self.f.instructions();
         i.if_(BlockType::Result(ValType::I64));
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add();
@@ -349,7 +361,11 @@ impl Emitter<'_> {
     pub(crate) fn proven_room(&self, cond: &IrExpr, then: &IrExpr) -> Option<(VarId, VarId, i64)> {
         use almide_ir::{BinOp, CallTarget};
         let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &then.kind else { return None };
-        if module.as_str() != "bytes" || !func.as_str().starts_with("__set_") {
+        // A set, or (#4944) a position read of the scalar matrix — what a
+        // checked reader's `if` becomes once inlined (inline_calls/readers.rs).
+        let f = func.as_str();
+        let read = f.starts_with("__read_") && !f.ends_with("_at") && !f.ends_with("_array");
+        if module.as_str() != "bytes" || !(f.starts_with("__set_") || read) {
             return None;
         }
         let (Some(IrExprKind::Var { id: b }), Some(IrExprKind::Var { id: p })) =
