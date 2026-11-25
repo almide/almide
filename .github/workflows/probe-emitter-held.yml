@@ -8,7 +8,7 @@ name: Probe — mutants of the adjacency between an emitted share and its record
 # Not a gate.
 on:
   push:
-    branches: [probe/adjacency]
+    branches: [probe/adjacency-2]
 
 permissions:
   contents: read
