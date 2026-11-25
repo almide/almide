@@ -70,13 +70,18 @@
 #               abort (its ok arm's carrier release is recorded); `fan` and
 #               `list.map` closure routes record the element's share and the
 #               callee's result. 13 test rows and the 4 run rows.
+#   2026-11-26  7 -> 5 (31st engineer, land-3): certified in the producer, each
+#               test run without the flag on bm-1 and its RC byte check
+#               (almide-anchor-check) OK: the branches of a frame whose
+#               whole paths pass the cap are JOINED where their arms reach
+#               the join in the same state (`{a|b}`, the checker's one-shot
+#               branch; witness_paths_join.rs), and a loop entered twice in
+#               one state is queued once (utf8_format_producers object 22
+#               needed 129..256 whole paths); a borrowed `if` whose arm is
+#               itself one records the nested select, which the RC check
+#               pairs leaf by leaf (annotated_result_branch_value).
 #
-# ceiling = "7"
-
-[[program]]
-entry = "test spec/lang/annotated_result_branch_value_test.almd"
-uncertified = 1
-reasons = ["bind:view-result"]
+# ceiling = "5"
 
 [[program]]
 entry = "test spec/lang/effect_fn_value_test.almd"
@@ -102,8 +107,3 @@ reasons = ["tail:view-result"]
 entry = "test spec/stdlib/http_router_test.almd"
 uncertified = 1
 reasons = ["!poison"]
-
-[[program]]
-entry = "test spec/stdlib/utf8_format_producers_test.almd"
-uncertified = 1
-reasons = ["branch-paths:cap"]
