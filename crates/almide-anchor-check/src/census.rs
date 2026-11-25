@@ -579,9 +579,11 @@ pub struct LoopRead {
 
 /// Probe only: every load and store that follows, in one straight-line run,
 /// a `local.get i; local.get n; i32.ge_u; br_if` at its own depth, where `n`
-/// was last assigned by a capture of a block's count and nothing between the
-/// capture and the access leaves the block the capture stands in. No bound,
-/// stride or base is tested here: the kernel judges each proposal.
+/// was last assigned by a capture of a block's count, nothing between the
+/// capture and the access leaves the block the capture stands in, and the
+/// access's address is built from constants, the captured block's local and
+/// the tested counter. No bound, stride, offset or width is tested here: the
+/// kernel judges each proposal.
 pub fn loop_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, inc: Option<u32>) -> Vec<LoopRead> {
     let by = located_by(anchors).unwrap_or_default();
     let mut out = Vec::new();
@@ -599,8 +601,8 @@ pub fn loop_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, inc: Option
             if t < 3 || !matches!(b.ops[t - 1], Op::I32GeU) {
                 continue;
             }
-            let (Op::LocalGet { .. }, Op::LocalGet { local_index: n }) = (&b.ops[t - 3], &b.ops[t - 2]) else { continue };
-            let (n, s0) = (*n, t - 3);
+            let (Op::LocalGet { local_index: counter }, Op::LocalGet { local_index: n }) = (&b.ops[t - 3], &b.ops[t - 2]) else { continue };
+            let (counter, n, s0) = (*counter, *n, t - 3);
             if !crate::window::runs_straight(b, s0, k) {
                 continue;
             }
@@ -618,6 +620,34 @@ pub fn loop_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, inc: Option
                 continue;
             };
             let Op::LocalGet { local_index: base } = &b.ops[p0] else { continue };
+            // The access addresses the captured block by the tested counter:
+            // its address is built, by adds, multiplies and shifts, from
+            // constants and exactly those two locals. Whether the stride, the
+            // offset and the width fit is the kernel's to judge, so a refusal
+            // is an access of this shape that it cannot place in the block.
+            let Some(p) = b.args[k].first().copied().flatten() else { continue };
+            let (mut leaves, mut plain, mut todo) = (Vec::new(), true, vec![p]);
+            while let Some(u) = todo.pop() {
+                match &b.ops[u] {
+                    Op::LocalGet { local_index } => leaves.push(*local_index),
+                    Op::I32Const { .. } => {}
+                    Op::I32Add | Op::I32Mul | Op::I32Shl => {
+                        for a in &b.args[u] {
+                            match a {
+                                Some(x) => todo.push(*x),
+                                None => plain = false,
+                            }
+                        }
+                    }
+                    _ => plain = false,
+                }
+            }
+            leaves.sort_unstable();
+            let mut want = vec![*base, counter];
+            want.sort_unstable();
+            if !plain || leaves != want {
+                continue;
+            }
             let d0 = b.depth[p0];
             if (p0..=j).any(|u| b.depth[u] != d0) {
                 continue;

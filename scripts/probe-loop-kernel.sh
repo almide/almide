@@ -11,10 +11,11 @@
 # function body (the hold may be empty). The kernel is asked once per
 # DISTINCT proposal. Writes <work-dir>/verdicts.tsv (leg, file, function,
 # access, write, located, bytes from the capture to the end of the scan,
-# class) and <work-dir>/summary.txt. The class is `loop_class`'s: 0 refused,
-# 4 the core holds and nothing stands behind the length word, 5 no
-# instruction in between writes memory or calls, 6 the loop holds the block,
-# 7 both.
+# class) and <work-dir>/summary.txt. The class is `loop_class`'s: 0 refused;
+# otherwise 4, plus 1 when no instruction in between writes memory or calls
+# (pure), plus 2 when the loop holds the block (held), plus 8 when the
+# block's address goes nowhere but into the access (kept). 4 alone: the core
+# holds and nothing stands behind the length word.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -91,20 +92,34 @@ need = (max(int(r[7]) for r in idx) + 1) if idx else 0
 if len(vals) != need:
     sys.exit(f"{len(vals)} verdict(s) for {need} distinct proposal(s)")
 KIND = {"0": "no event located", "1": "an initialization event", "2": "a bounds event", "4": "a field event"}
-CLASS = {"0": "refused", "4": "core only", "5": "pure", "6": "held", "7": "pure and held"}
+def CLASSOF(v):
+    n = int(v)
+    if n == 0:
+        return "refused"
+    names = [w for bit, w in ((1, "pure"), (2, "held"), (8, "kept")) if n & bit]
+    return " and ".join(names) if names else "core only"
+class _C(dict):
+    def get(self, k, d=None):
+        return CLASSOF(k)
+CLASS = _C()
 with open(f"{work}/verdicts.tsv", "w", encoding="utf-8") as out:
     for r in idx:
         out.write("\t".join(r[:7] + [vals[int(r[7])]]) + "\n")
 for leg in sorted(set(r[0] for r in idx)):
     R = [(r, vals[int(r[7])]) for r in idx if r[0] == leg]
-    ok = [r for r, v in R if v in ("5", "6", "7")]
+    ok = [r for r, v in R if int(v) > 4]
     print(f"loop kernel check [{leg}]: {len(R)} proposal(s): {len(ok)} accepted in {len(set(r[1] for r in ok))} module(s)")
     by = collections.Counter(CLASS.get(v, v) for r, v in R)
     for k in sorted(by):
         print(f"   {k}: {by[k]}")
     by = collections.Counter((CLASS.get(v, v), "store" if r[4] == "1" else "load", KIND.get(r[5], r[5])) for r, v in R)
     for k in sorted(by):
-        print(f"   {k[0]:14s} {k[1]:5s} with {k[2]}: {by[k]}")
+        print(f"   {k[0]:22s} {k[1]:5s} with {k[2]}: {by[k]}")
+    any_of = lambda bit: sum(1 for r, v in R if int(v) > 4 and int(v) & bit)
+    print(f"   accepted with: pure {any_of(1)}, held {any_of(2)}, kept {any_of(8)}; first of pure / held / kept: "
+          + ", ".join(str(sum(1 for r, v in R if int(v) > 4 and pick(int(v)))) for pick in (lambda n: n & 1, lambda n: not n & 1 and n & 2, lambda n: not n & 3 and n & 8)))
+    located = sum(1 for r, v in R if int(v) > 4 and r[5] == "2")
+    print(f"   accepted with a bounds event: {located}")
     spans = sorted(int(r[6]) for r in ok) or [0]
     print(f"   bytes scanned after the capture: median {spans[len(spans)//2]}, max {spans[-1]}")
 PY
