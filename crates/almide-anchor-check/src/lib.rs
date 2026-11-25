@@ -72,8 +72,15 @@
 //! for the kernel to judge with `proofs/GuardFresh.v`. No bound is tested
 //! here: a store past its block is a proposal the kernel refuses.
 //!
+//! LOOPS (loops.rs): likewise, every access that follows a loop's exit test
+//! in one straight-line run, addressed by the block whose count was captured
+//! before the loop and by the tested counter, is printed as byte strings for
+//! the kernel to judge with `proofs/GuardLoop.v`. No bound, stride, offset
+//! or width is tested here.
+//!
 //! TRUSTED: the representation R (init); the rest of operands.rs's,
-//! routines.rs's, proved.rs's, window.rs's and fresh.rs's TRUSTED lists.
+//! routines.rs's, proved.rs's, window.rs's, fresh.rs's and loops.rs's TRUSTED
+//! lists.
 
 
 use wasmparser::Operator as Op;
@@ -91,6 +98,7 @@ pub mod rc;
 mod routines;
 pub mod window;
 pub mod fresh;
+pub mod loops;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, proved_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
