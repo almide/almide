@@ -53,4 +53,13 @@ jobs:
           fi
           cat "$RUNNER_TEMP/guard-window.log"
           echo "exit $rc"
+          # The same three files as they are handed out, with the names in
+          # their comments removed and another logical path: they must compile
+          # on their own, in this order.
+          cd ../proofs-released
+          for f in GuardWindow.v GuardFresh.v GuardLoop.v; do
+            echo "===== released $f"
+            $C -Q . Trust "$f" 2>&1 | tail -4 || rc=$?
+          done
+          echo "released exit $rc"
           exit "$rc"
