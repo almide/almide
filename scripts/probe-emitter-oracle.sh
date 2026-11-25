@@ -60,6 +60,37 @@ summary() {
   printf '%s\t%s\t%s\t%s\t%s' "${b:--}" "${i:--}" "$d" "$e" "${first:--}"
 }
 
+# oracle_corpus <out-file> <program>...: the corpus loop of
+# scripts/wasm-checked-alloc.sh, without its three controls. A mutant can break
+# a control (its program no longer builds) and still build corpus programs;
+# the controls belong to the unmutated compiler, where step (a) runs them.
+oracle_corpus() {
+  local outf="$1" tmp built=0 same=0 diff=0 skipped=0 f x
+  shift
+  tmp="$(mktemp -d)"
+  for f in "$@"; do
+    if ! env -u ALMIDE_WASM_CHECKED_ALLOC "$ALMIDE" build "$f" --target wasm -o "$tmp/a.wasm" > /dev/null 2>&1; then skipped=$((skipped + 1)); continue; fi
+    if ! ALMIDE_WASM_CHECKED_ALLOC=1 "$ALMIDE" build "$f" --target wasm -o "$tmp/b.wasm" > /dev/null 2>&1; then
+      echo "DIFF $f: builds ordinarily but not under the switch" >> "$outf"; diff=$((diff + 1)); continue
+    fi
+    built=$((built + 1))
+    for x in a b; do
+      rm -rf "$tmp/troot"; mkdir "$tmp/troot"
+      ( cd "$tmp" && timeout "$RUN_TIMEOUT" wasmtime run --dir=. --dir="$tmp/troot::/tmp" "$tmp/$x.wasm" < /dev/null > "$tmp/$x.out" 2> "$tmp/$x.err"; echo $? > "$tmp/$x.rc" )
+    done
+    if cmp -s "$tmp/a.out" "$tmp/b.out" && cmp -s "$tmp/a.err" "$tmp/b.err" && cmp -s "$tmp/a.rc" "$tmp/b.rc"; then
+      same=$((same + 1))
+    else
+      diff=$((diff + 1))
+      echo "DIFF $f: exit $(cat "$tmp/a.rc") -> $(cat "$tmp/b.rc")" >> "$outf"
+      echo "    $(head -c 300 "$tmp/b.err" | tr '\n' ' ')" >> "$outf"
+    fi
+  done
+  echo "wasm-checked-alloc: $built built, $same identical, $diff different, $skipped not built (no wasm build)" >> "$outf"
+  rm -rf "$tmp"
+}
+
+export -f oracle_corpus
 build || { echo "baseline build failed"; tail -n 20 "$OUT/build.log"; exit 1; }
 "$ALMIDE" --version
 emit_all "$OUT/base"
@@ -99,7 +130,13 @@ while IFS=$'\t' read -r id file line genre name; do
     rc=$?
     st="rc$rc"
     grep -q '^wasm-checked-alloc: ' "$OUT/detail/$id.txt" || st="no-verdict-rc$rc"
-    grep -q '^FAIL' "$OUT/detail/$id.txt" && st="control-failed"
+    if grep -q '^FAIL' "$OUT/detail/$id.txt"; then
+      # a control failed under this mutant: the corpus loop alone
+      mv "$OUT/detail/$id.txt" "$OUT/detail/$id.controls.txt"
+      : > "$OUT/detail/$id.txt"
+      timeout "$T_ORACLE" bash -c 'oracle_corpus "$@"' _ "$OUT/detail/$id.txt" "${CH[@]}"
+      st="controls-skipped-rc$?"
+    fi
     printf '%s\t%s\t%s\t%s\n' "$id" "$st" "${#CH[@]}" "$(summary "$OUT/detail/$id.txt")" >> "$OUT/oracle.tsv"
   fi
   git apply -R "$MUT/$id.diff"
