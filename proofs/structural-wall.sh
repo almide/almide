@@ -219,6 +219,17 @@ while IFS= read -r f; do
       sed 's/^/  /' "$OUT/$N.windows-err" >&2
       exit 1
     fi
+    # The accesses into a block this artifact has just allocated with a
+    # constant size: the anchor file is read for the allocator's index only,
+    # no bound is tested here, and the kernel judges each one after the loop
+    # (check-shipped-fresh.sh).
+    printf 'MODULE %s\n' "$f" >> "$OUT/fresh-dump"
+    if ! "$ANCHORCHECK" --fresh "$OUT/$N.wasm" "$OUT/$N.anchors" >> "$OUT/fresh-dump" 2> "$OUT/$N.fresh-err"; then
+      echo "STRUCTURAL WALL FAIL: $f: the shipped bytes could not be swept for fresh-block accesses:" >&2
+      hew "$OUT/fresh-dump" --tail 1 | sed 's/^/  /' >&2
+      sed 's/^/  /' "$OUT/$N.fresh-err" >&2
+      exit 1
+    fi
   fi
   # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
   # what it certifies must be the translation of the shipped functions
@@ -287,6 +298,18 @@ bash "$ROOT/proofs/check-shipped-routines.sh" "$OUT/shipped-dump" "$OUT/shipped"
 echo "== guarded accesses proven in bounds from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/window-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for guarded-access windows — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "$MODE" | sed 's/^/  /'
+# ACCESSES INTO A BLOCK JUST ALLOCATED, FROM THE BYTES ALONE: the init and
+# fields witnesses are judged over a trace model and almide-anchor-check
+# (unverified) holds their events to the instructions by shape. Where a
+# function allocates a constant size into a local, leaves the local alone and
+# then reads or writes at that local plus a constant, the Rocq kernel reads
+# the three byte strings with GuardFresh.v and `fresh_sound` puts the access
+# inside the block's header and requested payload in every run. The cutter
+# proposes every such access and tests no bound; a proposal the kernel refuses
+# fails, and so does a count below the leg's floor.
+echo "== accesses into a block just allocated, proven inside it from the shipped bytes alone (Rocq kernel) =="
+[ -s "$OUT/fresh-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for fresh-block accesses — the check went blind" >&2; exit 1; }
+bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE" | sed 's/^/  /'
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"
