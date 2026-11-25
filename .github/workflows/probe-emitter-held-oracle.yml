@@ -1,4 +1,4 @@
-name: Probe — a dynamic heap oracle on the mutants of the adjacency between an emitted share and its record
+name: Probe — a dynamic heap oracle on the mutants of the adjacency for releases and field records
 # Probe only: the project's checked allocator (frees poisoned, a canary past
 # each block; scripts/wasm-checked-alloc.sh) as a dynamic oracle for the
 # held-out sample's module-changing mutants. Per mutant, every contract
@@ -8,7 +8,7 @@ name: Probe — a dynamic heap oracle on the mutants of the adjacency between an
 # Not a gate.
 on:
   push:
-    branches: [probe/adjacency-oracle]
+    branches: [probe/adjacency-2-oracle]
 
 permissions:
   contents: read
