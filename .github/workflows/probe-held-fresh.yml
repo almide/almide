@@ -85,4 +85,4 @@ jobs:
             ${{ runner.temp }}/held-fresh/base-failed
             ${{ runner.temp }}/held-fresh/kernel.log
             ${{ runner.temp }}/held-fresh/kernel/verdicts.tsv
-            ${{ runner.temp }}/held-fresh/kernel/summary.txt
+            ${{ runner.temp }}/held-fresh/uniq-dump

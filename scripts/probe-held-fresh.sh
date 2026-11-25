@@ -92,6 +92,11 @@ while IFS=$'\t' read -r id m n; do
 done < "$OUT/jobs.tsv"
 echo "dump: $(grep -c '^FRESHHEX' "$OUT/dump") proposal(s); allocator not found in $(grep -c '^FRESHALLOC none' "$OUT/dump") module(s), unreadable $(grep -c '^FRESHALLOC unreadable' "$OUT/dump"), no unmutated module $(grep -c '^FRESHALLOC no-base' "$OUT/dump")"
 
-FRESH_QUIET=1 bash "$ROOT/scripts/probe-fresh-kernel.sh" "$OUT/dump" "$OUT/kernel" > "$OUT/kernel.log" 2>&1 || { echo "the kernel run failed"; tail -n 20 "$OUT/kernel.log"; exit 1; }
+# The kernel is asked once per DISTINCT proposal (allocator and the three
+# byte strings), and the verdicts are spread back over the proposals.
+python3 -I "$ROOT/scripts/probe-held-fresh-uniq.py" fold "$OUT/dump" "$OUT/uniq-dump" "$OUT/uniq-index.tsv"
+bash "$ROOT/scripts/probe-fresh-kernel.sh" "$OUT/uniq-dump" "$OUT/kernel-uniq" > "$OUT/kernel.log" 2>&1 || { echo "the kernel run failed"; tail -n 20 "$OUT/kernel.log"; exit 1; }
 grep -E 'proposal\(s\) in the dump|kernel time|Closed under' "$OUT/kernel.log"
+mkdir -p "$OUT/kernel"
+python3 -I "$ROOT/scripts/probe-held-fresh-uniq.py" spread "$OUT/kernel-uniq/verdicts.tsv" "$OUT/uniq-index.tsv" "$OUT/kernel/verdicts.tsv"
 python3 -I "$ROOT/scripts/probe-held-fresh-join.py" "$OUT/dump" "$OUT/kernel/verdicts.tsv" "$SH" "$OUT"
