@@ -132,7 +132,9 @@ jobs:
           EOF
           R="$RUNNER_TEMP/replays"
           mkdir -p "$R"
-          for run in 45706009094 45676377343 45677866679 45653617765; do
+          # The twelve replays with only the repair undone: five in the first run, four in the second, three in the third
+          # (which also kept one more form of the first of its three).
+          for run in 45651221492 45706009094 45676377343; do
             gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'replay-*' --dir "$RUNNER_TEMP/replay-$run" || echo "nothing fetched from $run"
             for d in "$RUNNER_TEMP/replay-$run"/replay-*; do
               [ -d "$d" ] && mv "$d" "$R/$(basename "$d")@$run"
