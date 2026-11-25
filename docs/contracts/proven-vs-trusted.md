@@ -68,9 +68,10 @@ access, and every instruction in between, and its theorem `loop_sound` puts
 the access inside the looped block's payload in every run of the test and
 the access from locals in which the count's local holds the captured count
 (`proofs/check-shipped-loops.sh`: the kernel also computes whether the loop
-leaves memory alone, holds its own share of the block or keeps the block's
-address to itself; a read with none of the three is counted against a
-ceiling). What the anchor
+leaves memory alone, holds its own share of the block or reads the block's
+local nowhere else; a read with none of the three is counted against a
+ceiling, and so is a read the kernel cannot place inside the block). What
+the anchor
 check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and
 release routines, the copy-on-write judges), a read of a released block

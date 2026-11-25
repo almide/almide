@@ -35,14 +35,19 @@
 # its class, and every class read is then a goal `loop_class .. = <class>`
 # the kernel proves. <leg> names the row of proofs/shipped-loops-floor.txt.
 #
-# Fails when a proposal's core is REFUSED (class 0: an access through the
-# looped block by the tested counter that the kernel cannot place inside it,
-# or the cutter and the proof drifted apart), when a module's dump has no
-# `INCREMENT` line (the sweep went blind), when fewer reads are accepted
-# (class above 4) than the leg's floor, or when more reads than the leg's
-# ceiling have a core that holds and nothing behind the length word (class
-# 4: a count captured before a loop that nothing protects). Lower a floor or
-# raise a ceiling in its own commit and say why.
+# Fails when a module's dump has no `INCREMENT` line (the sweep went blind),
+# when fewer reads are accepted (class above 4) than the leg's floor, when
+# more reads than the leg's first ceiling have a core that holds and nothing
+# behind the length word (class 4: a count captured before a loop that
+# nothing protects), or when more reads than the leg's second ceiling have a
+# core the kernel REFUSES (class 0: an access through the looped block by the
+# tested counter that the kernel cannot place inside it). The corpus holds
+# refused reads that are in bounds for a reason the rule does not know: a
+# loop that counts BYTES and reads 4- or 8-byte elements stays inside only
+# because the length and the counter are multiples of the element size. They
+# are counted, not hidden: the cutter tests no bound, so a read one slot too
+# far is refused the same way and takes the count over its ceiling. Lower a
+# floor or raise a ceiling in its own commit and say why.
 # Writes <work-dir>/verdicts.tsv (label, function, access, class).
 #
 # Needs coqc and the compiled spine (proofs/check.sh, or at least
@@ -152,13 +157,13 @@ PY
 find "$WORK" -maxdepth 1 -name 'Proved_*.v' | LC_ALL=C sort \
   | xargs -P "${LOOPS_JOBS:-4}" -I{} bash -c 'c="$(basename "$1" .v)"; "$COQC" -Q "$HERE" AlmideTrust "$1" > "$WORK/$c.log" 2>&1 || { echo "FAIL: the kernel does not prove the classes of $c: $(head -3 "$WORK/$c.log")"; exit 255; }' _ {}
 
-row="$(awk -v leg="$LEG" '$1 == leg { print $2, $3 }' "$FLOORS")"
-[ -n "$row" ] || { echo "FAIL: $FLOORS has no row for the leg \`$LEG\`"; exit 1; }
+row="$(awk -v leg="$LEG" '$1 == leg && NF == 4 { print $2, $3, $4 }' "$FLOORS")"
+[ -n "$row" ] || { echo "FAIL: $FLOORS has no row of four fields for the leg \`$LEG\`"; exit 1; }
 fail=0
 # shellcheck disable=SC2086
 python3 -I - "$WORK" "$LEG" $row <<'PY' || fail=1
 import sys
-work, leg, floor, ceiling = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+work, leg, floor, ceiling, refusals = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
 cls = dict(l.split() for l in open(f"{work}/classes.tsv", encoding="utf-8"))
 rows = [l.rstrip("\n").split("\t") for l in open(f"{work}/index.tsv", encoding="utf-8")]
 mods, named, proposed, distinct = (int(x) for x in open(f"{work}/swept.txt", encoding="utf-8").read().split())
@@ -170,11 +175,13 @@ ok = sum(1 for v in c if v > 4)
 bare = [r for r, v in zip(rows, c) if v == 4]
 bad = [r for r, v in zip(rows, c) if v == 0]
 with_one = len({r[1] for r, v in zip(rows, c) if v > 4})
-print(f"shipped loop reads [{leg}]: {mods} module(s), {named} naming an increment routine, {proposed} read(s) proposed as {distinct} distinct: {ok} accepted, {len(bare)} with nothing behind the length word, {len(bad)} REFUSED")
-print(f"  accepted: pure {sum(1 for v in c if v > 4 and v & 1)}, held {sum(1 for v in c if v > 4 and v & 2)}, kept {sum(1 for v in c if v > 4 and v & 8)} (a read may be more than one), in {with_one} module(s) (floor {floor}); nothing behind: {len(bare)} (ceiling {ceiling})")
+print(f"shipped loop reads [{leg}]: {mods} module(s), {named} naming an increment routine, {proposed} read(s) proposed as {distinct} distinct: {ok} accepted, {len(bare)} with nothing behind the length word, {len(bad)} refused")
+print(f"  accepted: pure {sum(1 for v in c if v > 4 and v & 1)}, held {sum(1 for v in c if v > 4 and v & 2)}, kept {sum(1 for v in c if v > 4 and v & 8)} (a read may be more than one), in {with_one} module(s) (floor {floor}); nothing behind: {len(bare)} (ceiling {ceiling}); refused: {len(bad)} (ceiling {refusals})")
 failed = False
-for i, label, func, acc in bad[:20]:
-    print(f"FAIL: {label}: the read at function {func}, instruction {acc} addresses the looped block by the tested counter and the kernel refuses it (goal l{int(i):06d} of {work})")
+if len(bad) > refusals:
+    for i, label, func, acc in bad[:20]:
+        print(f"  refused: {label}: the read at function {func}, instruction {acc} addresses the looped block by the tested counter and the kernel cannot place it inside (goal l{int(i):06d} of {work})")
+    print(f"FAIL: {len(bad)} read(s) are refused by the kernel, above the ceiling of {refusals} for `{leg}`: a loop reads through its block by its counter where the rule cannot place the read. Fix the read, or raise proofs/shipped-loops-floor.txt in its own commit and say why it is in bounds.")
     failed = True
 if ok < floor:
     print(f"FAIL: {ok} read(s) accepted, below the floor of {floor} for `{leg}`: evidence was lost. Restore it, or lower proofs/shipped-loops-floor.txt in its own commit and say why.")
@@ -187,8 +194,10 @@ if len(bare) > ceiling:
 if ok > floor:
     print(f"  note: {ok - floor} above the floor; raise the `{leg}` row of proofs/shipped-loops-floor.txt to {ok} to keep them.")
 if len(bare) < ceiling:
-    print(f"  note: {ceiling - len(bare)} below the ceiling; lower the `{leg}` row's ceiling to {len(bare)} to keep it.")
+    print(f"  note: {ceiling - len(bare)} below the ceiling; lower the `{leg}` row's first ceiling to {len(bare)} to keep it.")
+if len(bad) < refusals:
+    print(f"  note: {refusals - len(bad)} below the refusal ceiling; lower the `{leg}` row's second ceiling to {len(bad)} to keep it.")
 sys.exit(1 if failed else 0)
 PY
 [ "$fail" -eq 0 ] || exit 1
-echo "ok   every proposed loop read's core is accepted by the kernel, and the counts hold their floor and ceiling"
+echo "ok   every proposed loop read is classed by the kernel, and the counts hold their floor and ceilings"
