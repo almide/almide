@@ -10,5 +10,5 @@
 # with the reason in the message.
 #
 # leg       accesses
-fixtures    0
-tests       0
+fixtures    17716
+tests       11601
