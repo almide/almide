@@ -216,3 +216,80 @@ fn the_control_state_marks_dead_code_after_an_exit_and_a_jump() {
     assert!(!b.dead(), "the code after a loop is live");
     assert!(b.settled());
 }
+
+/// `n` sequential two-arm sites over local 3 (object 0, owned), site `k`'s
+/// arms `arms(k)`, then the epilogue's release.
+fn sequential_sites(n: usize, arms: impl Fn(usize) -> (Vec<Ev>, Vec<Ev>)) -> Vec<Ev> {
+    let mut log = vec![Birth(0), Op(0, 'i'), bind(3, 0)];
+    for k in 0..n {
+        let (then, else_) = arms(k);
+        log.push(Open);
+        log.extend(then);
+        log.push(Arm);
+        log.extend(else_);
+        log.push(Close);
+    }
+    log.push(LOp(3, 'd'));
+    log
+}
+
+fn accepted(cert: &str) -> bool {
+    almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes())
+}
+
+/// A share moved on (`am`) in one arm, a read (`b`) in the other.
+fn share_or_read() -> (Vec<Ev>, Vec<Ev>) {
+    (vec![LOp(3, 'a'), LOp(3, 'm')], vec![LOp(3, 'b')])
+}
+
+#[test]
+fn sequential_branches_past_the_cap_join_at_each_site() {
+    // 8 sites whose arms record different events: 256 distinct whole paths,
+    // past PATH_CAP in both enumerated forms. Each arm leaves the count it
+    // found, so every site is one `{am|b}` item on one path.
+    let c = cert(&sequential_sites(8, |_| share_or_read()), 1);
+    assert_eq!(c, format!("i{}d\n", "{am|b}".repeat(8)));
+    assert!(accepted(&c));
+    // Under the cap the enumerated form keeps its bytes (no join).
+    assert_eq!(cert(&sequential_sites(1, |_| share_or_read()), 1), "{iamd|ibd}\n");
+}
+
+#[test]
+fn a_joined_arm_that_faults_is_still_refused() {
+    // One site's arm releases twice before re-sharing: net 0 like its
+    // sibling, so it joins — and the checker runs it from the count at the
+    // branch (1) and finds the second release at 0.
+    let log = sequential_sites(8, |k| if k == 5 { (vec![LOp(3, 'd'), LOp(3, 'd'), LOp(3, 'a'), LOp(3, 'a')], vec![LOp(3, 'b')]) } else { share_or_read() });
+    let c = cert(&log, 1);
+    assert!(c.contains("{b|ddaa}"), "{c}");
+    assert!(!accepted(&c), "{c}");
+}
+
+#[test]
+fn an_unbalanced_arm_is_never_joined() {
+    // One site's arm shares without moving on (a leak on that path): its
+    // net differs from its sibling's, so the site is not joined; the two
+    // paths it leaves carry joined items and cannot be written as flat
+    // whole-path arms, so the frame declines rather than certify.
+    let log = sequential_sites(8, |k| if k == 5 { (vec![LOp(3, 'a')], vec![LOp(3, 'b')]) } else { share_or_read() });
+    let e = render(&log, 1).expect_err("an unbalanced arm must not certify");
+    assert!(e.starts_with("branch-paths"), "{e}");
+    // The same leak under the cap: enumerated, and refused by the checker.
+    let c = cert(&sequential_sites(1, |_| (vec![LOp(3, 'a')], vec![LOp(3, 'b')])), 1);
+    assert!(!accepted(&c), "{c}");
+}
+
+#[test]
+fn a_loop_entered_twice_in_the_same_state_is_queued_once() {
+    // Two paths (a read in one arm) reach each of 40 loops with the same
+    // holders: one activation per loop, not one per path — 40 queued, under
+    // the cap, so the frame keeps its enumerated two-path line.
+    let mut log = vec![Birth(0), Op(0, 'i'), bind(3, 0), Open, LOp(3, 'b'), Arm, Close];
+    for _ in 0..40 {
+        log.extend([LoopOpen, LOp(3, 'a'), LOp(3, 'd'), LoopClose]);
+    }
+    log.push(LOp(3, 'd'));
+    let c = cert(&log, 1);
+    assert_eq!(c, format!("{{ibd|id}}\n{}", "ad\n".repeat(40)));
+    assert!(accepted(&c));
+}

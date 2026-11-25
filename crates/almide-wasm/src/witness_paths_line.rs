@@ -34,6 +34,9 @@ pub(super) fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
     if let [one] = set.iter().collect::<Vec<_>>().as_slice()
         && !one.ends_with('t')
     {
+        if exits == Exits::Join && !super::join::flat_groups(one) {
+            return Err("branch-paths:join-nested".into());
+        }
         return Ok((*one).clone());
     }
     let mut hoisted: BTreeSet<String> = BTreeSet::new();
@@ -71,5 +74,9 @@ pub(super) fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
             format!("{items}{tail}")
         }
     };
-    Ok(format!("{head}{body}"))
+    let line = format!("{head}{body}");
+    if exits == Exits::Join && !super::join::flat_groups(&line) {
+        return Err("branch-paths:join-nested".into());
+    }
+    Ok(line)
 }
