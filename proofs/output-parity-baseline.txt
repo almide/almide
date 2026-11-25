@@ -244,6 +244,7 @@ spec/wasm_cross/codec_triple_list.almd
 spec/wasm_cross/codec_variant_roundtrip.almd
 spec/wasm_cross/codec_variant_tuple_arity.almd
 spec/wasm_cross/codec_whitespace_tolerance.almd
+spec/wasm_cross/collection_key_total_equality.almd
 spec/wasm_cross/collection_literals.almd
 spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_eq.almd
