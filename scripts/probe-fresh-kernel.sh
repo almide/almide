@@ -59,28 +59,34 @@ PY
 
 export COQC ROOT WORK
 t0=$(date +%s)
-# Each file under a time limit and an address-space limit: a proposal whose
-# verdict costs more than that must not take the machine down with it.
+# Each file under a time limit and a resident-memory limit: a proposal whose
+# verdict costs more than that must not take the machine down with it. (An
+# address-space limit cannot be used: the OCaml 5 runtime reserves its minor
+# heaps at start and aborts under it before it has read a line.)
+LIMITED="$ROOT/scripts/probe-limited-run.py"
+export LIMITED
+# A control on the limit itself: a verdict that costs nothing must come back.
+printf 'From Stdlib Require Import ZArith.\nOpen Scope Z_scope.\nEval vm_compute in (1 + 1).\n' > "$WORK/limit_control.v"
+python3 -I "$LIMITED" 120 "${FRESH_RSS_KB:-3500000}" "$WORK/limit_control.out" "$WORK/limit_control.err" -- "$COQC" "$WORK/limit_control.v" \
+  && grep -q '= 2' "$WORK/limit_control.out" \
+  || { echo "the limited runner could not get the kernel to compute 1 + 1: $(head -c 300 "$WORK/limit_control.err")" >&2; exit 1; }
+echo "limit control: the kernel computes under the limits (${FRESH_SECONDS:-900} s, ${FRESH_RSS_KB:-3500000} kB resident)"
 find "$WORK" -maxdepth 1 -name 'Fresh_*.v' | LC_ALL=C sort \
-  | xargs -P "${FRESH_JOBS:-3}" -I{} bash -c 'c="${1%.v}"; ( ulimit -v "${FRESH_KB:-5000000}"; timeout "${FRESH_SECONDS:-900}" "$COQC" -Q "$ROOT/proofs" AlmideTrust "$1" > "$c.out" 2> "$c.err" ) || echo "LIMIT $1: $(head -c 200 "$c.err" | tr "\n" " ")"' _ {}
+  | xargs -P "${FRESH_JOBS:-3}" -I{} bash -c 'c="${1%.v}"; python3 -I "$LIMITED" "${FRESH_SECONDS:-900}" "${FRESH_RSS_KB:-3500000}" "$c.out" "$c.err" -- "$COQC" -Q "$ROOT/proofs" AlmideTrust "$1" || echo "LIMIT $1: $(tail -c 200 "$c.err" | tr "\n" " ")"' _ {}
 echo "kernel time: $(( $(date +%s) - t0 )) s (${FRESH_JOBS:-3} at a time)"
 # A file that did not give every verdict is halved until the proposals that
 # cost too much stand alone; those get the verdict `none`.
-python3 -I - "$WORK" "$COQC" "$ROOT/proofs" "${FRESH_KB:-5000000}" <<'PY'
-import glob, os, resource, subprocess, sys
-work, coqc, proofs, kb = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+python3 -I - "$WORK" "$COQC" "$ROOT/proofs" "${FRESH_RSS_KB:-3500000}" "$LIMITED" <<'PY'
+import glob, os, subprocess, sys
+work, coqc, proofs, kb, limited = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 HEAD = "From AlmideTrust Require Import GuardWindow GuardFresh.\nFrom Stdlib Require Import ZArith.\nFrom Stdlib Require Import List.\nImport ListNotations.\nOpen Scope Z_scope.\n"
-def limit():
-    resource.setrlimit(resource.RLIMIT_AS, (kb * 1024, kb * 1024))
 def ask(evals, seconds):
     p = os.path.join(work, "bisect.v")
     with open(p, "w", encoding="utf-8") as f:
         f.write(HEAD + "".join(evals))
-    try:
-        r = subprocess.run([coqc, "-Q", proofs, "AlmideTrust", p], capture_output=True, text=True, timeout=seconds, preexec_fn=limit)
-    except subprocess.TimeoutExpired:
-        return None
-    vals = [l.split("=", 1)[1].strip() for l in r.stdout.splitlines() if l.strip().startswith("= ")]
+    o, e = os.path.join(work, "bisect.out"), os.path.join(work, "bisect.err")
+    subprocess.run([sys.executable, "-I", limited, str(seconds), kb, o, e, "--", coqc, "-Q", proofs, "AlmideTrust", p])
+    vals = [l.split("=", 1)[1].strip() for l in open(o, encoding="utf-8", errors="replace") if l.strip().startswith("= ")]
     return vals if len(vals) == len(evals) else None
 def judge(evals):
     if not evals:
@@ -92,8 +98,9 @@ def judge(evals):
         return ["none"]
     h = len(evals) // 2
     return judge(evals[:h]) + judge(evals[h:])
-costly = 0
+costly = total = 0
 for v in sorted(glob.glob(os.path.join(work, "Fresh_*.v"))):
+    total += sum(1 for l in open(v, encoding="utf-8") if l.startswith("Eval "))
     evals = [l for l in open(v, encoding="utf-8") if l.startswith("Eval ")]
     out = v[:-2] + ".out"
     have =[l.split("=", 1)[1].strip() for l in open(out, encoding="utf-8") if l.strip().startswith("= ")] if os.path.exists(out) else []
@@ -108,7 +115,9 @@ for v in sorted(glob.glob(os.path.join(work, "Fresh_*.v"))):
             if x == "none":
                 f.write(e)
     print(f"{os.path.basename(v)}: asked again in halves; {got.count('none')} proposal(s) without a verdict")
-print(f"proposals without a verdict under the limits: {costly}")
+print(f"proposals without a verdict under the limits: {costly} of {total}")
+if total and costly == total:
+    sys.exit("no proposal got a verdict: the limit, not the proposals, is what failed")
 PY
 
 python3 -I - "$WORK" <<'PY' | tee "$WORK/summary.txt"
