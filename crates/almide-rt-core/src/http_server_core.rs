@@ -956,7 +956,7 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
     }
     // A secure field (C-407, #4134, owner ruling 2026-11-25): every response
     // says `X-Content-Type-Options: nosniff`; a handler's own is dropped above,
-    // so a script-capable body (C-465) is never sniffed.
+    // so a script-capable body the application granted itself is never sniffed.
     out.push_str("X-Content-Type-Options: nosniff\r\n");
     out.push_str("Connection: close\r\n");
     let informational = (100..200).contains(&status);
