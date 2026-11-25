@@ -200,11 +200,12 @@ fn alloc(ctx: &Ctx) -> String {
         Err(e) => return format!("SKIP: {e}"),
     };
     let mut cmd = std::process::Command::new(&ctx.almide);
-    cmd.arg("run").arg(&file).args(["--target", "wasm", "--"]).args(sandbox::ARGS).env("ALMIDE_WASM_ALLOC_COUNT", "1");
+    cmd.arg("run").arg(&file).args(["--target", "wasm", crate::incomplete::FLAG, "--"]).args(sandbox::ARGS).env("ALMIDE_WASM_ALLOC_COUNT", "1");
     world.enter(&mut cmd);
-    let Ok(out) = cmd.output() else {
+    let Ok(mut out) = cmd.output() else {
         return "SKIP: could not run almide".into();
     };
+    crate::incomplete::take(&mut out.stderr);
     let (pass, part) = alloc_part_exiting("call", &out, 0);
     format!("{}: {part}", if pass { "PASS" } else { "FAIL" })
 }
@@ -260,6 +261,7 @@ pub(super) fn inspect(ctx: &mut Ctx, name: &str, args: &[String]) {
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
+    crate::incomplete::print_report();
     let _ = std::fs::remove_dir_all(&ctx.dir);
     if !all_pass {
         std::process::exit(1);
