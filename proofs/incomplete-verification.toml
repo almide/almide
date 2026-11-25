@@ -40,8 +40,13 @@
 #               certified process.poll (`some(ok(s))` in a match over an owned
 #               carrier), whose RC byte check (almide-anchor-check) then found two
 #               releases no event records — so those frames stay listed.
+#   2026-11-25  37 -> 36: a `list.map` callback that propagates is judged as the
+#               closure value its fallible self-host form takes (28th, census
+#               cen28 on ds-2): spec/lang/fallible_lambda_test.almd certifies;
+#               fan_mapper_effect_callback_forms' one frame now declines on its
+#               fan.map callback instead.
 #
-# ceiling = "37"
+# ceiling = "36"
 
 [[program]]
 entry = "test spec/integration/clone_opt_test.almd"
@@ -57,11 +62,6 @@ reasons = ["bind:view-result"]
 entry = "test spec/lang/effect_fn_value_test.almd"
 uncertified = 1
 reasons = ["tail:Unwrap"]
-
-[[program]]
-entry = "test spec/lang/fallible_lambda_test.almd"
-uncertified = 3
-reasons = ["call-arg:Lambda:list.map:propagating"]
 
 [[program]]
 entry = "test spec/lang/fan_test.almd"
@@ -181,7 +181,7 @@ reasons = ["effect:carrier:ok-borrowed"]
 [[program]]
 entry = "run spec/embedded_cross/fan_mapper_effect_callback_forms.almd"
 uncertified = 1
-reasons = ["call-arg:Lambda:list.map:propagating"]
+reasons = ["call-arg:Lambda:fan.map:propagating"]
 
 [[program]]
 entry = "run spec/embedded_cross/process_spawn_family.almd"
