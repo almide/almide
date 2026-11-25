@@ -54,3 +54,60 @@ jobs:
           cd proofs
           if command -v coqc >/dev/null 2>&1; then C="coqc"; else C="rocq compile"; fi
           $C -Q . AlmideTrust GuardWindow.v
+
+  mutant:
+    name: Windows of one mutant's modules, before and after
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Measure
+        run: |
+          BIN="$HOME/.opam/${OCAML_VERSION}/bin"
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          export PATH="$BIN:$PATH"
+          cargo build -q --release --locked -p almide-anchor-check
+          (cd proofs && coqc -Q . AlmideTrust GuardWindow.v)
+          for side in base mutant; do
+            : > "$RUNNER_TEMP/dump-$side"
+            for w in probe-data/m0217/$side/*.wasm; do
+              printf 'MODULE %s\n' "$(basename "$w" .wasm)" >> "$RUNNER_TEMP/dump-$side"
+              ./target/release/almide-anchor-check --windows "$w" >> "$RUNNER_TEMP/dump-$side"
+            done
+            bash proofs/check-shipped-windows.sh "$RUNNER_TEMP/dump-$side" "$RUNNER_TEMP/win-$side" fixtures || echo "the kernel check of the $side side failed"
+            awk -F'\t' '$5 == "ok" { c[$1]++ } END { for (k in c) print k, c[k] }' "$RUNNER_TEMP/win-$side/verdicts.tsv" | sort > "$RUNNER_TEMP/count-$side.txt"
+            grep '^ACCESSES\|^MODULE' "$RUNNER_TEMP/dump-$side" | paste - - | awk '{ print $2, $4 }' | sort > "$RUNNER_TEMP/acc-$side.txt"
+          done
+          echo "module  accesses(base) windows(base)  accesses(mutant) windows(mutant)"
+          for m in $(cut -d' ' -f1 "$RUNNER_TEMP/acc-base.txt"); do
+            printf '%s %s %s %s %s\n' "$m" \
+              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/acc-base.txt")" \
+              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/count-base.txt" | grep . || echo 0)" \
+              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/acc-mutant.txt")" \
+              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/count-mutant.txt" | grep . || echo 0)"
+          done | tee "$RUNNER_TEMP/m0217-windows.txt"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: m0217-windows
+          path: |
+            ${{ runner.temp }}/m0217-windows.txt
+            ${{ runner.temp }}/dump-base
+            ${{ runner.temp }}/dump-mutant
+            ${{ runner.temp }}/win-base/verdicts.tsv
+            ${{ runner.temp }}/win-mutant/verdicts.tsv
