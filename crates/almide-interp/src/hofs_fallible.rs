@@ -269,7 +269,7 @@ impl<'a> Interpreter<'a> {
             "group_by" => {
                 let mut groups: Vec<(Value, Vec<Value>)> = Vec::new();
                 for (k, x) in keyed {
-                    match groups.iter_mut().find(|(gk, _)| *gk == k) {
+                    match groups.iter_mut().find(|(gk, _)| crate::value::key_eq(gk, &k)) {
                         Some((_, g)) => g.push(x),
                         None => groups.push((k, vec![x])),
                     }

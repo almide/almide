@@ -537,9 +537,10 @@ impl<'a> Interpreter<'a> {
 }
 
 /// Insert / overwrite a key in an insertion-ordered map entry vec, matching the
-/// compact-ordered-dict: existing key updates in place; new key appends.
+/// compact-ordered-dict: existing key updates in place; new key appends. Keys
+/// agree under the collection key equality (ALS-C11); the stored key stays.
 pub(crate) fn map_insert(entries: &mut Vec<(Value, Value)>, key: Value, value: Value) {
-    if let Some(slot) = entries.iter_mut().find(|(k, _)| k == &key) {
+    if let Some(slot) = entries.iter_mut().find(|(k, _)| crate::value::key_eq(k, &key)) {
         slot.1 = value;
     } else {
         entries.push((key, value));
