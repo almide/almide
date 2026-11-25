@@ -94,14 +94,39 @@ impl Emitter<'_> {
     fn emit_eq_outlined(&mut self, ty: SliceTy) -> Result<(), EmitError> {
         use crate::work::NamedOp;
         let ti = self.types.intern(ty).index() as u32;
+        let op = if self.key_eq { NamedOp::KeyEqTy } else { NamedOp::EqTy };
         if matches!(
-            self.work.named_bodies.borrow().get(&(NamedOp::EqTy, ti)),
+            self.work.named_bodies.borrow().get(&(op, ti)),
             Some(crate::work::DisplayBuild::Failed)
         ) {
             return unsup("eq-helper-failed");
         }
-        let idx = self.work.helper(Helper::NamedOp { op: NamedOp::EqTy, ti });
+        let idx = self.work.helper(Helper::NamedOp { op, ti });
         self.f.instructions().call(idx);
+        Ok(())
+    }
+
+    /// `[a, b]` f64 on the stack -> the collection key equality's verdict
+    /// (ALS-C11): `a == b`, or both NaN.
+    fn emit_f64_key_eq(&mut self) -> Result<(), EmitError> {
+        let hb = self.hold_f64()?;
+        let ha = self.hold_f64()?;
+        self.f
+            .instructions()
+            .local_set(hb)
+            .local_tee(ha)
+            .local_get(hb)
+            .f64_eq()
+            .local_get(ha)
+            .local_get(ha)
+            .f64_ne()
+            .local_get(hb)
+            .local_get(hb)
+            .f64_ne()
+            .i32_and()
+            .i32_or();
+        self.release_f64();
+        self.release_f64();
         Ok(())
     }
 
@@ -159,6 +184,7 @@ impl Emitter<'_> {
             INT => {
                 self.f.instructions().i64_eq();
             }
+            FLOAT if self.key_eq => self.emit_f64_key_eq()?,
             FLOAT => {
                 self.f.instructions().f64_eq();
             }
@@ -230,14 +256,14 @@ impl Emitter<'_> {
             }
             SliceTy::Named(ti) => {
                 if path.contains(&ti) {
+                    let op = if self.key_eq { crate::work::NamedOp::KeyEq } else { crate::work::NamedOp::Eq };
                     if matches!(
-                        self.work.named_bodies.borrow().get(&(crate::work::NamedOp::Eq, ti)),
+                        self.work.named_bodies.borrow().get(&(op, ti)),
                         Some(crate::work::DisplayBuild::Failed)
                     ) {
                         return unsup("eq-helper-failed");
                     }
-                    let idx =
-                        self.work.helper(Helper::NamedOp { op: crate::work::NamedOp::Eq, ti });
+                    let idx = self.work.helper(Helper::NamedOp { op, ti });
                     self.f.instructions().call(idx);
                 } else {
                     path.push(ti);

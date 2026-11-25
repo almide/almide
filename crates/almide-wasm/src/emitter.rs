@@ -234,6 +234,10 @@ pub(crate) struct Emitter<'a> {
     pub(crate) hold_f64_base: u32,
     pub(crate) hold_f64_depth: u32,
     pub(crate) scr_f64_local: u32,
+    /// ALS-C11 (ADR-0039): the comparison being emitted is the collection
+    /// key equality (Set membership, Map key lookup), not `==` — its Float
+    /// leaf equates every NaN. Set only inside a key-equality helper body.
+    pub(crate) key_eq: bool,
     pub(crate) f: &'a mut Function,
 }
 

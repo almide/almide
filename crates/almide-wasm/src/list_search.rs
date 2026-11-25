@@ -180,7 +180,14 @@ impl Emitter<'_> {
         // keep the scan family, so a Float key's `-0.0 == 0.0` and
         // `NaN != NaN` answers are unchanged.
         let indexed = crate::map_index::index_key(kt).is_some();
-        let scan = if indexed { self.keyed_find(kt)? } else { self.scan_helper(kt)? };
+        // A Float key keeps `==` (C-053, ALS-C11 leaves the list family IEEE).
+        let scan = if indexed {
+            self.keyed_find(kt)?
+        } else if kt == FLOAT {
+            self.work.helper(crate::work::Helper::ScanF64)
+        } else {
+            self.scan_helper(kt)?
+        };
         let (append, forget) = if indexed { (self.keyed_append(kt), self.keyed_remove(kt)) } else { (None, None) };
         let reserve = self.work.helper(crate::work::Helper::MapReserve);
         let kstride = kt.slot_size() as i32;

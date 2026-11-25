@@ -228,6 +228,7 @@ pub(crate) fn build_helper_body(
             hold_f64_base: holds + HOLD_I32_POOL + HOLD_I64_POOL,
             hold_f64_depth: 0,
             scr_f64_local: scr_f64,
+            key_eq: false,
             f: &mut f,
         };
         body(&mut em)?;
@@ -272,6 +273,9 @@ pub(crate) fn build_one_scan_helper(
                 .i32_load(wasm_encoder::MemArg { offset: 0, align: 2, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None });
             i.local_get(needle);
         }
+        // The scan family answers membership, so it compares with the
+        // collection key equality (ALS-C11).
+        em.key_eq = true;
         em.emit_val_eq(kt)?;
         {
             let mut i = em.f.instructions();
@@ -308,8 +312,10 @@ pub(crate) fn build_one_named_helper(
     let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", lent);
     let shell = if hash { Shell::ONE } else { Shell::PAIR };
     build_helper_body(table, types, work, pool, (shell, hw), |em| {
+        // ALS-C11: the key-equality twins compare with the key equality.
+        em.key_eq = matches!(op, crate::work::NamedOp::KeyEq | crate::work::NamedOp::KeyEqTy);
         // #4250: a type on a cycle compares a deep pair on a bounded stack.
-        if matches!(op, crate::work::NamedOp::Eq) && em.types.named_on_cycle(ti) {
+        if matches!(op, crate::work::NamedOp::Eq | crate::work::NamedOp::KeyEq) && em.types.named_on_cycle(ti) {
             return em.emit_named_eq_deep(ti);
         }
         // The deep key hash reads its one param itself (#4887).
@@ -320,10 +326,10 @@ pub(crate) fn build_one_named_helper(
         match op {
             // `path` starts with `ti`, so a self-referencing field sees the
             // cycle and calls THIS helper's promised index.
-            crate::work::NamedOp::Eq => em.emit_named_eq(ti, &mut vec![ti]),
+            crate::work::NamedOp::Eq | crate::work::NamedOp::KeyEq => em.emit_named_eq(ti, &mut vec![ti]),
             // The cmp walk needs no path: every `Named` is a call already.
             crate::work::NamedOp::Cmp => em.emit_named_cmp(ti),
-            crate::work::NamedOp::EqTy => {
+            crate::work::NamedOp::EqTy | crate::work::NamedOp::KeyEqTy => {
                 em.emit_val_eq_level(em.types.el(crate::ETy::from_index(ti as usize)), &mut Vec::new())
             }
             crate::work::NamedOp::CmpTy => em.emit_val_cmp_level(em.types.el(crate::ETy::from_index(ti as usize))),
