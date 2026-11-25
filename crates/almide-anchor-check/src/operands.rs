@@ -34,7 +34,9 @@
 //! copy-on-write JUDGE made of the local's own block counts as no change (a
 //! judge returns a block of its argument's count), and from the first read
 //! to the access no call other than a judge is handed the block and no store
-//! writes its count word.
+//! writes its count word. For those two, a read of the list's own variable
+//! that a loop has rewritten (no single reaching definition) is the block
+//! (`covers::may_be_its_variable`).
 //!
 //! An `if` with no `else` that ends in `return` and holds no branch never
 //! falls through either: what it calls or writes is not "between" a count's
@@ -654,7 +656,8 @@ impl<'b, 'a> Flow<'b, 'a> {
         // through, which may since hold something else.
         let root = |v: &T| chain(v).last().map(|&(s1, _)| s1);
         let hit = matches!((root(t), root(blk)), (Some(a), Some(b)) if a == b)
-            || matches!((site_id(t), site_id(blk)), (Some(a), Some(b)) if a == b);
+            || matches!((site_id(t), site_id(blk)), (Some(a), Some(b)) if a == b)
+            || covers::may_be_its_variable(t, blk);
         hit || match pl(t) {
             T::Op(_, xs) => xs.iter().any(|x| self.mentions(x, blk)),
             T::Call { args, .. } => args.iter().any(|x| self.mentions(x, blk)),

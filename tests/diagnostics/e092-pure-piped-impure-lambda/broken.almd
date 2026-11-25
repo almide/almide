@@ -1,0 +1,11 @@
+// #4928: the pipe form passes the lambda the same way the call form does.
+@pure
+fn twice(x: Int, f: (Int) -> Int) -> Int = f(f(x))
+
+fn main() -> Unit = {
+  let n = 3 |> twice((y) => {
+    println("step")
+    y * 2
+  })
+  println("${n}")
+}

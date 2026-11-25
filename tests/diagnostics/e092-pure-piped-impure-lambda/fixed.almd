@@ -1,0 +1,8 @@
+// #4928: a lambda without output may be piped into a `@pure` fn.
+@pure
+fn twice(x: Int, f: (Int) -> Int) -> Int = f(f(x))
+
+fn main() -> Unit = {
+  let n = 3 |> twice((y) => y * 2)
+  println("${n}")
+}

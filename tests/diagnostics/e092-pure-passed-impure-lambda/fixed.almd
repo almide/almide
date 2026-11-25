@@ -1,0 +1,9 @@
+// #4928: the output moves to the caller, around the `@pure` call.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let n = apply((y) => y + 1, 2)
+  println("side effect")
+  println("${n}")
+}

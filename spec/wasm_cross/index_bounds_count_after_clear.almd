@@ -1,0 +1,17 @@
+// @contract: C-067
+// A list of strings EMPTIED in place by `list.clear` on the second turn of the
+// loop that indexes it. The read that follows is past the end of the empty
+// list and aborts with the unified message and exit 1. A count read once
+// before the loop (see index_bounds_count_after_push.almd) would pass it and
+// read the strings the clear released.
+effect fn main() -> Unit = {
+  var names = ["alpha-alpha-alpha", "beta-beta-beta", "gamma-gamma-gamma", "delta-delta-delta"]
+  var out = ""
+  var i = 0
+  while i < 4 {
+    if i == 1 then list.clear(names) else ()
+    out = out + names[i]
+    i = i + 1
+  }
+  println(out)
+}

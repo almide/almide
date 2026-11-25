@@ -62,7 +62,7 @@ pub(super) fn entry_path(
     field("magic", MAGIC.as_bytes());
     field("compiler", compiler_identity().as_bytes());
     field("verified", &[verified as u8]);
-    // A certified route's entries are the modules the installed verifier
+    // A certified route's entries are the modules the linked verifier
     // accepted: they are kept apart, per verifier (#4836).
     let judge = if certifying { super::verify::verifier_identity() } else { String::new() };
     field("judged-by", judge.as_bytes());

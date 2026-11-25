@@ -1,5 +1,7 @@
 //! `[permissions] native` (#4093): a dependency that brings native code is
-//! refused unless the root `almide.toml` grants it by name.
+//! refused unless the root `almide.toml` grants it — by name for the root's
+//! own dependency entry, by origin (git source or directory) for a package
+//! reached through another dependency (#4834).
 //!
 //! A dependency's `native/*.rs` is copied into the generated crate, its
 //! `[native-deps]` crates are added to the generated `Cargo.toml` (so their
@@ -101,7 +103,7 @@ fn assert_refused_everywhere(dir: &Path, root: &Path, dep: &str) -> String {
             args.join(" ")
         );
         assert!(
-            err.contains("    [permissions]\n    native = [") && err.contains(&format!("\"{dep}\"]")),
+            err.contains("    [permissions]\n    native = [") && err.contains(&format!("{dep}\"]")),
             "no grant line to add:\n{err}"
         );
         assert!(!bin.exists() && !wasm.exists(), "a refused build wrote its output");
@@ -147,9 +149,17 @@ fn a_transitive_ungranted_native_dependency_is_refused() {
     let dir = app(&root, "app", &["mid"], Some(&["mid"]), "mid.twice()", "84");
     let err = assert_refused_everywhere(&dir, &root, "nat");
     assert!(err.contains("`nat` (required by another dependency)"), "not marked transitive:\n{err}");
-    assert!(err.contains("native = [\"mid\", \"nat\"]"), "the grant line drops the existing grant:\n{err}");
-    // Granting it by name builds.
+    // A package reached through another dependency is granted by its
+    // origin (#4834): the hint names its directory, relative to the root.
+    assert!(err.contains("native = [\"mid\", \"../nat\"]"), "the grant line drops the existing grant or names no origin:\n{err}");
+    // Granting it by name does not: the name covers only the root's own
+    // dependency entry of that name.
     let dir = app(&root, "app", &["mid"], Some(&["nat"]), "mid.twice()", "84");
+    let o = almide(&dir, &root, &["run", "src/main.almd"]);
+    assert_eq!(o.status.code(), Some(1), "a transitive package was granted by its name:\n{}", stderr(&o));
+    assert!(stderr(&o).contains("names only this manifest's own dependency of that name"), "{}", stderr(&o));
+    // Granting its directory builds.
+    let dir = app(&root, "app", &["mid"], Some(&["../nat"]), "mid.twice()", "84");
     let o = almide(&dir, &root, &["run", "src/main.almd"]);
     assert!(o.status.success(), "granted transitive run failed:\n{}", stderr(&o));
     assert_eq!(String::from_utf8_lossy(&o.stdout), "84\n");

@@ -175,20 +175,20 @@ impl AlmideNetTables {
         Ok(almide_net_slot(&mut self.streams, s))
     }
 
-    pub fn tcp_read(&mut self, h: i64, len: i64) -> Result<std::vec::Vec<u8>, String> {
+    pub fn tcp_read(&mut self, h: i64, len: i64) -> Result<AlmideList<u8>, String> {
         let n = almide_net_len("tcp_read", len)?;
         almide_net_read_once(self.stream(h)?, n, "tcp_read")
     }
 
     /// Read until `len` bytes arrived; EOF first is an err naming how many did.
-    pub fn tcp_read_exact(&mut self, h: i64, len: i64) -> Result<std::vec::Vec<u8>, String> {
+    pub fn tcp_read_exact(&mut self, h: i64, len: i64) -> Result<AlmideList<u8>, String> {
         let n = almide_net_len("tcp_read_exact", len)?;
         let s = self.stream(h)?;
         // The answer grows with the bytes that arrive (#4123): `len` is the
         // program's number, and allocating it up front aborted the process on
         // a huge one before a single byte was read.
         let mut chunk = ::std::vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
-        let mut buf = std::vec::Vec::new();
+        let mut buf = AlmideList::new();
         while buf.len() < n {
             let want = (n - buf.len()).min(chunk.len());
             match std::io::Read::read(s, &mut chunk[..want]) {
@@ -203,7 +203,7 @@ impl AlmideNetTables {
 
     /// One read bounded by `ms`; the stream's own timeout (`tcp_set_timeout`)
     /// is back in force afterwards.
-    pub fn tcp_read_timeout(&mut self, h: i64, len: i64, ms: i64) -> Result<std::vec::Vec<u8>, String> {
+    pub fn tcp_read_timeout(&mut self, h: i64, len: i64, ms: i64) -> Result<AlmideList<u8>, String> {
         let s = self.stream(h)?;
         let n = almide_net_len("tcp_read_timeout", len)?;
         if ms <= 0 {
@@ -316,10 +316,10 @@ impl AlmideNetTables {
     /// The next datagram, at most `max` bytes of it (the rest is dropped, as
     /// the OS does), and the sender's address and port. A huge `max` sizes no
     /// buffer: a datagram is at most 65535 bytes.
-    pub fn udp_recv_from(&mut self, h: i64, max: i64) -> Result<(std::vec::Vec<u8>, String, i64), String> {
+    pub fn udp_recv_from(&mut self, h: i64, max: i64) -> Result<(AlmideList<u8>, String, i64), String> {
         let n = almide_net_len("udp_recv_from", max)?;
         let u = self.udp(h)?;
-        let mut buf = ::std::vec![0u8; n.min(65535)];
+        let mut buf = almide_list![0u8; n.min(65535)];
         loop {
             match u.recv_from(&mut buf) {
                 Ok((k, from)) => {
@@ -377,11 +377,11 @@ const ALMIDE_NET_READ_CHUNK: usize = 64 * 1024;
 /// A zero-length read answers empty WITHOUT the syscall: Linux's `recv` on
 /// a zero-length buffer waits for data where macOS returns at once, so
 /// `tcp_read(c, 0)` on an idle stream hung on Linux (#3679's CI).
-fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &'static str) -> Result<std::vec::Vec<u8>, String> {
+fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &'static str) -> Result<AlmideList<u8>, String> {
     if n == 0 {
-        return Ok(std::vec::Vec::new());
+        return Ok(AlmideList::new());
     }
-    let mut buf = ::std::vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
+    let mut buf = almide_list![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
     loop {
         match std::io::Read::read(s, &mut buf) {
             Ok(k) => {

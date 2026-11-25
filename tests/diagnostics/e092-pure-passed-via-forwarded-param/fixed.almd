@@ -1,0 +1,11 @@
+// #4928: the function handed through `twice` makes no output.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn twice(f: (Int) -> Int, x: Int) -> Int = apply(f, apply(f, x))
+
+fn main() -> Unit = {
+  let n = twice((y) => y + 1, 2)
+  println("side effect")
+  println("${n}")
+}

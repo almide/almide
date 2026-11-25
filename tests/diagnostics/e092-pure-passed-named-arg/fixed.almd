@@ -1,0 +1,9 @@
+// #4928: the named argument is a lambda without the output.
+@pure
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = {
+  let n = apply(x: 2, f: (y) => y + 1)
+  println("side effect")
+  println("${n}")
+}

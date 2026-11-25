@@ -14,7 +14,10 @@
 //!
 //! All of it runs before, and outside, every `[permissions]` check. So a
 //! dependency that brings any of it is refused unless the ROOT manifest names
-//! it in `[permissions] native = [...]`. The root package's own native code
+//! it in `[permissions] native = [...]` — by its typed origin
+//! (`project::NativeGrant`, #4834): a bare name covers only the root's own
+//! dependency entry of that name, a git source or a directory covers the
+//! package from there. The root package's own native code
 //! needs no grant: the developer wrote it. The rule is a property of the
 //! dependency graph, not of the target, so every `--target` refuses the same
 //! graph (as `[permissions]` itself is, #3275).
@@ -41,11 +44,17 @@ pub struct NativeCode {
     /// (E085 refuses those outside the stdlib), as
     /// `` @inline_rust fn `name` (file:line) `` (#4100).
     pub templates: Vec<String>,
+    /// What the scan could not read: a `native/` directory it cannot list,
+    /// an `almide.toml` that does not parse, an `.almd` file it cannot read
+    /// or parse. Nothing proves such a package brings no native code, so it
+    /// is refused like one that does.
+    pub unscanned: Vec<String>,
 }
 
 impl NativeCode {
     pub fn is_empty(&self) -> bool {
         self.modules.is_empty() && self.assets == 0 && self.crates.is_empty() && self.externs.is_empty() && self.templates.is_empty()
+            && self.unscanned.is_empty()
     }
 
     /// One line naming every piece, e.g.
@@ -65,6 +74,9 @@ impl NativeCode {
             parts.push(format!("@extern fn {}", self.externs.join(", ")));
         }
         parts.extend(self.templates.iter().cloned());
+        if !self.unscanned.is_empty() {
+            parts.push(format!("not scannable (read as native code): {}", self.unscanned.join(", ")));
+        }
         parts.join("; ")
     }
 }
@@ -80,6 +92,10 @@ pub struct DepNative {
     pub direct: bool,
     pub code: NativeCode,
     pub granted: bool,
+    /// The `[permissions].native` entry that would grant it: its name when
+    /// the root depends on it directly, else its origin (a git source, or its
+    /// directory relative to the root).
+    pub grant_entry: String,
 }
 
 /// The native code of the package checked out at `package_dir`, whose
@@ -88,6 +104,9 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
     let mut code = NativeCode::default();
     let native_dir = package_dir.join("native");
     if native_dir.is_dir() {
+        if std::fs::read_dir(&native_dir).is_err() {
+            code.unscanned.push("native/ (cannot be listed)".to_string());
+        }
         for (rel, is_module) in native_files(&native_dir, Path::new("")) {
             if is_module {
                 code.modules.push(format!("native/{}", rel.display()));
@@ -97,11 +116,16 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
         }
     }
     let toml = package_dir.join("almide.toml");
-    if let Some(proj) = toml.exists().then(|| crate::project::parse_toml(&toml).ok()).flatten() {
-        for nd in proj.native_deps {
-            if !code.crates.contains(&nd.name) {
-                code.crates.push(nd.name);
+    if std::fs::symlink_metadata(&toml).is_ok() {
+        match crate::project::parse_toml(&toml) {
+            Ok(proj) => {
+                for nd in proj.native_deps {
+                    if !code.crates.contains(&nd.name) {
+                        code.crates.push(nd.name);
+                    }
+                }
             }
+            Err(_) => code.unscanned.push("almide.toml (does not parse)".to_string()),
         }
     }
     let mut files = Vec::new();
@@ -109,7 +133,10 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
     files.sort();
     for file in files {
         let rel = file.strip_prefix(package_dir).unwrap_or(&file).display().to_string();
-        let (externs, templates) = native_fns(&file);
+        let Some((externs, templates)) = native_fns(&file) else {
+            code.unscanned.push(format!("{rel} (cannot be read or parsed)"));
+            continue;
+        };
         code.externs.extend(externs.into_iter().map(|(name, line)| format!("`{name}` ({rel}:{line})")));
         code.templates.extend(templates.into_iter().map(|(attr, name, line)| format!("@{attr} fn `{name}` ({rel}:{line})")));
     }
@@ -162,14 +189,21 @@ const TEMPLATE_ATTRS: &[&str] = &["inline_rust", "intrinsic", "wasm_intrinsic"];
 /// The top-level fns in `file` that bring native code: `(name, line)` of
 /// each `@extern` whose target the native build binds (`rust`/`rs`, `c`; the
 /// predicate the checker and codegen use), and `(attribute, name, line)` of
-/// each fn carrying one of [`TEMPLATE_ATTRS`]. A file that does not parse
-/// contributes nothing here; the build reports it.
+/// each fn carrying one of [`TEMPLATE_ATTRS`]. `None` when the file cannot
+/// be read or does not parse: the caller counts it as unscanned, never as
+/// bringing nothing.
 #[allow(clippy::type_complexity)]
-fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)>) {
+fn native_fns(file: &Path) -> Option<(Vec<(String, usize)>, Vec<(String, String, usize)>)> {
     let (mut externs, mut templates) = (Vec::new(), Vec::new());
-    let Ok(source) = std::fs::read_to_string(file) else { return (externs, templates) };
+    let source = std::fs::read_to_string(file).ok()?;
     let tokens = crate::lexer::Lexer::tokenize(&source);
-    let Ok(program) = crate::parser::Parser::new(tokens).parse() else { return (externs, templates) };
+    let mut parser = crate::parser::Parser::new(tokens);
+    let program = parser.parse().ok()?;
+    // A recovered parse drops the declarations it could not read, and with
+    // them any `@extern` they carried.
+    if parser.errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
+        return None;
+    }
     for d in &program.decls {
         let crate::ast::Decl::Fn { name, extern_attrs, attrs, span, .. } = d else { continue };
         let line = span.map_or(0, |s| s.line);
@@ -180,21 +214,49 @@ fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)
             templates.push((a.name.to_string(), name.to_string(), line));
         }
     }
-    (externs, templates)
+    Some((externs, templates))
+}
+
+/// Does the root's `[permissions] native` grant `fd`? Each grant names a
+/// dependency by its typed origin (`project::NativeGrant`; #4834, owner
+/// ruling 2026-11-24): a bare name covers only the root's own dependency
+/// entry of that name, so a same-named package from another source, or a
+/// transitive package that declares that name, is not covered.
+fn is_granted(proj: &Project, fd: &FetchedDep) -> bool {
+    proj.native_grants.iter().any(|(_, g)| g.covers(&proj.dependencies, &fd.origin))
+}
+
+/// `to` written relative to `from` (both absolute), `..` per step up.
+fn relative_to(from: &Path, to: &Path) -> PathBuf {
+    let (f, t): (Vec<_>, Vec<_>) = (from.components().collect(), to.components().collect());
+    let common = f.iter().zip(&t).take_while(|(a, b)| a == b).count();
+    let mut out = PathBuf::new();
+    for _ in common..f.len() {
+        out.push("..");
+    }
+    for c in &t[common..] {
+        out.push(c);
+    }
+    out
+}
+
+/// The entry that grants `fd`: see [`DepNative::grant_entry`].
+fn grant_entry(proj: &Project, fd: &FetchedDep, direct: bool) -> String {
+    match &fd.origin {
+        _ if direct => fd.pkg_id.name.clone(),
+        crate::project::PackageOrigin::Git { source, .. } => source.to_string(),
+        crate::project::PackageOrigin::Path(dir) => {
+            let root = std::fs::canonicalize(&proj.root).unwrap_or_else(|_| proj.root.clone());
+            let rel = relative_to(&root, dir);
+            let text = rel.display().to_string();
+            if text.starts_with("..") { text } else { format!("./{text}") }
+        }
+    }
 }
 
 /// Every fetched dependency of `proj` with the native code it brings.
-/// Does the root's `[permissions] native` grant `fd`? The grant names a
-/// package; when the root manifest itself depends on a package of that name,
-/// the grant is for THAT origin only, so a same-named package from another
-/// source is not covered by it (#4834).
-fn is_granted(proj: &Project, fd: &FetchedDep) -> bool {
-    proj.native_grants.iter().any(|g| *g == fd.pkg_id.name)
-        && proj
-            .dependencies
-            .iter()
-            .filter(|d| d.name == fd.pkg_id.name)
-            .all(|d| crate::project::PackageOrigin::of(d) == fd.origin)
+fn is_direct(proj: &Project, fd: &FetchedDep) -> bool {
+    proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin)
 }
 
 pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
@@ -208,9 +270,10 @@ pub fn survey(proj: &Project, fetched: &[FetchedDep]) -> Vec<DepNative> {
                 .map(|p| p.package.version)
                 .unwrap_or_else(|_| fd.version.clone()),
             package_dir: fd.package_dir.clone(),
-            direct: proj.dependencies.iter().any(|d| d.name == fd.pkg_id.name && crate::project::PackageOrigin::of(d) == fd.origin),
+            direct: is_direct(proj, fd),
             code: native_code_of(&fd.package_dir, &fd.source_dir),
             granted: is_granted(proj, fd),
+            grant_entry: grant_entry(proj, fd, is_direct(proj, fd)),
         })
         .collect()
 }
@@ -230,9 +293,16 @@ pub fn refusal(proj: &Project, deps: &[DepNative]) -> Option<String> {
             "error: dependency `{}`{} brings native code that {} does not grant\n  {} {} at {}\n  native code: {}\n",
             d.name, how, manifest.display(), d.name, d.version, d.package_dir.display(), d.code.describe()
         ));
+        let by_name = proj.native_grants.iter().any(|(_, g)| matches!(g, crate::project::NativeGrant::Direct(n) if *n == d.name));
+        if !d.direct && by_name {
+            msg.push_str(&format!(
+                "  note: the grant \"{}\" names only this manifest's own dependency of that name; a package reached through another dependency is granted by its origin, \"{}\"\n",
+                d.name, d.grant_entry
+            ));
+        }
     }
-    let mut names = proj.native_grants.clone();
-    names.extend(refused.iter().map(|d| d.name.clone()));
+    let mut names: Vec<String> = proj.native_grants.iter().map(|(entry, _)| entry.clone()).collect();
+    names.extend(refused.iter().map(|d| d.grant_entry.clone()));
     let line = format!("native = [{}]", names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", "));
     msg.push_str("  note: native code is compiled and run by cargo during the build, before and outside every [permissions] check\n");
     msg.push_str(&format!("  hint: if you trust {}, grant it in {}:\n    [permissions]\n    {}",

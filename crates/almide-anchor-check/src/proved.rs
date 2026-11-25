@@ -41,7 +41,7 @@ const PROOF: &str = include_str!("generated/StructuralDecode.v");
 
 /// The anchor file's `proved` line: the flat release and the free routine, as
 /// function indices of the shipped module (`None`: the routine did not ship).
-pub type ProvedLine = (Option<u32>, Option<u32>);
+pub(crate) type ProvedLine = (Option<u32>, Option<u32>);
 
 /// The bytes of the proof script's `<name>_bytes` list.
 fn list(name: &str) -> Result<Vec<u8>, String> {
@@ -212,7 +212,7 @@ pub fn shipped_routines(wasm: &[u8], anchors: &str) -> Result<(Vec<Shipped>, Opt
 /// `alloc`, the rc_inc `inc`, and the `proved` line's flat release and free
 /// routine. Answers the routines held, each with where it is not its list
 /// byte for byte. `imports` is the module's count of imported functions.
-pub fn check_proved_routines(
+pub(crate) fn check_proved_routines(
     wasm: &[u8],
     bodies: &[Body<'_>],
     imports: u32,

@@ -1,0 +1,3 @@
+# The probe of deps.graph-budget: a chain of 66 path dependencies, two past the
+# depth budget (64), refused before anything past the budget is read.
+expect = "dependency chain too deep"

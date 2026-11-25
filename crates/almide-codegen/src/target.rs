@@ -76,6 +76,13 @@ pub fn configure(target: Target) -> TargetConfig {
     }
 }
 
+/// Every pass name a target's pipeline declares, over every target — what
+/// `ALMIDE_SKIP_PASS` names are read against (a name valid for one target is
+/// not refused when another target's pipeline runs).
+pub fn every_pass_name() -> Vec<String> {
+    [Target::Rust, Target::Wgsl].into_iter().flat_map(|t| build_pipeline(t).pass_names()).collect()
+}
+
 fn build_pipeline(target: Target) -> Pipeline {
     // Stage 1 egg flip landed: `EggSaturationPass` is the fusion driver
     // for matrix chains. The imperative `MatrixFusionPass` was retired

@@ -1,0 +1,14 @@
+# Negative control of deps.graph-budget (proofs/decision-sites.toml): the dependency depth budget is never enforced for a named dependency
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_dependency_chain_past_the_depth_budget_is_refused
+diff --git a/src/project_fetch.rs b/src/project_fetch.rs
+--- a/src/project_fetch.rs
++++ b/src/project_fetch.rs
+@@ -1012,7 +1012,7 @@
+                 chain.join(" → "),
+             ));
+         }
+-        if depth > budget::limit(BudgetId::DependencyDepth) {
++        if depth > budget::limit(BudgetId::DependencyDepth) && dep.name.is_empty() {
+             return Err(format!(
+                 "error: dependency chain too deep ({depth}, max {}): {}\n  \
+                  hint: a manifest that nests dependencies this deep is refused before it is fetched \

@@ -1,0 +1,6 @@
+import fs
+
+effect fn main() -> Unit = match fs.read_text("/almide-probe-outside.txt") {
+  ok(_) => println("read: ok"),
+  err(e) => println("read: err ${e}"),
+}

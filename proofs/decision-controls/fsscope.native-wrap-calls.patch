@@ -1,0 +1,14 @@
+# Negative control of fsscope.native-wrap-calls (proofs/decision-sites.toml): a guarded fn named other than as a direct call is copied unwrapped again (the pre-C-460 shape).
+# control_test: crates/almide-codegen/tests/fs_category_scope_test.rs::novel_a_guarded_fn_named_as_a_value_refuses_the_scope
+diff --git a/crates/almide-codegen/src/fs_scope.rs b/crates/almide-codegen/src/fs_scope.rs
+--- a/crates/almide-codegen/src/fs_scope.rs
++++ b/crates/almide-codegen/src/fs_scope.rs
+@@ -360,7 +360,7 @@
+                 out.push_str(&format!("{g}!({twin}{}, ", &after[..j]));
+                 copied = i + j + 1;
+             }
+-            Some(_) if before.ends_with("fn ") => {
++            Some(_) if before.ends_with("fn ") || true => {
+                 out.push_str(ident);
+                 copied = i + ident_len;
+             }

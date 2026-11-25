@@ -1,0 +1,5 @@
+import h00
+
+test "probe" {
+  assert_eq(h00.x(), 1)
+}

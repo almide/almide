@@ -1,0 +1,12 @@
+import self.reader
+
+type Reader = { read: (String) -> Result[String, String] }
+
+fn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f("s.txt")
+
+fn looks_pure(r: Reader) -> Result[String, String] = call_it(r.read)
+
+effect fn main() -> Unit = {
+  let r = Reader { read: (p) => reader.read(p) }
+  println(looks_pure(r) ?? "none")
+}

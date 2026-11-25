@@ -7932,6 +7932,7 @@ effect fn remove_all(path: String) -> Result[Unit, String] = _
 
 /// Host temp dir; a location, not a safe name.
 @intrinsic("almide_rt_fs_temp_dir")
+@category("Env.read")
 effect fn temp_dir() -> String = _
 
 /// Size, kind and mtime; err if missing.
@@ -28674,6 +28675,9 @@ fn matrix_split_cols_even(m: List[List[Float]], n: Int) -> List[List[List[Float]
   let hm = prim.handle(m)
   let r = prim.load32(hm + 4)
   let parts = if r == 0 or n <= 0 then 0 else n
+
+
+  if parts > 0 and parts > __mx_max_elems() / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   let cols = if r == 0 then 0 else prim.load32(prim.load64(hm + 12) + 4)
   let chunk = if parts == 0 then 0 else cols / parts
   let out: List[List[List[Float]]] = prim.alloc_list_str(parts)
@@ -40770,13 +40774,15 @@ fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.asser
 
 
 
+@category("Proc")
 @intrinsic("almide_rt_test_abort_site_run")
-fn __abort_site_run(site: Int) -> List[String] = _
+effect fn __abort_site_run(site: Int) -> List[String] = _
 
 
 
+@category("Env.read")
 @intrinsic("almide_rt_test_abort_site_selected")
-fn __abort_site_selected() -> Int = _
+effect fn __abort_site_selected() -> Int = _
 
 local fn abort_header(line: String) -> Bool = ["Error: ", "PANIC: "] |> list.any((h) => string.starts_with(line, h))
 
@@ -41868,11 +41874,11 @@ mod type Fd: Read, Write, Close = Int
 
 
 /// Stream socket connected to the listener at path.
-@category("Net.fetch")
+@category("Net.fetch", "FS.read")
 effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_connect(path)!))
 
 /// Listener bound at path, which must not exist yet.
-@category("Net.listen")
+@category("Net.listen", "FS.write")
 effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(path)!))
 
 /// Blocks for the next connection on listener.
@@ -41898,6 +41904,7 @@ effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
 
 
 /// New zero-filled unnamed file of size bytes.
+@category("FS.write")
 effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
@@ -41944,12 +41951,12 @@ local fn __raw(f: Fd) -> Int = match f {
 
 @intrinsic("almide_rt_unix___os_connect")
 @fs_path(path)
-@category("Net.fetch")
+@category("Net.fetch", "FS.read")
 effect fn __os_connect(path: String) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_listen")
 @fs_path(path)
-@category("Net.listen")
+@category("Net.listen", "FS.write")
 effect fn __os_listen(path: String) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_accept")
@@ -41973,6 +41980,7 @@ effect fn __os_close(fd: Int) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_create")
 @fs_shm_dir
+@category("FS.write")
 effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
 
 @intrinsic("almide_rt_unix___os_shm_resize")

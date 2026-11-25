@@ -1,7 +1,8 @@
 // The probe of bounded.shape-rules: a @bounded fn calls, inside a counted
 // loop, a @bounded helper that builds a List — the allocation is reached
 // through the callee (E071, #4871; the member rule of #4855 has its own
-// novel test).
+// novel test), and a @bounded fn hands a declared amplifier a run-time
+// Int (E075, `@sized_by`).
 @bounded
 fn pair_len(i: Int) -> Int = list.len([i, i])
 
@@ -14,4 +15,9 @@ fn shape() -> Int = {
   n
 }
 
-effect fn main() -> Unit = println("${shape()}")
+// The declared-amplifier case (E075, owner ruling 2026-11-22): `string.repeat`
+// declares `@sized_by(s, n)`, so a run-time `n` sizes its result.
+@bounded
+fn widen(s: String, n: Int) -> Int = string.len(string.repeat(s, n))
+
+effect fn main() -> Unit = println("${shape()} ${widen("ab", 3)}")

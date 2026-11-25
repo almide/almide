@@ -247,6 +247,11 @@ impl SplitMix64 {
 }
 
 impl Pipeline {
+    /// The names of the passes this pipeline declares, in declared order.
+    pub(crate) fn pass_names(&self) -> Vec<String> {
+        self.passes.iter().map(|p| p.name().to_string()).collect()
+    }
+
     pub fn new() -> Self {
         Self { passes: Vec::new() }
     }
@@ -503,8 +508,17 @@ impl Pipeline {
         // panic or compile error is the system refusing loudly. Zero-cost
         // when unset (parsed once, out of the loop).
         let skip_passes: Vec<String> = almide_base::env::var("ALMIDE_SKIP_PASS")
-            .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
+            .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
             .unwrap_or_default();
+        // A name that is no declared pass of any target's pipeline would skip
+        // nothing, and the hunt would read "output unchanged" for a pass it
+        // never removed: refused, against the declared pass names.
+        if !skip_passes.is_empty() {
+            let known = crate::target::every_pass_name();
+            if let Some(unknown) = skip_passes.iter().find(|s| !known.iter().any(|k| k.eq_ignore_ascii_case(s))) {
+                panic!("ALMIDE_SKIP_PASS names `{unknown}`, which is no codegen pass of any target (the passes: {})", known.join(", "));
+            }
+        }
 
         // #559: the names of passes that WILL run in THIS target's pipeline.
         // Dep edges are enforced ONLY against this set, so a wasm-arm pass can

@@ -1,0 +1,6 @@
+# The probe of env.skip-pass: ALMIDE_SKIP_PASS naming no declared codegen pass is refused
+# on every route that runs the codegen pipeline.
+expect = "which is no codegen pass"
+
+[env]
+ALMIDE_SKIP_PASS = "NoSuchPassProbe"

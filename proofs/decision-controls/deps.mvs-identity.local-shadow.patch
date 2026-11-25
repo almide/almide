@@ -1,0 +1,14 @@
+# Second negative control of deps.mvs-identity (proofs/decision-sites.toml): a name that is both a local module and a dependency is never refused (E121 off), so one of the two silently answers the import
+# control_test: tests/decision_deps_novel_test.rs::novel_a_fresh_name_meaning_a_local_module_and_a_dependency_is_refused
+diff --git a/src/resolve.rs b/src/resolve.rs
+--- a/src/resolve.rs
++++ b/src/resolve.rs
+@@ -890,7 +890,7 @@
+ /// cannot load the name from two places. One decision for both lookups.
+ fn refuse_ambiguous_import(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, PathBuf)]) -> Result<(), String> {
+     let dep_dirs: Vec<&PathBuf> = dep_paths.iter().filter(|(p, _)| p.name == name).map(|(_, d)| d).collect();
+-    if dep_dirs.is_empty() {
++    if dep_dirs.is_empty() || !name.is_empty() {
+         return Ok(());
+     }
+     let local = [base_dir.join(format!("{name}.almd")), base_dir.join(name)];

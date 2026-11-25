@@ -624,6 +624,9 @@ fn matrix_split_cols_even(m: List[List[Float]], n: Int) -> List[List[List[Float]
   let hm = prim.handle(m)
   let r = prim.load32(hm + 4)
   let parts = if r == 0 or n <= 0 then 0 else n
+  // #4914, C-161: n parts of r rows each are n x r row slots under the
+  // shared ceiling (by division), byte-identical to the native guard.
+  if parts > 0 and parts > __mx_max_elems() / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   let cols = if r == 0 then 0 else prim.load32(prim.load64(hm + 12) + 4)
   let chunk = if parts == 0 then 0 else cols / parts
   let out: List[List[List[Float]]] = prim.alloc_list_str(parts)

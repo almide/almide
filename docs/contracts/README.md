@@ -102,7 +102,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 3 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 23 |
-| C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 9 |
+| C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 12 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 3 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 15 |
@@ -495,4 +495,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-457 | An output line writes the same bytes on both targets as the String path would, allocates nothing per line, and never interleaves with another line on the same stream | 0.70.0 | active | fixture | 3 |
 | C-458 | An import whose first segment names both a module of the project and a [dependencies] entry is refused with E121, for `import pkg` and `import pkg.sub` alike | 0.70.0 | active | fixture | 0 |
 | C-459 | A process command name runs the program the launch PATH finds; env.set(\"PATH\") never changes which program a name runs, on native and the embedded wasm host alike | 0.70.0 | active | fixture | 0 |
+| C-460 | A stdlib call that reaches a filesystem entry carries an FS category in [permissions].allow: unix.connect is also FS.read, unix.listen and unix.shm_create FS.write, and fs.temp_dir, which touches no entry, is Env.read | 0.70.0 | active | fixture | 0 |
 

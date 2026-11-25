@@ -156,6 +156,8 @@ impl Checker {
                 // Register callee's type for variables that hold function values (Skip for builtins/functions — they don't need ExprId registration)
                 if self.env.lookup_var(&name).is_some() {
                     let _ = self.infer_expr(callee);
+                    // #4928: a call through a local or parameter calls what it holds.
+                    self.record_local_call(&name);
                 }
                 self.arg_spans = args.iter().map(|a| a.span).collect();
                 // #3274: `let g = rd; g(x)` is a call of `rd`.

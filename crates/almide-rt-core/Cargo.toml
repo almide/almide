@@ -25,6 +25,9 @@ rustls-native-certs = "0.8"
 # Scratch trees for the rooted fs tests (tests/fs_beneath_core.rs, #4084).
 tempfile = "3"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+# Test-only: tests/host_list_result.rs splices the net cores against the
+# runtime's own list, as the generated crate does (#4920).
+almide-str = { path = "../almide-str" }
 
 # Its own lints, not `[lints] workspace = true` (#3620): the workspace FORBIDS
 # unsafe code, which no module can relax, and net's Unix-socket core needs

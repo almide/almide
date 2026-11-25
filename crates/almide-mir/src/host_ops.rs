@@ -71,10 +71,15 @@ pub struct HostOp {
     /// (`lower::is_self_host_materialized_result_fn`). Checked against the
     /// declaration by the contract test.
     pub returns_result: bool,
+    /// Capabilities the op's implementation touches as part of the one
+    /// operation [`Self::caps`] already names, each with the written reason it
+    /// is not charged separately (#4916): neither the certificate nor the
+    /// checker counts it, and the agreement gate requires the reason.
+    pub subsumed: &'static [(Capability, &'static str)],
 }
 
 const fn op(module: &'static str, func: &'static str, symbol: &'static str, caps: &'static [Capability]) -> HostOp {
-    HostOp { module, func, intrinsic_fn: func, symbol, caps, by_value: &[], routed: false, returns_result: false }
+    HostOp { module, func, intrinsic_fn: func, symbol, caps, by_value: &[], routed: false, returns_result: false, subsumed: &[] }
 }
 
 const fn wrapper(
@@ -84,7 +89,7 @@ const fn wrapper(
     symbol: &'static str,
     caps: &'static [Capability],
 ) -> HostOp {
-    HostOp { module, func, intrinsic_fn, symbol, caps, by_value: &[], routed: false, returns_result: false }
+    HostOp { module, func, intrinsic_fn, symbol, caps, by_value: &[], routed: false, returns_result: false, subsumed: &[] }
 }
 
 impl HostOp {
@@ -97,7 +102,19 @@ impl HostOp {
     const fn result(self) -> Self {
         HostOp { returns_result: true, ..self }
     }
+    const fn subsumes(self, subsumed: &'static [(Capability, &'static str)]) -> Self {
+        HostOp { subsumed, ..self }
+    }
 }
+
+/// `fs.remove` removes a file or an empty directory: the one lookup of the
+/// path's own kind picks `remove_file` or `remove_dir` (a link to a directory
+/// stays a refusal, not an unlink), and it reads nothing but the entry the
+/// call removes, which the write grant already names.
+const REMOVE_KIND_STAT: &[(Capability, &str)] = &[(FsRead, "the kind lookup of the entry being removed is part of removing it; it reads no content")];
+/// The temp entry's random name is part of creating it: the program receives
+/// only the created path, never the random value, and cannot draw on it.
+const TEMP_NAME_ENTROPY: &[(Capability, &str)] = &[(Entropy, "the random name is part of creating the temp entry; the program sees only the created path")];
 
 use Capability::{CliArgs, Clock, Entropy, FsRead, FsWrite, Net, Process, Stdin, Stdout};
 
@@ -107,10 +124,11 @@ const ENTROPY: &[Capability] = &[Entropy];
 const READ: &[Capability] = &[FsRead];
 const WRITE: &[Capability] = &[FsWrite];
 const READ_WRITE: &[Capability] = &[FsRead, FsWrite];
-const WRITE_ENTROPY: &[Capability] = &[FsWrite, Entropy];
 const OUT: &[Capability] = &[Stdout];
 const IN: &[Capability] = &[Stdin];
 const NET: &[Capability] = &[Net];
+const NET_READ: &[Capability] = &[Net, FsRead];
+const NET_WRITE: &[Capability] = &[Net, FsWrite];
 const PROCESS: &[Capability] = &[Process];
 
 /// Every admitted host op. Adding one is adding a row; the contract gate then
@@ -196,12 +214,13 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "rename", "almide_rt_fs_rename", WRITE).result(),
     // Read-then-write compositions, and the unique-name creators (entropy suffix).
     op("fs", "copy", "almide_rt_fs_copy", READ_WRITE).result(),
-    op("fs", "append_text", "almide_rt_fs_append", READ_WRITE).result(),
-    op("fs", "append_bytes", "almide_rt_fs_append_bytes", READ_WRITE).result(),
-    op("fs", "remove", "almide_rt_fs_remove", READ_WRITE).result(),
-    op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
-    op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
-    op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE_ENTROPY).result(),
+    // A true append (#4382): opened O_APPEND, never read.
+    op("fs", "append_text", "almide_rt_fs_append", WRITE).result(),
+    op("fs", "append_bytes", "almide_rt_fs_append_bytes", WRITE).result(),
+    op("fs", "remove", "almide_rt_fs_remove", WRITE).subsumes(REMOVE_KIND_STAT).result(),
+    op("fs", "__root_remove", "almide_rt_fs___root_remove", WRITE).subsumes(REMOVE_KIND_STAT).result(),
+    op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE).subsumes(TEMP_NAME_ENTROPY).result(),
+    op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE).subsumes(TEMP_NAME_ENTROPY).result(),
     // ── http: the client (R-http-01) — get / request answer the body text,
     // get_response / send the whole response; the header-taking forms call
     // their flat-header leaf ──
@@ -255,16 +274,18 @@ pub const HOST_OPS: &[HostOp] = &[
     // the embedded wasm host serves the same core as interim ops 104..=116.
     // The native render serves them from the runtime's `unix` module as the
     // NATIVE UNIX HOST CALLS (proofs/TRUSTED_BASE.md). Every op is local
-    // inter-process I/O, counted as `Net` like the tcp ops above.
-    op("unix", "__os_connect", "almide_rt_unix___os_connect", NET).result(),
-    op("unix", "__os_listen", "almide_rt_unix___os_listen", NET).result(),
+    // inter-process I/O, counted as `Net` like the tcp ops above; the ones
+    // that reach a file entry count its fs capability too (C-460): connect
+    // looks the socket file up, listen and shm_create make a file.
+    op("unix", "__os_connect", "almide_rt_unix___os_connect", NET_READ).result(),
+    op("unix", "__os_listen", "almide_rt_unix___os_listen", NET_WRITE).result(),
     op("unix", "__os_accept", "almide_rt_unix___os_accept", NET).result(),
     op("unix", "__os_send", "almide_rt_unix___os_send", NET).result(),
     op("unix", "__os_recv", "almide_rt_unix___os_recv", NET).result(),
     op("unix", "__os_take_fds", "almide_rt_unix___os_take_fds", NET),
     op("unix", "__os_wait", "almide_rt_unix___os_wait", NET).result(),
     op("unix", "__os_close", "almide_rt_unix___os_close", NET).result(),
-    op("unix", "__os_shm_create", "almide_rt_unix___os_shm_create", NET).result(),
+    op("unix", "__os_shm_create", "almide_rt_unix___os_shm_create", WRITE).result(),
     op("unix", "__os_shm_resize", "almide_rt_unix___os_shm_resize", NET).result(),
     op("unix", "__os_shm_write", "almide_rt_unix___os_shm_write", NET).result(),
     op("unix", "__os_shm_read", "almide_rt_unix___os_shm_read", NET).result(),

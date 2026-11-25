@@ -1,20 +1,10 @@
 # Negative control of net.shm-create-tempfile (c2, proofs/decision-sites.toml): unix.shm_create is not judged by its directory (no @fs_shm_dir mark natively, no gate on the embedded host)
 # control_test: tests/fs_scope_test.rs::shm_create_is_bounded_by_permissions_fs_on_both_targets
-diff --git a/stdlib/unix.almd b/stdlib/unix.almd
---- a/stdlib/unix.almd
-+++ b/stdlib/unix.almd
-@@ -119,7 +119,6 @@
- effect fn __os_close(fd: Int) -> Result[Unit, String] = _
- 
- @intrinsic("almide_rt_unix___os_shm_create")
--@fs_shm_dir
- effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
- 
- @intrinsic("almide_rt_unix___os_shm_resize")
 diff --git a/crates/almide-rt-core/src/net_unix_core.rs b/crates/almide-rt-core/src/net_unix_core.rs
+index 7af54c9053..422bf9a16a 100644
 --- a/crates/almide-rt-core/src/net_unix_core.rs
 +++ b/crates/almide-rt-core/src/net_unix_core.rs
-@@ -288,7 +288,6 @@
+@@ -288,7 +288,6 @@ impl AlmideUnixTables {
      pub fn shm_create(&mut self, size: i64) -> Result<i64, String> {
          // C-393: judged by the directory its file is made in, before anything
          // is made (natively the `@fs_shm_dir` guard wraps the call first).
@@ -22,3 +12,16 @@ diff --git a/crates/almide-rt-core/src/net_unix_core.rs b/crates/almide-rt-core/
          if size < 0 {
              return Err(format!("shm_create: negative size {size}"));
          }
+diff --git a/stdlib/unix.almd b/stdlib/unix.almd
+index b2483fdb13..55c5dd5d36 100644
+--- a/stdlib/unix.almd
++++ b/stdlib/unix.almd
+@@ -122,8 +122,6 @@ effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String
+ effect fn __os_close(fd: Int) -> Result[Unit, String] = _
+ 
+ @intrinsic("almide_rt_unix___os_shm_create")
+-@fs_shm_dir
+-@category("FS.write")
+ effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
+ 
+ @intrinsic("almide_rt_unix___os_shm_resize")

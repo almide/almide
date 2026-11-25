@@ -1,0 +1,2 @@
+expects_code = "E092"
+expects_error = "`@pure` fn `apply` is passed a lambda through `twice` that calls `println`"
