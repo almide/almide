@@ -81,6 +81,8 @@ one() { # one <leg> <file>
   if [ "$arc" -eq 0 ]; then
     "$ANCHORCHECK" --census "${lin[@]}" "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null > "$W/a.census" || true
     grep '^CENSUSFN' "$W/a.census" > "$W/a.fn" || true
+    # A recount by a decoder that shares no code with the census (scripts/probe-recount.py).
+    python3 -I scripts/probe-recount.py "$W/a.wasm" "$W/a.anchors" --fn "$W/a.fn" --label "$leg:$f" >> "$OUT/recount.tsv" 2>> "$OUT/recount.err" || echo "recount failed: $f" >&2
     if [ "${CENSUS_LIGHT:-0}" != 1 ]; then
       "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
     fi
