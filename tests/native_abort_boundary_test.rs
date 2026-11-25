@@ -58,6 +58,10 @@ fn ordinary_calls_and_nonterminal_primitives_cannot_claim_abort_credit() {
     }
 }
 
+/// The join is credited where the arms' values meet (#4934): the aborting arm
+/// never forms it, and nothing is live at its abort (the else arm's block is
+/// born after it), so no line carries `t`. The surviving value moves into the
+/// join (`im`), and the join's line is that one credit, released (`id`).
 #[test]
 fn a_heap_join_gets_credit_only_from_its_surviving_value() {
     let cert = verdict(vec![Op::ConstInt { dst: V(1), value: 1 },
@@ -66,5 +70,5 @@ fn a_heap_join_gets_credit_only_from_its_surviving_value() {
         alloc(2), Op::Consume { v: V(2) }, Op::EndIf { val: Some(V(2)) },
         Op::Drop { v: V(4) },
     ], true);
-    assert!(cert.contains('t'));
+    assert_eq!(cert, "im\nid\n");
 }
