@@ -1,0 +1,56 @@
+name: Probe — the guarded-window cutter and its proof
+# A one-off on its own branch: the checker crate's tests, the two warning
+# ratchets, and the proof file under the pinned Rocq. Not a gate.
+on:
+  push:
+    branches: [probe/guard-window-kernel]
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.97.0"
+  OCAML_VERSION: "5.4.1"
+
+jobs:
+  rust:
+    name: Checker tests and warning ratchets
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-warning-ratchets-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - name: The checker's own tests
+        run: cargo test --release --locked -p almide-anchor-check
+      - name: Rustc warning ratchet
+        if: always()
+        run: bash scripts/check-rustc-warnings.sh
+      - name: Clippy warning ratchet
+        if: always()
+        run: bash scripts/check-clippy-warnings.sh
+
+  proof:
+    name: Compile the proof file
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Compile
+        run: |
+          export PATH="$HOME/.opam/${OCAML_VERSION}/bin:$PATH"
+          cd proofs
+          if command -v coqc >/dev/null 2>&1; then C="coqc"; else C="rocq compile"; fi
+          $C -Q . AlmideTrust GuardWindow.v
