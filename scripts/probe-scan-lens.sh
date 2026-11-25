@@ -45,6 +45,26 @@ for line in open(dump, encoding="utf-8", errors="replace"):
     key = (" ".join(parts[0].split()), " ".join(parts[1].split()))
     if key not in ids:
         ids[key] = len(ids)
+# A string whose bytes AND lengths are the front of another's is not asked
+# about: the stores into one block give one string per store, each the front
+# of the next, and the kernel's stepping of the longest one passes every
+# boundary of the shorter ones (a step reads only its own instruction). The
+# kernel's stepping costs the square of a string's length, so asking about
+# every front costs the fourth power of a block's size.
+distinct = len(ids)
+keys = sorted(((tuple(b.split()), tuple(l.split())) for b, l in ids))
+kept = []
+for n, (b, l) in enumerate(keys):
+    if n + 1 < len(keys):
+        nb, nl = keys[n + 1]
+        # ... and only when its own lengths tile its own bytes exactly: a
+        # string the decoder's lengths do not cover is asked about, and fails.
+        tiles = all(x.isdigit() for x in l) and sum(int(x) for x in l) == len(b)
+        if tiles and len(nb) > len(b) and nb[:len(b)] == b and len(nl) > len(l) and nl[:len(l)] == l:
+            continue
+    kept.append((" ".join(b), " ".join(l)))
+ids = {k: i for i, k in enumerate(kept)}
+print(f"{distinct} distinct string(s), {len(ids)} that are not the front of another")
 HEAD = """From AlmideTrust Require Import GuardWindow GuardFresh GuardLoop.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import List.

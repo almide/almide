@@ -124,28 +124,37 @@ one() { # one <leg> <file>
 grep -v -E '^(#|$)' crates/almide-wasm/tests/golden/witness-fixtures.txt | while IFS= read -r f; do one fixtures "$f"; done
 ls spec/stdlib/*_test.almd | while IFS= read -r f; do one tests "$f"; done
 
+# Every kernel step runs under its own time limit and says when it starts: a
+# step that does not finish must not take the ones after it with it.
+stamp() { echo "== $(date -u '+%H:%M:%S') $*"; }
+if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/window-dump" ]; then
+  stamp "window kernel check"
+  timeout 1200 bash scripts/probe-window-kernel.sh "$OUT/window-dump" "$OUT/window-kernel" || echo "window kernel check: FAILED or out of time" >&2
+fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/fresh-dump" ]; then
-  bash scripts/probe-fresh-kernel.sh "$OUT/fresh-dump" "$OUT/fresh-kernel" || echo "fresh kernel check: FAILED" >&2
+  stamp "fresh kernel check"
+  timeout 1800 bash scripts/probe-fresh-kernel.sh "$OUT/fresh-dump" "$OUT/fresh-kernel" || echo "fresh kernel check: FAILED or out of time" >&2
 fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/loop-dump" ]; then
-  bash scripts/probe-loop-kernel.sh "$OUT/loop-dump" "$OUT/loop-kernel" || echo "loop kernel check: FAILED" >&2
+  stamp "loop kernel check"
+  timeout 1800 bash scripts/probe-loop-kernel.sh "$OUT/loop-dump" "$OUT/loop-kernel" || echo "loop kernel check: FAILED or out of time" >&2
 fi
 # Negative controls of the two rules: wrong variants of every distinct
 # accepted proposal, which the kernel has to refuse.
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/fresh-kernel/verdicts.tsv" ] && [ -s "$OUT/loop-kernel/verdicts.tsv" ]; then
+  stamp "rule controls"
   mkdir -p "$OUT/controls"
   python3 -I scripts/probe-rule-controls.py make "$OUT/fresh-dump" "$OUT/fresh-kernel/verdicts.tsv" "$OUT/loop-dump" "$OUT/loop-kernel/verdicts.tsv" "$OUT/controls" \
     && find "$OUT/controls" -maxdepth 1 -name 'Ctl_*.v' | LC_ALL=C sort \
-       | xargs -P 4 -I{} bash -c 'c="${1%.v}"; coqc -Q proofs AlmideTrust "$1" > "$c.out" 2> "$c.err" || echo "FAIL $1: $(head -3 "$c.err")"' _ {} \
+       | xargs -P 4 -I{} bash -c 'c="${1%.v}"; timeout 1800 coqc -Q proofs AlmideTrust "$1" > "$c.out" 2> "$c.err" || echo "FAIL $1: $(head -3 "$c.err")"' _ {} \
     && python3 -I scripts/probe-rule-controls.py read "$OUT/controls" | tee "$OUT/controls/summary.txt" \
     || echo "rule controls: FAILED" >&2
 fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/scan-dump" ]; then
-  bash scripts/probe-scan-lens.sh "$OUT/scan-dump" "$OUT/scan-lens" || echo "scan lengths: FAILED" >&2
+  stamp "scan lengths: $(grep -c '^SCANLENS' "$OUT/scan-dump") line(s), $(wc -c < "$OUT/scan-dump") byte(s)"
+  timeout 2400 bash scripts/probe-scan-lens.sh "$OUT/scan-dump" "$OUT/scan-lens" || echo "scan lengths: FAILED or out of time" >&2
 fi
-if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/window-dump" ]; then
-  bash scripts/probe-window-kernel.sh "$OUT/window-dump" "$OUT/window-kernel" || echo "window kernel check: FAILED" >&2
-fi
+stamp "kernel steps done"
 
 python3 - "$OUT/rows.tsv" <<'PY'
 import csv, re, sys, statistics

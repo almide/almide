@@ -21,7 +21,7 @@ The loop rule (`loop_core pre mid ht rest`):
   next      the access's memarg offset moved one slot further
   test      the exit test's `i32.ge_u` turned into `i32.gt_u`
   base      the capture reads another local's block
-  stride    the capture counts slots of twice the size (when it divides)
+  stride    the capture counts slots of half the size (when it divides by an even size)
   open      the last `end` taken off the scanned bytes
   set-base  `i32.const 0 ; local.set b` put right after the access
   set-count `i32.const 0 ; local.set n` put right after the access
@@ -149,8 +149,10 @@ def loop_variants(pre, mid, ht, rest):
         out.append(("next", pre, mid, ht[:at] + [op] + enc_u(al) + enc_u(off + slot), rest))
     out.append(("test", pre, mid, ht[:t] + [75] + ht[t + 1:], rest))
     out.append(("base", [32] + enc_u(b + 1) + pre[p:], mid, ht, rest))
-    if stride and div == 110:
-        out.append(("stride", pre[:q] + [65] + enc_s(stride * 2) + pre[r:], mid, ht, rest))
+    # Half the divisor gives twice the count, so the last turns read past the
+    # end (twice the divisor would give a smaller count, which is still safe).
+    if stride and div == 110 and stride % 2 == 0:
+        out.append(("stride", pre[:q] + [65] + enc_s(stride // 2) + pre[r:], mid, ht, rest))
     if rest and rest[-1] == 11:
         out.append(("open", pre, mid, ht, rest[:-1]))
     out.append(("set-base", pre, mid, ht, [65, 0, 33] + enc_u(b) + rest))
@@ -218,16 +220,31 @@ def make(fdump, fverd, ldump, lverd, work, chunk=500):
     print(f"controls: {nf} distinct accepted fresh-block proposal(s), {len(seen)} distinct loop proposal(s) whose core holds, {len(goals)} variant(s)")
 
 
-def read(work):
+def read(work, chunk=500):
     idx = [l.rstrip("\n").split("\t") for l in open(f"{work}/index.tsv", encoding="utf-8")]
+    # One chunk at a time: a chunk the kernel did not finish (its time limit)
+    # leaves its variants without a verdict and takes no other chunk with it.
     vals = []
-    for p in sorted(glob.glob(f"{work}/Ctl_*.out")):
-        vals += [l.split("=", 1)[1].strip() for l in open(p, encoding="utf-8") if l.strip().startswith("= ")]
-    if len(vals) != len(idx):
-        sys.exit(f"{len(vals)} verdict(s) for {len(idx)} variant(s)")
+    for k in range((len(idx) + chunk - 1) // chunk):
+        want = min(chunk, len(idx) - k * chunk)
+        try:
+            got = [l.split("=", 1)[1].strip() for l in open(f"{work}/Ctl_{k:04d}.out", encoding="utf-8") if l.strip().startswith("= ")]
+        except OSError:
+            got = []
+        vals += got if len(got) == want else ["none"] * want
     by = collections.Counter((r[0], r[1], v) for r, v in zip(idx, vals))
     for rule, kind in sorted({(r[0], r[1]) for r in idx}):
-        print(f"control [{rule}] {kind:9s}: refused {by[(rule, kind, 'false')]}, still accepted {by[(rule, kind, 'true')]}")
+        print(f"control [{rule}] {kind:9s}: refused {by[(rule, kind, 'false')]}, still accepted {by[(rule, kind, 'true')]}, no verdict {by[(rule, kind, 'none')]}")
+    # The variants the kernel still accepts, with their goals, to be read.
+    goals = {}
+    with open(f"{work}/accepted.tsv", "w", encoding="utf-8") as out:
+        for i, (r, v) in enumerate(zip(idx, vals)):
+            if v != "true":
+                continue
+            k = i // chunk
+            if k not in goals:
+                goals[k] = [l.rstrip("\n") for l in open(f"{work}/Ctl_{k:04d}.v", encoding="utf-8") if l.startswith("Eval ")]
+            out.write(f"{i}\t{r[0]}\t{r[1]}\t{goals[k][i % chunk]}\n")
 
 
 if sys.argv[1] == "make":

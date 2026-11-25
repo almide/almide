@@ -68,6 +68,7 @@ jobs:
             ${{ runner.temp }}/census/scan-lens/summary.txt
             ${{ runner.temp }}/census/controls/summary.txt
             ${{ runner.temp }}/census/controls/index.tsv
+            ${{ runner.temp }}/census/controls/accepted.tsv
             ${{ runner.temp }}/census/scan-lens/differ.txt
             ${{ runner.temp }}/census/okrows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
