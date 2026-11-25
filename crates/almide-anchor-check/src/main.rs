@@ -121,26 +121,48 @@ fn main() {
         let (Some(m), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
         let (m, b) = (std::fs::read(m).unwrap_or_default(), std::fs::read(b).unwrap_or_default());
         let a = String::from_utf8_lossy(&std::fs::read(a).unwrap_or_default()).into_owned();
-        let (Ok(mb), Ok(bb), Ok((alloc, ..))) = (almide_anchor_check::decode(&m), almide_anchor_check::decode(&b), almide_anchor_check::parse_anchors_held(&a)) else {
+        let (Ok(mb), Ok(bb), Ok((alloc, _, _, _, _, rc))) = (almide_anchor_check::decode(&m), almide_anchor_check::decode(&b), almide_anchor_check::parse_anchors_held(&a)) else {
             println!("FRESHALLOC unreadable");
             return;
         };
         let code = |w: &[u8], bodies: &[almide_anchor_check::Body<'_>], p: usize| bodies.get(p).and_then(|x| x.at.first().map(|s| w[*s..x.end].to_vec()));
         let (bi, mi) = (almide_anchor_check::function_imports(&b), almide_anchor_check::function_imports(&m));
-        let want = alloc.checked_sub(bi).and_then(|p| code(&b, &bb, p as usize));
-        let found = want.as_ref().and_then(|want| {
-            let same = |p: &usize| code(&m, &mb, *p).as_ref() == Some(want);
-            alloc.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same))
-        });
-        let Some(p) = found else {
-            println!("FRESHALLOC none");
-            return;
+        // The module's function whose instructions are those of the base's
+        // function `role` (the same index first).
+        let locate = |role: u32| -> Option<u32> {
+            let want = role.checked_sub(bi).and_then(|p| code(&b, &bb, p as usize))?;
+            let same = |p: &usize| code(&m, &mb, *p).as_ref() == Some(&want);
+            role.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same)).map(|p| mi + p as u32)
         };
-        let f = mi + p as u32;
-        println!("FRESHALLOC {f}");
         let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
-        for fr in almide_anchor_check::fresh_windows(&m, &mb, "", f) {
-            println!("FRESHHEX {} {} {f} {} {} | {} | {} | {}", fr.func, fr.access, u8::from(fr.write), fr.located, hex(&fr.pre), hex(&fr.mid), hex(&fr.tail));
+        match locate(alloc) {
+            Some(f) => {
+                println!("FRESHALLOC {f}");
+                for fr in almide_anchor_check::fresh_windows(&m, &mb, "", f) {
+                    println!("FRESHHEX {} {} {f} {} {} | {} | {} | {}", fr.func, fr.access, u8::from(fr.write), fr.located, hex(&fr.pre), hex(&fr.mid), hex(&fr.tail));
+                }
+            }
+            None => println!("FRESHALLOC none"),
+        }
+        // The loop reads (proofs/GuardLoop.v): the hold is a call of the
+        // function whose instructions are those of the base's increment
+        // routine; without one, no proposal carries a hold.
+        let inc = rc.and_then(|r| r.0).and_then(locate);
+        println!("LOOPINC {}", inc.map_or_else(|| "none".to_string(), |f| f.to_string()));
+        for l in almide_anchor_check::loop_windows(&m, &mb, "", inc) {
+            println!(
+                "LOOPHEX {} {} {} {} {} | {} | {} | {} | {} | {}",
+                l.func,
+                l.access,
+                inc.unwrap_or(u32::MAX),
+                u8::from(l.write),
+                l.located,
+                hex(&l.hold),
+                hex(&l.pre),
+                hex(&l.mid),
+                hex(&l.ht),
+                hex(&l.rest)
+            );
         }
         return;
     }

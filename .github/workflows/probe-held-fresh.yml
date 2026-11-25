@@ -86,3 +86,7 @@ jobs:
             ${{ runner.temp }}/held-fresh/kernel.log
             ${{ runner.temp }}/held-fresh/kernel/verdicts.tsv
             ${{ runner.temp }}/held-fresh/uniq-dump
+            ${{ runner.temp }}/held-fresh/held-loop.tsv
+            ${{ runner.temp }}/held-fresh/held-loop-programs.tsv
+            ${{ runner.temp }}/held-fresh/loop-kernel.log
+            ${{ runner.temp }}/held-fresh/loop-kernel/verdicts.tsv

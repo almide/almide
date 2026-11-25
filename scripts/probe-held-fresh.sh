@@ -100,3 +100,12 @@ grep -E 'proposal\(s\) in the dump|kernel time|Closed under' "$OUT/kernel.log"
 mkdir -p "$OUT/kernel"
 python3 -I "$ROOT/scripts/probe-held-fresh-uniq.py" spread "$OUT/kernel-uniq/verdicts.tsv" "$OUT/uniq-index.tsv" "$OUT/kernel/verdicts.tsv"
 python3 -I "$ROOT/scripts/probe-held-fresh-join.py" "$OUT/dump" "$OUT/kernel/verdicts.tsv" "$SH" "$OUT"
+
+# The loop reads (proofs/GuardLoop.v) of the same modules: `--fresh-like`
+# also prints `LOOPINC <index | none>` and the `LOOPHEX` proposals, and the
+# kernel is asked once per distinct proposal.
+echo "loop dump: $(grep -c '^LOOPHEX' "$OUT/dump") proposal(s); increment routine not found in $(grep -c '^LOOPINC none' "$OUT/dump") module(s)"
+bash "$ROOT/scripts/probe-loop-kernel.sh" "$OUT/dump" "$OUT/loop-kernel" > "$OUT/loop-kernel.log" 2>&1 || { echo "the loop kernel run failed"; tail -n 20 "$OUT/loop-kernel.log"; exit 1; }
+grep -E 'proposal\(s\) in the dump|kernel time|Closed under' "$OUT/loop-kernel.log"
+grep -A 12 '^loop kernel check \[base\]' "$OUT/loop-kernel.log" | head -n 13
+python3 -I "$ROOT/scripts/probe-held-loop-join.py" "$OUT/dump" "$OUT/loop-kernel/verdicts.tsv" "$SH" "$OUT"
