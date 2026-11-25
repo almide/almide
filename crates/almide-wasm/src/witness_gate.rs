@@ -330,6 +330,10 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             stmts_subset(stmts).map(Why::Deep).or_else(|| value_subset(tail))
         }
+        // A block with no tail is the same shape with a Unit tail (no block,
+        // no site): its statements are the frame's, judged as any body's
+        // (an inlined callback's `(line) => { count = count + 1 }`).
+        IrExprKind::Block { stmts, expr: None } => stmts_subset(stmts).map(Why::Deep),
         // #2756: a value-position branch — one site, each arm hands the
         // join one credit (`witness_arm_value`); the condition runs first.
         IrExprKind::If { cond, then, else_ } => value_subset(cond)
