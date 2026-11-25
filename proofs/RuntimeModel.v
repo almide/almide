@@ -18,7 +18,8 @@
    WasmCert-Coq layer — the further, ISA-level half of G1.2. *)
 
 From AlmideTrust Require Import OwnershipChecker.
-From Stdlib Require Import ZArith.
+From Stdlib Require Import ZArith List Lia.
+Import ListNotations.
 Open Scope Z_scope.
 
 (* Linear memory: address -> value (total; unwritten cells read 0). *)
@@ -68,6 +69,10 @@ Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   | Take => Some (rt_inc m base)
   (* ADR-0034 probe: a liveness read, like Borrow. *)
   | Probe => rt_borrow m base
+  (* #1961 region reclaim: this ACCOUNT's credit is discharged (it steps like
+     Dec); the block itself goes back to the allocator with the whole window
+     at `RegionRestore` — `region_restore_reclaims` below. *)
+  | Reclaim => rt_dec m base
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -126,6 +131,10 @@ Proof.
     + (* Probe: Borrow's guard *) unfold rt_borrow. destruct (read_rc m base <=? 0) eqn:E.
       * reflexivity.
       * apply IH.
+    + (* Reclaim: the account steps like Dec *) unfold rt_dec. destruct (read_rc m base <=? 0) eqn:E.
+      * reflexivity.
+      * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
+        rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)
@@ -159,6 +168,105 @@ Proof.
   rewrite Hsome, Hrc in Href. cbn in Href.
   rewrite Hnoleak in Href. injection Href as Href'. exact Href'.
 Qed.
+
+(* ─── THE REGION WINDOW (#1961): why a `Reclaim` discharges its block ───
+   The structural leg runs `consume(produce(scalars))` inside a bump window:
+   `RegionSave` files the bump pointer and the size-class heads and ZEROES the
+   heads; `RegionRestore` puts both back (crates/almide-wasm/src/region.rs).
+   The model: the allocator state is the bump pointer and the free blocks the
+   heads hold (one list — the class split does not matter here); a window
+   allocation takes a free block or bumps, a window free files a block. The
+   window's escape condition (the compiler's region-purity check, TRUSTED:
+   proofs/TRUSTED_BASE.md) is `frees_above`: inside the window only blocks the
+   window itself took are freed, and no size is negative. Then every block the
+   window hands out lies at or above the saved bump pointer and on no saved
+   free list, and the restore returns the allocator to the saved state: each
+   such block is back beyond the bump pointer — reclaimed without a release
+   call, which is what the witness's `w` asserts for the parked temporary. *)
+Record RgAlloc : Type := { rg_bump : Z; rg_heads : list Z }.
+
+Inductive WOp : Type :=
+  | WAlloc : Z -> WOp
+  | WFree : Z -> WOp.
+
+Definition walloc (s : RgAlloc) (sz : Z) : RgAlloc * Z :=
+  match rg_heads s with
+  | cons a t => ({| rg_bump := rg_bump s; rg_heads := t |}, a)
+  | nil => ({| rg_bump := rg_bump s + sz; rg_heads := nil |}, rg_bump s)
+  end.
+
+Definition wfree (s : RgAlloc) (a : Z) : RgAlloc := {| rg_bump := rg_bump s; rg_heads := cons a (rg_heads s) |}.
+
+(* The window run: the final allocator state and every block handed out. *)
+Fixpoint wrun (s : RgAlloc) (ops : list WOp) : RgAlloc * list Z :=
+  match ops with
+  | nil => (s, nil)
+  | cons (WAlloc sz) r =>
+      let p := walloc s sz in
+      let q := wrun (fst p) r in
+      (fst q, cons (snd p) (snd q))
+  | cons (WFree a) r => wrun (wfree s a) r
+  end.
+
+Fixpoint frees_above (b0 : Z) (ops : list WOp) : Prop :=
+  match ops with
+  | nil => True
+  | cons (WAlloc sz) r => 0 <= sz /\ frees_above b0 r
+  | cons (WFree a) r => b0 <= a /\ frees_above b0 r
+  end.
+
+Definition region_save (s : RgAlloc) : RgAlloc := {| rg_bump := rg_bump s; rg_heads := nil |}.
+Definition region_restore (saved _cur : RgAlloc) : RgAlloc := saved.
+
+Lemma walloc_above :
+  forall s sz b0, 0 <= sz -> b0 <= rg_bump s -> Forall (fun a => b0 <= a) (rg_heads s) ->
+    b0 <= snd (walloc s sz) /\ b0 <= rg_bump (fst (walloc s sz))
+      /\ Forall (fun a => b0 <= a) (rg_heads (fst (walloc s sz))).
+Proof.
+  intros s sz b0 Hsz Hb Hh. unfold walloc.
+  destruct (rg_heads s) as [| x t] eqn:Eh; cbn.
+  - split; [exact Hb | split; [lia | constructor]].
+  - rewrite Eh in Hh. inversion Hh as [| y l Hx Ht]; subst.
+    split; [exact Hx | split; [exact Hb | exact Ht]].
+Qed.
+
+Lemma wrun_above :
+  forall ops s b0, b0 <= rg_bump s -> Forall (fun a => b0 <= a) (rg_heads s) ->
+    frees_above b0 ops -> Forall (fun a => b0 <= a) (snd (wrun s ops)).
+Proof.
+  induction ops as [| o r IH]; intros s b0 Hb Hh Hf.
+  - cbn. constructor.
+  - destruct o as [sz | a]; cbn [frees_above] in Hf; destruct Hf as [Ho Hr].
+    + destruct (walloc_above s sz b0 Ho Hb Hh) as [Ha [Hb' Hh']].
+      cbn [wrun snd]. constructor; [exact Ha |].
+      apply IH; [exact Hb' | exact Hh' | exact Hr].
+    + cbn [wrun]. apply IH; [exact Hb | | exact Hr].
+      unfold wfree; cbn. constructor; [exact Ho | exact Hh].
+Qed.
+
+(* THE REGION THEOREM. From an allocator whose free blocks all lie below its
+   bump pointer, a window that frees only its own blocks hands out blocks that
+   are, after the restore, at or above the bump pointer and on no free list —
+   the restore reclaims every one of them, and puts the allocator back exactly
+   as the save found it. *)
+Theorem region_restore_reclaims :
+  forall s ops,
+    Forall (fun a => a < rg_bump s) (rg_heads s) -> frees_above (rg_bump s) ops ->
+    region_restore s (fst (wrun (region_save s) ops)) = s /\
+    Forall (fun a => rg_bump s <= a /\ ~ In a (rg_heads s)) (snd (wrun (region_save s) ops)).
+Proof.
+  intros s ops Hh Hf. split; [reflexivity |].
+  assert (H : Forall (fun a => rg_bump s <= a) (snd (wrun (region_save s) ops))).
+  { apply wrun_above; [unfold region_save; cbn; lia | unfold region_save; cbn; constructor | exact Hf]. }
+  apply Forall_forall. intros a Ha.
+  pose proof (proj1 (Forall_forall _ _) H a Ha) as Hge.
+  split; [exact Hge |]. intro Hin.
+  pose proof (proj1 (Forall_forall _ _) Hh a Hin) as Hlt. lia.
+Qed.
+
+(* A reclaimed line's account: `w` steps like `d` on the holder's credit. *)
+Theorem reclaim_steps_like_dec : forall m base, step_mem Reclaim m base = step_mem Dec m base.
+Proof. reflexivity. Qed.
 
 Print Assumptions mrun_tracks_exec.
 Print Assumptions balanced_cert_no_memory_fault.

@@ -132,7 +132,8 @@ pub fn balanced(cert: &str) -> bool {
         for c in line.chars() {
             match c {
                 'i' | 'a' => bal += 1,
-                'd' | 'm' => bal -= 1,
+                // #1961: a region reclaim folds like a release.
+                'd' | 'm' | 'w' => bal -= 1,
                 'b' if bal > 0 => {}
                 // #4278: an arm's share-out moves no count on its line.
                 's' => {}

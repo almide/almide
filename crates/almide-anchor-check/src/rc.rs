@@ -90,6 +90,18 @@
 //! that arm's own window read through the argument — a named event, never a
 //! counted class.
 //!
+//! A region reclaim (`w-@<from>-<to>`, #1961: a region window's parked
+//! temporary, discharged by the window's restore rather than a release
+//! call) takes NO RC call. It is held to the shipped `RegionRestore` in its
+//! own window: the save block read back into the bump pointer (`local.get
+//! L; i32.load; global.set`), the class heads copied back (`memory.copy`),
+//! then that same local handed to a call that is no RC call (`local.get L;
+//! call $free`). A reclaim whose window holds no such restore, or names no
+//! window (`w-@?`: the restore did not ship), is refused like any event left
+//! over. What the restore reclaims rests on the window's region purity
+//! (crates/almide-wasm/src/region.rs, TRUSTED) and on
+//! proofs/RuntimeModel.v `region_restore_reclaims`.
+//!
 //! No counted window class is left (#4278 B1): `consumed` was retired by the
 //! helper signatures, `element` by the slot consume, `routine-internal` and
 //! `arm-internal` by the routines' and arms' own logged events. A new
@@ -584,6 +596,30 @@ impl<'x, 'a> Frame<'x, 'a> {
                 })
                 .collect()
         })[t]
+    }
+
+    /// #1961: event `e`'s own window holds a shipped `RegionRestore`: a
+    /// `memory.copy`, and `local.get L; i32.load; global.set` followed by
+    /// `local.get L; call F` where that call is no RC call of this frame.
+    fn reclaim_holds(&self, e: usize) -> bool {
+        let Some((a, z)) = self.ev.evwin[e] else { return false };
+        let ops = &self.b.ops;
+        let Some(z) = z.min(ops.len()).checked_sub(1).filter(|&z| a <= z) else { return false };
+        let rc_call = |k: usize| self.calls.iter().any(|c| c.0 == k);
+        let copies = (a..=z).any(|k| matches!(ops[k], Op::MemoryCopy { .. }));
+        let rewinds: Vec<(usize, u32)> = (a + 2..=z)
+            .filter_map(|k| match (&ops[k - 2], &ops[k - 1], &ops[k]) {
+                (Op::LocalGet { local_index }, Op::I32Load { .. }, Op::GlobalSet { .. }) => Some((k, *local_index)),
+                _ => None,
+            })
+            .collect();
+        copies
+            && rewinds.iter().any(|&(k, l)| {
+                (k + 2..=z).any(|j| {
+                    matches!((&ops[j - 1], &ops[j]), (Op::LocalGet { local_index }, Op::Call { .. }) if *local_index == l)
+                        && !rc_call(j)
+                })
+            })
     }
 
     /// Instruction `k` lies in event `e`'s own window.

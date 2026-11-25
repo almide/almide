@@ -121,6 +121,12 @@ Proof.
       apply Z.leb_gt in E.
       assert (Eg : (r + k <=? 0) = false) by (apply Z.leb_gt; lia).
       rewrite Eg. apply IH; auto.
+    + (* Reclaim — folds like Dec. *)
+      destruct (r <=? 0) eqn:E; [discriminate|].
+      apply Z.leb_gt in E.
+      assert (Eg : (r + k <=? 0) = false) by (apply Z.leb_gt; lia).
+      rewrite Eg.
+      replace (r + k - 1) with (r - 1 + k) by lia. apply IH; auto.
 Qed.
 
 (* An abstract caller line: plain ops, plus call sites carrying their mode. *)
@@ -171,6 +177,8 @@ Proof.
       apply IHHF; [lia | exact Hex].
     + apply IHHF; [lia | exact Hex].
     + apply IHHF; [lia | exact Hex].
+    + destruct (r <=? 0) eqn:E; [discriminate|]. apply Z.leb_gt in E.
+      apply IHHF; [lia | exact Hex].
     + destruct (r <=? 0) eqn:E; [discriminate|]. apply Z.leb_gt in E.
       apply IHHF; [lia | exact Hex].
   - (* call site: split the mode *)

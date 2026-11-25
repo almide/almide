@@ -29,7 +29,7 @@ pub(crate) fn net(events: &str) -> i64 {
             '{' => depth += 1,
             '}' => depth -= 1,
             'i' | 'a' if depth == 0 => n += 1,
-            'd' | 'm' | 'r' if depth == 0 => n -= 1,
+            'd' | 'm' | 'r' | 'w' if depth == 0 => n -= 1,
             _ => {}
         }
     }

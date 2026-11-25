@@ -301,6 +301,9 @@ impl Frame<'_, '_> {
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
                 (c, _) if is_move(c) => {}
+                // #1961: a region reclaim takes no call; it is held to its
+                // restore (rc.rs `reclaim_holds`), refused otherwise.
+                ('w', None) if self.reclaim_holds(e) => {}
                 // A window's callee that holds the variable but declares no
                 // consuming signature for that parameter (#4278 B1).
                 (k @ ('a' | 'd'), Some(l)) if (0..self.takers.len()).any(|t| self.holds(l, t)) => {

@@ -333,6 +333,8 @@ pub(crate) fn lower_fn(
             room_proven: None,
             display_src: None,
             borrowed_temps: Vec::new(),
+            region_site: None,
+            region_parked: None,
             exit_ledger: Vec::new(), arm_rests: Default::default(),
             borrow_base,
             table: ctx.table,

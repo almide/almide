@@ -100,6 +100,12 @@ pub(crate) struct Emitter<'a> {
     /// there would land on the temporary's slot: fs_write_errno's
     /// `rename` decremented its own Result block, 2026-09-07).
     pub(crate) borrowed_temps: Vec<(u32, SliceTy)>,
+    /// #1961: the borrow-pool depth of the region window site whose own
+    /// arguments are being lowered (`None` inside any nested call): the
+    /// one temporary parked there is reclaimed by the restore, not released.
+    pub(crate) region_site: Option<usize>,
+    /// The witness object of that parked temporary, for its `w` (region.rs).
+    pub(crate) region_parked: Option<u32>,
     /// First local of the borrow pool (`BORROW_POOL` i32 slots).
     pub(crate) borrow_base: u32,
     /// Every exit `emit_exit` wrote, with the byte offset it started at —
