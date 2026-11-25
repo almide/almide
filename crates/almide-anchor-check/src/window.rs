@@ -153,8 +153,25 @@ fn run(b: &Body<'_>, s: usize, acc: usize) -> Result<Run, Stop> {
                 return Err(Stop::Blocked);
             }
             // What the proof script's arm reader takes before the abort:
-            // constants, local and global reads, calls.
-            let plain = |o: &Op<'_>| matches!(o, Op::I32Const { .. } | Op::I64Const { .. } | Op::LocalGet { .. } | Op::GlobalGet { .. } | Op::Call { .. });
+            // constants, local and global reads and writes, calls, drops,
+            // numeric instructions, loads and stores. Nothing that opens a
+            // block, branches or returns.
+            let plain = |o: &Op<'_>| {
+                matches!(
+                    o,
+                    Op::I32Const { .. }
+                        | Op::I64Const { .. }
+                        | Op::LocalGet { .. }
+                        | Op::LocalSet { .. }
+                        | Op::LocalTee { .. }
+                        | Op::GlobalGet { .. }
+                        | Op::GlobalSet { .. }
+                        | Op::Call { .. }
+                        | Op::Drop
+                ) || is_access(o)
+                    || modelled(o).is_some()
+                    || opaque(o).is_some()
+            };
             if !b.ops[j + 1..end - 1].iter().all(plain) {
                 return Err(Stop::Blocked);
             }
