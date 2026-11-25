@@ -1,0 +1,69 @@
+name: Probe — functions in which the kernel judges every load and store
+# A one-off measurement on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/function-judged]
+
+permissions:
+  contents: read
+
+jobs:
+  judge:
+    name: The contract programs, function by function
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: The proofs compile
+        run: |
+          cd proofs
+          coqc -Q . AlmideTrust GuardWindow.v
+          coqc -Q . AlmideTrust GuardFresh.v
+          coqc -Q . AlmideTrust GuardFunction.v
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Build the driver, the producer and the cutter
+        run: |
+          cargo build -q --release --locked --bin almide
+          cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
+          cargo build -q --release --locked -p almide-anchor-check
+      - name: Measure
+        run: bash scripts/probe-function-judged.sh "$RUNNER_TEMP/fj"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: function-judged
+          path: |
+            ${{ runner.temp }}/fj/coqc.log
+            ${{ runner.temp }}/fj/summary.txt
+            ${{ runner.temp }}/fj/modules.tsv
+            ${{ runner.temp }}/fj/functions.tsv
+            ${{ runner.temp }}/fj/no-module.txt
+            ${{ runner.temp }}/fj/no-anchors.txt
+            ${{ runner.temp }}/fj/cutter-failed.txt
+            ${{ runner.temp }}/fj/work/*.rc
+            ${{ runner.temp }}/fj/work/*.err
+            ${{ runner.temp }}/fj/work/*.tsv
+            ${{ runner.temp }}/fj/work/Ask_0000.v
+            ${{ runner.temp }}/fj/work/Ask_0000.out
+            ${{ runner.temp }}/fj/work/Control_0000.v
+            ${{ runner.temp }}/fj/work/Control_0000.out
