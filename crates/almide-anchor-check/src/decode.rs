@@ -48,6 +48,10 @@ pub struct Body<'a> {
     /// pops, bottom first, when the provenance walk knows it (operands.rs
     /// rebuilds a value's expression from these).
     pub args: Vec<Vec<Option<usize>>>,
+    /// The module offset each instruction starts at, and the offset one past
+    /// the body's last instruction (window.rs cuts instruction runs by these).
+    pub at: Vec<usize>,
+    pub end: usize,
 }
 
 /// The proposals whose control flow this checker does not classify (#4854):
@@ -128,11 +132,13 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
     fv.read_locals(&mut br).map_err(|e| e.to_string())?;
     let mut r = wasmparser::OperatorsReader::new(br);
     let (mut ops, mut depth, mut addr, mut args) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut at = Vec::new();
     let mut shadow: Vec<Option<usize>> = Vec::new();
     while !r.eof() {
         let off = r.original_position();
         let op = r.read().map_err(|e| e.to_string())?;
         let i = ops.len();
+        at.push(off);
         if control(&op) == Control::Refused {
             return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
         }
@@ -165,7 +171,8 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         reshadow(&mut shadow, arity, (pre, post, floor), i);
         ops.push(op);
     }
-    Ok(Body { ops, depth, addr, args })
+    let end = r.original_position();
+    Ok(Body { ops, depth, addr, args, at, end })
 }
 
 /// The producers of the operands an instruction of `arity` pops from a
