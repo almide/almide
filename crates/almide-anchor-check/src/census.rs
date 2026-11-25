@@ -495,6 +495,8 @@ pub struct Fresh {
     pub pre: Vec<u8>,
     pub mid: Vec<u8>,
     pub tail: Vec<u8>,
+    /// The byte length of each instruction of `mid`, as the decoder found them.
+    pub mid_lens: Vec<usize>,
 }
 
 /// Probe only: every load and store whose address is local `x` (plus a
@@ -546,6 +548,7 @@ pub fn fresh_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, alloc: u32
                 pre: wasm[b.at[j - 2]..end_of(j)].to_vec(),
                 mid: wasm[end_of(j)..b.at[s0]].to_vec(),
                 tail: wasm[b.at[s0]..end_of(k)].to_vec(),
+                mid_lens: (j + 1..s0).map(|u| end_of(u) - b.at[u]).collect(),
             });
         }
     }
@@ -569,6 +572,9 @@ pub struct LoopRead {
     pub mid: Vec<u8>,
     pub ht: Vec<u8>,
     pub rest: Vec<u8>,
+    /// The byte length of each instruction of `mid ++ ht ++ rest`, as the
+    /// decoder found them.
+    pub lens: Vec<usize>,
 }
 
 /// Probe only: every load and store that follows, in one straight-line run,
@@ -648,6 +654,7 @@ pub fn loop_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, inc: Option
                 mid: wasm[end_of(j)..b.at[s0]].to_vec(),
                 ht: wasm[b.at[s0]..end_of(k)].to_vec(),
                 rest: wasm[end_of(k)..end_of(e)].to_vec(),
+                lens: (j + 1..=e).map(|u| end_of(u) - b.at[u]).collect(),
             });
         }
     }

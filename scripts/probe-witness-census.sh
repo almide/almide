@@ -88,6 +88,7 @@ one() { # one <leg> <file>
     grep '^WINDOWFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/windowrows.tsv" || true
     { echo "MODULE $leg $f"; grep '^FRESHHEX ' "$W/a.census" || true; } >> "$OUT/fresh-dump"
     { echo "MODULE $leg $f"; grep '^LOOPHEX ' "$W/a.census" || true; } >> "$OUT/loop-dump"
+    grep '^SCANLENS ' "$W/a.census" >> "$OUT/scan-dump" || true
     grep '^FRESHFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/freshrows.tsv" || true
     grep '^KINDFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $2 "\t" $3 "\t" $4 "\t" $5}' >> "$OUT/kindrows.tsv" || true
     grep -E '^(FIELDS|RC) OK' "$W/a.anchor" | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/okrows.tsv" || true
@@ -128,6 +129,9 @@ if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/fresh-dump" ]; then
 fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/loop-dump" ]; then
   bash scripts/probe-loop-kernel.sh "$OUT/loop-dump" "$OUT/loop-kernel" || echo "loop kernel check: FAILED" >&2
+fi
+if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/scan-dump" ]; then
+  bash scripts/probe-scan-lens.sh "$OUT/scan-dump" "$OUT/scan-lens" || echo "scan lengths: FAILED" >&2
 fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/window-dump" ]; then
   bash scripts/probe-window-kernel.sh "$OUT/window-dump" "$OUT/window-kernel" || echo "window kernel check: FAILED" >&2
