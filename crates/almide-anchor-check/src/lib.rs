@@ -77,7 +77,7 @@ mod routines;
 pub mod window;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
-pub use census::{census, census_by_function, census_detail, census_fresh, census_kinds, census_with, census_writes, located, located_by, Census, FnRow, Tally};
+pub use census::{census, census_by_function, census_detail, census_fresh, census_kinds, census_with, fresh_windows, Fresh, census_writes, located, located_by, Census, FnRow, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
 pub use routines::check_named_routines;
 use anchors::helper_sigs;

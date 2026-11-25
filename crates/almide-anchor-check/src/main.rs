@@ -301,6 +301,14 @@ fn main() {
     }
     if census {
         if let (Ok(bodies), Ok((alloc, ..))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
+            let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
+            for f in almide_anchor_check::fresh_windows(&w, &bodies, &a, alloc) {
+                println!("FRESHHEX {} {} {} {} {} | {} | {} | {}", f.func, f.access, alloc, u8::from(f.write), f.located, hex(&f.pre), hex(&f.mid), hex(&f.tail));
+            }
+        }
+    }
+    if census {
+        if let (Ok(bodies), Ok((alloc, ..))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
             for (func, n) in almide_anchor_check::census_fresh(&bodies, alloc) {
                 println!("FRESHFN {func} {}", n.map(|x| x.to_string()).join(" "));
             }

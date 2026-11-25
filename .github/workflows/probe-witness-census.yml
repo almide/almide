@@ -58,6 +58,9 @@ jobs:
             ${{ runner.temp }}/census/storerows.tsv
             ${{ runner.temp }}/census/kindrows.tsv
             ${{ runner.temp }}/census/freshrows.tsv
+            ${{ runner.temp }}/census/fresh-kernel/verdicts.tsv
+            ${{ runner.temp }}/census/fresh-kernel/summary.txt
+            ${{ runner.temp }}/census/fresh-kernel/GuardFresh.log
             ${{ runner.temp }}/census/okrows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
             ${{ runner.temp }}/census/windowrows.tsv

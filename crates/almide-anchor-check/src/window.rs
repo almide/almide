@@ -405,3 +405,9 @@ pub fn prove(b: &Body<'_>, cmp: usize, acc0: usize) -> (bool, String, usize) {
     }
     (false, format!("limit {last}"), lo)
 }
+
+/// Probe only: whether `ops[s..=acc]` is a straight-line run the proof
+/// script's window language reads from an empty stack.
+pub(crate) fn runs_straight(b: &Body<'_>, s: usize, acc: usize) -> bool {
+    run(b, s, acc).is_ok()
+}

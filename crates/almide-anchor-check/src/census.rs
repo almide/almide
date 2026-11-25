@@ -481,3 +481,73 @@ pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 12])
     }
     out
 }
+
+/// Probe only: one access into a block just allocated with a constant size,
+/// as proofs/GuardFresh.v reads it: the module bytes of `i32.const n; call
+/// alloc; local.set x`, of everything between, and of the straight-line run
+/// that ends in the access.
+pub struct Fresh {
+    pub func: usize,
+    pub access: usize,
+    pub write: bool,
+    /// Bit 1 init, 2 bounds, 4 fields: the witnesses that locate the access.
+    pub located: u8,
+    pub pre: Vec<u8>,
+    pub mid: Vec<u8>,
+    pub tail: Vec<u8>,
+}
+
+/// Probe only: every load and store whose address is local `x` (plus a
+/// constant), `x` last assigned by `i32.const n; call alloc; local.set x` at
+/// the access's own depth with nothing shallower in between, and whose
+/// address and value operands are computed by a straight-line run. The bound
+/// is NOT tested here: the kernel judges each proposal.
+pub fn fresh_windows(wasm: &[u8], bodies: &[Body<'_>], anchors: &str, alloc: u32) -> Vec<Fresh> {
+    let by = located_by(anchors).unwrap_or_default();
+    let mut out = Vec::new();
+    for (func, b) in bodies.iter().enumerate() {
+        let end_of = |k: usize| b.at.get(k + 1).copied().unwrap_or(b.end);
+        for (k, op) in b.ops.iter().enumerate() {
+            if !crate::window::is_access(op) {
+                continue;
+            }
+            let Some(p) = b.args[k].first().copied().flatten() else { continue };
+            // The address expression: `local.get x`, or that plus a constant.
+            let (x, s0) = match &b.ops[p] {
+                Op::LocalGet { local_index } => (*local_index, p),
+                Op::I32Add if p >= 2 => match (&b.ops[p - 2], &b.ops[p - 1]) {
+                    (Op::LocalGet { local_index }, Op::I32Const { .. }) | (Op::I32Const { .. }, Op::LocalGet { local_index }) => (*local_index, p - 2),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let Some(j) = (0..s0).rev().find(|&t| matches!(&b.ops[t], Op::LocalSet { local_index } | Op::LocalTee { local_index } if *local_index == x)) else { continue };
+            if j < 2 || b.depth[j] != b.depth[k] || (j..=k).any(|t| b.depth[t] < b.depth[j]) {
+                continue;
+            }
+            if !matches!(&b.ops[j - 1], Op::Call { function_index } if *function_index == alloc) || !matches!(&b.ops[j - 2], Op::I32Const { .. }) {
+                continue;
+            }
+            if b.depth[j - 2] != b.depth[j] || !crate::window::runs_straight(b, s0, k) {
+                continue;
+            }
+            let write = store_width(op).is_some();
+            let located = match by.get(&At { func, op: k }) {
+                Some(&"init") => 1,
+                Some(&"bounds") => 2,
+                Some(_) => 4,
+                None => 0,
+            };
+            out.push(Fresh {
+                func,
+                access: k,
+                write,
+                located,
+                pre: wasm[b.at[j - 2]..end_of(j)].to_vec(),
+                mid: wasm[end_of(j)..b.at[s0]].to_vec(),
+                tail: wasm[b.at[s0]..end_of(k)].to_vec(),
+            });
+        }
+    }
+    out
+}
