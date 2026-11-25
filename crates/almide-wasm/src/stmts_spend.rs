@@ -65,14 +65,24 @@ impl Emitter<'_> {
 
     /// A call to a resolved program fn spends `var` only through a `mut`
     /// parameter it is passed to directly, or through an argument that
-    /// spends it (`arg_spends_var`). `None` when the call is not one: a
-    /// variant constructor or an unresolved name.
+    /// spends it (`arg_spends_var`). A VARIANT CONSTRUCTOR never spends a
+    /// Var payload: the payload store shares it (`rc_share_guard`, the `+1`
+    /// the slot's credit is, `witness_store`), so `t = Node(t, Leaf)` leaves
+    /// the old occupant's own credit with `t` — the Assign releases it, where
+    /// skipping that release left every node of a built chain at rc 2, one
+    /// block per step live forever. `None` for an unresolved name.
     fn named_call_spends_var(&self, call: &IrExpr, var: VarId) -> Option<bool> {
         let IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } = &call.kind else {
             return None;
         };
         let name = name.as_str();
-        let i = if self.is_variant_ctor(name, call) { None } else { self.resolve_named_fn(name) }?;
+        if self.is_variant_ctor(name, call) {
+            return Some(args.iter().any(|a| match &a.kind {
+                IrExprKind::Var { id } if *id == var => false,
+                _ => self.arg_spends_var(a, var),
+            }));
+        }
+        let i = self.resolve_named_fn(name)?;
         let param_mut = &self.table.infos[i].param_mut;
         Some(args.iter().enumerate().any(|(k, a)| match &a.kind {
             IrExprKind::Var { id } if *id == var => param_mut.get(k).copied().unwrap_or(true),
