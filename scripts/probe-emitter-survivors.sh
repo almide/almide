@@ -34,10 +34,19 @@ export ALMIDE="$TD/release/almide"
 export T_FILE="${T_FILE:-180}"
 T_SHARD="${T_SHARD:-16200}"
 START=$(date +%s)
+# Which stages run: `tests` (every test file on the wasm target) and `fuzz`
+# (the differential fuzzer on a fixed seed and program count, so the unmutated
+# compiler and every mutant are asked about the same generated programs).
+STAGES="${STAGES:-tests}"
+has() { case " $STAGES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+FUZZ="$OUT/xtarget-fuzz"
+FUZZ_COUNT="${FUZZ_COUNT:-600}"
+FUZZ_SEED="${FUZZ_SEED:-20261125}"
 
 # Every file `almide test spec/` would find: one with a top-level test block.
 TESTS="$OUT/tests.txt"
 grep -r -l -E '^test "' --include='*.almd' spec | sort > "$TESTS"
+has tests || : > "$TESTS"
 echo "test files: $(wc -l < "$TESTS")"
 
 name_of() { printf '%s' "$1" | tr '/' '_'; }
@@ -58,6 +67,18 @@ export -f one
 run_all() { mkdir -p "$1"; xargs -P 4 -I{} bash -c 'one "$1" "$2"' _ {} "$1" < "$TESTS"; }
 
 build() { cargo build -q --release --locked --bin almide 2> "$OUT/build.err"; }
+
+# fuzz_one <dir>: the fixed campaign against the compiler at $ALMIDE; its exit
+# code (non-zero iff a finding), the names of its findings, its last lines.
+fuzz_one() {
+  local d="$1" rc=0
+  mkdir -p "$d"
+  timeout 1800 "$FUZZ" run --count "$FUZZ_COUNT" --jobs 4 --repo "$ROOT" --almide "$ALMIDE" --seed "$FUZZ_SEED" --out "$d/findings" > "$d/out.txt" 2>&1 < /dev/null || rc=$?
+  echo "$rc" > "$d/rc"
+  ls "$d/findings" 2>/dev/null | sort > "$d/names.txt"
+  tail -25 "$d/out.txt" > "$d/tail.txt"
+  rm -f "$d/out.txt"
+}
 
 # ---------------------------------------------------------------- baseline
 t0=$(date +%s)
@@ -83,7 +104,25 @@ echo "baseline: $pass file(s) pass, $fail fail, $(wc -l < "$OUT/unstable.txt") e
   printf 'file\trc\n'
   while IFS= read -r f; do printf '%s\t%s\n' "$f" "$(cat "$OUT/base/$(name_of "$f").rc")"; done < "$TESTS"
 } > "$OUT/baseline.tsv"
-[ "$pass" -ge 300 ] || { echo "too few test files pass under the unmutated compiler; the comparison would be empty"; exit 1; }
+if has tests; then
+  [ "$pass" -ge 300 ] || { echo "too few test files pass under the unmutated compiler; the comparison would be empty"; exit 1; }
+fi
+
+if has fuzz; then
+  t0=$(date +%s)
+  (cd tools/xtarget-fuzz && cargo build -q --release) 2> "$OUT/fuzz-build.err" || { echo "fuzzer build failed"; tail -30 "$OUT/fuzz-build.err"; exit 1; }
+  cp tools/xtarget-fuzz/target/release/xtarget-fuzz "$FUZZ"
+  echo "fuzzer build: $(( $(date +%s) - t0 )) s"
+  t0=$(date +%s)
+  fuzz_one "$OUT/fuzz/base"
+  echo "baseline fuzz: exit $(cat "$OUT/fuzz/base/rc"), $(wc -l < "$OUT/fuzz/base/names.txt" | tr -d ' ') finding(s), $(( $(date +%s) - t0 )) s"
+  fuzz_one "$OUT/fuzz/base2"
+  echo "baseline fuzz, second run: exit $(cat "$OUT/fuzz/base2/rc"), $(wc -l < "$OUT/fuzz/base2/names.txt" | tr -d ' ') finding(s)"
+  cat "$OUT/fuzz/base/tail.txt"
+  # known.txt: what either baseline run reports; a mutant's finding counts only when it is not here.
+  sort -u "$OUT/fuzz/base/names.txt" "$OUT/fuzz/base2/names.txt" > "$OUT/fuzz/known.txt"
+  printf 'id\texit\tfindings\tnew\tfirst_new\tseconds\n' > "$OUT/fuzz.tsv"
+fi
 
 # ---------------------------------------------------------------- mutants
 RES="$OUT/results.tsv"
@@ -142,6 +181,14 @@ while IFS=$'\t' read -r -u 3 id file line genre name; do
     row ok "$tb" "$tt" "$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$changed" "$nf" "$np" "$to" "$first" "$firstline")"
     { echo "== $id $file:$line $genre"; echo "$name"; cat "$MUT/$id.diff"; } > "$OUT/detail/$id.txt"
     echo "$id ok build ${tb}s tests ${tt}s: changed $changed, newly failing $nf, newly passing $np, timeouts $to, first $first"
+    if has fuzz; then
+      t0=$(date +%s)
+      fuzz_one "$OUT/fuzz/$id"
+      new="$(comm -13 "$OUT/fuzz/known.txt" "$OUT/fuzz/$id/names.txt" | wc -l | tr -d ' ')"
+      firstnew="$(comm -13 "$OUT/fuzz/known.txt" "$OUT/fuzz/$id/names.txt" | head -1)"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$(cat "$OUT/fuzz/$id/rc")" "$(wc -l < "$OUT/fuzz/$id/names.txt" | tr -d ' ')" "$new" "${firstnew:--}" "$(( $(date +%s) - t0 ))" >> "$OUT/fuzz.tsv"
+      echo "$id fuzz: exit $(cat "$OUT/fuzz/$id/rc"), $new finding(s) the unmutated compiler does not have ${firstnew:-}"
+    fi
   else
     row no-build "$(( $(date +%s) - t0 ))" 0 "$NONE"
     echo "$id no-build"; tail -5 "$OUT/build.err"

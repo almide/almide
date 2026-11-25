@@ -1,4 +1,4 @@
-name: Probe — the wasm test suite against the surviving source mutants
+name: Probe — a fixed differential-fuzz campaign against the first sample's surviving source mutants
 # A one-off measurement on its own branch: for the mutants of the emitter
 # crate's source that nothing in the first two stages noticed (the seeded
 # sample probe-emitter-mutants.yml draws), does the merge gate's own wasm test
@@ -6,7 +6,7 @@ name: Probe — the wasm test suite against the surviving source mutants
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-survivors]
+    branches: [probe/emitter-survivors-fuzz1]
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ env:
   # order they run in, are scripts/probe-emitter-survivors-ids.txt.
   SAMPLE_N: "480"
   SAMPLE_SEED: "20261122"
-  SHARDS: "16"
+  SHARDS: "8"
 
 jobs:
   list:
@@ -31,7 +31,7 @@ jobs:
           toolchain: "1.97.0"
       - name: Install the mutation tool
         run: |
-          cargo install --locked cargo-mutants
+          cargo install --locked cargo-mutants --version 27.1.0
           cargo mutants --version
       - name: List
         run: |
@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -85,6 +85,10 @@ jobs:
       - name: Draw this shard's mutants
         run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-survivors-ids.txt)"
       - name: Measure
+        env:
+          STAGES: "fuzz"
+          FUZZ_COUNT: "600"
+          FUZZ_SEED: "20261125"
         run: bash scripts/probe-emitter-survivors.sh "$RUNNER_TEMP/survivors" "$RUNNER_TEMP/pick" scripts/probe-emitter-survivors-ids.txt
       - name: Upload results
         if: always()
@@ -93,6 +97,8 @@ jobs:
           name: emitter-survivors-${{ matrix.shard }}
           path: |
             ${{ runner.temp }}/survivors/results.tsv
+            ${{ runner.temp }}/survivors/fuzz.tsv
+            ${{ runner.temp }}/survivors/fuzz
             ${{ runner.temp }}/survivors/baseline.tsv
             ${{ runner.temp }}/survivors/unstable.txt
             ${{ runner.temp }}/survivors/detail
