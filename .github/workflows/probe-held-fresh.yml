@@ -28,6 +28,8 @@ env:
 jobs:
   fresh:
     name: Fresh-block proposals of the mutants' modules
+    # Off for this push: only the replays are asked again.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -144,6 +146,15 @@ jobs:
             cp "$d/a.anchors.wasm" "$RUNNER_TEMP/rbase/$n.wasm"
             cp "$d/a.anchors" "$RUNNER_TEMP/rbase/$n.anchors"
             cp "$b/a.anchors.wasm" "$RUNNER_TEMP/rshards/replay/emut/modules/bug/$n.wasm"
+            # The module with the defect again, as its own base: judged with ITS
+            # anchor file, so that its allocator is the one its own anchors name
+            # (the defect's patch can renumber what the allocator calls, and
+            # then no function of it equals the unpatched allocator byte for byte).
+            if [ -s "$b/a.anchors" ]; then
+              cp "$b/a.anchors.wasm" "$RUNNER_TEMP/rbase/$n+own.wasm"
+              cp "$b/a.anchors" "$RUNNER_TEMP/rbase/$n+own.anchors"
+              cp "$b/a.anchors.wasm" "$RUNNER_TEMP/rshards/replay/emut/modules/bug/$n+own.wasm"
+            fi
           done
           ls "$RUNNER_TEMP/rbase" | grep -c '\.wasm$'
       - name: Measure
