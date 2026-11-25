@@ -1,5 +1,6 @@
-spec/wasm_cross/bytes_writer_mut_from_declaration.almd
-spec/wasm_cross/closure_capture_escapes_frame.almd
-spec/wasm_cross/effect_slot_unit_block_tail.almd
-spec/wasm_cross/grain_functions.almd
-spec/wasm_cross/top_let_fn_value_closure_param.almd
+spec/wasm_cross/matrix_from_bytes_count_domain.almd
+spec/wasm_cross/matrix_from_bytes_offset_domain.almd
+spec/wasm_cross/option_map_none_heap_payload_closure.almd
+spec/wasm_cross/control_flow.almd
+spec/wasm_cross/env_secret.almd
+spec/wasm_cross/ctor_if_payload.almd
