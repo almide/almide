@@ -254,7 +254,7 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String 
                 ParamPlan::Str => "string".to_string(),
                 ParamPlan::Block(s) => ts_shape(s, false),
             };
-            format!("{p}: {ty}")
+            format!("{}: {ty}", super::ts_param(p))
         })
         .collect();
     let ret = match &plan.ret {
@@ -265,7 +265,15 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String 
         RetPlan::RegionAddress => "number".to_string(),
     };
     let ret = if entry == Entry::Async { format!("Promise<{ret}>") } else { ret };
-    format!("export function {}({}): {ret};\n", f.name, params.join(", "))
+    let params = params.join(", ");
+    // A name the target grammar reserves (`delete`, `default`, a backticked
+    // `let`) cannot be a declaration's binding, so it is declared under the
+    // glue's own `$` spelling and exported by its name (#4943).
+    if super::js_reserved(&f.name) {
+        format!("declare function {}({params}): {ret};\nexport {{ {} as {} }};\n", super::glue_binding(&f.name), super::glue_binding(&f.name), f.name)
+    } else {
+        format!("export function {}({params}): {ret};\n", f.name)
+    }
 }
 
 /// The wrapper for one export: the shape constants it reads, then the
@@ -280,11 +288,15 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
         name
     };
     let (mut pre, mut args, mut post) = (Vec::new(), Vec::new(), Vec::new());
-    for (i, ((p, _), pp)) in f.params.iter().zip(&plan.params).enumerate() {
+    for (i, pp) in plan.params.iter().enumerate() {
+        // The wrapper's parameters are the glue's `$<i>`, never the source
+        // names: `default`, `new` or `instance` would otherwise be a syntax
+        // error or shadow the binding the body reads (#4943).
+        let p = format!("${i}");
         let v = *sig.params.get(i).ok_or_else(|| format!("export `{}` has fewer wasm params than declared", f.name))?;
         let callee_owns = owned.get(i).copied().unwrap_or(false);
         match pp {
-            ParamPlan::Scalar(m) => args.push(to_wasm(*m, v, p, &f.name)),
+            ParamPlan::Scalar(m) => args.push(to_wasm(*m, v, &p, &f.name)),
             ParamPlan::Str => {
                 pre.push(format!("  const h{i} = allocString({p});\n"));
                 args.push(format!("h{i}"));
@@ -334,7 +346,7 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
         // One result in the address width (#4519): a number either way.
         (RetPlan::RegionAddress, _) => format!("    return Number({call});\n"),
     };
-    let names: Vec<&str> = f.params.iter().map(|(p, _)| p.as_str()).collect();
+    let names: Vec<String> = (0..plan.params.len()).map(|i| format!("${i}")).collect();
     let guard = if entry == Entry::Guarded { format!("  idle(\"{}\");\n", f.name) } else { String::new() };
     let mut inner = format!("  ready();\n{guard}{}", pre.concat());
     if post.is_empty() {
@@ -346,8 +358,8 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
     Ok(match entry {
         // One call in the instance at a time (#3353): the body runs when the
         // calls before it have settled.
-        Entry::Async => format!("\n{consts}export function {}({names}) {{\n  return serial(async () => {{\n{inner}  }});\n}}\n", f.name),
-        _ => format!("\n{consts}export function {}({names}) {{\n{inner}}}\n", f.name),
+        Entry::Async => format!("\n{consts}function {}({names}) {{\n  return serial(async () => {{\n{inner}  }});\n}}\n", super::glue_binding(&f.name)),
+        _ => format!("\n{consts}function {}({names}) {{\n{inner}}}\n", super::glue_binding(&f.name)),
     })
 }
 
