@@ -177,8 +177,18 @@ Fixpoint scan_keep (fuel : nat) (x depth : Z) (bs : list Z) : bool :=
 
 (* ══ THE TAIL ═════════════════════════════════════════════════════════ *)
 
+(* A store leaves the block's length word, its bytes 4 to 7, alone: it ends
+   at or below byte 4 or starts at or above byte 8. A load is not held to
+   this. *)
+Definition keeps_length (k : akind) (c off w : Z) : bool :=
+  match k with
+  | ALoad => true
+  | AStore => (c + off + w <=? 4) || (8 <=? c + off)
+  end.
+
 (* The tail's access addresses local `x` plus a constant, inside the header
-   and the first `n` payload bytes of the block `x` points at. *)
+   and the first `n` payload bytes of the block `x` points at, and a store
+   does not reach the length word. *)
 Definition fresh_tail (x n : Z) (tail : list Z) : bool :=
   match dec (S (length tail)) tail [] with
   | Some (ws, k, off, w) =>
@@ -189,7 +199,7 @@ Definition fresh_tail (x n : Z) (tail : list Z) : bool :=
               match flat a with
               | ([TL y], c) =>
                   (y =? x) && (0 <=? c) && (0 <=? off) && (0 <? w) && (0 <=? n)
-                  && (c + off + w <=? PAYLOAD + n)
+                  && (c + off + w <=? PAYLOAD + n) && keeps_length k c off w
               | _ => false
               end
           | None => false
@@ -254,6 +264,57 @@ Proof.
       rewrite (Z.mod_small c M32) by (unfold PAYLOAD in *; lia).
       apply Z.mod_small. unfold PAYLOAD in *. lia. }
     rewrite Hav. unfold PAYLOAD in *. lia.
+Qed.
+
+(* An accepted tail that ends in a store writes no byte of the length word
+   of the block at the value local `x` held on entry. *)
+Theorem fresh_tail_keeps_length : forall x n tail ws off w rest loc stk,
+  fresh_tail x n tail = true ->
+  dec (S (length tail)) tail [] = Some (ws, AStore, off, w) ->
+  crun G memf uo bo ws (L0, rest) = Some (loc, stk) ->
+  exists av,
+    addr_of AStore stk = Some av
+    /\ (L0 x mod M32 + PAYLOAD + n <= M32 ->
+        av mod M32 + off + w <= L0 x mod M32 + 4
+        \/ L0 x mod M32 + 8 <= av mod M32 + off).
+Proof.
+  intros x n tail ws off w rest loc stk Hok Hd Hrun.
+  unfold fresh_tail in Hok. rewrite Hd in Hok.
+  destruct (srun ws (mkS [] [] [])) as [[e st fs]|] eqn:Es; [| discriminate Hok].
+  cbn [sstk] in Hok.
+  destruct (addr_of AStore st) as [a|] eqn:Ea; [| discriminate Hok].
+  destruct (flat a) as [xs c] eqn:Ef.
+  destruct xs as [|t1 xs']; [discriminate Hok |].
+  destruct t1 as [y|g|z|op1 off1 a1|op1 a1|op1 a1 b1]; try discriminate Hok.
+  destruct xs' as [|t2 xs'']; [| discriminate Hok].
+  apply andb_prop in Hok. destruct Hok as [Hok Hkeep].
+  unfold keeps_length in Hkeep. apply Bool.orb_true_iff in Hkeep.
+  repeat (apply andb_prop in Hok; destruct Hok as [Hok ?]).
+  apply Z.eqb_eq in Hok. subst y.
+  repeat match goal with
+         | H : (_ <=? _) = true |- _ => apply Z.leb_le in H
+         | H : (_ <? _) = true |- _ => apply Z.ltb_lt in H
+         end.
+  destruct (run_sound L0 G memf uo bo ws L0 rest [] [] [] rest loc stk (mkS e st fs)
+              eq_refl (fun v => eq_refl) (Forall_nil (zero32 L0 G memf uo bo)) Es Hrun)
+    as [Hs _].
+  cbn [sstk] in Hs.
+  exists (den L0 G memf uo bo a). split.
+  - subst stk.
+    destruct st as [|s1 [|s2 r']]; cbn [addr_of] in Ea; try discriminate Ea;
+      injection Ea as Ea'; subst; reflexivity.
+  - intro Hfit.
+    pose proof (flat_sound L0 G memf uo bo a) as Hfl.
+    rewrite Ef in Hfl. cbn [fst snd sumd den] in Hfl.
+    assert (Hr : 0 <= L0 x mod M32 < M32) by (apply Z.mod_pos_bound; unfold M32; lia).
+    assert (Hav : den L0 G memf uo bo a mod M32 = L0 x mod M32 + c).
+    { rewrite Hfl.
+      replace (L0 x + 0 + c) with (L0 x + c) by lia.
+      rewrite Z.add_mod by (unfold M32; lia).
+      rewrite (Z.mod_small c M32) by (unfold PAYLOAD in *; lia).
+      apply Z.mod_small. unfold PAYLOAD in *. lia. }
+    rewrite Hav.
+    destruct Hkeep as [Hk|Hk]; apply Z.leb_le in Hk; lia.
 Qed.
 
 End Semantics.
@@ -388,4 +449,24 @@ Example refuses_cutter_store_past_the_block :
   fresh_ok 0 [65; 16; 16; 0; 33; 2] [32; 1; 16; 1; 33; 3] [32; 2; 32; 0; 55; 3; 28] = false.
 Proof. vm_compute. reflexivity. Qed.
 
+(* a store of the length word of the block just allocated is refused; the
+   same store of the count word below it and of the capacity word above it
+   is not, and a read of the length word is not *)
+Example refuses_store_of_the_length_word :
+  fresh_ok 6 [65; 16; 16; 6; 33; 4] [] [32; 4; 32; 1; 54; 2; 4] = false.
+Proof. vm_compute. reflexivity. Qed.
+
+Example keeps_store_of_the_count_word :
+  fresh_ok 6 [65; 16; 16; 6; 33; 4] [] [32; 4; 32; 1; 54; 2; 0] = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example keeps_store_of_the_capacity_word :
+  fresh_ok 6 [65; 16; 16; 6; 33; 4] [] [32; 4; 32; 1; 54; 2; 8] = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example keeps_read_of_the_length_word :
+  fresh_ok 6 [65; 16; 16; 6; 33; 4] [] [32; 4; 40; 2; 4] = true.
+Proof. vm_compute. reflexivity. Qed.
+
 Print Assumptions fresh_sound.
+Print Assumptions fresh_tail_keeps_length.
