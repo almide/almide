@@ -1,0 +1,13 @@
+# The least number of guarded accesses the Rocq kernel must prove in bounds
+# from the shipped bytes alone (proofs/GuardWindow.v), per corpus leg of
+# proofs/structural-wall.sh. proofs/check-shipped-windows.sh fails a run that
+# proves fewer: a change that moves a count out of its window (a length read
+# hoisted before a loop, a call between the compare and the access) is lost
+# evidence, and shows here instead of passing unseen.
+#
+# Raise a row whenever a run proves more. Lower one only in its own commit,
+# with the reason in the message.
+#
+# leg       windows
+fixtures    0
+tests       0
