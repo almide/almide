@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/list_fuse.rs b/crates/almide-wasm/src/list_fuse.rs
+index b95275ba93..3adff7bd6c 100644
+--- a/crates/almide-wasm/src/list_fuse.rs
++++ b/crates/almide-wasm/src/list_fuse.rs
+@@ -455,11 +455,6 @@ impl Emitter<'_> {
+             // an element the list's own release then freed: a wrong byte on
+             // wasm, no trap, only through a chain that fuses (#2397). A
+             // fresh body result already carries its credit and takes no +1.
+-            self.rc_share_guard(fold_body, acc_ty);
+-            if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
+-                self.f.instructions().local_get(acc).call(dec);
+-            }
+-            self.witness_fold_step(fold_body, acc, acc_ty);
+         } else {
+             // Do not reassociate Float or swap the operands (NaNs and
+             // signed zero included): exactly acc + element, from +0.0.

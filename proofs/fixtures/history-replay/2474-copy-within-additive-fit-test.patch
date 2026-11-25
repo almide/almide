@@ -1,0 +1,31 @@
+diff --git a/crates/almide-wasm/src/bytes_in_place.rs b/crates/almide-wasm/src/bytes_in_place.rs
+index 5138e3e3cf..8dd57b4f35 100644
+--- a/crates/almide-wasm/src/bytes_in_place.rs
++++ b/crates/almide-wasm/src/bytes_in_place.rs
+@@ -105,11 +105,9 @@ impl Emitter<'_> {
+             // s < e (unsigned: a negative s is enormous and fails)
+             //   && d >= 0 && d <= len - (e - s)
+             i.local_get(hs).local_get(he).i64_lt_u();
+-            i.local_get(hd).i64_const(0).i64_ge_s().i32_and();
+-            i.local_get(hd);
++            i.local_get(hd).local_get(he).i64_add().local_get(hs).i64_sub();
+             len(&mut i);
+-            i.local_get(he).local_get(hs).i64_sub().i64_sub();
+-            i.i64_le_s();
++            i.i64_le_u();
+             i.i32_and().if_(wasm_encoder::BlockType::Empty);
+             payload(&mut i, hd);
+             payload(&mut i, hs);
+diff --git a/stdlib/bytes_mutate.almd b/stdlib/bytes_mutate.almd
+index 73429cbb5c..4c1304612f 100644
+--- a/stdlib/bytes_mutate.almd
++++ b/stdlib/bytes_mutate.almd
+@@ -245,7 +245,7 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
+   let e = if src_end >= 0 then (if src_end < n then src_end else n)
+   else n
+   let cnt = e - src_start
+-  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst <= n - cnt then __cw_move(
++  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst + cnt <= n then __cw_move(
+     base,
+     src_start,
+     dst,

@@ -1,0 +1,46 @@
+diff --git a/crates/almide-wasm/src/matrix_shape.rs b/crates/almide-wasm/src/matrix_shape.rs
+index 5bb484a857..c01d14df9b 100644
+--- a/crates/almide-wasm/src/matrix_shape.rs
++++ b/crates/almide-wasm/src/matrix_shape.rs
+@@ -43,12 +43,15 @@ impl Emitter<'_> {
+     pub(crate) fn lower_matrix_slice_rows(&mut self, m: &IrExpr, start: &IrExpr, end: &IrExpr) -> ArmResult {
+         let (hm, hr, hc) = self.mat_open(m)?;
+         let mut se = [0u32; 2];
+-        for (slot, e) in se.iter_mut().zip([start, end]) {
++        for (k, (slot, e)) in se.iter_mut().zip([start, end]).enumerate() {
+             self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
+             *slot = self.hold_i64()?;
+             let h = *slot;
+-            // #4147: a negative bound is 0 (list.slice's rule).
+-            self.f.instructions().local_set(h).local_get(h).i64_const(0).local_get(h).i64_const(0).i64_gt_s().select().local_set(h);
++            if k == 1 {
++                self.f.instructions().local_set(h).local_get(h).i64_const(0).local_get(h).i64_const(0).i64_gt_s().select().local_set(h);
++            } else {
++                self.f.instructions().local_set(h);
++            }
+         }
+         let [hs, he] = se;
+         let hn = self.hold_i32()?;
+@@ -62,8 +65,7 @@ impl Emitter<'_> {
+             i.local_get(hr).i64_extend_i32_u();
+             i.else_().local_get(he).end().local_set(he);
+             // n = 0 <= start < e ? e - start : 0
+-            i.local_get(hs).i64_const(0).i64_ge_s();
+-            i.local_get(hs).local_get(he).i64_lt_s().i32_and();
++            i.local_get(hs).local_get(he).i64_lt_s();
+             i.if_(BlockType::Result(ValType::I32));
+             i.local_get(he).local_get(hs).i64_sub().i32_wrap_i64();
+             i.else_().i32_const(0).end().local_set(hn);
+diff --git a/stdlib/matrix_core.almd b/stdlib/matrix_core.almd
+index 2b84c8dfe2..fec66e12ae 100644
+--- a/stdlib/matrix_core.almd
++++ b/stdlib/matrix_core.almd
+@@ -298,7 +298,7 @@ fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Fl
+   let len = prim.load32(hm + 4)
+   let e = if end < 0 then 0
+   else (if end > len then len else end)
+-  let s = if start < 0 then 0 else start
++  let s = start
+   let n = if s < e then e - s else 0
+   let out: List[List[Float]] = prim.alloc_list_str(n)
+   let _x = __mx_slice_fill(prim.handle(out), hm, s, n, 0)

@@ -1,0 +1,12 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 0a4e65f069..f32f0257ab 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -143,7 +143,6 @@ impl Emitter<'_> {
+                     // it `pred(v)` inside `ok(v) => …` freed the payload
+                     // the caller still held (the nightly fuzz's
+                     // zeroed-string findings).
+-                    self.rc_arg_guard(a, *p);
+                     self.witness_arg(a, *p);
+                 }
+                 self.f.instructions().local_get(h).i32_load(slot_memarg(0));

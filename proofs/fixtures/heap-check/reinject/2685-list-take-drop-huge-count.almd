@@ -1,0 +1,7 @@
+// The reproduction of #2685: a count whose byte product wraps.
+fn main() -> Unit = {
+  let xs = [10, 20, 30]
+  println("${list.take(xs, 2305843009213693952)}")
+  println("${list.drop(xs, 9223372036854775807)}")
+  println("${list.take(xs, 9223372036854775807)}")
+}

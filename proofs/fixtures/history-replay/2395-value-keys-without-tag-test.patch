@@ -1,0 +1,37 @@
+diff --git a/crates/almide-wasm/src/value_helpers.rs b/crates/almide-wasm/src/value_helpers.rs
+index 4cfe2ad310..3b6888d3c1 100644
+--- a/crates/almide-wasm/src/value_helpers.rs
++++ b/crates/almide-wasm/src/value_helpers.rs
+@@ -164,13 +164,6 @@ pub(crate) fn emit_value_keys_helper() -> Function {
+     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+     let mut f = Function::new([(4, ValType::I32)]);
+     let mut i = f.instructions();
+-    i.local_get(v)
+-        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+-        .i32_const(VT_OBJECT)
+-        .i32_ne()
+-        .if_(BlockType::Empty);
+-    i.i32_const(0).call(F_ALLOC).return_();
+-    i.end();
+     i.local_get(v).i32_load(m_pay).local_set(v); // pairs list
+     i.local_get(v).i32_load(len_memarg()).call(F_ALLOC).local_set(dst);
+     i.local_get(v).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+diff --git a/stdlib/value_core.almd b/stdlib/value_core.almd
+index ed58804b4b..bde36589a9 100644
+--- a/stdlib/value_core.almd
++++ b/stdlib/value_core.almd
+@@ -309,12 +309,12 @@ fn value_as_object(v: Value) -> Result[List[(String, Value)], String] = {
+   else err("expected Object, received " + __vkind(tag))
+ }
+ 
+-fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
++fn value_keys(v: Value) -> List[String] = {
+   let h = prim.handle(v)
+   let n = prim.load32(h + 8) / 2
+   // @8 is the SLOT count (2 per pair); the pair count is /2
+   __vobj_keys(v, 0, n, [])
+-} else []
++}
+ 
+ fn __veq_str_bytes(pa: Int, pb: Int, n: Int, k: Int) -> Bool = if k >= n then true
+ else if prim.load8(pa + k) == prim.load8(pb + k) then __veq_str_bytes(pa, pb, n, k + 1)

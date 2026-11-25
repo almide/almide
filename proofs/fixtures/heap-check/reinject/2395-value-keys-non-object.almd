@@ -1,0 +1,41 @@
+// The reproduction of #2395 on the route a program still reaches: decoding a
+// variant makes the compiler insert the keys walk over the value it is given,
+// and the value here is not an object. Each line decodes one such value; the
+// two object lines are the control that the walk still answers.
+import json
+
+type Shape: Decode = | Dot | Sized(Int) | Pair(Int, Int)
+
+fn dirty(mk: () -> Value) -> Value = {
+  let failed: Result[Value, String] = err("expected null")
+  match failed {
+    ok(x) => x,
+    err(_) => mk(),
+  }
+}
+
+fn show(label: String, v: Value) -> Unit = println(match Shape.decode(v) {
+  ok(s) => "${label}: ok ${s}",
+  err(e) => "${label}: err ${e}",
+})
+
+fn main() -> Unit = {
+  show("object", json.parse("{\"Sized\":[3]}") ?? value.null())
+  show("object-unit", json.parse("{\"Dot\":null}") ?? value.null())
+  // Standalone: the payload slot holds a real but non-address value.
+  show("bool", value.bool(true))
+  show("int", value.int(7))
+  show("float", value.float(1.5))
+  show("str", value.string("hi"))
+  show("array", value.array([value.int(1), value.int(2)]))
+  show("null", value.null())
+  // Through a dirty heap: Null's unwritten slot now aliases a dead string.
+  show("dirty-null", dirty(() => value.null()))
+  show("dirty-str", dirty(() => value.string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
+  // A failed parse taken by `??` is the shape the fuzzer found.
+  show("parse-failed", json.parse("nope") ?? value.null())
+  // Last, the payloads that are addresses far outside linear memory.
+  show("str-long", value.string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  show("int-wide", value.int(4000000000))
+  show("dirty-int", dirty(() => value.int(4000000000)))
+}

@@ -1,0 +1,60 @@
+name: Probe — the twelve replayed memory bugs against the static checkers, on the rules' branch
+# A one-off measurement on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/replay-at-rules-branch]
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    name: Replay ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - 1786-closure-call-borrowed-arg.record-kept
+          - 2397-fused-fold-borrowed-result
+          - 2398-list-update-borrowed-result
+          - 3538-payload-copy-without-credit
+          - 4476-call-rebinds-global-read-earlier
+          - 2613-cell-occupant-stored-without-share.record-kept
+          - 2133-variant-case-payload-without-share
+          - 2395-value-keys-without-tag-test
+          - 2475-slice-rows-without-start-floor
+          - 2685-list-take-drop-insert-byte-product
+          - 1909-from-bytes-additive-fit-test
+          - 2474-copy-within-additive-fit-test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Install wasmtime (the pin the nightly checked-allocator job uses)
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Replay
+        env:
+          ONLY: ${{ matrix.variant }}
+          NO_RESTORE: "1"
+        run: bash scripts/probe-replay-history.sh "$RUNNER_TEMP/replay"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: replay-${{ matrix.variant }}
+          path: ${{ runner.temp }}/replay

@@ -1,0 +1,80 @@
+diff --git a/crates/almide-wasm/src/data.rs b/crates/almide-wasm/src/data.rs
+index 2fc12ab9ef..c13b1a7e3c 100644
+--- a/crates/almide-wasm/src/data.rs
++++ b/crates/almide-wasm/src/data.rs
+@@ -501,16 +501,14 @@ impl Emitter<'_> {
+                         self.f.instructions().local_get(hold);
+                         self.witness_record_default(&d);
+                         self.lower(&d, Some(fty))?;
+-                        self.rc_share_guard(&d, fty);
+-                        self.witness_store(&d, fty);
++                        self.witness_store_dropped(&d, fty);
+                         self.store_ty_slot(fty, off);
+                         self.fw_store(site, k + 1);
+                     }
+                     for ((_, fexpr), (fty, off, k)) in fields.iter().zip(slots) {
+                         self.f.instructions().local_get(hold);
+                         self.lower(fexpr, Some(fty))?;
+-                        self.rc_share_guard(fexpr, fty);
+-                        self.witness_store(fexpr, fty);
++                        self.witness_store_dropped(fexpr, fty);
+                         self.store_ty_slot(fty, off);
+                         self.fw_store(site, k + 1);
+                     }
+diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
+index 28c5c59db5..de4eebbabe 100644
+--- a/crates/almide-wasm/src/witness_hooks.rs
++++ b/crates/almide-wasm/src/witness_hooks.rs
+@@ -685,3 +685,52 @@ impl Emitter<'_> {
+ 
+ #[path = "witness_hooks_tail.rs"]
+ mod hooks_tail;
++
++impl Emitter<'_> {
++    /// Replay probe: the local a store hook would record a share of (`am`):
++    /// a borrowed, handle-shaped local whose credit is not moving in.
++    fn replay_shared_local(&self, e: &almide_ir::IrExpr, ty: SliceTy) -> Option<u32> {
++        if let almide_ir::IrExprKind::Var { id } = &e.kind
++            && !self.owned_call_marks.is_moving(e)
++            && ty.val_type() == wasm_encoder::ValType::I32
++            && self.rc_droppable(ty)
++            && let Some(&(l, vt)) = self.locals.get(id)
++            && self.elem_is_handle(vt)
++        {
++            Some(l)
++        } else {
++            None
++        }
++    }
++
++    /// Replay probe: the store hook of an emitter that takes no share here
++    /// and records nothing for the store.
++    pub(crate) fn witness_store_dropped(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
++        if self.replay_shared_local(e, ty).is_some() {
++            return;
++        }
++        self.witness_store(e, ty);
++    }
++
++    /// Replay probe: the store hook of an emitter that takes no share here
++    /// and records the local's credit as moved into the holder.
++    pub(crate) fn witness_store_as_move(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
++        if let Some(l) = self.replay_shared_local(e, ty) {
++            if let Some(w) = self.witness.as_mut() {
++                let _ = w.move_local(l);
++            }
++            return;
++        }
++        self.witness_store(e, ty);
++    }
++
++    /// Replay probe: a callback value an emitter takes for owned whatever it
++    /// is: born here and moved to its holder (`im`).
++    pub(crate) fn witness_taken_for_owned(&mut self, t: SliceTy) {
++        if self.rc_droppable(t)
++            && let Some(w) = self.witness.as_mut()
++        {
++            w.temp_move();
++        }
++    }
++}

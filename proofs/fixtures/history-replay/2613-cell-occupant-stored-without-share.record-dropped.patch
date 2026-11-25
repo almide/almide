@@ -1,0 +1,28 @@
+diff --git a/crates/almide-wasm/src/rc_ownership.rs b/crates/almide-wasm/src/rc_ownership.rs
+index a71559d630..ba1dcfe291 100644
+--- a/crates/almide-wasm/src/rc_ownership.rs
++++ b/crates/almide-wasm/src/rc_ownership.rs
+@@ -123,6 +123,9 @@ impl Emitter<'_> {
+             // container's drop freed the global's block while the global
+             // still named it, and the next allocation reused it.
+             almide_ir::IrExprKind::Var { id } => {
++                if self.cells.contains(id) {
++                    return;
++                }
+                 let vt = match self.locals.get(id) {
+                     Some(&(_, vt)) => vt,
+                     None => match self.globals.get(&(self.var_space, *id)) {
+diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
+index 28c5c59db5..71ca47ee2d 100644
+--- a/crates/almide-wasm/src/witness_hooks.rs
++++ b/crates/almide-wasm/src/witness_hooks.rs
+@@ -328,6 +328,9 @@ impl Emitter<'_> {
+     fn witness_retain_var(&mut self, e: &almide_ir::IrExpr, position: &str) {
+         let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
+         let is_cell = self.cells.contains(id);
++        if is_cell {
++            return;
++        }
+         let Some(&(l, vt)) = self.locals.get(id) else {
+             // A global's block: `rc_share_guard` shares a handle, a view's
+             // share moved into the holder (`am`).
