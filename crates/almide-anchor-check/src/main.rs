@@ -79,6 +79,37 @@ fn main() {
         }
         return;
     }
+    // `--fresh <artifact.wasm> <anchors>`: the accesses into a block just
+    // allocated with a constant size (fresh.rs), three strings of decimal
+    // bytes each: the input of the proof script's `fresh_ok`, whose verdict is
+    // the kernel's. The anchor file is read for ONE number, the allocator's
+    // function index; no event is. A module that names no allocator has no
+    // proposal and says so.
+    if args.first().map(String::as_str) == Some("--fresh") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        let alloc = match almide_anchor_check::parse_anchors_held(&a) {
+            Ok((alloc, ..)) => alloc,
+            Err(e) => {
+                println!("FRESH UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        };
+        let bytes = |v: &[u8]| v.iter().map(|b| format!(" {b}")).collect::<String>();
+        match almide_anchor_check::fresh::shipped(&w, alloc) {
+            Ok(found) => {
+                for x in &found {
+                    println!("FRESH {} {} {alloc} |{} |{} |{}", x.func, x.access, bytes(&x.pre), bytes(&x.mid), bytes(&x.tail));
+                }
+                println!("ALLOCATOR {alloc}");
+            }
+            Err(e) => {
+                println!("FRESH UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     // `--windows <artifact.wasm>`: the guarded-access windows the cutter
     // proposes over every load and store of the module (window.rs), one line
     // of decimal bytes each: the input of the proof script's `window_ok`,

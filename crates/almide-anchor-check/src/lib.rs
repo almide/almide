@@ -66,8 +66,14 @@
 //! aborting arm, the access) and the windows found are printed as bytes for
 //! the Rocq kernel to judge with `proofs/GuardWindow.v`. No witness is read.
 //!
+//! FRESH BLOCKS (fresh.rs): likewise apart from the verdict, every access
+//! whose address is a local plus a constant, the local last assigned the
+//! allocator's result for a constant size, is printed as three byte strings
+//! for the kernel to judge with `proofs/GuardFresh.v`. No bound is tested
+//! here: a store past its block is a proposal the kernel refuses.
+//!
 //! TRUSTED: the representation R (init); the rest of operands.rs's,
-//! routines.rs's, proved.rs's and window.rs's TRUSTED lists.
+//! routines.rs's, proved.rs's, window.rs's and fresh.rs's TRUSTED lists.
 
 
 use wasmparser::Operator as Op;
@@ -84,6 +90,7 @@ mod proved;
 pub mod rc;
 mod routines;
 pub mod window;
+pub mod fresh;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};
