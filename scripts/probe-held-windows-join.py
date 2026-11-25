@@ -25,7 +25,7 @@ if mode == "fold":
         for line in open(jobs, encoding="utf-8"):
             mid, _path, name = line.rstrip("\n").split("\t")
             p = os.path.join(wins, mid, name + ".txt")
-            swept = False
+            swept, n = False, 0
             if os.path.exists(p):
                 for l in open(p, encoding="utf-8", errors="replace"):
                     t = l.split()
@@ -33,10 +33,16 @@ if mode == "fold":
                         b = " ".join(t[4:])
                         k = keys.setdefault((t[3], b), len(keys))
                         idx.write(f"{mid}\t{name}\t{t[1]}\t{t[2]}\t{k}\n")
+                        n += 1
                     elif t and t[0] == "WINDOWSWEEP":
                         swept = True
+            # every module is a row: one that was swept and holds no window
+            # must still count as a module of its mutant, or a fall to zero
+            # would not be seen
             if not swept:
                 idx.write(f"{mid}\t{name}\t-\t-\tunread\n")
+            elif n == 0:
+                idx.write(f"{mid}\t{name}\t-\t-\tnone\n")
     with open(dump, "w", encoding="utf-8") as d:
         d.write("MODULE uniq all\n")
         for (shape, b), k in sorted(keys.items(), key=lambda kv: kv[1]):
@@ -56,6 +62,8 @@ else:
         seen.add((mid, name))
         if k == "unread":
             unread.add((mid, name))
+            continue
+        if k == "none":
             continue
         c = per[(mid, name)]
         c[0] += 1
