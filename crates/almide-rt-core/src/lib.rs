@@ -46,6 +46,16 @@ pub mod process_core {
 /// The tcp family (#3620): `runtime/rs/src/net.rs` includes it, the embedded
 /// host serves its net ops with it.
 pub mod net_core {
+    // The list a host result is built in (#4920), by the bare names the core
+    // text uses. In the generated crate the splice resolves `AlmideList` and
+    // `almide_list!` to the runtime's own list (ADR-0037), so a read's buffer
+    // IS the list the program gets, with no second copy into it. Here, where
+    // the embedded host copies the bytes into guest memory either way, they
+    // are `Vec` and `vec!`; the core uses only the surface the two share.
+    #[allow(dead_code)]
+    type AlmideList<T> = std::vec::Vec<T>;
+    #[allow(unused_macros)]
+    macro_rules! almide_list { ($x:expr; $n:expr) => { ::std::vec![$x; $n] }; }
     include!("generated/err_text.rs");
     include!("net_core.rs");
 }
@@ -54,6 +64,11 @@ pub mod net_core {
 /// 104..=116 with it. Its syscall module (net_unix_sys.rs, included) is the
 /// crate's one sanctioned `unsafe` site — see Cargo.toml's lints.
 pub mod net_unix_core {
+    // The list a host result is built in (#4920): see `net_core`.
+    #[allow(dead_code)]
+    type AlmideList<T> = std::vec::Vec<T>;
+    #[allow(unused_macros)]
+    macro_rules! almide_list { ($x:expr; $n:expr) => { ::std::vec![$x; $n] }; }
     include!("generated/err_text.rs");
     include!("net_unix_core.rs");
 }

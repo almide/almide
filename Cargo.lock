@@ -266,6 +266,7 @@ dependencies = [
 name = "almide-rt-core"
 version = "0.12.2"
 dependencies = [
+ "almide-str",
  "rcgen",
  "rustls",
  "rustls-native-certs",
