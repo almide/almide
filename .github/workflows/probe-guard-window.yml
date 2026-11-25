@@ -45,7 +45,7 @@ jobs:
           rc=0
           $C -Q . AlmideTrust GuardWindow.v > "$RUNNER_TEMP/guard-window.log" 2>&1 || rc=$?
           if [ "$rc" -eq 0 ]; then
-            for f in GuardFresh.v; do
+            for f in GuardFresh.v GuardLoop.v; do
               [ -f "$f" ] || continue
               echo "===== $f" >> "$RUNNER_TEMP/guard-window.log"
               $C -Q . AlmideTrust "$f" >> "$RUNNER_TEMP/guard-window.log" 2>&1 || rc=$?
