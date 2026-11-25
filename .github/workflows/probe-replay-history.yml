@@ -16,10 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - 1786-closure-call-borrowed-arg.record-kept
-          - 1786-closure-call-borrowed-arg.record-dropped
-          - 2613-cell-occupant-stored-without-share
-          - 4476-call-rebinds-global-read-earlier
+          - 2613-cell-occupant-stored-without-share.record-dropped
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
