@@ -1,0 +1,47 @@
+diff --git a/crates/almide-wasm/src/list_order.rs b/crates/almide-wasm/src/list_order.rs
+index ec3c6130be..b2d7bcc028 100644
+--- a/crates/almide-wasm/src/list_order.rs
++++ b/crates/almide-wasm/src/list_order.rs
+@@ -70,10 +70,10 @@ impl Emitter<'_> {
+                 i.local_get(hn).i64_const(stride as i64).i64_mul().i64_sub().i32_wrap_i64();
+                 i.local_get(hn).i64_const(0).i64_lt_s();
+                 i.local_get(hn)
++                    .i64_const(stride as i64)
++                    .i64_mul()
+                     .local_get(hb)
+                     .i32_load(len_memarg())
+-                    .i32_const(stride)
+-                    .i32_div_u()
+                     .i64_extend_i32_u()
+                     .i64_ge_s();
+                 i.i32_or();
+@@ -128,10 +128,10 @@ impl Emitter<'_> {
+                     .i64_const(0)
+                     .i64_lt_s()
+                     .local_get(hn)
++                    .i64_const(stride as i64)
++                    .i64_mul()
+                     .local_get(hb)
+                     .i32_load(len_memarg())
+-                    .i32_const(stride)
+-                    .i32_div_u()
+                     .i64_extend_i32_u()
+                     .i64_gt_s()
+                     .i32_or();
+@@ -514,11 +514,12 @@ impl Emitter<'_> {
+                 // compared below len and allocated a wrapped byte count,
+                 // #2685).
+                 i.local_get(hb).i32_load(len_memarg());
+-                i.local_get(hn).i64_const(stride as i64).i64_mul().i32_wrap_i64();
++                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
++                i.local_get(hn).i64_const(stride as i64).i64_mul();
++                i.local_get(hn).i64_const(stride as i64).i64_mul();
++                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
++                i.i64_gt_s().select().i32_wrap_i64();
+                 i.local_get(hn).i64_const(0).i64_lt_s();
+-                i.local_get(hn);
+-                i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
+-                i.i64_ge_s().i32_or();
+                 i.select().local_set(hc);
+                 i.local_get(hc).call(F_ALLOC).local_set(ho);
+                 i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();

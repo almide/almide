@@ -1,0 +1,13 @@
+diff --git a/stdlib/matrix_core.almd b/stdlib/matrix_core.almd
+index 2b84c8dfe2..fec66e12ae 100644
+--- a/stdlib/matrix_core.almd
++++ b/stdlib/matrix_core.almd
+@@ -298,7 +298,7 @@ fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Fl
+   let len = prim.load32(hm + 4)
+   let e = if end < 0 then 0
+   else (if end > len then len else end)
+-  let s = if start < 0 then 0 else start
++  let s = start
+   let n = if s < e then e - s else 0
+   let out: List[List[Float]] = prim.alloc_list_str(n)
+   let _x = __mx_slice_fill(prim.handle(out), hm, s, n, 0)
