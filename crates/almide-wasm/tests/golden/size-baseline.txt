@@ -834,9 +834,9 @@
 10194	spec/wasm_cross/set_entries_reclaim.almd
 15943	spec/wasm_cross/set_from_list_every_equatable_element.almd
 11741	spec/wasm_cross/set_index_order.almd
-14015	spec/wasm_cross/set_insertion_order.almd
+14031	spec/wasm_cross/set_insertion_order.almd
 2753	spec/wasm_cross/shared_arg_pair_dup.almd
-79537	spec/wasm_cross/sized_display_matrix.almd
+79553	spec/wasm_cross/sized_display_matrix.almd
 6999	spec/wasm_cross/sized_field_default_matrix.almd
 3186	spec/wasm_cross/sized_int_overflow_wrap.almd
 3479	spec/wasm_cross/sized_int_record_fields.almd
