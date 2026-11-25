@@ -113,6 +113,11 @@ impl Emitter<'_> {
     /// arguments reach it) took a real `rc_inc` on an object this frame
     /// does not track by local — withdraw with `reason`, never under-record.
     pub(crate) fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
+        // A value that diverged (a `panic` in it) is never handed over: the
+        // settling instructions after it are unreachable (`witness_arm_value`).
+        if self.witness.as_ref().is_some_and(|w| w.dead()) {
+            return;
+        }
         let src_local = self.witness_src_local(e);
         let fresh = self.rc_owned_result(e);
         // A top-let GLOBAL holds its own credit for the program's life: a
@@ -201,10 +206,19 @@ impl Emitter<'_> {
     /// an owned value the join does not take: that block has no owner here,
     /// so the frame declines.
     pub(crate) fn witness_unwrap_or_arm(&mut self, e: &almide_ir::IrExpr, fallback: Option<&almide_ir::IrExpr>, et: SliceTy) {
+        let almide_ir::IrExprKind::UnwrapOr { expr: carrier, fallback: fb } = &e.kind else { return };
+        // The gate admits an unbound carrier (a fold step's call, #4315) only
+        // for the owned-carrier route, which records it; this route releases
+        // no carrier, so one that is not a bound block's view declines.
+        if fallback.is_none()
+            && !crate::witness_unwrap::slot_read_of_var(carrier)
+            && !matches!(carrier.kind, almide_ir::IrExprKind::OptionNone)
+        {
+            self.witness_decline("unwrap-or:unowned-carrier");
+        }
         if self.witness.is_none() || !self.rc_droppable(et) {
             return;
         }
-        let almide_ir::IrExprKind::UnwrapOr { fallback: fb, .. } = &e.kind else { return };
         let owned_join = self.unwrap_or_owns_join(e, fb, et);
         match (fallback, owned_join) {
             (Some(f), true) => self.witness_share_or_move(f, "unwrap-or:fallback"),
