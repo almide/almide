@@ -3,6 +3,7 @@
 
   probe-window-controls.py mutants <windows.txt> <out-dir>
   probe-window-controls.py verdicts <out-dir>
+  probe-window-controls.py judge <out-dir> <jobs> <memory KB> <seconds per 2000>
   probe-window-controls.py vectors <out-dir>
   probe-window-controls.py compare <out-dir>
 
@@ -150,6 +151,101 @@ if mode == "verdicts":
         for role in sorted(by, key=lambda r: (-by[r][1], r)):
             print(f"   {role:34s} {by[role][0]:8d} {by[role][1]:8d}")
             fh.write(f"{role}\t{by[role][0]}\t{by[role][1]}\n")
+    sys.exit(0)
+
+if mode == "judge":
+    # The kernel's verdict on every mutant, each compiler run under a memory
+    # and a time limit. A run that does not finish is split until the mutants
+    # it could not judge stand alone: those get `limit` instead of a verdict.
+    import concurrent.futures
+    import itertools
+    import subprocess
+    import threading
+    import time
+    out, jobs, mem_kb, secs = sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+    rows = [l.rstrip("\n").split("\t") for l in open(os.path.join(out, "mutants.tsv"), encoding="utf-8")]
+    work = os.path.join(out, "judge")
+    os.makedirs(work, exist_ok=True)
+    serial, lock = itertools.count(), threading.Lock()
+    runs = {"finished": 0, "memory or error": 0, "time": 0}
+
+    # The memory limit is the shell's, set in the child before it becomes the
+    # compiler (0 = none, for a self-test on a system without that limit).
+    cmd = ["bash", "-c", (f"ulimit -v {mem_kb} && " if mem_kb else "") + 'exec coqc -Q proofs AlmideTrust "$0"']
+
+    def run(goals, allow):
+        """The values the compiler printed for `goals`, or (None, why)."""
+        with lock:
+            n = next(serial)
+        path = os.path.join(work, f"J_{n:06d}.v")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(HEAD)
+            for g in goals:
+                f.write(f"Eval vm_compute in ({g}).\n")
+        try:
+            r = subprocess.run(cmd + [path], capture_output=True, text=True, timeout=allow)
+        except subprocess.TimeoutExpired:
+            with lock:
+                runs["time"] += 1
+            return None, "time"
+        got = [l.split("=", 1)[1].strip() for l in r.stdout.splitlines() if l.strip().startswith("= ")]
+        if r.returncode != 0 or len(got) != len(goals):
+            with lock:
+                runs["memory or error"] += 1
+            return None, "memory or error: " + " ".join(r.stderr.split())[:160]
+        with lock:
+            runs["finished"] += 1
+        return got, ""
+
+    def goal(i):
+        return f"window_ok [{';'.join(rows[i][5].split())}]"
+
+    def judge(batch):
+        got, why = run([goal(i) for i in batch], max(30, secs * len(batch) // CHUNK))
+        if got is not None:
+            return {i: (v, "") for i, v in zip(batch, got)}
+        if len(batch) == 1:
+            return {batch[0]: ("limit", why)}
+        step, res = max(1, (len(batch) + 7) // 8), {}
+        for k in range(0, len(batch), step):
+            res.update(judge(batch[k:k + step]))
+        return res
+
+    # The limits must not be what stops an ordinary run.
+    got, why = run(["window_ok [0;1;2]", "window_ok []"], 60)
+    if got is None:
+        sys.exit(f"the limits stop an ordinary run ({why}); nothing was judged")
+    t0 = time.time()
+    verdict = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+        for res in pool.map(judge, [list(range(k, min(k + CHUNK, len(rows)))) for k in range(0, len(rows), CHUNK)]):
+            verdict.update(res)
+    print(f"kernel time on the mutants: {time.time() - t0:.0f} s ({jobs} at a time; each run under {mem_kb // 1000} MB and {secs} s per {CHUNK})")
+    print(f"compiler runs: {runs['finished']} finished, {runs['memory or error']} stopped by the memory limit or an error, {runs['time']} by the time limit")
+    by = {}
+    with open(os.path.join(out, "verdict-all.tsv"), "w", encoding="utf-8") as fa, \
+         open(os.path.join(out, "accepted.tsv"), "w", encoding="utf-8") as fh, \
+         open(os.path.join(out, "limit.tsv"), "w", encoding="utf-8") as fl:
+        for i, (code, n, pos, nb, role, m) in enumerate(rows):
+            v, why = verdict[i]
+            t = by.setdefault(role, [0, 0, 0])
+            t[0] += 1
+            fa.write(f"{code}\t{v}\n")
+            if v == "true":
+                t[1] += 1
+                fh.write(f"{code}\t{n}\t{pos}\t{nb}\t{role}\t{m}\n")
+            elif v == "limit":
+                t[2] += 1
+                fl.write(f"{code}\t{n}\t{pos}\t{nb}\t{role}\t{why}\t{m}\n")
+            elif v != "false":
+                sys.exit(f"{code}: the compiler printed {v!r}")
+    tot, acc, lim = (sum(t[k] for t in by.values()) for k in range(3))
+    print(f"{tot} one-byte mutant(s): the kernel refuses {tot - acc - lim}, still accepts {acc}, and gives no verdict within the limits on {lim}")
+    print("role of the changed byte in the original window: mutants, still accepted, no verdict")
+    with open(os.path.join(out, "by-role.tsv"), "w", encoding="utf-8") as fh:
+        for role in sorted(by, key=lambda r: (-by[r][1], -by[r][2], r)):
+            print(f"   {role:34s} {by[role][0]:8d} {by[role][1]:8d} {by[role][2]:8d}")
+            fh.write(f"{role}\t{by[role][0]}\t{by[role][1]}\t{by[role][2]}\n")
     sys.exit(0)
 
 # ---- the nine interpreted instructions ---------------------------------------

@@ -138,11 +138,9 @@ jobs:
           python3 -I scripts/probe-window-controls.py compare "$O"
           # every one-byte mutant of the accepted windows
           python3 -I scripts/probe-window-controls.py mutants probe-data/windows-516.txt "$O"
-          export O
-          t0=$(date +%s)
-          ls "$O"/mut/Mut_*.v | xargs -P 4 -I{} bash -c 'coqc -Q proofs AlmideTrust "$1" > "${1%.v}.out" 2> "${1%.v}.err" || echo "FAIL $1"' _ {}
-          echo "kernel time on the mutants: $(( $(date +%s) - t0 )) s (4 at a time)"
-          python3 -I scripts/probe-window-controls.py verdicts "$O"
+          # each compiler run under 2.5 GB and a time limit; a run that does
+          # not finish is split until the mutants it could not judge stand alone
+          python3 -I scripts/probe-window-controls.py judge "$O" 4 2500000 300
       - name: Upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -150,6 +148,8 @@ jobs:
           name: window-controls
           path: |
             ${{ runner.temp }}/controls/accepted.tsv
+            ${{ runner.temp }}/controls/limit.tsv
+            ${{ runner.temp }}/controls/verdict-all.tsv
             ${{ runner.temp }}/controls/by-role.tsv
             ${{ runner.temp }}/controls/sem/Sem.out
             ${{ runner.temp }}/controls/sem/engine.out
