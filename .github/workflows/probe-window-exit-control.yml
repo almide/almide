@@ -1,0 +1,71 @@
+name: Probe — one-byte mutants of every accepted window, by the window's shape
+# A one-off measurement on its own branch: the windows the cutter proposes in
+# every artifact the structural wall judges, and the kernel's verdict on every
+# one-byte mutant of each, apart for the windows behind an aborting arm and
+# the ones behind a conditional exit. Not a gate.
+on:
+  push:
+    branches: [probe/window-exit-control]
+
+permissions:
+  contents: read
+
+jobs:
+  census:
+    name: Window mutants by shape
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Install wabt
+        run: sudo apt-get update -q && sudo apt-get install -y -q wabt
+      - name: Measure
+        env:
+          CENSUS_LIGHT: "1"
+        run: bash scripts/probe-witness-census.sh "$RUNNER_TEMP/census"
+      - name: One-byte mutants of the accepted windows, by shape
+        run: |
+          C="$RUNNER_TEMP/census"
+          O="$RUNNER_TEMP/controls"
+          mkdir -p "$O"
+          python3 -I scripts/probe-window-shapes.py "$C/window-dump" "$C/window-kernel/verdicts.tsv" "$O"
+          for shape in $(ls "$O" | sed -n 's/^windows-\(.*\)\.txt$/\1/p'); do
+            echo "== $shape: $(wc -l < "$O/windows-$shape.txt") window(s)"
+            python3 -I scripts/probe-window-controls.py mutants "$O/windows-$shape.txt" "$O/$shape"
+            # each compiler run under 2.5 GB and a time limit; a run that does
+            # not finish is split until the mutants it could not judge stand alone
+            python3 -I scripts/probe-window-controls.py judge "$O/$shape" 4 2500000 300
+          done
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: window-controls-by-shape
+          path: |
+            ${{ runner.temp }}/controls/windows-*.txt
+            ${{ runner.temp }}/controls/shapes.txt
+            ${{ runner.temp }}/controls/*/accepted.tsv
+            ${{ runner.temp }}/controls/*/limit.tsv
+            ${{ runner.temp }}/controls/*/by-role.tsv
+            ${{ runner.temp }}/census/window-kernel/verdicts.tsv
+            ${{ runner.temp }}/census/window-dump
