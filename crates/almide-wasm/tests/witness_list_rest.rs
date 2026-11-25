@@ -1,7 +1,8 @@
 //! #2758 (#1696 step 4) — the NAMED LIST REST `[h, ..t]` in the structural
 //! witness. The pattern builds `t` as a fresh block (`i`) that its UNGUARDED
 //! arm releases once the body has run (`d`, arm_rests.rs `release_arm_rests`).
-//! A guarded arm (a false guard falls through with the rest built) declines.
+//! A guarded arm releases the rest on its false guard's edge and after its
+//! body (#2971, arm_rests.rs `settle_guard_rests`).
 //! #3377: a path that leaves the arm early — a `!`, a guard return, a
 //! recursive tail call, a `break` / `continue` — releases the rest on its own
 //! edge, so it is certified with exactly one `d` per path.
@@ -100,6 +101,12 @@ fn named_list_rests_are_born_and_released_by_their_arm() {
             "{name}: the portable checker must accept {got:?}"
         );
     }
-    // A false guard falls through with the rest built: declined by the gate.
-    assert_eq!(w.get("guarded").map(String::as_str), Some("!decline:pattern:list-rest\n"));
+    // A guarded arm: built (`i`), and released on exactly one edge per path —
+    // the false guard's (`d`, then the fall-through) or the body's end.
+    let guarded = w.get("guarded").map(String::as_str);
+    assert_eq!(guarded, Some("\n\n{x|}{ibdx|}id\n"));
+    assert!(
+        almide_verify::check(almide_verify::Property::Ownership, guarded.unwrap_or_default().as_bytes()),
+        "guarded: the portable checker must accept {guarded:?}"
+    );
 }
