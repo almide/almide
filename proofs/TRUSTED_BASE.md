@@ -172,7 +172,7 @@ the row lists where it does not hold yet.
 
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
-The spine has 164 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
+The spine has 167 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra
@@ -460,6 +460,132 @@ value_helpers.rs, json_helpers.rs, map_index.rs 1 each; the empty
 separator's split reads its lead byte after handing the string to
 `$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
+
+GUARDED ACCESSES FROM THE BYTES ALONE (`proofs/GuardWindow.v`). Everything
+above rests on almide-anchor-check, which is unverified Rust. For one shape
+that trust is not needed. A WINDOW is a straight-line run of a function's
+shipped instructions that ends in a load or a store: the compare, its
+aborting arm (`if ... unreachable end`), the address arithmetic and the
+access, with nothing in between that writes memory, calls, or branches.
+`GuardWindow.v` decodes a window from the module's own bytes, runs it
+symbolically from an empty stack and accepts when the address is `base + 12
++ idx * S + o` (`o + width <= S`) under a compare the window aborted on that
+leaves `idx <u len / S`, `len` being the word the window itself read at
+`base + 4`. `window_sound`: in every run of an accepted window that reaches
+the access (any locals, globals, memory and stack beneath, with the
+machine's 32- and 64-bit wrap-around), the access touches only
+`[B + 12, B + 12 + len)`, for `B` the value of the base expression and `len`
+the word at `B + 4`, as long as that range lies in the 32-bit address space.
+No witness and no anchor file is read. `proofs/structural-wall.sh` has the
+cutter (`almide-anchor-check --windows`, window.rs) sweep EVERY load and
+store of every artifact it judges, and the Rocq kernel compute `window_ok`
+on each proposed window's bytes (`proofs/check-shipped-windows.sh`); a
+proposal the kernel refuses fails the gate, and so does a count below the
+leg's floor (`proofs/shipped-windows-floor.txt`), so a change that moves a
+count out of its window (a hoisted length, a call between the compare and
+the access) shows as lost evidence. Trusted for it: the meaning the proof
+gives nine instructions (`usem` / `bsem`: i32 add, mul, shl, div_u, shr_u,
+ge_u, i64 ge_u, wrap, extend_u), that any other one-byte numeric
+instruction is a function of its operands, that a load reads memory and
+changes nothing, and that an arm with no branch that ends in `unreachable`
+does not fall through; of the cutter, that a window's bytes are bytes
+`[lo, hi)` of the module with `lo` and `hi` instruction boundaries of one
+function body at one control depth; and, as everywhere here, that the base
+is a live block whose word at `+ 4` is its payload length. An access whose
+count was read before a loop, or with a copy-on-write judge's call in front
+of it, is not a window and stays with the rules above.
+
+ACCESSES INTO A BLOCK JUST ALLOCATED, FROM THE BYTES ALONE
+(`proofs/GuardFresh.v`). The init and fields rules above are almide-anchor-check's,
+and they hold an event to an instruction by shape. For the commonest of those
+accesses the kernel judges the shipped bytes itself. Where a function
+allocates a constant size into a local (`i32.const n ; call $alloc ;
+local.set x`, or `local.tee`), leaves that local alone, and then reads or
+writes at `x` plus a constant, `GuardFresh.v` takes three consecutive byte
+strings: it decodes the first (`fresh_pre`), scans the second with the
+length of every instruction (`scan_keep`: none assigns `x`, the nesting never
+drops below its starting depth and ends at it; calls, stores and whole
+blocks may lie there), and runs the third symbolically in the window
+language. `fresh_sound`: if `fresh_ok` accepts, the first string decodes to
+the allocation of `n` bytes into `x`, the scan holds, and every run of the
+third string that reaches its access (any locals, globals, memory and stack
+beneath, with 32-bit wrap-around) touches only `[p, p + 12 + n)`, for `p`
+the value of `x` when the third string starts, as long as that range lies in
+the 32-bit address space. No witness is read, and the anchor file gives one
+number, the allocator's function index. `proofs/structural-wall.sh` has the
+cutter (`almide-anchor-check --fresh`, fresh.rs) propose EVERY access of the
+shape, testing no bound, and the Rocq kernel compute `fresh_ok` on each
+distinct triple (`proofs/check-shipped-fresh.sh`): a store past its block is
+a proposal the kernel refuses and fails the gate, and so does a count below
+the leg's floor (`proofs/shipped-fresh-floor.txt`). Trusted for it: what the
+window language trusts above; that an instruction the scan lets through
+leaves the local alone (only `local.set` and `local.tee` assign one) and
+that the third string is reached only through the first, an argument from
+the instruction set and structured control and not a theorem; of the
+cutter, that the three strings are consecutive bytes of one function body
+cut at instruction boundaries; that the function at the allocator's index
+returns a block of `12 + n` bytes, which `proofs/check-shipped-routines.sh`
+ties to the proven allocator tree, itself proved over unbounded integers;
+and it says nothing about whether the block is still live at the access. An
+access through a copy of the pointer, into a block of computed size, or
+with the allocation at another control depth is not proposed and stays with
+the rules above.
+
+THE READS A LOOP'S EXIT TEST GUARDS, FROM THE BYTES ALONE
+(`proofs/GuardLoop.v`). A `for` over a list or a string reads the count once,
+before the loop, into a local, and every turn tests its counter against that
+local and leaves the loop when it is not below; no window holds both the
+length read and the access. `GuardLoop.v` takes four consecutive byte
+strings: the capture (`local.get b ; i32.load 4 ; [i32.const s ; i32.div_u ;]
+local.set n`), everything up to the exit test, the test and the access (a run
+in the window language, in which a `br_if` is read as an exit: past it its
+condition was zero), and everything from there to the `end` of the outermost
+block opened since the capture. `loop_core` decodes the capture (`loop_pre`),
+runs GuardWindow's check on the capture's instructions followed by those of
+the test and the access, and scans every other instruction with its length
+(`scan_keep`: none assigns `b` or `n`, the nesting closes what it opened and
+never leaves the block the capture stands in). `loop_sound`: if `loop_core`
+accepts, the capture decodes, the scans hold, and from ANY locals in which
+`n` holds what the capture would store there (any globals, any memory, any
+stack beneath, with 32-bit wrap-around), every run of the test and the
+access that reaches the access touches only the payload that memory's
+length word gives the block at `b`, as long as it lies in the 32-bit address
+space. `loop_class` then computes, with no theorem of its own, which of
+three things stands behind the length word at the access being the one the
+capture read: no instruction in between writes memory or calls (pure), the
+capture is preceded by `local.get b ; call $inc` (held), or local `b` is read
+nowhere in between but for the access, whose run assigns no local and leaves
+nothing computed from `b` on the stack (kept). No witness is read, and the
+anchor file gives one number, the increment routine's function index.
+`proofs/structural-wall.sh` has the cutter (`almide-anchor-check --loops`,
+loops.rs) propose every access addressed by the captured block's local and
+the tested counter, testing no bound, stride, offset or width, and the Rocq
+kernel prove each distinct proposal's class (`proofs/check-shipped-loops.sh`):
+a count of accepted reads below the leg's floor fails the gate, and so do
+more reads with nothing behind the length word than the leg's first ceiling
+and more reads whose core the kernel refuses than its second
+(`proofs/shipped-loops-floor.txt`). The refusals the corpus holds are loops
+that count bytes and read 4- or 8-byte elements: in bounds because length
+and counter are multiples of the element size, which the rule does not know
+and so does not accept.
+Trusted for it: what the window language trusts above; that the scans' table
+reads each instruction's length as the binary format has it; the step from
+"no instruction in between assigns `b` or `n`" to "at the test `n` holds the
+captured count", an argument from the instruction set and structured control
+and not a theorem; of the cutter, that the strings are consecutive bytes of
+one function body cut at instruction boundaries; for a held loop, that no
+routine writes the length word of a block with a second holder and that the
+share is not given up inside the loop (the ownership witness's subject), and
+that the function at the increment's index is the proven routine
+(`proofs/check-shipped-routines.sh`); for a kept loop, that code which was
+not handed what `b` holds reaches the block only through another reference
+(another local may hold the same address), that such a reference makes the
+block shared, and that no other store lands on its length word — what the
+anchor check's own Count rule assumes;
+and, as for a window, that `b` is a live block whose length word does not
+exceed its payload. A read guarded by another shape (a cursor walked to an
+end pointer, a countdown, a bound that comes from an enclosing test) is not
+proposed and stays with the rules above.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
