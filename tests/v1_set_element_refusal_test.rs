@@ -29,7 +29,7 @@ fn walled_reason(tag: &str, src: &str) -> String {
 #[test]
 fn a_set_of_float_lists_renders_on_the_verified_route() {
     let err = walled_reason(
-        "floats",
+        "float_lists",
         "fn has(s: Set[List[Float]], x: Float) -> Bool = set.contains(s, [x])\n\n\
          effect fn main() -> Unit = {\n  let s = set.from_list([[1.5], [2.5], [1.5]])\n  \
          println(\"${set.len(s)} ${has(s, 1.5)} ${has(s, 9.0)}\")\n}\n",
