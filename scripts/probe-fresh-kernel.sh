@@ -59,9 +59,57 @@ PY
 
 export COQC ROOT WORK
 t0=$(date +%s)
+# Each file under a time limit and an address-space limit: a proposal whose
+# verdict costs more than that must not take the machine down with it.
 find "$WORK" -maxdepth 1 -name 'Fresh_*.v' | LC_ALL=C sort \
-  | xargs -P "${FRESH_JOBS:-4}" -I{} bash -c 'c="${1%.v}"; "$COQC" -Q "$ROOT/proofs" AlmideTrust "$1" > "$c.out" 2> "$c.err" || echo "FAIL $1: $(head -3 "$c.err")"' _ {}
-echo "kernel time: $(( $(date +%s) - t0 )) s (4 at a time)"
+  | xargs -P "${FRESH_JOBS:-3}" -I{} bash -c 'c="${1%.v}"; ( ulimit -v "${FRESH_KB:-5000000}"; timeout "${FRESH_SECONDS:-900}" "$COQC" -Q "$ROOT/proofs" AlmideTrust "$1" > "$c.out" 2> "$c.err" ) || echo "LIMIT $1: $(head -c 200 "$c.err" | tr "\n" " ")"' _ {}
+echo "kernel time: $(( $(date +%s) - t0 )) s (${FRESH_JOBS:-3} at a time)"
+# A file that did not give every verdict is halved until the proposals that
+# cost too much stand alone; those get the verdict `none`.
+python3 -I - "$WORK" "$COQC" "$ROOT/proofs" "${FRESH_KB:-5000000}" <<'PY'
+import glob, os, resource, subprocess, sys
+work, coqc, proofs, kb = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+HEAD = "From AlmideTrust Require Import GuardWindow GuardFresh.\nFrom Stdlib Require Import ZArith.\nFrom Stdlib Require Import List.\nImport ListNotations.\nOpen Scope Z_scope.\n"
+def limit():
+    resource.setrlimit(resource.RLIMIT_AS, (kb * 1024, kb * 1024))
+def ask(evals, seconds):
+    p = os.path.join(work, "bisect.v")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(HEAD + "".join(evals))
+    try:
+        r = subprocess.run([coqc, "-Q", proofs, "AlmideTrust", p], capture_output=True, text=True, timeout=seconds, preexec_fn=limit)
+    except subprocess.TimeoutExpired:
+        return None
+    vals = [l.split("=", 1)[1].strip() for l in r.stdout.splitlines() if l.strip().startswith("= ")]
+    return vals if len(vals) == len(evals) else None
+def judge(evals):
+    if not evals:
+        return []
+    got = ask(evals, 60 + len(evals))
+    if got is not None:
+        return got
+    if len(evals) == 1:
+        return ["none"]
+    h = len(evals) // 2
+    return judge(evals[:h]) + judge(evals[h:])
+costly = 0
+for v in sorted(glob.glob(os.path.join(work, "Fresh_*.v"))):
+    evals = [l for l in open(v, encoding="utf-8") if l.startswith("Eval ")]
+    out = v[:-2] + ".out"
+    have =[l.split("=", 1)[1].strip() for l in open(out, encoding="utf-8") if l.strip().startswith("= ")] if os.path.exists(out) else []
+    if len(have) == len(evals):
+        continue
+    got = judge(evals)
+    costly += got.count("none")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("".join(f"     = {x}\n" for x in got))
+    with open(os.path.join(work, "costly.txt"), "a", encoding="utf-8") as f:
+        for e, x in zip(evals, got):
+            if x == "none":
+                f.write(e)
+    print(f"{os.path.basename(v)}: asked again in halves; {got.count('none')} proposal(s) without a verdict")
+print(f"proposals without a verdict under the limits: {costly}")
+PY
 
 python3 -I - "$WORK" <<'PY' | tee "$WORK/summary.txt"
 import collections, glob, sys

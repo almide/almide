@@ -32,10 +32,12 @@ for line in open(dump, encoding="utf-8", errors="replace"):
     elif line.startswith("FRESHALLOC ") and cur is not None:
         alloc[cur] = line.split()[1]
 
-ok, bad = collections.Counter(), collections.Counter()
+# `none`: the kernel gave no verdict under the time and memory limits; that is
+# neither an acceptance nor a refusal.
+ok, bad, none = collections.Counter(), collections.Counter(), collections.Counter()
 for line in open(verdicts, encoding="utf-8"):
     t = line.rstrip("\n").split("\t")
-    (ok if t[-1] == "true" else bad)[(t[0], t[1])] += 1
+    (ok if t[-1] == "true" else none if t[-1] == "none" else bad)[(t[0], t[1])] += 1
 
 changed = {}
 for p in glob.glob(os.path.join(shards, "**", "emut", "windows", "*.tsv"), recursive=True):
@@ -46,17 +48,18 @@ for p in glob.glob(os.path.join(shards, "**", "emut", "windows", "*.tsv"), recur
 
 per = collections.defaultdict(list)
 with open(os.path.join(out, "held-fresh-programs.tsv"), "w", encoding="utf-8") as fh:
-    fh.write("id\tprogram\tallocator\tbase_accepted\tproposed\taccepted\trefused\n")
+    fh.write("id\tprogram\tallocator\tbase_accepted\tproposed\taccepted\trefused\tno_verdict\n")
     for (mid, prog), a in sorted(alloc.items()):
         if mid == "base":
             continue
-        b, o, r = ok[("base", prog)], ok[(mid, prog)], bad[(mid, prog)]
-        fh.write(f"{mid}\t{prog}\t{a}\t{b}\t{o + r}\t{o}\t{r}\n")
+        b, o, r, n = ok[("base", prog)], ok[(mid, prog)], bad[(mid, prog)], none[(mid, prog)]
+        fh.write(f"{mid}\t{prog}\t{a}\t{b}\t{o + r + n}\t{o}\t{r}\t{n}\n")
         per[mid].append((prog, a, b, o, r))
 
 base_total = sum(v for (m, _), v in ok.items() if m == "base")
 base_bad = sum(v for (m, _), v in bad.items() if m == "base")
 print(f"unmutated modules: {sum(1 for k in alloc if k[0] == 'base')} judged, {base_total} proposal(s) accepted, {base_bad} refused")
+print(f"proposals without a verdict under the limits: {sum(none.values())} in {len(none)} module(s) of {len({k[0] for k in none})} mutant(s)")
 rows = []
 with open(os.path.join(out, "held-fresh.tsv"), "w", encoding="utf-8") as fh:
     fh.write("id\tchanged_programs\tkept_modules\tallocator_not_found\tbase_accepted\taccepted\trefused\tprograms_with_fewer\tprograms_with_more\tprograms_with_a_refusal\n")
