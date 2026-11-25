@@ -6,7 +6,16 @@
 // index_bounds_count_after_push.almd for why only the call stands in the way)
 // would pass eight reads, four of them past the end, and print 360.
 effect fn main() -> Unit = {
-  var xs = [10, 20, 30, 40, 50, 60, 70, 80]
+  var xs = [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80
+  ]
   var total = 0
   var i = 0
   while i < 8 {
