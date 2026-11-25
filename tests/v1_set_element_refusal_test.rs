@@ -1,6 +1,8 @@
-//! A Set whose element has no exact runtime equality (`Set[List[Float]]`) has
-//! no verified native form: the native build route refuses it with E081
-//! (C-464). An Option of an exact element is exact (`Set[Option[Int]]`).
+//! A Set whose element is a List of Floats holds real floats on the verified
+//! native route and compares them with the collection key equality (ALS-C11,
+//! C-466); a Float two runtime containers deep has no native form and the
+//! native build route refuses it with E081. An Option of an exact element is
+//! exact (`Set[Option[Int]]`).
 
 use std::process::Command;
 
@@ -23,17 +25,29 @@ fn walled_reason(tag: &str, src: &str) -> String {
     stderr
 }
 
-/// C-464: a Set whose element holds a nested Float has no element equality
-/// the native render agrees with (IEEE `==` on every Float inside it), so
-/// the native build route refuses it with E081 before anything is rendered.
+/// A `Set[List[Float]]` renders on the verified route (ALS-C11).
 #[test]
-fn a_set_of_float_lists_is_refused_by_the_native_route() {
+fn a_set_of_float_lists_renders_on_the_verified_route() {
+    let err = walled_reason(
+        "floats",
+        "fn has(s: Set[List[Float]], x: Float) -> Bool = set.contains(s, [x])\n\n\
+         effect fn main() -> Unit = {\n  let s = set.from_list([[1.5], [2.5], [1.5]])\n  \
+         println(\"${set.len(s)} ${has(s, 1.5)} ${has(s, 9.0)}\")\n}\n",
+    );
+    assert!(!err.contains("walled"), "{err}");
+}
+
+/// A Float two runtime containers deep in the element rides a lane no key
+/// equality reads: the native build route refuses the set with E081 before
+/// anything is rendered.
+#[test]
+fn a_set_of_nested_float_lists_is_refused_by_the_native_route() {
     let dir = std::env::temp_dir().join(format!("almide_set_refusal_floats_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("main.almd"),
-        "fn has(s: Set[List[Float]], x: Float) -> Bool = set.contains(s, [x])\n\n\
-         effect fn main() -> Unit = {\n  let s = set.from_list([[1.5], [2.5], [1.5]])\n  \
+        "fn has(s: Set[List[List[Float]]], x: Float) -> Bool = set.contains(s, [[x]])\n\n\
+         effect fn main() -> Unit = {\n  let s = set.from_list([[[1.5]], [[2.5]], [[1.5]]])\n  \
          println(\"${set.len(s)} ${has(s, 1.5)} ${has(s, 9.0)}\")\n}\n").unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))
         .current_dir(&dir)
@@ -45,7 +59,7 @@ fn a_set_of_float_lists_is_refused_by_the_native_route() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(!built, "a binary was written: {stderr}");
-    assert!(stderr.contains("error[E081]: fn `has` holds a `Set[List[Float]]`, which has no implementation on the native target"), "{stderr}");
+    assert!(stderr.contains("error[E081]: fn `has` holds a `Set[List[List[Float]]]`, which has no implementation on the native target"), "{stderr}");
 }
 
 /// An Option's `==` is its payload's, so a `Set[Option[Int]]` has an exact
