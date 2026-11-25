@@ -20,7 +20,7 @@ env:
   # The sample run kept the modules of the mutants that change at most a
   # hundred programs (45536243441, judged first); this run judged the other
   # thirty-six again and kept every changed module.
-  HELD_RUN: "45536243441"
+  HELD_RUN: "45565891270"
   # The run that built the replayed defects of the paper, each with and
   # without its defect.
   REPLAY_RUN: "45001834111"
