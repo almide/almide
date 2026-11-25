@@ -4,7 +4,7 @@
 // platform globals it reads; `view`, `hooks`, `imports`, `flush`,
 // `instance`, `ready`, `readString`, its own helpers) neither shadows nor
 // redeclares anything, and a name JS reserves (`delete`, a `default` or
-// `new` parameter) is still a valid export. The host
+// `new` parameter, a backticked `let`) is still a valid export. The host
 // calls each one after init() in glue_names.host.mjs. (`init` is the glue's
 // own export and `memory` the module's, so those two are build-time
 // refusals: tests/js_host_test.rs.)
@@ -28,7 +28,10 @@ fn readString(s: String) -> Int = string.len(s)
 
 fn delete(default: Int, new: Int) -> Int = default - new
 
+fn `let`(class: String) -> String = class + "!"
+
 fn main() -> Unit = {
   println(process("main"))
   println(int.to_string(view(1) + fetch(1) + delete(10, 3)))
+  println(`let`("main"))
 }

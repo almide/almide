@@ -14,6 +14,7 @@ export async function after(m) {
   assert.equal(m.ready(1), 9);
   assert.equal(m.readString("héllo"), 5);
   assert.equal(m.delete(10, 3), 7);
+  assert.equal(m.let("x"), "x!");
   // The platform globals the glue reads are the platform's.
   assert.equal(typeof globalThis.process.versions.node, "string");
   assert.equal(typeof globalThis.fetch, "function");
