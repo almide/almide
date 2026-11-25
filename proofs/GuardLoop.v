@@ -355,4 +355,52 @@ Example refuses_open_loop :
     [33;2;32;10;65;1;106;33;10;12;0] = false.
 Proof. vm_compute. reflexivity. Qed.
 
+(* ══ A CONTROL ON THE LENGTH TABLE ════════════════════════════════════ *)
+
+(* The scans rest on `step1` reading each instruction's length as the binary
+   format has it. Nothing here proves that; this is the control that tests
+   it: the lengths `step1` gives the instructions of a byte string, in order,
+   compared with the lengths an independent decoder found for the same
+   bytes. *)
+Fixpoint scan_lens (fuel : nat) (bs : list Z) : option (list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bs with
+      | [] => Some []
+      | _ :: _ =>
+          match step1 bs with
+          | None => None
+          | Some (_, r) =>
+              match scan_lens f r with
+              | Some ls => Some (Z.of_nat (length bs) - Z.of_nat (length r) :: ls)
+              | None => None
+              end
+          end
+      end
+  end.
+
+Fixpoint zs_eqb (a b : list Z) : bool :=
+  match a, b with
+  | [], [] => true
+  | x :: a', y :: b' => (x =? y) && zs_eqb a' b'
+  | _, _ => false
+  end.
+
+Definition lens_ok (bs ls : list Z) : bool :=
+  match scan_lens (S (length bs)) bs with
+  | Some l => zs_eqb l ls
+  | None => false
+  end.
+
+(* `i32.const 0 ; local.set 10 ; block ; loop ; local.get 300 ; i64.load
+   offset=12 ; br 0 ; end ; end`: a two-byte local index among them. *)
+Example lens_of_a_loop :
+  lens_ok [65;0;33;10;2;64;3;64;32;172;2;41;3;12;12;0;11;11] [2;2;2;2;3;3;2;1;1] = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example lens_refuses_a_shifted_boundary :
+  lens_ok [65;0;33;10;2;64;3;64;32;172;2;41;3;12;12;0;11;11] [2;2;2;2;2;4;2;1;1] = false.
+Proof. vm_compute. reflexivity. Qed.
+
 Print Assumptions loop_sound.
