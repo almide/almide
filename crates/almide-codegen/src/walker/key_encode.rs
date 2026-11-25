@@ -8,11 +8,14 @@
 //! like an Int or String key.
 //!
 //! A type qualifies only when its `==` is the derived field-by-field one and
-//! every field is an exact-equality type with key bytes: Int and the sized
-//! integers, Bool, String, and lists, options, results and tuples of
-//! those or of another qualifying type. A Float (IEEE `==`: `0.0 == -0.0`),
-//! a closure, a Map, Set or Value field, a generic or a recursive type keeps
-//! the linear scan. Only programs that build a Set or a Map carry the impls.
+//! every field has key bytes: Int and the sized integers, Bool, String, a
+//! Float, and lists, options, results and tuples of those or of another
+//! qualifying type. A Float writes its canonical bits (every NaN one value,
+//! -0.0 as 0.0), so a type holding one registers as a Float key and the
+//! runtime compares it by those bytes where `==` says no — the collection key
+//! equality (ALS-C11). A closure, a Map, Set or Value field, a generic or a
+//! recursive type keeps the linear scan. Only programs that build a Set or a
+//! Map carry the impls.
 
 use std::collections::HashMap;
 
@@ -30,6 +33,7 @@ fn ty_ok(t: &Ty, decls: &HashMap<String, &IrTypeDecl>, ctx: &RenderContext, seen
     match t {
         // Bytes is `AlmideRcCow<Vec<u8>>` here, with no key impl: linear.
         Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Bool | Ty::String => true,
+        Ty::Float | Ty::Float32 | Ty::Float64 => true,
         Ty::Applied(C::List | C::Option, a) if a.len() == 1 => ty_ok(&a[0], decls, ctx, seen),
         Ty::Applied(C::Result, a) if a.len() == 2 => ty_ok(&a[0], decls, ctx, seen) && ty_ok(&a[1], decls, ctx, seen),
         Ty::Tuple(es) if (2..=4).contains(&es.len()) => es.iter().all(|e| ty_ok(e, decls, ctx, seen)),
@@ -139,8 +143,35 @@ pub(crate) fn place(user_code: String, program: &IrProgram, ctx: &RenderContext)
     }
     out.push_str("fn almide_register_key_types() {\n");
     for td in &ok {
-        out.push_str(&format!("    almide_map_register_key::<{}>();\n", td.name));
+        let register = if holds_float(td, &decls, &mut Vec::new()) { "almide_map_register_float_key" } else { "almide_map_register_key" };
+        out.push_str(&format!("    {register}::<{}>();\n", td.name));
     }
     out.push_str("}\n");
     out
+}
+
+/// Whether a qualifying decl's key bytes encode a Float (ALS-C11).
+fn holds_float(td: &IrTypeDecl, decls: &HashMap<String, &IrTypeDecl>, seen: &mut Vec<String>) -> bool {
+    fn ty(t: &Ty, decls: &HashMap<String, &IrTypeDecl>, seen: &mut Vec<String>) -> bool {
+        match t {
+            Ty::Float | Ty::Float32 | Ty::Float64 => true,
+            Ty::Named(n, _) => decls.get(n.as_str()).is_some_and(|td| holds_float(td, decls, seen)),
+            Ty::Applied(_, a) => a.iter().any(|t| ty(t, decls, seen)),
+            Ty::Tuple(es) => es.iter().any(|t| ty(t, decls, seen)),
+            _ => false,
+        }
+    }
+    if seen.iter().any(|s| s == td.name.as_str()) {
+        return false;
+    }
+    seen.push(td.name.to_string());
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| ty(&f.ty, decls, seen)),
+        IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|v| match &v.kind {
+            IrVariantKind::Unit => false,
+            IrVariantKind::Tuple { fields } => fields.iter().any(|t| ty(t, decls, seen)),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty(&f.ty, decls, seen)),
+        }),
+        _ => false,
+    }
 }
