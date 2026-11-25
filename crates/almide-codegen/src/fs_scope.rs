@@ -538,8 +538,12 @@ almide_rt_fs_write(x, y)
     /// found through a helper of its module, and one that does not is not.
     #[test]
     fn the_runtime_scan_follows_helpers_and_admits_pure_fns() {
-        let text = "pub fn almide_rt_x_a(p: &str) -> u8 { helper(p) }\nfn helper(p: &str) -> u8 { let _ = std::fs::metadata(p); 0 }\n\
-                    pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\npub fn almide_rt_x_c(d: &str) { std::process::Command::new(\"ls\").current_dir(d); }\n";
+        // Each piece opens with its quote, so no source line here starts with
+        // `pub fn`: the text is test input, not this crate's items.
+        let text = concat!(
+            "pub fn almide_rt_x_a(p: &str) -> u8 { helper(p) }\nfn helper(p: &str) -> u8 { let _ = std::fs::metadata(p); 0 }\n",
+            "pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\npub fn almide_rt_x_c(d: &str) { std::process::Command::new(\"ls\").current_dir(d); }\n",
+        );
         let found = file_touching_fns(&[("x", text)]);
         assert!(found.contains_key("almide_rt_x_a") && found.contains_key("almide_rt_x_c") && !found.contains_key("almide_rt_x_b"), "{found:?}");
     }
