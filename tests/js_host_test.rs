@@ -35,7 +35,10 @@ fn host_js_writes_the_module_the_glue_and_the_typings() {
     assert!(js.contains("new URL(\"./app.wasm\", import.meta.url)"), "{js}");
     assert!(js.contains("export async function init("), "{js}");
     assert!(js.contains("export function run()"), "{js}");
-    assert!(js.contains("export function greet(n)") && js.contains("export function shout(s)"), "{js}");
+    // Each wrapper is the glue's `$` binding exported under the source name
+    // (#4943), with the glue's `$<i>` parameters.
+    assert!(js.contains("function $greet($0)") && js.contains("function $shout($0)"), "{js}");
+    assert!(js.contains("export { $greet as greet, $shout as shout };"), "{js}");
     assert!(js.contains("jsImports.js_log = (a0) =>") && js.contains("readString(a0)"), "{js}");
     assert!(js.contains("wasiImports.fd_write = wasi.fd_write"), "{js}");
     // A String parameter goes in through the module's allocator. On the
@@ -44,7 +47,7 @@ fn host_js_writes_the_module_the_glue_and_the_typings() {
     // `string.to_upper`, so the callee owns the block and the host does not
     // release it after the call.
     assert!(line.contains("structural leg"), "{line}");
-    assert!(js.contains("const h0 = allocString(s);"), "{js}");
+    assert!(js.contains("const h0 = allocString($0);"), "{js}");
     assert!(js.contains("takeString(instance.exports.shout(h0))") && !js.contains("__release(h0)"), "{js}");
     assert!(dts.contains("export function greet(n: number): number;"), "{dts}");
     assert!(dts.contains("export function shout(s: string): string;"), "{dts}");
@@ -265,8 +268,8 @@ fn a_block_shaped_export_is_wrapped_by_its_recorded_layout() {
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
-    assert!(js.contains(r#"const S_pick_p0 = {k:"list",stride:4,el:{k:"rec",size:"#), "{js}");
-    assert!(js.contains("const h0 = putBlock(S_pick_p0, xs, \"pick\");") && js.contains("takeBlock(instance.exports.pick(h0, h1, h2), S_pick_r, \"pick\")"), "{js}");
+    assert!(js.contains(r#"const S0p0 = {k:"list",stride:4,el:{k:"rec",size:"#), "{js}");
+    assert!(js.contains("const h0 = putBlock(S0p0, $0, \"pick\");") && js.contains("takeBlock(instance.exports.pick(h0, h1, h2), S0r, \"pick\")"), "{js}");
     assert!(dts.contains("export function pick(xs: Array<{ x: number; name: string }>, b: Uint8Array, o: number | undefined): Array<string>;"), "{dts}");
 }
 
@@ -282,7 +285,7 @@ fn an_effect_export_unwraps_its_result_block() {
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
-    assert!(js.contains("return takeResult(instance.exports.raw(h0), S_raw_r, \"raw\");") && js.contains(r#"const S_raw_r = {k:"res",ok:{k:"str"},err:{k:"str"}};"#), "{js}");
+    assert!(js.contains("return takeResult(instance.exports.raw(h0), S0r, \"raw\");") && js.contains(r#"const S0r = {k:"res",ok:{k:"str"},err:{k:"str"}};"#), "{js}");
     assert!(js.contains("takeString(instance.exports.plain(h0))"), "{js}");
     assert!(js.contains("export class AlmideError extends Error"), "{js}");
     assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");
@@ -420,4 +423,76 @@ fn an_extern_on_the_fan_protocol_module_is_refused() {
     let src = "@extern(wasm, \"almide:fan\", \"wait\")\nfn wait() -> Unit\n\nfn main() -> Unit = wait()\n";
     let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
     assert!(!ok && stderr.contains("reserves the import module \"almide:fan\""), "{stderr}");
+}
+
+/// #4943: a pub fn named like a binding of the glue (`process`, `view`,
+/// `memory`, ...) or a word JS reserves (`delete`, a `default` parameter, a
+/// backticked `let`) is the glue's `$<name>` binding, exported under its own
+/// name — no source name is ever a binding of the glue's scope. The typings
+/// spell a reserved name through the same `$` binding and a reserved
+/// parameter with a trailing `$`. Running it under node is `glue_names` in
+/// `spec/wasm_host_js`.
+#[test]
+fn a_source_name_is_never_a_binding_of_the_glue() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "fn process(s: String) -> String = s\nfn view(x: Int) -> Int = x\nfn delete(default: Int, new: Int) -> Int = default - new\nfn `let`(class: String) -> String = class\nfn main() -> Unit = {}\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    // Each wrapper is `$<name>`; the only `function view(` is the glue's own
+    // helper, declared once, and no source name gets a declaration.
+    for name in ["process", "view", "delete", "let"] {
+        assert!(js.contains(&format!("function ${name}($0")), "{js}");
+        assert!(!js.contains(&format!("export function {name}(")), "{js}");
+    }
+    assert_eq!(js.matches("function view(").count(), 1, "{js}");
+    assert!(!js.contains("function process(") && !js.contains("function delete(") && !js.contains("function let("), "{js}");
+    assert!(js.contains("export { $process as process, $view as view, $delete as delete, $let as let };"), "{js}");
+    // The glue's own reads stay its own: the node check names the global.
+    assert!(js.contains("process.versions.node") && js.contains("function view() {"), "{js}");
+    assert!(dts.contains("export function process(s: string): string;") && dts.contains("export function view(x: number): number;"), "{dts}");
+    assert!(dts.contains("declare function $delete(default$: number, new$: number): number;\nexport { $delete as delete };"), "{dts}");
+    assert!(dts.contains("declare function $let(class$: string): string;\nexport { $let as let };"), "{dts}");
+}
+
+/// #4943: a pub fn cannot take a name the glue itself exports — a module has
+/// one export per name — so the build refuses it by name, listing the glue's
+/// exports for THIS build: `run` is the glue's only with a `main`.
+#[test]
+fn a_pub_fn_named_like_a_glue_export_is_refused_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), "fn init(x: Int) -> Int = x\nfn main() -> Unit = {}\n", &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(!ok, "a pub fn `init` must be refused:\n{stderr}");
+    assert!(stderr.contains("--host js cannot export `init`: the generated glue already exports `init`"), "{stderr}");
+    assert!(stderr.contains("AlmideExit, init, run") && stderr.contains("local fn init"), "{stderr}");
+    assert!(!dir.path().join("app.js").exists(), "a refused build writes no glue");
+    let (ok, stderr) = build(dir.path(), "fn run(x: Int) -> Int = x\nfn main() -> Unit = {}\n", &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("cannot export `run`"), "with a main, `run` is the glue's:\n{stderr}");
+    // Without a main the glue has no `run`, so the pub fn takes the name.
+    let (ok, stderr) = build(dir.path(), "fn run(x: Int) -> Int = x\n", &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    assert!(js.contains("export { $run as run };") && !js.contains("export function run("), "{js}");
+}
+
+/// #4943: `memory` is the module's own export (its linear memory, #3490),
+/// so a pub fn of that name is not exported by the module and no wrapper can
+/// reach it: refused by name, never a glue that silently lacks it.
+#[test]
+fn a_pub_fn_the_module_cannot_export_is_refused_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), "fn memory(x: Int) -> Int = x\nfn main() -> Unit = {}\n", &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(!ok, "a pub fn `memory` must be refused:\n{stderr}");
+    assert!(stderr.contains("--host js cannot export `memory`: the toolchain writes an export of that name into the module itself"), "{stderr}");
+    assert!(stderr.contains("local fn memory") && stderr.contains("@export(wasm,"), "{stderr}");
+    assert!(!dir.path().join("app.js").exists(), "a refused build writes no glue");
+    // Declared under a name of its own, it is wrapped under that name.
+    let (ok, stderr) = build(dir.path(), "@export(wasm, \"memory_of\")\nfn memory(x: Int) -> Int = x\nfn main() -> Unit = {}\n", &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    assert!(js.contains("export { $memory_of as memory_of };"), "{js}");
+    // Without --host js the build is unchanged: the fn simply stays internal.
+    let (ok, stderr) = build(dir.path(), "fn memory(x: Int) -> Int = x\nfn main() -> Unit = {}\n", &["--target", "wasm", "-o", "plain.wasm"]);
+    assert!(ok, "{stderr}");
 }

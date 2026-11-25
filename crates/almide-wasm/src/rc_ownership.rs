@@ -374,7 +374,7 @@ impl Emitter<'_> {
         ty: SliceTy,
         tail: bool,
     ) -> Result<(), EmitError> {
-        let IrExprKind::If { then, else_, .. } = &e.kind else {
+        let IrExprKind::If { cond, then, else_ } = &e.kind else {
             return unsup("if-arms");
         };
         let normalize =
@@ -396,7 +396,11 @@ impl Emitter<'_> {
             self.witness_branch_arm();
             self.witness_branch_anchor(then_at);
             self.in_tail = tail;
-            self.lower(then, Some(ty))?;
+            // #4944: a read arm whose window the condition proved (bytes_rw.rs `proven_room`).
+            self.room_proven = self.proven_room(cond, then);
+            let lowered = self.lower(then, Some(ty));
+            self.room_proven = None;
+            lowered?;
             let then_owned = self.rc_owned_result(then);
             if normalize && !then_owned {
                 self.rc_inc_top();

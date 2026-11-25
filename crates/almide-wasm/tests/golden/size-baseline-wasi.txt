@@ -49,7 +49,7 @@
 3987	spec/wasm_cross/bytes_clear_mut_param.almd
 6031	spec/wasm_cross/bytes_copy_from_negative_len.almd
 4439	spec/wasm_cross/bytes_copy_within_offset_domain.almd
-13330	spec/wasm_cross/bytes_cursor_read_domain.almd
+11821	spec/wasm_cross/bytes_cursor_read_domain.almd
 9425	spec/wasm_cross/bytes_display.almd
 1652	spec/wasm_cross/bytes_equality_call_operands.almd
 6476	spec/wasm_cross/bytes_f16.almd
@@ -64,7 +64,7 @@
 9627	spec/wasm_cross/bytes_negative_offset_family.almd
 1946	spec/wasm_cross/bytes_new_exhaustion.almd
 2302	spec/wasm_cross/bytes_pad_ceiling_oom.almd
-7125	spec/wasm_cross/bytes_param_writeback.almd
+7115	spec/wasm_cross/bytes_param_writeback.almd
 2841	spec/wasm_cross/bytes_push_growth.almd
 2027	spec/wasm_cross/bytes_push_inplace.almd
 15378	spec/wasm_cross/bytes_rawptr.almd
@@ -76,7 +76,7 @@
 8651	spec/wasm_cross/bytes_temp_receiver.almd
 5450	spec/wasm_cross/bytes_to_string_err_release.almd
 3617	spec/wasm_cross/bytes_walk_reduction_fused.almd
-11126	spec/wasm_cross/bytes_writer_family.almd
+10814	spec/wasm_cross/bytes_writer_family.almd
 5388	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 634	spec/wasm_cross/call_arg_eval_order_with_drops.almd
 2956	spec/wasm_cross/call_closure_lambda_param.almd
@@ -191,8 +191,8 @@
 9271	spec/wasm_cross/empty_collection_fold.almd
 8672	spec/wasm_cross/empty_from_list_mono.almd
 5881	spec/wasm_cross/encoding_base64.almd
-14468	spec/wasm_cross/endian_auto_import.almd
-7072	spec/wasm_cross/endian_explicit_import.almd
+13713	spec/wasm_cross/endian_auto_import.almd
+6758	spec/wasm_cross/endian_explicit_import.almd
 1899	spec/wasm_cross/enumerate_unnameable_element.almd
 3447	spec/wasm_cross/env_args.almd
 4048	spec/wasm_cross/env_get.almd
@@ -636,7 +636,7 @@
 10063	spec/wasm_cross/mut_param_typed_err_propagates.almd
 3292	spec/wasm_cross/mut_param_writeback_growth.almd
 5181	spec/wasm_cross/mut_scalar_param_reassign.almd
-7053	spec/wasm_cross/mutable_global_bytes_arena.almd
+6989	spec/wasm_cross/mutable_global_bytes_arena.almd
 4331	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 9278	spec/wasm_cross/mutable_global_field_mut_arg.almd
 5955	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
@@ -647,7 +647,7 @@
 3086	spec/wasm_cross/mutual_recursive_types.almd
 1325	spec/wasm_cross/mutual_tail_recursion.almd
 6122	spec/wasm_cross/nan_canonical_bytes_set_write.almd
-3898	spec/wasm_cross/nan_canonical_bytes_write.almd
+3742	spec/wasm_cross/nan_canonical_bytes_write.almd
 1500	spec/wasm_cross/nan_canonical_observation.almd
 5560	spec/wasm_cross/native_list_option_fallback_float.almd
 4892	spec/wasm_cross/native_map_merge_same_binding.almd
@@ -656,7 +656,7 @@
 5388	spec/wasm_cross/native_wall_shapes.almd
 11242	spec/wasm_cross/negative_count_rule.almd
 5171	spec/wasm_cross/negative_float_literal_sized.almd
-8945	spec/wasm_cross/negative_offset_and_width_totality.almd
+8814	spec/wasm_cross/negative_offset_and_width_totality.almd
 3822	spec/wasm_cross/nested_box_guard_binder.almd
 2795	spec/wasm_cross/nested_ctor_pattern.almd
 3224	spec/wasm_cross/nested_ctor_swap_two_types.almd
@@ -823,7 +823,7 @@
 10373	spec/wasm_cross/result_wall_escalations.almd
 20479	spec/wasm_cross/runtime_backed_value_repr.almd
 12334	spec/wasm_cross/runtime_backed_variant_repr.almd
-3278	spec/wasm_cross/scalar_if_arm_effects.almd
+3200	spec/wasm_cross/scalar_if_arm_effects.almd
 3786	spec/wasm_cross/scan_heap_acc.almd
 4190	spec/wasm_cross/scoped_region_value.almd
 3486	spec/wasm_cross/scoped_worker_in_and_out.almd
@@ -852,11 +852,11 @@
 12156	spec/wasm_cross/sql_highlight_tokens.almd
 13807	spec/wasm_cross/statement_after_tail_walker_bang.almd
 41209	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
-10550	spec/wasm_cross/stdlib_call_temporaries_release.almd
+10456	spec/wasm_cross/stdlib_call_temporaries_release.almd
 27484	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 35218	spec/wasm_cross/stdlib_opaque_shadow.almd
 33916	spec/wasm_cross/stdlib_type_eq.almd
-63461	spec/wasm_cross/stdlib_type_shadow.almd
+63301	spec/wasm_cross/stdlib_type_shadow.almd
 3447	spec/wasm_cross/str_result_heap_bind.almd
 4591	spec/wasm_cross/string_bidi_controls_literal.almd
 1280	spec/wasm_cross/string_bool_ordering.almd
