@@ -209,6 +209,16 @@ while IFS= read -r f; do
       sed 's/^/  /' "$OUT/$N.shipped-err" >&2
       exit 1
     fi
+    # The guarded-access windows of this artifact: every load and store is
+    # swept, no witness read; the kernel judges the windows after the loop
+    # (check-shipped-windows.sh).
+    printf 'MODULE %s\n' "$f" >> "$OUT/window-dump"
+    if ! "$ANCHORCHECK" --windows "$OUT/$N.wasm" >> "$OUT/window-dump" 2> "$OUT/$N.windows-err"; then
+      echo "STRUCTURAL WALL FAIL: $f: the shipped bytes could not be swept for guarded-access windows:" >&2
+      tail -1 "$OUT/window-dump" | sed 's/^/  /' >&2
+      sed 's/^/  /' "$OUT/$N.windows-err" >&2
+      exit 1
+    fi
   fi
   # #4005 A4: the module's self-host prim accesses. The prover is untrusted;
   # what it certifies must be the translation of the shipped functions
@@ -266,6 +276,17 @@ mv "$HASHES.tmp" "$HASHES"
 echo "== the runtime routines as shipped, read by the proof script's decoders (Rocq kernel) =="
 [ -s "$OUT/shipped-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact's runtime routines were dumped — the shipped-form check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-routines.sh" "$OUT/shipped-dump" "$OUT/shipped" | sed 's/^/  /'
+# GUARDED ACCESSES FROM THE BYTES ALONE: the bounds witness is judged over a
+# trace model and almide-anchor-check (unverified) holds its events to the
+# instructions. Where a compare, its aborting arm and the access lie in one
+# straight-line run of shipped instructions, no witness is needed: the Rocq
+# kernel decodes that window's bytes with GuardWindow.v and `window_sound`
+# puts the access inside the block's payload in every run. The cutter
+# proposes the windows over EVERY load and store; a proposal the kernel
+# refuses fails, and so does a count below the leg's floor.
+echo "== guarded accesses proven in bounds from the shipped bytes alone (Rocq kernel) =="
+[ -s "$OUT/window-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for guarded-access windows — the check went blind" >&2; exit 1; }
+bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "$MODE" | sed 's/^/  /'
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"
