@@ -1,0 +1,19 @@
+diff --git a/crates/almide-wasm/src/arg_rebind.rs b/crates/almide-wasm/src/arg_rebind.rs
+index 0a7acac02a..c72afdbd4d 100644
+--- a/crates/almide-wasm/src/arg_rebind.rs
++++ b/crates/almide-wasm/src/arg_rebind.rs
+@@ -217,7 +217,13 @@ impl IrMutVisitor for Orderer<'_, '_> {
+         let mut later: Vec<HashSet<u32>> = vec![HashSet::new(); ops.len()];
+         for i in (0..ops.len() - 1).rev() {
+             let mut s = later[i + 1].clone();
+-            s.extend(self.writes.assigned_by(ops[i + 1]));
++            s.extend({
++                let mut own = HashSet::new();
++                if !matches!(ops[i + 1].kind, IrExprKind::Lambda { .. }) {
++                    almide_ir::collect_assigned_vars(ops[i + 1], &mut own);
++                }
++                own
++            });
+             later[i] = s;
+         }
+         let rebound: Vec<bool> = ops

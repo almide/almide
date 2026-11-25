@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/rc_ownership.rs b/crates/almide-wasm/src/rc_ownership.rs
+index a71559d630..ba1dcfe291 100644
+--- a/crates/almide-wasm/src/rc_ownership.rs
++++ b/crates/almide-wasm/src/rc_ownership.rs
+@@ -123,6 +123,9 @@ impl Emitter<'_> {
+             // container's drop freed the global's block while the global
+             // still named it, and the next allocation reused it.
+             almide_ir::IrExprKind::Var { id } => {
++                if self.cells.contains(id) {
++                    return;
++                }
+                 let vt = match self.locals.get(id) {
+                     Some(&(_, vt)) => vt,
+                     None => match self.globals.get(&(self.var_space, *id)) {

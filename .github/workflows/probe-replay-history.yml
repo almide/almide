@@ -2,7 +2,7 @@ name: Probe — replayed memory bugs against the static checkers
 # A one-off measurement on its own branch. Not a gate.
 on:
   push:
-    branches: [probe/replay-nonrc]
+    branches: [probe/replay-counting-3]
 
 permissions:
   contents: read
@@ -16,7 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - 2475-slice-rows-without-start-floor
+          - 1786-closure-call-borrowed-arg.record-kept
+          - 1786-closure-call-borrowed-arg.record-dropped
+          - 2613-cell-occupant-stored-without-share
+          - 4476-call-rebinds-global-read-earlier
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
