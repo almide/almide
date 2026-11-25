@@ -64,6 +64,10 @@ printf 'S\nID\n'   > $GATE_TMP/share_out.cert        # #4278: an arm's share-out
 printf 'SD\n'      > $GATE_TMP/share_out_credit.cert # #4278: the argument's line releases the share it handed out (not its credit) → REJECT
 printf 'IDS\n'     > $GATE_TMP/share_out_dead.cert   # #4278: share-out of an OWNED object after its release (use-after-free) → REJECT
 printf 'S\nI\n'   > $GATE_TMP/share_out_leak.cert   # #4278: the result that received the share never releases it → REJECT
+printf 'i{a{d|m}|}d\n' > $GATE_TMP/nest_agree.cert     # format v10: a branch arm holding a nested branch, every arm at net 0 → ACCEPT
+printf 'i{{dd|}|}d\n' > $GATE_TMP/nest_double.cert    # v10: a nested arm releases twice (double free) → REJECT
+printf 'i{{a|}|}d\n'  > $GATE_TMP/nest_unequal.cert   # v10: the nested arms' nets differ (+1 vs 0), never joined → REJECT
+printf 'i{{d|m}|a}d\n' > $GATE_TMP/nest_swapped.cert  # v10: the nested branch and its sibling arm swapped (-1 vs +1) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
@@ -96,6 +100,10 @@ run $GATE_TMP/share_out.cert 0
 run $GATE_TMP/share_out_credit.cert 1
 run $GATE_TMP/share_out_dead.cert 1
 run $GATE_TMP/share_out_leak.cert 1
+run $GATE_TMP/nest_agree.cert 0
+run $GATE_TMP/nest_double.cert 1
+run $GATE_TMP/nest_unequal.cert 1
+run $GATE_TMP/nest_swapped.cert 1
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.

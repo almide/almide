@@ -4,7 +4,8 @@
 //! the `t` arm-abort terminal; format v7 adds the `s` arm share-out, #4278;
 //! format v8 adds the `k` take and the `u` probe with the drain rule,
 //! ADR-0034, and refuses `r` on every line, #4753; format v9 adds the `w`
-//! region reclaim, #1961),
+//! region reclaim, #1961; format v10 lets a `{…|…}` arm hold `{…|…}`
+//! branches of its own — `CNest`, folded by `nexec`),
 //! with the owned-line resurrection rule (#3229:
 //! on a line born by a top-level `i`, every later `a` must meet a live count).
 //!
@@ -47,7 +48,37 @@ enum Item {
     BranchRet(bool, Vec<Op>, Vec<Op>),
     /// `CBranchAbort`: `true` = the THEN arm ends the process (format v6).
     BranchAbort(bool, Vec<Op>, Vec<Op>),
+    /// `CNest` (format v10): a one-shot branch whose arms hold branches.
+    Nest(Vec<Node>, Vec<Node>),
     Poison,
+}
+
+/// One node of a nested arm (`NOps`: `NOp1` / `NBr` — the arm as a sequence
+/// of ops and branches, each branch with its two arms).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Node {
+    At(Op),
+    Br(Vec<Node>, Vec<Node>),
+}
+
+/// `nexec`: a nested arm's fold — every branch at every depth runs both
+/// arms from its entry count, fault-free, to the SAME result.
+fn nexec(ns: &[Node], mut rc: i64) -> Option<i64> {
+    for n in ns {
+        rc = match n {
+            Node::At(o) => exec(std::slice::from_ref(o), rc)?,
+            Node::Br(t, e) => {
+                let (rt, re) = (nexec(t, rc)?, nexec(e, rc)?);
+                (rt == re).then_some(rt)?
+            }
+        };
+    }
+    Some(rc)
+}
+
+/// The arm's ops when it holds no branch (`nflat`).
+fn nflat(ns: &[Node]) -> Option<Vec<Op>> {
+    ns.iter().map(|n| if let Node::At(o) = n { Some(*o) } else { None }).collect()
 }
 
 /// `parse_byte`: the op alphabet, either case; every other byte is skipped.
@@ -121,6 +152,10 @@ fn exec_line(items: &[Item], mut rc: i64) -> Option<i64> {
                 let (rt, re) = (exec(then_b, rc)?, exec(else_b, rc)?);
                 if *ab_then { re } else { rt }
             }
+            Item::Nest(then_b, else_b) => {
+                let (rt, re) = (nexec(then_b, rc)?, nexec(else_b, rc)?);
+                (rt == re).then_some(rt)?
+            }
             Item::Poison => return None,
         };
     }
@@ -132,7 +167,9 @@ fn check_line(items: &[Item]) -> bool {
     exec_line(items, 0) == Some(0)
 }
 
-/// The in-progress `{ then | else }` region (`brxst`).
+/// The in-progress `{ then | else }` region (`brxst`): format v10 arms
+/// collect nodes, and `stack` holds the nested branches open inside them,
+/// innermost last, as (in_else, then nodes, else nodes).
 #[derive(Default)]
 struct Brx {
     in_else: bool,
@@ -141,34 +178,57 @@ struct Brx {
     then_aborted: bool,
     else_aborted: bool,
     malformed: bool,
-    then_ops: Vec<Op>,
-    else_ops: Vec<Op>,
+    then_ops: Vec<Node>,
+    else_ops: Vec<Node>,
+    stack: Vec<(bool, Vec<Node>, Vec<Node>)>,
 }
 
 impl Brx {
-    /// `close_brx`: malformed or both arms terminal → poison; one exit-marked
-    /// arm → `CBranchRet`; one abort-marked arm → `CBranchAbort`; no marker
-    /// → the ordinary `CBranch`.
+    /// `close_brx`: malformed or both arms terminal → poison; one
+    /// exit-marked arm → `CBranchRet`; one abort-marked arm → `CBranchAbort`;
+    /// no marker → the ordinary `CBranch`. An arm holding a branch makes a
+    /// `CNest`, which no marker may carry.
     fn close(self) -> Item {
         let then_term = self.then_exited || self.then_aborted;
         let else_term = self.else_exited || self.else_aborted;
+        let (Some(t), Some(e)) = (nflat(&self.then_ops), nflat(&self.else_ops)) else {
+            return if self.malformed || then_term || else_term {
+                Item::Poison
+            } else {
+                Item::Nest(self.then_ops, self.else_ops)
+            };
+        };
         if self.malformed || (then_term && else_term) {
             Item::Poison
         } else if self.then_exited {
-            Item::BranchRet(true, self.then_ops, self.else_ops)
+            Item::BranchRet(true, t, e)
         } else if self.else_exited {
-            Item::BranchRet(false, self.then_ops, self.else_ops)
+            Item::BranchRet(false, t, e)
         } else if self.then_aborted {
-            Item::BranchAbort(true, self.then_ops, self.else_ops)
+            Item::BranchAbort(true, t, e)
         } else if self.else_aborted {
-            Item::BranchAbort(false, self.then_ops, self.else_ops)
+            Item::BranchAbort(false, t, e)
         } else {
-            Item::Branch(self.then_ops, self.else_ops)
+            Item::Branch(t, e)
         }
     }
 
-    /// One byte inside `{…}` that is not a delimiter (`is_struct`) and not a
-    /// newline.
+    /// `brx_add`: a node joins the innermost open arm; in the branch's own
+    /// arm, after that arm's terminal mark, it is malformed.
+    fn add(&mut self, n: Node) {
+        if let Some((fe, ft, fl)) = self.stack.last_mut() {
+            if *fe { fl.push(n) } else { ft.push(n) }
+        } else if self.in_else {
+            self.malformed |= self.else_exited || self.else_aborted;
+            self.else_ops.push(n);
+        } else {
+            self.malformed |= self.then_exited || self.then_aborted;
+            self.then_ops.push(n);
+        }
+    }
+
+    /// One byte inside `{…}` that is not `|`, `}`, `{`, another delimiter
+    /// (`is_struct`) or a newline.
     fn step(&mut self, b: u8) {
         if is_xmark(b) || is_tmark(b) {
             // A second mark on the same arm is malformed.
@@ -183,15 +243,7 @@ impl Brx {
                 self.then_aborted |= abort;
             }
         } else if let Some(op) = parse_byte(b) {
-            // An op after the current arm's mark: `x` / `t` must be
-            // arm-terminal (nothing runs after an exit or an abort).
-            if self.in_else {
-                self.malformed |= self.else_exited || self.else_aborted;
-                self.else_ops.push(op);
-            } else {
-                self.malformed |= self.then_exited || self.then_aborted;
-                self.then_ops.push(op);
-            }
+            self.add(Node::At(op));
         }
     }
 }
@@ -241,7 +293,31 @@ impl LineState {
     /// One byte that is not a newline.
     fn step(&mut self, b: u8) {
         if let Some(brx) = self.branch.as_mut() {
+            let nested = !brx.stack.is_empty();
             match b {
+                // Format v10: `{` opens a nested branch in the innermost
+                // arm (malformed in the branch's own arm after its mark).
+                b'{' => {
+                    if !nested {
+                        brx.malformed |= if brx.in_else {
+                            brx.else_exited || brx.else_aborted
+                        } else {
+                            brx.then_exited || brx.then_aborted
+                        };
+                    }
+                    brx.stack.push((false, Vec::new(), Vec::new()));
+                }
+                b'|' if nested => match brx.stack.last_mut() {
+                    Some((fe, _, _)) if !*fe => *fe = true,
+                    _ => self.poison_region(),
+                },
+                b'}' if nested => match brx.stack.pop() {
+                    Some((true, t, e)) => brx.add(Node::Br(t, e)),
+                    _ => self.poison_region(),
+                },
+                // A terminal mark inside a nested arm: exit and abort arms
+                // are flat.
+                _ if nested && (is_xmark(b) || is_tmark(b)) => self.poison_region(),
                 // A second separator, a `}` before the one separator, or any
                 // other delimiter inside an arm poisons (the region ends).
                 b'|' if !brx.in_else => brx.in_else = true,
@@ -249,10 +325,7 @@ impl LineState {
                     let closed = self.branch.take().map(Brx::close);
                     self.items.extend(closed);
                 }
-                _ if is_struct(b) => {
-                    self.branch = None;
-                    self.items.push(Item::Poison);
-                }
+                _ if is_struct(b) => self.poison_region(),
                 _ => brx.step(b),
             }
         } else if is_xmark(b) || is_tmark(b) {
@@ -274,6 +347,12 @@ impl LineState {
         } else {
             self.step_plain(b);
         }
+    }
+
+    /// The open `{…}` region is malformed: it ends here as a poison.
+    fn poison_region(&mut self) {
+        self.branch = None;
+        self.items.push(Item::Poison);
     }
 
     /// One byte outside any `{…}` / `[…]` region.
@@ -343,8 +422,27 @@ fn guard_item(item: &Item) -> Vec<Item> {
         Item::Branch(t, e) => vec![Item::Branch(guard_ops(t), guard_ops(e))],
         Item::BranchRet(f, t, e) => vec![Item::BranchRet(*f, guard_ops(t), guard_ops(e))],
         Item::BranchAbort(f, t, e) => vec![Item::BranchAbort(*f, guard_ops(t), guard_ops(e))],
+        Item::Nest(t, e) => vec![Item::Nest(nguard(t), nguard(e))],
         Item::Poison => vec![Item::Poison],
     }
+}
+
+/// `nguard`: the probe inside a nested arm, at every depth.
+fn nguard(ns: &[Node]) -> Vec<Node> {
+    ns.iter()
+        .flat_map(|n| match n {
+            Node::At(o) => guard_ops(std::slice::from_ref(o)).into_iter().map(Node::At).collect(),
+            Node::Br(t, e) => vec![Node::Br(nguard(t), nguard(e))],
+        })
+        .collect()
+}
+
+/// A nested arm with no op `bad` at any depth (`nprobe_free` / `nno_reuse`).
+fn nfree(ns: &[Node], bad: Op) -> bool {
+    ns.iter().all(|n| match n {
+        Node::At(o) => *o != bad,
+        Node::Br(t, e) => nfree(t, bad) && nfree(e, bad),
+    })
 }
 
 /// `guard_line` (#3229): a line whose first item is a top-level `Inc` is an
@@ -374,6 +472,7 @@ fn item_probe_free(item: &Item) -> bool {
         Item::CondLoop(t, e) | Item::Branch(t, e) | Item::BranchRet(_, t, e) | Item::BranchAbort(_, t, e) => {
             free(t) && free(e)
         }
+        Item::Nest(t, e) => nfree(t, Op::Probe) && nfree(e, Op::Probe),
         Item::Poison => true,
     }
 }
@@ -415,6 +514,7 @@ fn item_no_reuse(item: &Item) -> bool {
         Item::Op(o) => *o != Op::Reuse,
         Item::Loop(b) => free(b),
         Item::CondLoop(t, e) | Item::Branch(t, e) | Item::BranchRet(_, t, e) | Item::BranchAbort(_, t, e) => free(t) && free(e),
+        Item::Nest(t, e) => nfree(t, Op::Reuse) && nfree(e, Op::Reuse),
         Item::Poison => false,
     }
 }
@@ -521,6 +621,21 @@ mod tests {
         assert!(!check_xc(b"i{|d}add"));
         // A leaving arm that keeps it.
         assert!(!check_xc(b"i{|x}d"));
+    }
+
+    #[test]
+    fn a_nested_branch_folds_at_every_depth() {
+        // Format v10 (OwnershipChecker.v cert_xc_nested_*): accept, and the
+        // controls — a nested double release, unequal nested nets, the
+        // nested branch moved before its share, an arm swapped across the
+        // levels, a marker or a loop in a nested arm, an unclosed nest.
+        assert!(check_xc(b"i{a{d|m}|}d"));
+        assert!(check_xc(b"i{{a{d|m}|}|b}d"));
+        for w in [&b"i{{dd|}|}d"[..], b"i{{a|}|}d", b"i{{d|m}a|}d", b"i{{d|m}|a}d", b"i{{dx|}|}d", b"i{{d|d}x|}d", b"i{{(d)|}|}d", b"i{{d|}|d"] {
+            assert!(!check_xc(w), "{}", String::from_utf8_lossy(w));
+        }
+        // A whole-line branch whose arms are joined paths.
+        assert!(check_xc(b"{i{am|b}d|i{b|am}d}"));
     }
 
     #[test]

@@ -65,7 +65,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::lines::{flat_exits, hoist, net, record};
+use super::lines::{flat_exits, hoist, items, net, record};
 
 /// The loop-carried locals (#2755), split for the file budget.
 #[path = "witness_carry.rs"]
@@ -509,6 +509,9 @@ fn walk<'t>(seq: &'t [Node], at: At<'t>, paths: Vec<Path>, cx: &mut Cx<'t, '_>) 
         }
         next.sort();
         next.dedup();
+        if at.exits == Exits::Join {
+            next = join::merge(next);
+        }
         if next.len() > PATH_CAP {
             return Err("branch-paths:cap".into());
         }
@@ -589,7 +592,8 @@ fn enter_loop<'t>(
 ) -> Result<(), String> {
     bump();
     queue(&mut cx.loops, body, carried, Some(p.clone()));
-    if !p.born || at.scope.lifted() {
+    // An iteration with no exit in its body has no exit path to account.
+    if !p.born || at.scope.lifted() || !has_exit(body) {
         return Ok(());
     }
     let out = loop_exits(body, carried, at, p, cx.ix)?;
@@ -601,6 +605,15 @@ fn enter_loop<'t>(
         }
     }
     Ok(())
+}
+
+/// Does `body` (nested loops and arms included) hold an exit?
+fn has_exit(body: &[Node]) -> bool {
+    body.iter().any(|n| match n {
+        Node::Ev(e) => *e == Ev::Exit,
+        Node::Branch(arms) => arms.iter().any(|a| has_exit(a)),
+        Node::Loop(b, _) => has_exit(b),
+    })
 }
 
 /// #2758: the paths of ONE iteration of `body` that EXIT, for an object

@@ -28,7 +28,7 @@ pub(crate) fn net(events: &str) -> i64 {
         .into_iter()
         .map(|it| match it.strip_prefix('{') {
             Some(_) if fold_arm(it).is_some() => 0,
-            Some(group) => ops_net(group.split('|').next().unwrap_or("")),
+            Some(_) => net(group_arms(it).0),
             None => ops_net(it),
         })
         .sum()
@@ -115,4 +115,20 @@ pub(crate) fn hoist(events: &str) -> (Vec<String>, String) {
         }
     }
     (hoisted, flat)
+}
+
+/// A `{a|b}` group's two arms, split at its own `|` (an arm may hold groups
+/// of its own, certificate format v10).
+pub(crate) fn group_arms(group: &str) -> (&str, &str) {
+    let inner = group.strip_prefix('{').and_then(|g| g.strip_suffix('}')).unwrap_or("");
+    let mut depth = 0;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            '|' if depth == 0 => return (&inner[..i], &inner[i + 1..]),
+            _ => {}
+        }
+    }
+    (inner, "")
 }

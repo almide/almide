@@ -558,7 +558,8 @@ fn one_line(s: &str) -> String {
 /// mismatch; absent, version 1. A bundle whose ownership witness carries an
 /// arm share-out `s` (#4278) is version 3 either way; one whose ownership
 /// (or helper) lines carry a region reclaim `w` (#1961, certificate format
-/// v9) is version 6.
+/// v9) is version 6; one whose lines nest a branch inside a branch arm
+/// (certificate format v10) is version 7.
 pub fn render(
     producer: &str,
     source: &str,
@@ -576,19 +577,25 @@ pub fn render(
     let reclaim = records
         .iter()
         .any(|r| (r.property == "ownership" || r.property == "rc-sig") && r.bytes.contains(['w', 'W']));
+    // Version 7 (format v10): an ownership (or helper) line nests a branch
+    // inside a branch arm, which every reader before version 7 poisoned.
+    let nested = records
+        .iter()
+        .any(|r| (r.property == "ownership" || r.property == "rc-sig") && nests_branches(&r.bytes));
+    let late = if nested { Some(7) } else if reclaim { Some(6) } else { None };
     let mut out = match (artifact, share_out, helper_sig) {
-        (None, false, false) if !reclaim => {
+        (None, false, false) if late.is_none() => {
             format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source))
         }
         (None, _, sig) => format!(
             "almide-certificate-bundle {}\nproducer {}\nsource {}\n",
-            if reclaim { 6 } else if sig { 4 } else { 3 },
+            late.unwrap_or(if sig { 4 } else { 3 }),
             one_line(producer),
             one_line(source)
         ),
         (Some((hex, path)), _, _) => format!(
             "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
-            if reclaim { 6 } else if helper_sig { 4 } else if share_out { 3 } else { 2 },
+            late.unwrap_or(if helper_sig { 4 } else if share_out { 3 } else { 2 }),
             one_line(producer),
             one_line(source),
             one_line(path)
@@ -601,4 +608,18 @@ pub fn render(
         out.push_str(&format!("uncertified {} {}\n", one_line(f), one_line(reason)));
     }
     out
+}
+
+/// Does a certificate nest a `{…}` inside another on one line (format v10)?
+fn nests_branches(witness: &str) -> bool {
+    let mut depth = 0u32;
+    witness.chars().any(|c| {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            '\n' => depth = 0,
+            _ => {}
+        }
+        depth > 1
+    })
 }

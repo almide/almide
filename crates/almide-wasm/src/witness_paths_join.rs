@@ -36,10 +36,12 @@ fn same_state(p: &Path, q: &Path) -> bool {
     p.born == q.born && p.holders == q.holders && p.first == q.first && p.aborted == q.aborted && p.exited == q.exited && p.ended == q.ended
 }
 
-/// Flat ops an arm of `{a|b}` can carry: no structure, and no probe (a
-/// probe's drain rule reads only the line's top level, ADR-0034 D2).
+/// What an arm of a `{a|b}` item can carry: ops and branches of its own
+/// (certificate format v10 nests them), but no exit or abort marker (exit
+/// and abort arms are flat), no loop, and no probe (a probe's drain rule
+/// reads only the line's top level, ADR-0034 D2).
 fn joinable(ops: &str) -> bool {
-    !ops.contains(['{', '}', '|', '(', ')', '[', ']', 'u', 'x', 't'])
+    !ops.contains(['(', ')', '[', ']', 'u', 'x', 't'])
 }
 
 /// The survivors of one branch (each holding its arm's events from the
@@ -80,17 +82,63 @@ fn join_group(group: Vec<Path>) -> Vec<Path> {
     vec![joined]
 }
 
-/// A JOIN-form line is written only when every `{…}` group stays at the top
-/// level: a joined item inside a whole-path arm or an exit item would nest,
-/// which v5 arms do not (the checker poisons it). Such a line declines.
-pub(super) fn flat_groups(line: &str) -> bool {
-    let mut depth = 0u32;
-    line.chars().all(|c| {
-        match c {
-            '{' => depth += 1,
-            '}' => depth = depth.saturating_sub(1),
-            _ => {}
+/// Paths that reach this point of the walk in the same state, merged
+/// (certificate format v10): two paths `C u` and `C v` that agree on every
+/// holder, the birth and the first event have the same future, so they are
+/// written once as `C{u|v}` — the checker runs both `u` and `v` from the
+/// count `C` leaves and requires them to agree (`CNest`, OwnershipChecker.v
+/// `nexec`), which is exactly both whole paths' check. Merged only when
+/// their nets agree (else the item would be refused — the paths stay
+/// apart, and the cap decides), and neither carries a probe or an
+/// exit/abort marker (those arms must stay flat). This is what keeps a
+/// frame whose selects leave two holder states that reconverge only later
+/// at one path per state instead of one per history.
+pub(super) fn merge(paths: Vec<Path>) -> Vec<Path> {
+    let mut groups: Vec<Vec<Path>> = Vec::new();
+    for p in paths {
+        let mergeable = !p.ended && joinable(&p.events);
+        match groups.iter_mut().find(|g| mergeable && !g[0].ended && joinable(&g[0].events) && same_state(&g[0], &p)) {
+            Some(g) => g.push(p),
+            None => groups.push(vec![p]),
         }
-        depth <= 1
-    })
+    }
+    groups.into_iter().flat_map(merge_group).collect()
+}
+
+fn merge_group(group: Vec<Path>) -> Vec<Path> {
+    let mut out: Vec<Path> = Vec::new();
+    'paths: for p in group {
+        for q in out.iter_mut() {
+            if let Some(events) = merge2(&q.events, &p.events) {
+                q.events = events;
+                continue 'paths;
+            }
+        }
+        out.push(p);
+    }
+    out
+}
+
+/// `C u` and `C v` as `C{u|v}` (the shorter-sorting arm first), when their
+/// nets agree.
+fn merge2(a: &str, b: &str) -> Option<String> {
+    if a == b {
+        return Some(a.to_string());
+    }
+    if net(a) != net(b) {
+        return None;
+    }
+    let (ia, ib) = (items(a), items(b));
+    let k = ia.iter().zip(&ib).take_while(|(x, y)| x == y).count();
+    let common: String = ia[..k].concat();
+    let (u, v) = (ia[k..].concat(), ib[k..].concat());
+    let (lo, hi) = if u <= v { (u, v) } else { (v, u) };
+    Some(format!("{common}{{{lo}|{hi}}}"))
+}
+
+/// An exit or abort item (an arm carrying an `x` / `t` marker) is flat:
+/// the checker poisons one that nests a branch, so a line that would write
+/// one declines instead.
+pub(super) fn markers_flat(line: &str) -> bool {
+    items(line).into_iter().all(|it| !(it.starts_with('{') && it.contains(['x', 't'])) || it[1..].find('{').is_none())
 }
