@@ -559,7 +559,9 @@ def join(work, out):
     with open(f"{out}/functions.tsv", "w", encoding="utf-8") as f:
         f.write("module\tfunction\tbody_bytes\tinstructions\taccesses\tproposals\tclaims\tstate\tgoal\tkernel\n")
         for r in rows:
-            v = ans.get(r[8], "-") if r[7] == "asked" else "-"
+            if r[7] != "asked":
+                continue    # the other functions are counted per module (modules.tsv)
+            v = ans.get(r[8], "-")
             f.write("\t".join(r + [v]) + "\n")
             m = per.setdefault(r[0], dict(judged=0, judged_accesses=0, refused=0, unanswered=0))
             if v == "true":

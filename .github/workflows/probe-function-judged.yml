@@ -69,17 +69,35 @@ jobs:
             ${{ runner.temp }}/fj/work/Control_0000.out
 
   pairs:
-    name: Kept modules of mutants and replayed defects, with and without
+    name: Kept modules, with and without the mutant or the defect (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # The tree a group of mutants was applied to, and per set the run that
+        # kept the modules its mutants changed.
+        include:
+          - name: third-sample-and-deletions
+            held_ref: probe/adjacency
+            sets: "adjacency:45688174781 adjacency2:45706369535 s3:45536243441 s3wide:45565891270"
+            replays: "45651221492 45706009094 45676377343"
+          - name: first-sample
+            held_ref: probe/emitter-s1-modules
+            sets: "s1:45578876545"
+            replays: ""
+          - name: second-sample
+            held_ref: probe/emitter-s2-modules
+            sets: "s2:45578884578"
+            replays: ""
     env:
-      # The tree the paired deletions and the held-out sample were applied to.
-      HELD_REF: probe/adjacency
+      SETS: ${{ matrix.sets }}
+      REPLAY_RUNS: ${{ matrix.replays }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: probe/adjacency
+          ref: ${{ matrix.held_ref }}
           path: held
       - uses: ./.github/actions/root-tmpdir
       - name: Restore opam root (OCaml + Rocq)
@@ -118,23 +136,18 @@ jobs:
           S="$RUNNER_TEMP/sets"
           mkdir -p "$S"
           : > "$RUNNER_TEMP/sets.tsv"
-          # set, the run that kept its mutants' modules, the mutant ids to take (all when empty)
-          while read -r set run ids; do
-            [ -n "$set" ] || continue
+          for pair in $SETS; do
+            set="${pair%%:*}"
+            run="${pair#*:}"
             gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'emitter-mutants-[0-9]*' --dir "$S/$set" || echo "nothing fetched for $set"
             echo "$set: $(find "$S/$set" -type f -path '*/emut/modules/*/*.wasm' | wc -l) kept module(s)"
-            printf '%s\t%s\t%s\n' "$set" "$S/$set" "$ids" >> "$RUNNER_TEMP/sets.tsv"
-          done <<'EOF'
-          adjacency 45688174781
-          adjacency2 45706369535
-          s3 45536243441
-          s3wide 45565891270 m0210
-          EOF
+            printf '%s\t%s\t\n' "$set" "$S/$set" >> "$RUNNER_TEMP/sets.tsv"
+          done
           R="$RUNNER_TEMP/replays"
           mkdir -p "$R"
           # The twelve replays with only the repair undone: five in the first run, four in the second, three in the third
           # (which also kept one more form of the first of its three).
-          for run in 45651221492 45706009094 45676377343; do
+          for run in $REPLAY_RUNS; do
             gh run download "$run" --repo "$GITHUB_REPOSITORY" --pattern 'replay-*' --dir "$RUNNER_TEMP/replay-$run" || echo "nothing fetched from $run"
             for d in "$RUNNER_TEMP/replay-$run"/replay-*; do
               [ -d "$d" ] && mv "$d" "$R/$(basename "$d")@$run"
@@ -147,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: function-judged-pairs
+          name: function-judged-pairs-${{ matrix.name }}
           path: |
             ${{ runner.temp }}/fp/coqc.log
             ${{ runner.temp }}/fp/summary.txt
