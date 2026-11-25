@@ -40,8 +40,9 @@
      `local.get b ; call INC` (`loop_hold`: the loop holds its own share of
      the block); or `loop_kept` finds that local `b` is read nowhere in `mid`
      and `rest`, that `ht` assigns no local and ends in a load, and that
-     nothing `ht` leaves on the stack is computed from `b` (the block's
-     address goes nowhere but into the access).
+     nothing `ht` leaves on the stack is computed from `b` (what `b` holds
+     goes nowhere but into the access: the condition of the byte-level
+     check's own Count rule, computed here).
 
    Not here, and so trusted: that the strings are consecutive instruction
    runs of one function (the cutter is almide-anchor-check), that `step1`
@@ -51,10 +52,11 @@
    through its first instruction); for a held block, that no routine writes
    the length word of a block with a second holder and that the share is not
    given up inside the loop (the ownership witness); for a kept block, that
-   code which was not handed the block's address reaches it only through
-   another reference, which makes it shared, and that no other store lands
-   on its length word; and that a block's length word never exceeds its
-   payload (the heap invariant GuardWindow.v also assumes). *)
+   code which was not handed what `b` holds reaches the block only through
+   another reference (another local may hold the same address), that such a
+   reference makes the block shared, and that no other store lands on its
+   length word; and that a block's length word never exceeds its payload
+   (the heap invariant GuardWindow.v also assumes). *)
 
 From Stdlib Require Import ZArith List Lia Bool.
 From AlmideTrust Require Import GuardWindow GuardFresh.
@@ -290,9 +292,10 @@ Definition no_assign (i : ins) : bool :=
   | _ => true
   end.
 
-(* The block's address goes nowhere but into the access: `mid` and `rest`
+(* What local `b` holds goes nowhere but into the access: `mid` and `rest`
    never read local `b`; `ht` assigns no local, ends in a load, and leaves
-   under that load's address nothing computed from `b`. *)
+   under that load's address nothing computed from `b`. Another local may
+   hold the same address; this says nothing about it. *)
 Definition loop_kept (b : Z) (mid ht rest : list Z) : bool :=
   scan_noget (S (length mid)) b mid
   && scan_noget (S (length rest)) b rest
@@ -336,7 +339,7 @@ Definition loop_core (pre mid ht rest : list Z) : bool :=
 (* What stands behind "the access finds the length word as the capture read
    it": 0 the core refuses; otherwise 4, plus 1 when no instruction in
    between writes memory or calls, plus 2 when the loop holds the block,
-   plus 8 when the block's address goes nowhere but into the access. *)
+   plus 8 when what `b` holds goes nowhere but into the access. *)
 Definition loop_class (inc : Z) (hold pre mid ht rest : list Z) : Z :=
   if loop_core pre mid ht rest then
     4 + (if scan_pure (S (length (mid ++ ht ++ rest))) (mid ++ ht ++ rest) then 1 else 0)
