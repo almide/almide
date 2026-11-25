@@ -1182,7 +1182,7 @@ http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> Http
 // @since unreleased
 http.with_body(resp: HttpResponse, body: B) -> HttpResponse
 
-// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+// A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 // @since unreleased
 http.typed(media_type: String, body: Bytes) -> TypedBody
 

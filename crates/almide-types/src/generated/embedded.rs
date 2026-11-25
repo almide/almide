@@ -10347,8 +10347,10 @@ fn script_json(v: Value) -> SafeHtml = {
 
 
 
+
+
 @media_owns("text/html", "application/xhtml+xml")
-@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml", "text/javascript", "application/javascript", "application/ecmascript", "application/x-javascript", "application/x-ecmascript", "text/ecmascript", "text/x-javascript", "text/x-ecmascript", "text/jscript", "text/livescript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
 fn __safe_html_to_bytes(h: SafeHtml) -> Bytes = bytes.from_string(to_string(h))
@@ -10398,6 +10400,7 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
 
+
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 @sized_by(body)
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
@@ -10432,7 +10435,7 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
   body.__self_media_type(),
 )
 
-/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+/// A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 @literal_media(media_type)
 fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
   media_type: media_type,
@@ -11824,15 +11827,15 @@ fn __hs_refusal(resp: List[String]) -> String? = {
 }
 
 fn __hs_owned(k: String) -> Bool = list.contains(
-  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  ["connection", "content-length", "transfer-encoding", "keep-alive", "x-content-type-options"],
   string.to_lower(k),
 )
 
 
 
+
 fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
-  if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
-  else pairs + [("X-Content-Type-Options", "nosniff")]
+  pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 
