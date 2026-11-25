@@ -440,10 +440,14 @@ fn a_source_name_is_never_a_binding_of_the_glue() {
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    // Each wrapper is `$<name>`; the only `function view(` is the glue's own
+    // helper, declared once, and no source name gets a declaration.
     for name in ["process", "view", "delete", "let"] {
-        assert!(!js.contains(&format!("function {name}(")), "`{name}` must not be a binding of the glue:\n{js}");
-        assert!(js.contains(&format!("function ${name}(")), "{js}");
+        assert!(js.contains(&format!("function ${name}($0")), "{js}");
+        assert!(!js.contains(&format!("export function {name}(")), "{js}");
     }
+    assert_eq!(js.matches("function view(").count(), 1, "{js}");
+    assert!(!js.contains("function process(") && !js.contains("function delete(") && !js.contains("function let("), "{js}");
     assert!(js.contains("export { $process as process, $view as view, $delete as delete, $let as let };"), "{js}");
     // The glue's own reads stay its own: the node check names the global.
     assert!(js.contains("process.versions.node") && js.contains("function view() {"), "{js}");
