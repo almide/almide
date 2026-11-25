@@ -18,7 +18,9 @@
 //!
 //! A site that names any other function is refused.
 //!
-//! TRUSTED: that `alloc <index>` names `$alloc`; the two callees no body is
+//! That `alloc <index>` names `$alloc` is held by proved.rs.
+//!
+//! TRUSTED: the two callees no body is
 //! given for (`$cow`'s release and `$block_copy`'s copy routine), which are
 //! taken not to write a count word; the block layout (the reference count
 //! at 0, `LEN` at 4, the payload at 12).

@@ -389,11 +389,19 @@ From AlmideTrust Require Import StructuralAlloc.
 (* The emitted grow-arm BODY span, verbatim (select/grow/OOM), with the
    OOM-message immediate as a parameter (its SLEB bytes). Matched byte-
    for-byte and abstracted to `SGrow`. Call indices: 6 = $eprintln_block,
-   2 = the exit import; 0 = unreachable. *)
+   2 = the exit import; 0 = unreachable.
+
+   The grow result is tested against the CONSTANT 0 (`i32.const 0;
+   i32.lt_s`, runtime_alloc.rs), and only the die that follows carries the
+   message's address. This span used to spell the tested constant as the
+   parameter too. With the probe address 0 the two coincide, so the decode
+   theorem below held; with any real program's address the span matched
+   nothing the emitter writes, and `adecode` rejected every real `$alloc`
+   (StructuralShipped.v's `alloc_emitted_adecodes_at_1024` is the control). *)
 Definition grow_span (oom_leb : list Z) : list Z :=
   [32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
    32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
-   75;27;64;0] ++ [65] ++ oom_leb ++ [72;4;64] ++ [65] ++ oom_leb ++
+   75;27;64;0] ++ [65;0;72;4;64] ++ [65] ++ oom_leb ++
   [16;6;65;1;16;2;0;11].
 
 (* The wrap guard's body (#1908): the C-197 die — `i32.const oom; call

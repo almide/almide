@@ -439,6 +439,59 @@ separator's split reads its lead byte after handing the string to
 `$str_len_chars`, which the count rule refuses) and 120 `prim.load8` in the 24
 self-hosted `stdlib/string_*.almd` bodies.
 
+**The passes after the emitter.** A module ships after the stock-WASI
+transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
+imports and shims, calls are renumbered, and `i32.const 1; call proc_exit` is
+put in front of every `unreachable`) and the prune
+(`crates/almide-wasi/src/prune.rs`: dead functions and globals are dropped
+and the rest renumbered; it is the transform's last step). Both run after
+the emitter has recorded the witness's events, and after
+`proofs/check-structural-bytes.sh` compares the emitter's four runtime
+routines with the lists `StructuralDecode.v` transcribes. So the realization
+theorems are about bodies that do not all ship byte for byte: on the
+1059-fixture certified corpus `$free` ships as its list in every module that
+has it (1011), `$inc` in 498 of 827 (another global index in the other 329),
+and `$dec_flat` (1008) and `$alloc` (1002) in none, each with an exit call
+in front of every trap. What is checked on the shipped bytes:
+`almide-anchor-check` (proved.rs) reads the four lists out of the proof
+script and holds to them the function the anchor file names as `alloc`, the
+`rcfns` line's rc_inc, and the two routines its `proved` line names. It
+tolerates three differences: a function or a global index renumbered the
+same way at every place in the four bodies; any constant where the list has
+the out-of-memory report's address; and the exit call in front of a trap
+when it names the imported `proc_exit`. Any other difference refuses the
+module, and so does an anchor file with an `rcfns` line and no `proved`
+line. That check is fast, unverified Rust, and it compares. What is PROVED
+of the shipped bytes: `proofs/StructuralShipped.v` defines decoders for the
+shipped forms (an index is bound and reported in its role instead of
+compared with a constant; `i32.const 1; call x; unreachable` is read as the
+trap; a function or global index is read as the LEB128 number it is) and
+proves that, for every index, the shipped forms decode to the same trees as
+the emitted lists. `proofs/structural-wall.sh` then has the Rocq kernel
+check, for every artifact it judges, that the artifact's own bytes decode to
+those trees with one global in the `$line_end` role in `$inc` and
+`$dec_flat`, `$dec_flat` freeing through the function whose bytes decode as
+`$free`, and every inserted exit call naming the `proc_exit` import
+(`proofs/check-shipped-routines.sh`). The realization theorems therefore
+reach the bytes that ship, for the artifacts the wall judges. Writing those
+decoders exposed a fault in `StructuralDecode.v`'s own: its allocation
+decoder spelled the constant tested after `memory.grow` with the
+out-of-memory address parameter. The emitter writes 0 there, and the two
+agree only at the probe address 0, so that decoder read the emitter's dump
+and no real program's `$alloc`. It is corrected, and the body at address
+1024 is a theorem. TRUSTED: what the imported `proc_exit` does before the
+trap that still follows it (control cannot continue past the `unreachable`,
+but a host function runs with the exported memory in reach, and the trees do
+not model it); that the globals bound in the `$line_end` and bump-frontier
+roles hold what the model says they hold (a naming, as indices 3 and 1
+were); `tokens`, the instruction tokenizer the shipped-form decoders read
+through; and the two passes' effect on every function no located event
+names (a located event is carried through the transform's map and held to
+the instruction it then names, so a wrong relocation fails the anchor check;
+code no event names is not looked at).
+The direct component routes (`to_p2`, `to_p3`, `to_p3_service`) run their
+own transforms; what those do to the four routines has not been measured.
+
 **The native leg (#4006).** For the programs the verified native renderer
 renders (the grow-only `proofs/native-verified-floor.txt` subset of
 `spec/wasm_cross`), `proofs/native-wall.sh` judges per build the ownership
