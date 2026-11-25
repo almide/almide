@@ -1,0 +1,58 @@
+name: Probe — the kernel's window check on the byte-level check's own test modules
+# A one-off measurement on its own branch. The byte-level check's tests hold
+# hand-written modules, among them the ones that reproduce the acceptances it
+# once gave wrongly. This job dumps every module those tests decode and asks
+# the Rocq kernel (proofs/GuardWindow.v, `window_ok`) about every byte range
+# of every function body in them. Not a gate.
+on:
+  push:
+    branches: [probe/unsound-inputs]
+
+permissions:
+  contents: read
+
+jobs:
+  ranges:
+    name: Every byte range of the test modules, judged by the kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Build the cutter
+        run: cargo build -q --release --locked -p almide-anchor-check
+      - name: Measure
+        run: bash scripts/probe-unsound-inputs.sh "$RUNNER_TEMP/unsound"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsound-inputs
+          path: |
+            ${{ runner.temp }}/unsound/unsound-inputs.tsv
+            ${{ runner.temp }}/unsound/accepted.tsv
+            ${{ runner.temp }}/unsound/summary.txt
+            ${{ runner.temp }}/unsound/tests.log
+            ${{ runner.temp }}/unsound/modules
+            ${{ runner.temp }}/unsound/cut
+            ${{ runner.temp }}/unsound/Loops.v
+            ${{ runner.temp }}/unsound/Loops.out
+          retention-days: 30

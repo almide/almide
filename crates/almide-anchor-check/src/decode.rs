@@ -65,8 +65,22 @@ pub struct Body<'a> {
 pub(crate) const UNCLASSIFIED_PROPOSALS: WasmFeatures =
     WasmFeatures::GC.union(WasmFeatures::LEGACY_EXCEPTIONS).union(WasmFeatures::STACK_SWITCHING);
 
+/// Probe only: with `PROBE_DUMP_DIR` set, every module handed to `decode` is
+/// written there, named after the test binary, the thread (a test's name)
+/// and a counter.
+fn probe_dump(bytes: &[u8]) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let Ok(dir) = std::env::var("PROBE_DUMP_DIR") else { return };
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let clean = |s: &str| -> String { s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '-' }).collect() };
+    let exe = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
+    let thread = std::thread::current();
+    let _ = std::fs::write(format!("{dir}/{}.{}.{n:05}.wasm", clean(&exe), clean(thread.name().unwrap_or("unnamed"))), bytes);
+}
+
 /// Every defined function of `bytes`, validated, in position order.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
+    probe_dump(bytes);
     // Every proposal but the unclassified ones (#4854) and the threads ones:
     // no check follows an atomic access (a store of a block's count word
     // among them), so a module that holds one does not validate here and is
