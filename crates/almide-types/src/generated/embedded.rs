@@ -11834,8 +11834,7 @@ fn __hs_owned(k: String) -> Bool = list.contains(
 
 
 
-fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
-  pairs + [("X-Content-Type-Options", "nosniff")]
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 
