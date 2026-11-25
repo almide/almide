@@ -2,7 +2,7 @@ name: Probe — replayed memory bugs against the static checkers
 # A one-off measurement on its own branch. Not a gate.
 on:
   push:
-    branches: [probe/replay-history, probe/replay-both]
+    branches: [probe/replay-nonrc]
 
 permissions:
   contents: read
@@ -16,17 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - 2133-variant-case-payload-without-share
-          - 2133-variant-case-payload-without-share.record-dropped
-          - 2133-variant-case-payload-without-share.record-moved
-          - 2397-fused-fold-borrowed-result
-          - 2397-fused-fold-borrowed-result.record-dropped
-          - 2397-fused-fold-borrowed-result.record-owned
-          - 2398-list-update-borrowed-result
-          - 2398-list-update-borrowed-result.record-dropped
-          - 2398-list-update-borrowed-result.record-owned
-          - 3538-payload-copy-without-credit
-          - 3538-payload-copy-without-credit.record-kept
+          - 2395-value-keys-without-tag-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir

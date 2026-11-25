@@ -1,0 +1,18 @@
+diff --git a/crates/almide-wasm/src/value_helpers.rs b/crates/almide-wasm/src/value_helpers.rs
+index 4cfe2ad310..3b6888d3c1 100644
+--- a/crates/almide-wasm/src/value_helpers.rs
++++ b/crates/almide-wasm/src/value_helpers.rs
+@@ -164,13 +164,6 @@ pub(crate) fn emit_value_keys_helper() -> Function {
+     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+     let mut f = Function::new([(4, ValType::I32)]);
+     let mut i = f.instructions();
+-    i.local_get(v)
+-        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+-        .i32_const(VT_OBJECT)
+-        .i32_ne()
+-        .if_(BlockType::Empty);
+-    i.i32_const(0).call(F_ALLOC).return_();
+-    i.end();
+     i.local_get(v).i32_load(m_pay).local_set(v); // pairs list
+     i.local_get(v).i32_load(len_memarg()).call(F_ALLOC).local_set(dst);
+     i.local_get(v).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
