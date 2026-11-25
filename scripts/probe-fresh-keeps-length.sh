@@ -23,8 +23,13 @@ n=0; bad=0
 while IFS= read -r f; do
   case "$f" in ''|'#'*) continue ;; esac
   n=$((n + 1))
+  # The module is the one the ordinary build command writes; the producer is
+  # given it and writes the anchor file beside its bundle.
+  if ! "$TD/almide" build "$f" --target wasm -o "$OUT/m.wasm" > "$OUT/m.err" 2>&1; then
+    bad=$((bad + 1)); [ "$bad" -gt 5 ] || { echo "the build refused $f: $(head -n 1 "$OUT/m.err" | cut -c1-200)"; }; continue
+  fi
   if ! "$PRODUCER" "$f" --artifact "$OUT/m.wasm" --anchors "$OUT/m.anchors" > "$OUT/m.bundle" 2> "$OUT/m.err"; then
-    bad=$((bad + 1)); echo "the producer refused $f"; continue
+    bad=$((bad + 1)); [ "$bad" -gt 5 ] || { echo "the producer refused $f: $(head -n 1 "$OUT/m.err" | cut -c1-200)"; }; continue
   fi
   printf 'MODULE %s\n' "$f" >> "$OUT/fresh-dump"
   "$ANCHORCHECK" --fresh "$OUT/m.wasm" "$OUT/m.anchors" >> "$OUT/fresh-dump" 2>> "$OUT/fresh.err" || { bad=$((bad + 1)); echo "the cutter failed on $f"; }

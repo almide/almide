@@ -36,6 +36,7 @@ jobs:
           echo "$BIN" >> "$GITHUB_PATH"
       - name: Build the producer and the cutter
         run: |
+          cargo build -q --release --locked --bin almide
           cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
           cargo build -q --release --locked -p almide-anchor-check
       - name: Measure
