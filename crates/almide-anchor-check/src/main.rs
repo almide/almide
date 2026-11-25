@@ -340,6 +340,27 @@ fn main() {
         }
     }
     if census {
+        if let (Ok(bodies), Ok((_, _, _, _, _, rc))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
+            let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
+            let inc = rc.and_then(|r| r.0);
+            for l in almide_anchor_check::loop_windows(&w, &bodies, &a, inc) {
+                println!(
+                    "LOOPHEX {} {} {} {} {} | {} | {} | {} | {} | {}",
+                    l.func,
+                    l.access,
+                    inc.unwrap_or(u32::MAX),
+                    u8::from(l.write),
+                    l.located,
+                    hex(&l.hold),
+                    hex(&l.pre),
+                    hex(&l.mid),
+                    hex(&l.ht),
+                    hex(&l.rest)
+                );
+            }
+        }
+    }
+    if census {
         if let (Ok(bodies), Ok((alloc, ..))) = (almide_anchor_check::decode(&w), almide_anchor_check::parse_anchors_held(&a)) {
             for (func, n) in almide_anchor_check::census_fresh(&bodies, alloc) {
                 println!("FRESHFN {func} {}", n.map(|x| x.to_string()).join(" "));
