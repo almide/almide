@@ -31,6 +31,8 @@
 // code below is not in this module and is linted normally.
 #[allow(dead_code, clippy::all, clippy::pedantic)]
 mod runtime_random {
+    // ADR-0037: the list type the runtime ships, not a stand-in.
+    use almide_str::AlmideList;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"

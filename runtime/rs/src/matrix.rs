@@ -9,18 +9,18 @@
 pub struct AlmideMatrix {
     pub rows: usize,
     pub cols: usize,
-    pub data: Vec<f64>, // row-major, length rows*cols
+    pub data: std::vec::Vec<f64>, // row-major, length rows*cols
 }
 
 #[inline]
-pub fn mk(rows: usize, cols: usize, data: Vec<f64>) -> AlmideMatrix {
+pub fn mk(rows: usize, cols: usize, data: std::vec::Vec<f64>) -> AlmideMatrix {
     debug_assert_eq!(data.len(), rows * cols);
     AlmideMatrix { rows, cols, data }
 }
 
 impl AlmideMatrix {
     #[inline]
-    pub fn len(&self) -> usize { self.rows } // row count (matches old Vec<Vec<>> semantics)
+    pub fn len(&self) -> usize { self.rows } // row count (matches old AlmideList<AlmideList<>> semantics)
     #[inline]
     pub fn is_empty(&self) -> bool { self.rows == 0 }
     /// The rows, in order — exactly `rows` of them. NOT `data.chunks(cols)`:
@@ -51,19 +51,31 @@ impl std::ops::IndexMut<usize> for AlmideMatrix {
     }
 }
 
-// `(0..rows).map(|r| (0..cols).map(..).collect::<Vec<f64>>()).collect()` keeps working.
-impl FromIterator<Vec<f64>> for AlmideMatrix {
-    fn from_iter<I: IntoIterator<Item = Vec<f64>>>(iter: I) -> Self {
-        let rows: Vec<Vec<f64>> = iter.into_iter().collect();
+// `vec![vec![x; cols]; rows].into()` keeps working. Rows collect through
+// the std-Vec `FromIterator` below only: a second `FromIterator` over
+// `AlmideList<f64>` rows makes every untyped inner `.collect()` ambiguous
+// (E0283), in this runtime and in host code alike.
+impl From<AlmideList<AlmideList<f64>>> for AlmideMatrix {
+    fn from(v: AlmideList<AlmideList<f64>>) -> Self {
+        let r = v.len();
+        let c = if r > 0 { v[0].len() } else { 0 };
+        mk(r, c, v.iter().flat_map(|row| row.iter().copied()).collect())
+    }
+}
+
+// The host's rows (ADR-0037 ruling (A): a host builds a matrix from std
+// vectors, as the documented ABI says).
+impl FromIterator<std::vec::Vec<f64>> for AlmideMatrix {
+    fn from_iter<I: IntoIterator<Item = std::vec::Vec<f64>>>(iter: I) -> Self {
+        let rows: std::vec::Vec<std::vec::Vec<f64>> = iter.into_iter().collect();
         let r = rows.len();
         let c = if r > 0 { rows[0].len() } else { 0 };
         mk(r, c, rows.into_iter().flatten().collect())
     }
 }
 
-// `vec![vec![x; cols]; rows].into()` keeps working.
-impl From<Vec<Vec<f64>>> for AlmideMatrix {
-    fn from(v: Vec<Vec<f64>>) -> Self {
+impl From<std::vec::Vec<std::vec::Vec<f64>>> for AlmideMatrix {
+    fn from(v: std::vec::Vec<std::vec::Vec<f64>>) -> Self {
         v.into_iter().collect()
     }
 }
@@ -146,7 +158,7 @@ pub fn almide_rt_matrix_shape_eq(a: usize, b: usize) {
 /// exit 101) while the wasm leg, a list of rows with no shape invariant, built
 /// the ragged value and read on. C-282 already stated that no public
 /// constructor builds a ragged matrix; this is the guard that makes it so.
-pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
+pub fn almide_rt_matrix_rows_uniform(rows: &[AlmideList<f64>]) {
     if let Some(first) = rows.first() {
         if rows.iter().any(|r| r.len() != first.len()) {
             almide_abort("matrix rows must have equal length");
@@ -161,13 +173,13 @@ pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     // r == 0, and (0, i64::MAX) passes the dims guard with zero elements —
     // the eager row was a raw capacity-overflow panic where the wasm leg
     // answered the empty matrix.
-    (0..r).map(|_| vec![0.0; c]).collect::<Vec<_>>().into()
+    (0..r).map(|_| almide_list![0.0; c]).collect::<AlmideList<_>>().into()
 }
 
 pub fn almide_rt_matrix_ones(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     // Row-lazy, same as `zeros` — see the note there.
-    (0..r).map(|_| vec![1.0; c]).collect::<Vec<_>>().into()
+    (0..r).map(|_| almide_list![1.0; c]).collect::<AlmideList<_>>().into()
 }
 
 pub fn almide_rt_matrix_shape(m: &AlmideMatrix) -> (i64, i64) {
@@ -215,19 +227,19 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
     // permutation for all inputs. This is the flat ABI win — the kernel reads
     // m.data straight, no copy.
     if m.rows == 0 || m.cols == 0 {
-        return mk(0, 0, vec![]);
+        return mk(0, 0, ::std::vec::Vec::new());
     }
-    let mut out = vec![0.0f64; m.rows * m.cols];
+    let mut out = ::std::vec![0.0f64; m.rows * m.cols];
     almide_kernel::transpose_f64::transpose_matrix_f64(&m.data, m.rows, m.cols, &mut out);
     mk(m.cols, m.rows, out) // transposed shape is cols × rows
 }
 
-pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_lists(rows: &[AlmideList<f64>]) -> AlmideMatrix {
     almide_rt_matrix_rows_uniform(rows);
-    rows.to_vec().into()
+    AlmideList::from(rows).into()
 }
 
-pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
+pub fn almide_rt_matrix_from_bytes_f32_le(data: &AlmideList<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // #1503: a negative dimension clamps to the empty matrix (the C-034 /
     // C-161 rule the constructors already follow) and a negative offset is
     // out of bounds by definition — the raw `as usize` casts turned either
@@ -239,11 +251,11 @@ pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64
     if !almide_rt_matrix_window_fits(data.len(), offset, need) {
         return None;
     }
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
+    let mut result: AlmideList<AlmideList<f64>> = AlmideList::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
-        let mut row: Vec<f64> = Vec::with_capacity(c);
+        let mut row: AlmideList<f64> = AlmideList::with_capacity(c);
         let row_base = i * c * 4;
         for j in 0..c {
             let p = row_base + j * 4;
@@ -255,7 +267,7 @@ pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64
     Some(result.into())
 }
 
-pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
+pub fn almide_rt_matrix_from_bytes_f16_le(data: &AlmideList<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // IEEE-754 half-precision → f32 → f64, inlined to keep the matrix.rs
     // file a single contiguous block of `pub fn almide_rt_matrix_*` functions
     // (simplifies the runtime-stripping logic in src/cli/mod.rs).
@@ -270,11 +282,11 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
     if !almide_rt_matrix_window_fits(data.len(), offset, need) {
         return None;
     }
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
+    let mut result: AlmideList<AlmideList<f64>> = AlmideList::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
-        let mut row: Vec<f64> = Vec::with_capacity(c);
+        let mut row: AlmideList<f64> = AlmideList::with_capacity(c);
         let row_base = i * c * 2;
         for j in 0..c {
             let p = row_base + j * 2;
@@ -304,8 +316,8 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
     Some(result.into())
 }
 
-pub fn almide_rt_matrix_to_lists(m: &AlmideMatrix) -> Vec<Vec<f64>> {
-    m.iter().map(|r| r.to_vec()).collect()
+pub fn almide_rt_matrix_to_lists(m: &AlmideMatrix) -> AlmideList<AlmideList<f64>> {
+    m.iter().map(|r| AlmideList::from(r)).collect()
 }
 
 pub fn almide_rt_matrix_add(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
@@ -344,13 +356,13 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     let k = if m == 0 { 0 } else { a.cols };
     let n = if b.rows == 0 { 0 } else { b.cols };
     if m == 0 || k == 0 || n == 0 {
-        return mk(m, n, vec![0.0f64; m * n]);
+        return mk(m, n, ::std::vec![0.0f64; m * n]);
     }
     // #2481: the inner dimension is a precondition, not a clamp — `b` was
     // indexed as if it had `k` rows (a raw slice panic past its data) while
     // the wasm body summed over `min(k, rows(b))` and printed a product.
     almide_rt_matrix_shape_eq(k, b.rows);
-    let mut out = vec![0.0f64; m * n];
+    let mut out = ::std::vec![0.0f64; m * n];
     almide_kernel::matmul::matmul(&a.data, m, k, &b.data, n, &mut out);
     mk(m, n, out)
 }
@@ -393,13 +405,13 @@ pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &[f64]) -> Alm
     m.iter().map(|row| row.iter().zip(bias.iter()).map(|(x, b)| x + b).collect()).collect()
 }
 
-pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
+pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> AlmideList<AlmideMatrix> {
     // #2480: a part count of 0 or less is the EMPTY list, the same answer
     // `n == 0` has always had here and on the self-hosted leg (the C-034
     // signed-clamp reading: a negative count is no parts). Cast raw, -1
     // became 18446744073709551615 parts and the collect died in a raw
     // `capacity overflow` panic (exit 101) where wasm printed 0.
-    if m.is_empty() || n <= 0 { return vec![].into(); }
+    if m.is_empty() || n <= 0 { return almide_list![].into(); }
     // #4914, C-161: the result holds n parts of rows(m) rows each, so the
     // part count is a row count — n x rows(m) row slots take the shared
     // ceiling (tested by division), or a huge n allocated gigabytes natively
@@ -414,14 +426,14 @@ pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideM
     (0..n).map(|h| {
         let start = h * chunk;
         let end = start + chunk;
-        m.iter().map(|row| row[start..end].to_vec()).collect::<Vec<Vec<f64>>>().into()
+        m.iter().map(|row| AlmideList::from(&row[start..end])).collect::<AlmideList<AlmideList<f64>>>().into()
     }).collect()
 }
 
 pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMatrix {
-    if matrices.is_empty() { return vec![].into(); }
+    if matrices.is_empty() { return almide_list![].into(); }
     let rows = matrices[0].len();
-    if rows == 0 { return vec![vec![]].into(); }
+    if rows == 0 { return almide_list![almide_list![]].into(); }
     // #2482: every NON-EMPTY member must have the first member's row count —
     // a member with fewer rows left the output ragged (the flat store's
     // assertion panic) while the wasm leg built the ragged value; a member
@@ -434,7 +446,7 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     }
     let total_cols: usize = matrices.iter().map(|m| if m.is_empty() { 0 } else { m[0].len() }).sum();
     (0..rows).map(|r| {
-        let mut row = Vec::with_capacity(total_cols);
+        let mut row = std::vec::Vec::with_capacity(total_cols);
         for m in matrices {
             if !m.is_empty() {
                 row.extend_from_slice(&m[r]);
@@ -455,7 +467,7 @@ pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> Al
     let len = m.len();
     let e = (end.max(0) as u64).min(len as u64) as usize;
     let s = (start.max(0) as u64).min(len as u64) as usize;
-    if s >= e { return vec![].into(); }
+    if s >= e { return almide_list![].into(); }
     mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 

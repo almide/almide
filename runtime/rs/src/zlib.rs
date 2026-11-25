@@ -8,94 +8,94 @@ use std::io::Read as _;
 
 // ── Zlib (with header) ──
 
-pub fn almide_rt_zlib_compress(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_compress(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
     almide_rt_zlib_compress_level(data, 6)
 }
 
-pub fn almide_rt_zlib_compress_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
-    let __almide_r: Result<Vec<u8>, String> = (|| {
+pub fn almide_rt_zlib_compress_level(data: &[u8], level: i64) -> Result<AlmideList<u8>, AlmideString> {
+    let __almide_r: Result<std::vec::Vec<u8>, String> = (|| {
         let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
         let mut encoder = flate2::read::ZlibEncoder::new(data, lvl);
-        let mut out = Vec::new();
+        let mut out = std::vec::Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.compress: {}", e))?;
         Ok(out)
     })();
-    __almide_r.map_err(Into::into)
+    __almide_r.map(AlmideList::from).map_err(Into::into)
 }
 
-pub fn almide_rt_zlib_decompress(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
-    zlib_decode(data, ZLIB_DEFAULT_MAX).map_err(|e| zlib_decode_err("zlib.decompress", e))
+pub fn almide_rt_zlib_decompress(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
+    zlib_decode(data, ZLIB_DEFAULT_MAX).map(AlmideList::from).map_err(|e| zlib_decode_err("zlib.decompress", e))
 }
 
 /// `decompress` with the output bound `max_len` in place of the default 256 MiB
 /// (R-zlib-04); `max_len <= 0` aborts.
-pub fn almide_rt_zlib_decompress_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_decompress_max(data: &[u8], max_len: i64) -> Result<AlmideList<u8>, AlmideString> {
     let max = zlib_checked_max("decompress_max", max_len);
-    zlib_decode(data, max).map_err(|e| zlib_decode_err("zlib.decompress", e))
+    zlib_decode(data, max).map(AlmideList::from).map_err(|e| zlib_decode_err("zlib.decompress", e))
 }
 
 // ── Deflate (raw, no header — used by Minecraft) ──
 
-pub fn almide_rt_zlib_deflate(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_deflate(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
     almide_rt_zlib_deflate_level(data, 6)
 }
 
-pub fn almide_rt_zlib_deflate_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
-    let __almide_r: Result<Vec<u8>, String> = (|| {
+pub fn almide_rt_zlib_deflate_level(data: &[u8], level: i64) -> Result<AlmideList<u8>, AlmideString> {
+    let __almide_r: Result<std::vec::Vec<u8>, String> = (|| {
         let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
         let mut encoder = flate2::read::DeflateEncoder::new(data, lvl);
-        let mut out = Vec::new();
+        let mut out = std::vec::Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.deflate: {}", e))?;
         Ok(out)
     })();
-    __almide_r.map_err(Into::into)
+    __almide_r.map(AlmideList::from).map_err(Into::into)
 }
 
-pub fn almide_rt_zlib_inflate(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_inflate(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
     zlib_inflate_capped(data, ZLIB_DEFAULT_MAX)
 }
 
 /// `inflate` with the output bound `max_len` (R-zlib-04); `max_len <= 0` aborts.
-pub fn almide_rt_zlib_inflate_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_inflate_max(data: &[u8], max_len: i64) -> Result<AlmideList<u8>, AlmideString> {
     zlib_inflate_capped(data, zlib_checked_max("inflate_max", max_len))
 }
 
 /// A raw DEFLATE stream is the whole input: a byte after its final block is
 /// `trailing data after stream`, as a byte after a gzip member is refused (#4268).
-fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<Vec<u8>, AlmideString> {
-    let mut out = Vec::new();
+fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<AlmideList<u8>, AlmideString> {
+    let mut out = std::vec::Vec::new();
     match zlib_raw_inflate(data, 0, &mut out, max) {
         Ok(after) if after < data.len() => Err(zlib_decode_err("zlib.inflate", ZLIB_TRAILING.into())),
-        Ok(_) => Ok(out),
+        Ok(_) => Ok(AlmideList::from(out)),
         Err(e) => Err(zlib_decode_err("zlib.inflate", e)),
     }
 }
 
 // ── Gzip ──
 
-pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
-    let __almide_r: Result<Vec<u8>, String> = (|| {
+pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
+    let __almide_r: Result<std::vec::Vec<u8>, String> = (|| {
         let mut encoder = flate2::read::GzEncoder::new(data, flate2::Compression::default());
-        let mut out = Vec::new();
+        let mut out = std::vec::Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.gzip: {}", e))?;
         Ok(out)
     })();
-    __almide_r.map_err(Into::into)
+    __almide_r.map(AlmideList::from).map_err(Into::into)
 }
 
 /// Empty input is `unexpected end of file` on every leg (#2478): a gzip file
 /// has at least one member.
-pub fn almide_rt_zlib_gunzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
-    gzip_decode(data, ZLIB_DEFAULT_MAX).map_err(|e| zlib_decode_err("zlib.gunzip", e))
+pub fn almide_rt_zlib_gunzip(data: &[u8]) -> Result<AlmideList<u8>, AlmideString> {
+    gzip_decode(data, ZLIB_DEFAULT_MAX).map(AlmideList::from).map_err(|e| zlib_decode_err("zlib.gunzip", e))
 }
 
 /// `gunzip` with the output bound `max_len` (R-zlib-04); `max_len <= 0` aborts.
-pub fn almide_rt_zlib_gunzip_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+pub fn almide_rt_zlib_gunzip_max(data: &[u8], max_len: i64) -> Result<AlmideList<u8>, AlmideString> {
     let max = zlib_checked_max("gunzip_max", max_len);
-    gzip_decode(data, max).map_err(|e| zlib_decode_err("zlib.gunzip", e))
+    gzip_decode(data, max).map(AlmideList::from).map_err(|e| zlib_decode_err("zlib.gunzip", e))
 }
 
 // ── Decoding: one canonical failure set on every leg (C-331) ──
@@ -164,10 +164,10 @@ fn zlib_checked_max(func: &str, max_len: i64) -> u64 {
 /// symbol by symbol: the inflater is never handed room past `max` + 1 bytes,
 /// so a failure it meets before the bound is that failure, and output that
 /// fills the room exceeds the bound. `out` holds at most `max` + 1 bytes.
-fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> Result<usize, ZlibDecodeError> {
+fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut std::vec::Vec<u8>, max: u64) -> Result<usize, ZlibDecodeError> {
     let input = data.get(start..).unwrap_or(&[]);
     let room = max.saturating_sub(out.len() as u64).saturating_add(1);
-    let mut buf = vec![0u8; room.min(64 * 1024) as usize];
+    let mut buf = ::std::vec![0u8; room.min(64 * 1024) as usize];
     let mut inf = miniz_oxide::inflate::core::DecompressorOxide::new();
     let (mut in_pos, mut out_pos) = (0usize, 0usize);
     loop {
@@ -248,11 +248,11 @@ fn gzip_header_end(data: &[u8], pos: usize) -> Result<usize, &'static str> {
 }
 
 /// gzip members back to back, each checked against its CRC-32 and ISIZE.
-fn gzip_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
+fn gzip_decode(data: &[u8], max: u64) -> Result<std::vec::Vec<u8>, ZlibDecodeError> {
     if data.is_empty() {
         return Err(ZLIB_EOF.into());
     }
-    let mut out = Vec::new();
+    let mut out = std::vec::Vec::new();
     let mut pos = 0;
     while pos < data.len() {
         let start = gzip_header_end(data, pos)?;
@@ -283,7 +283,7 @@ fn zlib_adler32(bytes: &[u8]) -> u32 {
 
 /// The zlib container: CMF FLG, the DEFLATE stream, a big-endian Adler-32, and
 /// nothing after it (#4268).
-fn zlib_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
+fn zlib_decode(data: &[u8], max: u64) -> Result<std::vec::Vec<u8>, ZlibDecodeError> {
     if data.len() < 2 {
         return Err(ZLIB_EOF.into());
     }
@@ -294,7 +294,7 @@ fn zlib_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
     if flg & 32 != 0 {
         return Err(ZLIB_PRESET_DICT.into());
     }
-    let mut out = Vec::new();
+    let mut out = std::vec::Vec::new();
     let after = zlib_raw_inflate(data, 2, &mut out, max)?;
     if after + 4 > data.len() {
         return Err(ZLIB_EOF.into());

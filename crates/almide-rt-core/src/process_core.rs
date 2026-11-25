@@ -145,9 +145,9 @@ pub fn almide_proc_exec_status_timeout(
     // #4918: `Builder::spawn` answers a refused thread as an err (it never
     // is natively; wasm32-wasip1 refuses the Command spawn above first), so
     // no path here aborts the way `thread::spawn`'s unwrap would.
-    fn drain<R: std::io::Read + Send + 'static>(r: Option<R>) -> std::io::Result<std::thread::JoinHandle<Vec<u8>>> {
+    fn drain<R: std::io::Read + Send + 'static>(r: Option<R>) -> std::io::Result<std::thread::JoinHandle<std::vec::Vec<u8>>> {
         std::thread::Builder::new().spawn(move || {
-            let mut buf = Vec::new();
+            let mut buf = std::vec::Vec::new();
             if let Some(mut r) = r {
                 let _ = r.read_to_end(&mut buf);
             }
@@ -327,7 +327,7 @@ pub fn almide_proc_signal_windows(pid: i32, sig: i32) -> Result<(), i32> {
 /// tree. A pid leaves the set when its child is reported, or when a new
 /// child is started with it (a reused pid).
 #[cfg(windows)]
-static ALMIDE_PROC_KILLED: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+static ALMIDE_PROC_KILLED: std::sync::Mutex<std::vec::Vec<u32>> = std::sync::Mutex::new(std::vec::Vec::new());
 
 #[cfg(windows)]
 pub fn almide_proc_mark_killed(pid: u32) {
@@ -377,9 +377,9 @@ fn almide_proc_child_code(pid: u32, status: Option<std::process::ExitStatus>) ->
 /// A captured child and what it has written so far.
 pub struct AlmideProcChild {
     child: std::process::Child,
-    out: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
-    err: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
-    pumps: Vec<std::thread::JoinHandle<()>>,
+    out: std::sync::Arc<std::sync::Mutex<std::vec::Vec<u8>>>,
+    err: std::sync::Arc<std::sync::Mutex<std::vec::Vec<u8>>>,
+    pumps: std::vec::Vec<std::thread::JoinHandle<()>>,
     deadline: Option<std::time::Instant>,
     timeout_ms: i64,
     exited: Option<std::process::ExitStatus>,
@@ -395,7 +395,7 @@ pub struct AlmideProcChild {
 /// is an err (#4918: `Builder::spawn`, never `thread::spawn`'s unwrap).
 fn almide_proc_pump<R: std::io::Read + Send + 'static>(
     r: Option<R>,
-    buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    buf: std::sync::Arc<std::sync::Mutex<std::vec::Vec<u8>>>,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     std::thread::Builder::new().spawn(move || {
         let Some(mut r) = r else { return };
@@ -440,10 +440,10 @@ impl AlmideProcChild {
         let mut child = command.spawn().map_err(|e| almide_proc_call_err(call, &operand, e))?;
         // A pid an earlier child ended with is this new child's now.
         almide_proc_take_killed(child.id());
-        let out = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let err = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let out = std::sync::Arc::new(std::sync::Mutex::new(std::vec::Vec::new()));
+        let err = std::sync::Arc::new(std::sync::Mutex::new(std::vec::Vec::new()));
         let pumps = almide_proc_pump(child.stdout.take(), out.clone())
-            .and_then(|o| almide_proc_pump(child.stderr.take(), err.clone()).map(|e| vec![o, e]));
+            .and_then(|o| almide_proc_pump(child.stderr.take(), err.clone()).map(|e| ::std::vec![o, e]));
         let pumps = match pumps {
             Ok(p) => p,
             Err(e) => {
@@ -465,7 +465,7 @@ impl AlmideProcChild {
         self.child.id() as i64
     }
 
-    fn text(buf: &std::sync::Mutex<Vec<u8>>) -> String {
+    fn text(buf: &std::sync::Mutex<std::vec::Vec<u8>>) -> String {
         String::from_utf8_lossy(&buf.lock().unwrap_or_else(|p| p.into_inner())).to_string()
     }
 
@@ -631,9 +631,9 @@ pub fn almide_proc_run_cmd(cmd: &str, args: &[impl AsRef<str>], dir: &str, stdin
 }
 
 /// The children `process.start` made, by handle (their slot). Process-wide.
-pub fn almide_proc_handles() -> &'static std::sync::Mutex<Vec<Option<AlmideProcChild>>> {
-    static HANDLES: std::sync::OnceLock<std::sync::Mutex<Vec<Option<AlmideProcChild>>>> = std::sync::OnceLock::new();
-    HANDLES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+pub fn almide_proc_handles() -> &'static std::sync::Mutex<std::vec::Vec<Option<AlmideProcChild>>> {
+    static HANDLES: std::sync::OnceLock<std::sync::Mutex<std::vec::Vec<Option<AlmideProcChild>>>> = std::sync::OnceLock::new();
+    HANDLES.get_or_init(|| std::sync::Mutex::new(std::vec::Vec::new()))
 }
 
 /// Run `f` on the child behind handle `h`.

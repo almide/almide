@@ -116,7 +116,7 @@ fn render_alloc(
         )));
     }
     let (v, n) = (var(dst), var(len));
-    writeln!(out, "{pad}let mut {v}: Vec<u8> = Vec::new();").expect("writing to a String cannot fail");
+    writeln!(out, "{pad}let mut {v}: AlmideList<u8> = AlmideList::new();").expect("writing to a String cannot fail");
     writeln!(out, "{pad}if {n} < 0 || {v}.try_reserve_exact({n} as usize).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }}").expect("writing to a String cannot fail");
     writeln!(out, "{pad}{v}.resize({n} as usize, 0);").expect("writing to a String cannot fail");
     tys.insert(dst, NTy::Rec(i));

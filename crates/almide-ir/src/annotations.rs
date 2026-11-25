@@ -15,6 +15,35 @@ pub enum VarStorage {
 // Module-global storage (Cell / RcRefCell / Const / Lazy) lives in
 // `top_let_storage::TopLetStorage` since §4 — VarStorage is LOCALS-ONLY.
 
+/// How a package fn's host face (the `pub fn` native code calls back, in the
+/// host's std spelling) hands one param to the fn it wraps. Decided by
+/// `HostFacePass` from the param's final borrow mode and type; the walker
+/// spells the conversion it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostFaceParam {
+    /// The host's spelling is the fn's own (a fn value, a `&str`, a type with
+    /// no list inside): passed through unchanged.
+    Direct,
+    /// An owned list of elements the host spells the same: the host `Vec`
+    /// becomes the list without a per-element copy.
+    OwnList,
+    /// Owned: copied from the host shape into the fn's.
+    OwnCopy,
+    /// `&mut`: copied in, lent mutably, copied back into the host's value.
+    MutCopyBack,
+    /// A slice: its elements copied into a local list, lent as a slice.
+    SliceCopy,
+    /// Borrowed: copied into the fn's shape and lent.
+    RefCopy,
+}
+
+/// The key a loop's facts are published under (`CodegenAnnotations::loop_appends`):
+/// the address of the loop's head expression (a `while` condition, a `for`
+/// iterable) in the IR the walker renders. Each head is its own boxed node, so
+/// no two loops share one; the facts are published by the pipeline's last
+/// pass, so no rewrite moves a head between the publication and the render.
+pub type LoopKey = usize;
+
 /// Annotations populated by Nanopass passes, read by the walker.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
@@ -270,6 +299,15 @@ pub struct CodegenAnnotations {
     /// later reader asks the fn's own declaration (`@ordered`, its body)
     /// instead of reconstructing the module from the spelling.
     pub minted_call_symbols: HashMap<almide_base::intern::Sym, (almide_base::intern::Sym, almide_base::intern::Sym)>,
+    /// The list vars a loop appends one element to by a whole statement, each
+    /// with its number of append statements, in order of first append (#4906).
+    /// Published by `LoopAppendersPass` (last of all) for a loop holding no
+    /// closure; the walker gives the first one whose every mention in the
+    /// rendered loop is such an append an appender that keeps its length local.
+    pub loop_appends: HashMap<LoopKey, Vec<(VarId, usize)>>,
+    /// Every fn param's host-face conversion, by var. Published by
+    /// `HostFacePass` from the final param modes; the walker spells it.
+    pub host_face_params: HashMap<VarId, HostFaceParam>,
 }
 
 impl CodegenAnnotations {
@@ -333,6 +371,11 @@ impl CodegenAnnotations {
     /// True if the fan at `span` runs its arms inline (#3459).
     pub fn is_inline_fan(&self, span: Option<almide_base::span::Span>) -> bool {
         span.is_some_and(|s| self.inline_fans.contains(&Self::fan_key(s)))
+    }
+
+    /// The key [`Self::loop_appends`] is indexed by, for the loop headed by `head`.
+    pub fn loop_key(head: &IrExpr) -> LoopKey {
+        head as *const IrExpr as usize
     }
 
     /// Alias-resolved global lookup — the ONLY way stage-2 consumers are

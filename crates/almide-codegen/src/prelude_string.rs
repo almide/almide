@@ -10,10 +10,11 @@
 pub(crate) fn string_prelude(vis: &str) -> String {
     let mut s = String::new();
     s.push_str("#[allow(dead_code, unused_imports)]\n");
-    s.push_str(&format!("{vis}mod almide_str_block {{\n{}\n}}\n", almide_str::SOURCE));
+    // ADR-0037 D6: the list block follows the string block in the same module.
+    s.push_str(&format!("{vis}mod almide_str_block {{\n{}\n{}\n}}\n", almide_str::SOURCE, almide_str::LIST_SOURCE));
     // Only `almide`-prefixed names reach the top level: a user fn of the
     // same name would collide (E0428). The unique view stays in its module.
-    s.push_str(&format!("{vis}use almide_str_block::{{almide_str_mark_reachable, AlmideStr}};\n"));
+    s.push_str(&format!("{vis}use almide_str_block::{{almide_str_mark_reachable, AlmideStr, AlmideList, AlmideToList, AlmideListElem, AlmideListFill, AlmideListFillZeroed, AlmideZeroValid}};\n"));
     s.push_str(&format!("{vis}type AlmideString = AlmideStr;\n"));
     // A runtime function converts what it returns once, at its boundary.
     s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\n"));
@@ -52,7 +53,7 @@ fn shared_thread_boundary(vis: &str) -> String {
 const INTO_IMPLS: &str = "\
 impl AlmideIntoStr for String { type Out = AlmideStr; #[inline(always)] fn into_almide(self) -> AlmideStr { AlmideStr::from(self) } }
 impl AlmideIntoStr for AlmideStr { type Out = AlmideStr; #[inline(always)] fn into_almide(self) -> AlmideStr { self } }
-impl<T: AlmideIntoStr> AlmideIntoStr for Vec<T> { type Out = Vec<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.into_iter().map(AlmideIntoStr::into_almide).collect() } }
+impl<T: AlmideIntoStr + Clone> AlmideIntoStr for AlmideList<T> where T::Out: Clone { type Out = AlmideList<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.into_iter().map(AlmideIntoStr::into_almide).collect() } }
 impl<T: AlmideIntoStr> AlmideIntoStr for Option<T> { type Out = Option<T::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { self.map(AlmideIntoStr::into_almide) } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for Result<A, B> { type Out = Result<A::Out, B::Out>; #[inline(always)] fn into_almide(self) -> Self::Out { match self { Ok(a) => Ok(a.into_almide()), Err(b) => Err(b.into_almide()) } } }
 impl<A: AlmideIntoStr, B: AlmideIntoStr> AlmideIntoStr for (A, B) { type Out = (A::Out, B::Out); #[inline(always)] fn into_almide(self) -> Self::Out { (self.0.into_almide(), self.1.into_almide()) } }

@@ -5,3 +5,6 @@
 # as the program reads clean; the gate fails on a clean row left behind.
 #
 # program<TAB>ratio<TAB>found<TAB>plan
+research/benchmark/perf/v1-shapes/loop_slot_read_then_if.almd	1.039	2026-11-21	ADR-0037 D1: the list length lives in the block header, read once per pass of the loop (+2.5 instructions per iteration); accepted at this value by the owner ruling of 2026-11-21, goes when the length read is hoisted out of the loop
+spec/wasm_cross/fan_arm_stderr_timeline.almd	1.055	2026-11-21	the v1 and v0 renders of the hot loop are the same text; the backend allocates its registers differently (one more instruction per iteration); accepted at this value by the owner ruling of 2026-11-21, goes when the two renders compile to the same loop
+research/benchmark/perf/v1-shapes/collections_inline.almd	1.031	2026-11-21	ADR-0037: measured 1.031 on three cachegrind runs (v1 13451124 / v0 13045250 instructions); accepted at this value by the owner ruling of 2026-11-21, goes when the v1 render of the collection loops reaches the v0 instruction count

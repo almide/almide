@@ -128,7 +128,7 @@ pub(crate) fn fan_glue() -> String {
          fn almide_stdout_is_terminal() -> bool { std::io::IsTerminal::is_terminal(&std::io::stdout()) }\n\
          fn almide_stack_guard_register() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::register();\n}\n\
          fn almide_v1_out(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {\n\
-         \x20   if almide_fan_active() { let mut v: Vec<u8> = Vec::new(); let _ = std::io::Write::write_fmt(&mut v, args); if newline { v.push(b'\\n'); } return almide_out_write(err, &v); }\n\
+         \x20   if almide_fan_active() { let mut v: std::vec::Vec<u8> = std::vec::Vec::new(); let _ = std::io::Write::write_fmt(&mut v, args); if newline { v.push(b'\\n'); } return almide_out_write(err, &v); }\n\
          \x20   if err { let mut e = std::io::stderr().lock(); let _ = std::io::Write::write_fmt(&mut e, args); if newline { let _ = std::io::Write::write_all(&mut e, b\"\\n\"); } }\n\
          \x20   else { let mut o = std::io::stdout().lock(); let _ = std::io::Write::write_fmt(&mut o, args); if newline { let _ = std::io::Write::write_all(&mut o, b\"\\n\"); } }\n\
          }\n\

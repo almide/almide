@@ -41,7 +41,7 @@ fn key_type_ok(i: u16, seen: &mut std::collections::BTreeSet<u16>) -> bool {
     // `NTy::Rec(i)` always names a generated type, as in `key_impl_types`.
     let d = RECS.with(|r| r.borrow()[i as usize].clone());
     if d.alias.is_some() {
-        return d.alias == Some("Vec<u8>");
+        return d.alias == Some("AlmideList<u8>");
     }
     if d.map_of.is_some() || d.set_of.is_some() || d.closure_of.is_some() || d.cell_of.is_some() {
         return false;
@@ -119,7 +119,7 @@ pub(crate) fn key_encode_defs() -> String {
             continue;
         }
         let n = struct_name(i);
-        out.push_str(&format!("impl AlmideKeyEncode for {n} {{\n    fn almide_key_encode(&self, out: &mut Vec<u8>) {{\n"));
+        out.push_str(&format!("impl AlmideKeyEncode for {n} {{\n    fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {{\n"));
         match &d.cases {
             Some(cases) => {
                 out.push_str("        match self {\n");

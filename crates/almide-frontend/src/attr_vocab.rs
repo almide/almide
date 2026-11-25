@@ -40,6 +40,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "borrow_ref",
     // May take over a dying source's storage (crates/almide-types: `reuse`)
     "reuse",
+    // A `@reuse` fn whose result is its reused list with its `Int` param
+    // appended as one element, so a loop that only appends to a list it holds
+    // keeps the length local (crates/almide-mir `render_native_appends`)
+    "appends",
     // A self-hosted body names the stdlib fn it implements (crates/almide-types: `implements`)
     "implements",
     // A representation-specialized self-hosted body (`map.set_skv`) names the

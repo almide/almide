@@ -20,8 +20,28 @@ mod almide_str {
 }
 
 pub use almide_str::{almide_str_mark_reachable, AlmideStr, AlmideStrHeader, AlmideStrStatic, AlmideUniqueStr, AlmideIntText, AlmideIntoStrList, almide_str_list};
-pub use almide_str::AlmideList;
+pub use almide_str::{AlmideList, AlmideListIntoIter, AlmideToList};
+pub use almide_str::{AlmideListElem, AlmideListFill, AlmideListFillZeroed, AlmideZeroValid};
 
 /// The source text of `almide_str.rs`, which every generated native program
 /// splices in as its Almide String.
 pub const SOURCE: &str = include_str!("almide_str.rs");
+
+/// The source text of `almide_list.rs` (ADR-0037), spliced after [`SOURCE`]
+/// once the native renderer spells lists with it.
+pub const LIST_SOURCE: &str = include_str!("almide_list.rs");
+
+/// `almide_list![a, b, c]`, `almide_list![]` and `almide_list![x; n]`: the `vec!` forms, building an `AlmideList`.
+#[macro_export]
+macro_rules! almide_list {
+    () => { $crate::AlmideList::new() };
+    // One block at its final capacity, filled in place; an all-zero element of a type
+    // valid when zeroed allocates it zeroed (AlmideZeroValid).
+    ($x:expr; $n:expr) => {{
+        #[allow(unused_imports)]
+        use $crate::{AlmideListFill as _, AlmideListFillZeroed as _};
+        (&&$crate::AlmideListElem::new($x)).almide_list_fill($n)
+    }};
+    ($($x:expr),+ $(,)?) => { $crate::AlmideList::from([$($x),+]) };
+}
+

@@ -195,9 +195,9 @@ mod type_tests {
         assert_eq!(bind_param(&mut env, &DTy::Bytes, NTy::Vec), None);
         assert_eq!(kind_of(&env, &DTy::Bytes), Some(bytes));
         assert_eq!(rust_agrees(&DTy::Bytes, "&[u8]"), Some(true));
-        assert_eq!(rust_agrees(&DTy::Bytes, "&Vec<u8>"), Some(true));
-        assert_eq!(rust_agrees(&DTy::Bytes, "Vec<u8>"), Some(false));
-        assert_eq!(rust_agrees(&DTy::Bytes, "&mutVec<u8>"), None);
+        assert_eq!(rust_agrees(&DTy::Bytes, "&AlmideList<u8>"), Some(true));
+        assert_eq!(rust_agrees(&DTy::Bytes, "AlmideList<u8>"), Some(false));
+        assert_eq!(rust_agrees(&DTy::Bytes, "&mutAlmideList<u8>"), None);
         assert_eq!(rust_agrees(&DTy::Str, "AlmideString"), Some(false));
         assert_eq!(rust_agrees(&DTy::Str, "&str"), Some(true));
         assert_eq!(rust_agrees(&DTy::Str, "String"), None);

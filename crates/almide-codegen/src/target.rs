@@ -34,6 +34,8 @@ use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_range_counting::RangeCountingVarsPass;
 use super::pass_str_view_rebind::StrViewRebindPass;
+use super::pass_host_faces::HostFacePass;
+use super::pass_loop_appenders::LoopAppendersPass;
 use super::pass_metered_region_delegate::MeteredRegionDelegatePass;
 use super::pass_meter_charge::MeterChargePass;
 use super::pass_egg_saturation::EggSaturationPass;
@@ -251,6 +253,12 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // #4296: which binding arms of a str-view match own their
                 // binder — read off the final arm bodies, so last of all.
                 .add(StrViewRebindPass)
+                // A package fn's host face: how each param crosses it, from
+                // the final param modes — the walker spells the copy.
+                .add(HostFacePass)
+                // #4906: which lists each loop only appends to, keyed by the
+                // loop head's address in the final IR — so last of all.
+                .add(LoopAppendersPass)
         }
 
         Target::Wgsl => Pipeline::new()

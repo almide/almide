@@ -136,7 +136,7 @@ const SIGNATURES: &[(&str, &str)] = &[
     ("sum", "(p: &AlmdRec_x_y<i64, i64>) -> i64"),
     ("tag", "(p: &AlmdRec_n_name<i64, AlmideString>) -> AlmideString"),
     ("mk", "(n: i64) -> AlmdRec_n_name<i64, AlmideString>"),
-    ("nest", "(p: &AlmdRec_at_zs<almide_rt_cb_Pair<i64>, Vec<AlmideString>>) -> i64"),
+    ("nest", "(p: &AlmdRec_at_zs<almide_rt_cb_Pair<i64>, AlmideList<AlmideString>>) -> i64"),
     ("diff", "(p: &almide_rt_cb_Pt) -> i64"),
     ("back", "(n: i64) -> almide_rt_cb_Pt"),
     ("open_box", "(b: &almide_rt_cb_Boxed<AlmideString>) -> AlmideString"),
@@ -182,7 +182,7 @@ pub fn run_all() -> String {
     out.push(almide_rt_cb_0v0_names(&almide_rt_cb_Pair { a: s("x"), b: s("y") }).to_string());
     let t = almide_rt_cb_0v0_tagged(4);
     out.push(format!("{}{:?}", t.tag.as_str(), t.items));
-    out.push(almide_rt_cb_0v0_count(&almide_rt_cb_Bag { tag: s("five!"), items: vec![s("i")] }).to_string());
+    out.push(almide_rt_cb_0v0_count(&almide_rt_cb_Bag { tag: s("five!"), items: vec![s("i")].into() }).to_string());
     out.push(format!("{:?}{:?}", almide_rt_cb_0v0_pick(2), almide_rt_cb_0v0_pick(0)));
     out.push(almide_rt_cb_0v0_side(almide_rt_cb_Either::Right(s("r"))).to_string());
     out.push(format!("{:?}", almide_rt_cb_0v0_pairs(2)));
@@ -190,7 +190,7 @@ pub fn run_all() -> String {
     out.push(almide_rt_cb_0v0_tag(&AlmdRec_n_name { n: 3i64, name: s("nm") }).to_string());
     let m = almide_rt_cb_0v0_mk(5);
     out.push(format!("{}{}", m.name.as_str(), m.n));
-    out.push(almide_rt_cb_0v0_nest(&AlmdRec_at_zs { at: Pi { a: 6, b: 0 }, zs: vec![s("z")] }).to_string());
+    out.push(almide_rt_cb_0v0_nest(&AlmdRec_at_zs { at: Pi { a: 6, b: 0 }, zs: vec![s("z")].into() }).to_string());
     out.push(format!("{}{:?}", almide_rt_cb_0v0_diff(&almide_rt_cb_Pt { px: 10, py: 3 }), almide_rt_cb_0v0_back(7)));
     out.push(almide_rt_cb_0v0_open_box(&almide_rt_cb_Boxed { item: s("it"), n: 1 }).to_string());
     out.join("|")
@@ -319,5 +319,41 @@ fn a_mut_callback_whose_error_arm_carries_nothing_is_refused_by_name_and_still_r
     let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
     assert!(!ok, "a package the native render refuses built its tests:\n{out}{err}");
     assert!(format!("{out}{err}").contains(refusal), "the refusal is not named:\n{out}{err}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+const ROUND_TRIP_MODULE: &str = r#"pub fn greet(name: String) -> String = "hello ${name}"
+pub fn echo(xs: List[Int]) -> List[Int] = xs + [list.len(xs)]
+pub fn names(xs: List[String]) -> List[String] = xs |> list.map((x) => x + "!")
+"#;
+
+/// A host-built `Vec` lent (`&[i64]`) and handed in by value, and the `Vec`
+/// each fn answers read back (ADR-0037 ruling 1: the host keeps std's vector at this boundary).
+const ROUND_TRIP_HOST_RS: &str = r#"use crate::*;
+pub fn run_all() -> String {
+    let xs: Vec<i64> = vec![4, 5];
+    let back: Vec<i64> = almide_rt_cb_0v0_echo(&xs);
+    let ss: Vec<AlmideString> = almide_rt_cb_0v0_names(vec![AlmideString::from("a"), AlmideString::from("b")]);
+    format!("{:?}{}", back, ss.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","))
+}
+"#;
+
+#[test]
+fn a_host_built_vec_passed_in_and_a_list_returned_both_round_trip() {
+    if !available() {
+        return;
+    }
+    let root = package("roundtrip", ROUND_TRIP_MODULE, ROUND_TRIP_HOST_RS);
+    let (ok, emitted, err) = almide(&root, &["src/main.almd", "--target", "rust"]);
+    assert!(ok, "the standard codegen's emission failed:\n{err}");
+    for face in ["pub fn almide_rt_cb_echo(xs: &[i64]) -> Vec<i64> {", "pub fn almide_rt_cb_names(xs: Vec<AlmideString>) -> Vec<AlmideString> {"] {
+        assert!(emitted.contains(face), "the standard codegen's face is not `{face}`");
+    }
+    let (ok, out, err) = almide(&root, &["run", "src/main.almd"]);
+    assert!(ok, "the package did not build and run:\n{err}");
+    assert_eq!(out, "[4, 5, 2]a!,b!\nhello main\n");
+    assert!(!err.contains("walled"), "the native render refused the package:\n{err}");
+    let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
+    assert!(ok, "the package's tests failed on the native lane:\n{out}{err}");
     let _ = std::fs::remove_dir_all(&root);
 }

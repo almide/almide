@@ -49,7 +49,7 @@ fn nested_string_bodies_specialize_the_generic_cell() {
     let rt = std::fs::read_to_string("runtime/rs/src/list.rs").unwrap();
     let core = std::fs::read_to_string("stdlib/value_core.almd").unwrap();
     assert!(list.contains("@intrinsic(\"almide_rt_list_eq_any\")\nfn __eq_any[A](a: List[A], b: List[A]) -> Bool = _"));
-    assert!(rt.contains("pub fn almide_rt_list_eq_any<A: PartialEq>(a: &[A], b: &[A]) -> bool"));
+    assert!(rt.contains("pub fn almide_rt_list_eq_any<A: PartialEq + Clone>(a: &[A], b: &[A]) -> bool"));
     for body in ["list_eq_list_str", "list_eq_opt_str"] {
         assert!(core.contains(&format!("@specializes(\"list.__eq_any\")\nfn {body}(")), "`{body}` does not specialize list.__eq_any");
     }

@@ -64,6 +64,9 @@ jobs:
           fi
           grep -E '^LOSS .*push_swap' drill.log
 
+      - name: Negative control — a time-bound program's dearer pass is still a loss
+        run: bash scripts/check-native-v1-perf-time-bound-negative.sh
+
   small:
     name: Small certified programs do no more work than the standard codegen
     runs-on: ubuntu-latest

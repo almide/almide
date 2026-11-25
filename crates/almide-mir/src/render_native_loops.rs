@@ -242,7 +242,7 @@ fn source_iter(lines: &[String], at: (usize, usize), source: Option<&(String, St
 /// once per element. Rewrites `body` and answers whether it did.
 fn moves_out_of_dying_source(lines: &[String], (s, e): (usize, usize), src: &str, elem: &str, body: &mut [String]) -> bool {
     let owned = (0..s).rev().find_map(|k| let_parts(&lines[k]).filter(|(v, _, _)| *v == src))
-        .is_some_and(|(_, ty, _)| ty == "Vec<AlmideString>" || ty.starts_with("Vec<Vec<"));
+        .is_some_and(|(_, ty, _)| ty == "AlmideList<AlmideString>" || ty.starts_with("AlmideList<AlmideList<"));
     let dies = lines[e + 1..].iter().find(|l| !is_note(l)).is_some_and(|l| l.trim() == format!("drop({src});"));
     let copy = format!("(*{elem}).clone()");
     let at: Vec<usize> = (0..body.len()).filter(|&k| body[k].contains(&copy)).collect();
@@ -341,9 +341,9 @@ fn closure_safe(body: &[&String], body_text: &str) -> bool {
 mod tests {
     use super::iterator_loops;
 
-    const MAP: &str = r#"    let mut v4: Vec<i64> = almd_build(v3);
+    const MAP: &str = r#"    let mut v4: AlmideList<i64> = almd_build(v3);
     let mut v8: i64 = v4.len() as i64;
-    let mut v9: Vec<i64> = { let mut r = Vec::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!("Error: out of memory"); std::process::exit(1); } r };
+    let mut v9: AlmideList<i64> = { let mut r = AlmideList::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!("Error: out of memory"); std::process::exit(1); } r };
     let mut v11: i64 = 0i64;
     let mut v12: i64 = 1i64;
     loop {
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn a_fold_loop_becomes_a_for_over_the_list() {
-        let src = MAP.replace("        v9.push(v21);\n", "        v9 = v21;\n").replace("Vec<i64> = { let mut r = Vec::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); std::process::exit(1); } r }", "i64 = 0i64");
+        let src = MAP.replace("        v9.push(v21);\n", "        v9 = v21;\n").replace("AlmideList<i64> = { let mut r = AlmideList::new(); if r.try_reserve_exact(v8.max(0) as usize).is_err() { eprintln!(\"Error: out of memory\"); std::process::exit(1); } r }", "i64 = 0i64");
         let got = iterator_loops(src);
         assert!(got.contains("for (v11, __e_v11) in v4.iter().enumerate() {"), "{got}");
         assert!(got.contains("        v9 = v21;"), "{got}");
@@ -402,9 +402,9 @@ mod tests {
     }
 
     /// A filter over a list of strings dropped right after the loop.
-    const FILTER: &str = r#"    let mut v4: Vec<AlmideString> = almd_build(v3);
+    const FILTER: &str = r#"    let mut v4: AlmideList<AlmideString> = almd_build(v3);
     let mut v8: i64 = v4.len() as i64;
-    let mut v9: Vec<AlmideString> = (0..v8.max(0)).map(|_| AlmideString::new()).collect();
+    let mut v9: AlmideList<AlmideString> = (0..v8.max(0)).map(|_| AlmideString::new()).collect();
     let mut v10: i64 = 0i64;
     let mut v11: i64 = 0i64;
     let mut v12: i64 = 1i64;
@@ -441,7 +441,7 @@ mod tests {
         for src in [
             FILTER.replace("            v10 = v10.wrapping_add(v12);\n", "            v10 = v10.wrapping_add(v12);\n            let mut v19: i64 = rt_string_eq(v16, \"y\");\n"),
             FILTER.replace("    drop(v4);\n", "    let mut v30: i64 = v4.len() as i64;\n    drop(v4);\n"),
-            FILTER.replace("Vec<AlmideString> = almd_build", "Vec<AlmdRec0> = almd_build"),
+            FILTER.replace("AlmideList<AlmideString> = almd_build", "AlmideList<AlmdRec0> = almd_build"),
         ] {
             let got = iterator_loops(src);
             assert!(got.contains("v4.iter().enumerate()") && got.contains("(*__e_v11).clone()") && !got.contains("mem::take"), "{got}");
