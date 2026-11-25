@@ -130,17 +130,20 @@ pub(super) fn reader_body(f: &IrFunction, fns: &HashSet<String>, module: &str, d
     Some(body)
 }
 
+/// A `some(..)` arm's binder: the variable and its type, or none for `some(_)`.
+type SomeBind = Option<(almide_ir::VarId, Ty)>;
+
 /// How a site takes the reader's Option apart.
 enum Use {
     /// `?? d`: the fallback.
     Or(IrExpr),
     /// `match`: the some arm (its binder, when it binds) and the none arm.
-    Match(Option<(almide_ir::VarId, Ty)>, IrExpr, IrExpr),
+    Match(SomeBind, IrExpr, IrExpr),
 }
 
 /// A two-arm, guard-free `match` over an Option: (the some arm's binder, its
 /// body, the other arm's body), the other arm `none` or `_`.
-fn option_arms(arms: &[IrMatchArm]) -> Option<(Option<(almide_ir::VarId, Ty)>, IrExpr, IrExpr)> {
+fn option_arms(arms: &[IrMatchArm]) -> Option<(SomeBind, IrExpr, IrExpr)> {
     let [a, b] = arms else { return None };
     if a.guard.is_some() || b.guard.is_some() {
         return None;
