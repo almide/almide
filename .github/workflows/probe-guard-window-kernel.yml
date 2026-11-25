@@ -55,6 +55,7 @@ jobs:
           if command -v coqc >/dev/null 2>&1; then C="coqc"; else C="rocq compile"; fi
           $C -Q . AlmideTrust GuardWindow.v
           $C -Q . AlmideTrust GuardFresh.v
+          $C -Q . AlmideTrust GuardLoop.v
 
   fresh:
     name: The fresh-block gate on two small modules, end to end
@@ -102,7 +103,7 @@ jobs:
           fi
 
   mutant:
-    name: Windows of one mutant's modules, before and after
+    name: The three rules on one mutant's modules, before and after
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -127,36 +128,18 @@ jobs:
           if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
           export PATH="$BIN:$PATH"
           cargo build -q --release --locked -p almide-anchor-check
-          (cd proofs && coqc -Q . AlmideTrust GuardWindow.v)
-          for side in base mutant; do
-            : > "$RUNNER_TEMP/dump-$side"
-            for w in probe-data/m0217/$side/*.wasm; do
-              printf 'MODULE %s\n' "$(basename "$w" .wasm)" >> "$RUNNER_TEMP/dump-$side"
-              ./target/release/almide-anchor-check --windows "$w" >> "$RUNNER_TEMP/dump-$side"
-            done
-            bash proofs/check-shipped-windows.sh "$RUNNER_TEMP/dump-$side" "$RUNNER_TEMP/win-$side" fixtures || echo "the kernel check of the $side side failed"
-            awk -F'\t' '$5 == "ok" { c[$1]++ } END { for (k in c) print k, c[k] }' "$RUNNER_TEMP/win-$side/verdicts.tsv" | sort > "$RUNNER_TEMP/count-$side.txt"
-            grep '^ACCESSES\|^MODULE' "$RUNNER_TEMP/dump-$side" | paste - - | awk '{ print $2, $4 }' | sort > "$RUNNER_TEMP/acc-$side.txt"
-          done
-          echo "module  accesses(base) windows(base)  accesses(mutant) windows(mutant)"
-          for m in $(cut -d' ' -f1 "$RUNNER_TEMP/acc-base.txt"); do
-            printf '%s %s %s %s %s\n' "$m" \
-              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/acc-base.txt")" \
-              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/count-base.txt" | grep . || echo 0)" \
-              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/acc-mutant.txt")" \
-              "$(awk -v m="$m" '$1 == m { print $2 }' "$RUNNER_TEMP/count-mutant.txt" | grep . || echo 0)"
-          done | tee "$RUNNER_TEMP/m0217-windows.txt"
+          (cd proofs && coqc -Q . AlmideTrust GuardWindow.v && coqc -Q . AlmideTrust GuardFresh.v && coqc -Q . AlmideTrust GuardLoop.v)
+          bash scripts/probe-m0217-rules.sh probe-data/m0217 "$RUNNER_TEMP/m0217"
       - name: Upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: m0217-windows
+          name: m0217-rules
           path: |
-            ${{ runner.temp }}/m0217-windows.txt
-            ${{ runner.temp }}/dump-base
-            ${{ runner.temp }}/dump-mutant
-            ${{ runner.temp }}/win-base/verdicts.tsv
-            ${{ runner.temp }}/win-mutant/verdicts.tsv
+            ${{ runner.temp }}/m0217/rules.txt
+            ${{ runner.temp }}/m0217/loops.txt
+            ${{ runner.temp }}/m0217/*-dump-*
+            ${{ runner.temp }}/m0217/*/verdicts.tsv
 
   controls:
     name: Negative and differential controls of the window checker

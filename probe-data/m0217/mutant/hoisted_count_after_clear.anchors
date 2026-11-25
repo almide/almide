@@ -1,0 +1,15 @@
+almide-anchors 1
+alloc 4
+init 8:2 8:5 8:8 8:11 8:14
+bounds 8:63 8:81
+fields 
+judges 
+holds 
+rcfns - 8 11
+rc 8|o0 o1 ( | ( ^@45-45 d0 | ^@53-53 ) ( ^@62-62 | ^@74-74 ) ) d0 d1;7|( | ) ( d0 | ) d0
+rcarms 8:46-52
+rcroutines 8:55-83
+rchelpers 7:$37
+prims 
+selfhost 
+proved 8 7
