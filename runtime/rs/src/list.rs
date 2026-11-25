@@ -83,6 +83,9 @@ pub fn almide_rt_list_unique<T: Clone + PartialEq + 'static>(xs: &[T]) -> Almide
     let mut seen: AlmideMap<T, ()> = AlmideMap::new();
     let mut r = AlmideList::new();
     for x in xs {
+        // `==`, not the map's key equality (C-289, ALS-C11): a value holding a
+        // NaN equals nothing, so it is always kept and never remembered.
+        if x != x { r.push(x.clone()); continue; }
         if !seen.contains_key(x) { seen.insert(x.clone(), ()); r.push(x.clone()); }
     }
     r
@@ -287,6 +290,8 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static + Clone>(xs: Al
     let mut result = AlmideList::new();
     for x in xs {
         let k = f(x.clone());
+        // `==` on the key, as `almide_rt_list_unique` (C-289, ALS-C11).
+        if k != k { result.push(x); continue; }
         if !seen.contains_key(&k) { seen.insert(k, ()); result.push(x); }
     }
     result
