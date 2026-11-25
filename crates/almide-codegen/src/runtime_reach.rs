@@ -74,7 +74,7 @@ pub fn reaching_fns<'a>(modules: &[(&'a str, &str)], apis: &[&str]) -> BTreeMap<
 /// panics ("no pids on this platform") and `thread::spawn` unwraps a spawn
 /// the platform always refuses. (A call that returns an `Unsupported` error
 /// instead is served: the program sees the err, as on any host that refuses.)
-pub const WASIP1_ABORTING_CALLS: &[&str] = &["std::process::id(", "std::thread::spawn("];
+pub const WASIP1_ABORTING_CALLS: &[&str] = &["std::process::id(", "std::thread::spawn("]; // the forbidden calls named as text to search runtime sources for; nothing here calls them
 
 /// `module.fn` -> its `@intrinsic` symbol, for every stdlib declaration in
 /// `sources` whose runtime symbol `reached` holds.
@@ -135,7 +135,7 @@ mod tests {
         let rt = "pub fn almide_rt_x_a() -> i64 { helper() }\nfn helper() -> i64 { std::process::id() as i64 }\n\
                   pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\n\
                   pub fn almide_rt_x_c() -> bool { std::net::TcpStream::connect(\"a:1\").is_ok() }\n\
-                  pub fn almide_rt_x_d() { std::thread::spawn(|| ()); }\n";
+                  pub fn almide_rt_x_d() { std::thread::spawn(|| ()); }\n"; // test input text naming the forbidden call; never compiled
         let reached = reaching_fns(&[("x", rt)], WASIP1_ABORTING_CALLS);
         let src = "@intrinsic(\"almide_rt_x_a\")\nfn a() -> Int = _\n@intrinsic(\"almide_rt_x_b\")\nfn b(n: Int) -> Int = _\n\
                    @intrinsic(\"almide_rt_x_c\")\nfn c() -> Bool = _\n@intrinsic(\"almide_rt_x_d\")\nfn d() -> Unit = _\n";
