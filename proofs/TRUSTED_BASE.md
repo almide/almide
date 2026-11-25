@@ -172,7 +172,7 @@ the row lists where it does not hold yet.
 
 ## Axiom ledger (the "Print Assumptions ⊆ standard" gate)
 
-The spine has 165 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
+The spine has 166 audited theorems; `proofs/check.sh` fails when this number differs from the measured count.
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra
@@ -472,6 +472,42 @@ function body at one control depth; and, as everywhere here, that the base
 is a live block whose word at `+ 4` is its payload length. An access whose
 count was read before a loop, or with a copy-on-write judge's call in front
 of it, is not a window and stays with the rules above.
+
+ACCESSES INTO A BLOCK JUST ALLOCATED, FROM THE BYTES ALONE
+(`proofs/GuardFresh.v`). The init and fields rules above are almide-anchor-check's,
+and they hold an event to an instruction by shape. For the commonest of those
+accesses the kernel judges the shipped bytes itself. Where a function
+allocates a constant size into a local (`i32.const n ; call $alloc ;
+local.set x`, or `local.tee`), leaves that local alone, and then reads or
+writes at `x` plus a constant, `GuardFresh.v` takes three consecutive byte
+strings: it decodes the first (`fresh_pre`), scans the second with the
+length of every instruction (`scan_keep`: none assigns `x`, the nesting never
+drops below its starting depth and ends at it; calls, stores and whole
+blocks may lie there), and runs the third symbolically in the window
+language. `fresh_sound`: if `fresh_ok` accepts, the first string decodes to
+the allocation of `n` bytes into `x`, the scan holds, and every run of the
+third string that reaches its access (any locals, globals, memory and stack
+beneath, with 32-bit wrap-around) touches only `[p, p + 12 + n)`, for `p`
+the value of `x` when the third string starts, as long as that range lies in
+the 32-bit address space. No witness is read, and the anchor file gives one
+number, the allocator's function index. `proofs/structural-wall.sh` has the
+cutter (`almide-anchor-check --fresh`, fresh.rs) propose EVERY access of the
+shape, testing no bound, and the Rocq kernel compute `fresh_ok` on each
+distinct triple (`proofs/check-shipped-fresh.sh`): a store past its block is
+a proposal the kernel refuses and fails the gate, and so does a count below
+the leg's floor (`proofs/shipped-fresh-floor.txt`). Trusted for it: what the
+window language trusts above; that an instruction the scan lets through
+leaves the local alone (only `local.set` and `local.tee` assign one) and
+that the third string is reached only through the first, an argument from
+the instruction set and structured control and not a theorem; of the
+cutter, that the three strings are consecutive bytes of one function body
+cut at instruction boundaries; that the function at the allocator's index
+returns a block of `12 + n` bytes, which `proofs/check-shipped-routines.sh`
+ties to the proven allocator tree, itself proved over unbounded integers;
+and it says nothing about whether the block is still live at the access. An
+access through a copy of the pointer, into a block of computed size, or
+with the allocation at another control depth is not proposed and stays with
+the rules above.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
