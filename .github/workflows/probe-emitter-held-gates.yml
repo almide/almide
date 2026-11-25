@@ -1,4 +1,4 @@
-name: Probe — the ledgers, and every changed module, for the held-out sample of source mutants
+name: Probe — the ledgers for the mutants of the adjacency between an emitted share and its record
 # A one-off measurement on its own branch, over the sample that
 # probe-emitter-held.yml drew and judged (the same tree, the same listing, the
 # same seed). Two things that run left open:
@@ -11,7 +11,7 @@ name: Probe — the ledgers, and every changed module, for the held-out sample o
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-held-gates]
+    branches: [probe/adjacency-gates]
 
 permissions:
   contents: read
@@ -53,14 +53,12 @@ jobs:
           save-if: false
           workspaces: "."
           prefix-key: "trust-spine"
-      - name: Fetch the sample run's listing
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --name emitter-mutants-list --dir "$RUNNER_TEMP/list"
-      - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-gates-ids.txt)"
+      - name: Write this shard's mutants
+        run: |
+          python3 -I scripts/probe-adjacency-pick.py "$RUNNER_TEMP/pick" ${{ matrix.shard }} "$SHARDS"
+          cut -f1 "$RUNNER_TEMP/pick/sample.tsv" > "$RUNNER_TEMP/order.txt"
       - name: Measure
-        run: bash scripts/probe-emitter-gates.sh "$RUNNER_TEMP/gates" "$RUNNER_TEMP/pick" scripts/probe-emitter-held-gates-ids.txt
+        run: bash scripts/probe-emitter-gates.sh "$RUNNER_TEMP/gates" "$RUNNER_TEMP/pick" "$RUNNER_TEMP/order.txt"
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -75,6 +73,7 @@ jobs:
 
   wide:
     name: Every changed module, shard ${{ matrix.shard }}
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
