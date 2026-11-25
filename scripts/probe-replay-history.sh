@@ -22,8 +22,8 @@ build() {
     cargo build -q -p almide-verify -p almide-anchor-check &&
     cargo build -q --bin almide
 }
-# verdicts <almd> <dir>: the producer, almide-verify, the anchor check, and
-# the program's own behaviour on the wasm target.
+# verdicts <almd> <dir>: the producer, almide-verify, the anchor check, the
+# program's own behaviour on the wasm target, and the checked allocator.
 verdicts() {
   local f="$1" W="$2"
   mkdir -p "$W"
@@ -40,6 +40,10 @@ verdicts() {
   fi
   timeout 60 "$T/almide" run "$f" --target wasm > "$W/run.out" 2> "$W/run.err" < /dev/null
   echo "   run on wasm: exit $? ; stdout sha $(sha256sum < "$W/run.out" | cut -c1-12) ; $(head -c 300 "$W/run.out" | tr '\n' '|') ; stderr: $(head -1 "$W/run.err" | cut -c1-160)"
+  # The project's checked allocator on the same program, with this compiler:
+  # its own controls first, then the ordinary build against the checked one.
+  ALMIDE="$T/almide" timeout 900 bash scripts/wasm-checked-alloc.sh "$f" > "$W/checked.out" 2>&1
+  echo "   checked allocator: exit $? ; $(grep -m1 '^wasm-checked-alloc: ' "$W/checked.out") ; controls ok $(grep -c '^  ok: ' "$W/checked.out"), failed $(grep -c '^FAIL' "$W/checked.out") ; $(grep -m1 -A1 '^DIFF ' "$W/checked.out" | cut -c1-240 | tr '\n' ' ')"
 }
 build || { echo "the unpatched tree does not build"; exit 1; }
 for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-replay/*.patch; do

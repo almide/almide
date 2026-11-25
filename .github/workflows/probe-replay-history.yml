@@ -17,6 +17,10 @@ jobs:
       matrix:
         variant:
           - 2395-value-keys-without-tag-test
+          - 2685-list-take-drop-insert-byte-product
+          - 2474-copy-within-additive-fit-test
+          - 2475-slice-rows-without-start-floor
+          - 1909-from-bytes-additive-fit-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -28,6 +32,14 @@ jobs:
           save-if: false
           workspaces: "."
           prefix-key: "trust-spine"
+      - name: Install wasmtime (the pin the nightly checked-allocator job uses)
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
       - name: Replay
         env:
           ONLY: ${{ matrix.variant }}
