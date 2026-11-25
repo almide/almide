@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   census:
@@ -18,14 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: "1.97.0"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: false
-          workspaces: "."
-          prefix-key: "trust-spine"
       - name: Restore opam root (OCaml + Rocq)
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -37,12 +30,18 @@ jobs:
           ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
           if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
           echo "$BIN" >> "$GITHUB_PATH"
-      - name: Install wabt
-        run: sudo apt-get update -q && sudo apt-get install -y -q wabt
-      - name: Measure
+      # The first run of this probe (45621471935) cut the windows and stopped in
+      # a later summary of the sweep, before the step below. Its dump is read
+      # back here, and the kernel judges the windows again.
+      - name: Fetch the windows the first run cut, and judge them
         env:
-          CENSUS_LIGHT: "1"
-        run: bash scripts/probe-witness-census.sh "$RUNNER_TEMP/census"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45621471935 --repo "$GITHUB_REPOSITORY" -n window-controls-by-shape --dir "$RUNNER_TEMP/prev"
+          mkdir -p "$RUNNER_TEMP/census"
+          cp "$RUNNER_TEMP/prev/census/window-dump" "$RUNNER_TEMP/census/window-dump"
+          bash scripts/probe-window-kernel.sh "$RUNNER_TEMP/census/window-dump" "$RUNNER_TEMP/census/window-kernel"
+          cmp "$RUNNER_TEMP/prev/census/window-kernel/verdicts.tsv" "$RUNNER_TEMP/census/window-kernel/verdicts.tsv" && echo "the verdicts are those of the first run"
       - name: One-byte mutants of the accepted windows, by shape
         run: |
           C="$RUNNER_TEMP/census"
