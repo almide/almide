@@ -437,6 +437,15 @@ def checks(work, chunk):
     print(f"{len(asked)} answer(s) to check, {len(keys) - len(asked)} goal(s) without an answer")
 
 
+def masked(b, start, end):
+    """A body's instructions with the immediates of call, return_call, global.get,
+    global.set and i32.const left out; None when the body is not read."""
+    ins = instrs(b, start, end)
+    if ins is None:
+        return None
+    return tuple(bytes([op]) if op in (0x10, 0x12, 0x23, 0x24, 0x41) else bytes(b[start + o:start + e]) for o, e, op, _ in ins)
+
+
 def alloc_like(base_wasm, base_anchors, module, out):
     """An anchor file for a module that has none of its own: the base module's,
     with the allocator's index replaced by the index of the function of
@@ -458,15 +467,25 @@ def alloc_like(base_wasm, base_anchors, module, out):
     m = open(module, "rb").read()
     mi, mf = bodies(m)
     same = [mi + i for i, (s, e) in enumerate(mf) if bytes(m[s:e]) == want]
+    how = "bytes"
     if alloc in same:
         same = [alloc]
+    if not same:
+        # A mutant can change what is live, and the pass that prunes a module
+        # then renumbers the functions and globals a routine names: the ONE
+        # function with the allocator's instructions once every function
+        # index, global index and 32-bit constant is masked.
+        s, e = bf[alloc - bi]
+        shape = masked(b, s, e)
+        same = [mi + i for i, (s, e) in enumerate(mf) if shape is not None and masked(m, s, e) == shape]
+        how = "shape"
     if len(same) != 1:
         print("none" if not same else "several")
         return 1
     lines[at[0]] = f"alloc {same[0]}"
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"found {same[0]}")
+    print(f"found-by-{how} {same[0]}")
     return 0
 
 
@@ -494,7 +513,11 @@ def compare(out):
             continue
         jb, jm = int(base[col["judged"]]), int(r[col["judged"]])
         lost_alloc = r[col["allocator"]] == "4294967295" and base[col["allocator"]] != "4294967295"
-        m["no_allocator"] += lost_alloc
+        if lost_alloc:
+            # no fresh-block proposal could be cut: nothing to compare
+            m["no_allocator"] += 1
+            detail.append([t[0], t[1], t[2], str(jb), str(jm), base[col["judged_accesses"]], r[col["judged_accesses"]], r[col["refused"]], "allocator not found"])
+            continue
         m["base_judged"] += jb
         m["judged"] += jm
         m["refused"] += int(r[col["refused"]])
@@ -503,8 +526,8 @@ def compare(out):
         m["same"] += jm == jb
         m["lost"] += max(0, jb - jm)
         m["gained"] += max(0, jm - jb)
-        if jm != jb or int(r[col["refused"]]) or lost_alloc:
-            detail.append([t[0], t[1], t[2], str(jb), str(jm), base[col["judged_accesses"]], r[col["judged_accesses"]], r[col["refused"]], "allocator not found" if lost_alloc else "-"])
+        if jm != jb or int(r[col["refused"]]) != int(base[col["refused"]]):
+            detail.append([t[0], t[1], t[2], str(jb), str(jm), base[col["judged_accesses"]], r[col["judged_accesses"]], r[col["refused"]] + " (base " + base[col["refused"]] + ")", "-"])
     keys = ("programs", "no_base", "unreadable", "no_allocator", "base_judged", "judged", "fewer", "more", "same", "lost", "gained", "refused")
     with open(f"{out}/mutants.tsv", "w", encoding="utf-8") as f:
         f.write("set\tmutant\t" + "\t".join(keys) + "\n")
@@ -518,14 +541,14 @@ def compare(out):
     for (st, mid), m in per.items():
         t = sets.setdefault(st, dict(mutants=0, compared=0, fewer=0, more=0, refused=0, no_allocator=0))
         t["mutants"] += 1
-        t["compared"] += (m["programs"] - m["no_base"] - m["unreadable"]) > 0
+        t["compared"] += (m["programs"] - m["no_base"] - m["unreadable"] - m["no_allocator"]) > 0
         t["fewer"] += m["fewer"] > 0
         t["more"] += m["more"] > 0
         t["refused"] += m["refused"] > 0
         t["no_allocator"] += m["no_allocator"] > 0
     for st in sorted(sets):
         t = sets[st]
-        print(f"{st}: {t['mutants']} mutant(s), {t['compared']} with a program compared; some program has fewer judged functions under {t['fewer']}, more under {t['more']}; the kernel refuses an asked function under {t['refused']}; an allocator is not found under {t['no_allocator']}")
+        print(f"{st}: {t['mutants']} mutant(s), {t['compared']} with a program compared; some program has fewer judged functions under {t['fewer']}, more under {t['more']}; in some program the allocator is not found under {t['no_allocator']}")
 
 
 def join(work, out):
