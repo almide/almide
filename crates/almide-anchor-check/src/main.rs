@@ -110,6 +110,37 @@ fn main() {
         }
         return;
     }
+    // `--loops <artifact.wasm> <anchors>`: the reads a loop's exit test guards
+    // against a count captured before the loop (loops.rs), five strings of
+    // decimal bytes each: the input of the proof script's `loop_core` and
+    // `loop_class`, whose verdicts are the kernel's. The anchor file is read
+    // for ONE number, the increment routine's function index; no event is.
+    if args.first().map(String::as_str) == Some("--loops") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        let inc = match almide_anchor_check::parse_anchors_held(&a) {
+            Ok((_, _, _, _, _, rc)) => rc.and_then(|r| r.0),
+            Err(e) => {
+                println!("LOOPS UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        };
+        let bytes = |v: &[u8]| v.iter().map(|b| format!(" {b}")).collect::<String>();
+        match almide_anchor_check::loops::shipped(&w, inc) {
+            Ok(found) => {
+                let named = inc.map_or_else(|| "-".to_string(), |f| f.to_string());
+                for x in &found {
+                    println!("LOOP {} {} {} |{} |{} |{} |{} |{}", x.func, x.access, inc.unwrap_or(u32::MAX), bytes(&x.hold), bytes(&x.pre), bytes(&x.mid), bytes(&x.ht), bytes(&x.rest));
+                }
+                println!("INCREMENT {named}");
+            }
+            Err(e) => {
+                println!("LOOPS UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     // `--windows <artifact.wasm>`: the guarded-access windows the cutter
     // proposes over every load and store of the module (window.rs), one line
     // of decimal bytes each: the input of the proof script's `window_ok`,
