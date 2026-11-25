@@ -61,7 +61,16 @@ the local alone and then reads or writes at that local plus a constant,
 `fresh_sound` puts the access inside the block's header and requested
 payload in every run (`proofs/check-shipped-fresh.sh`: every such access is
 proposed with no bound tested, so a store past its block is refused by the
-kernel; the proven count is held to a floor). What the anchor
+kernel; the proven count is held to a floor). For a third shape too: a
+`for` reads its count once, before the loop, and tests its counter against
+it on every turn; `proofs/GuardLoop.v` reads the capture, the test and the
+access, and every instruction in between, and its theorem `loop_sound` puts
+the access inside the looped block's payload in every run of the test and
+the access from locals in which the count's local holds the captured count
+(`proofs/check-shipped-loops.sh`: the kernel also computes whether the loop
+leaves memory alone, holds its own share of the block or keeps the block's
+address to itself; a read with none of the three is counted against a
+ceiling). What the anchor
 check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and
 release routines, the copy-on-write judges), a read of a released block
