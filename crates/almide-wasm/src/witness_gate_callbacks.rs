@@ -47,7 +47,7 @@ use super::{value_subset, Why};
 ///
 /// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
 /// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating` —
-/// except an fs walker's, whose closure route is recorded.
+/// except an fs walker's and `list.map`'s, whose closure routes are recorded.
 ///
 /// Any OTHER module call with a literal callback is judged as a self-hosted
 /// callee's is (each argument by the ordinary value rule, a literal callback
@@ -119,6 +119,13 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
         // ordinary closure argument, each line an activation that shares the
         // line (and a heap accumulator) into the callee (witness_walkers.rs).
         if module == "fs" {
+            return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg")));
+        }
+        // `list.map` with a propagating callback links its fallible self-host
+        // form (list.rs fn-value route) and passes the literal as the closure
+        // VALUE it is: the ordinary argument rule and the module-call audit
+        // judge it, as any other self-hosted callee's closure argument.
+        if (module, func) == ("list", "map") {
             return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg")));
         }
         return here(":propagating");
