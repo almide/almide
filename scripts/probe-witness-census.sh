@@ -130,6 +130,16 @@ fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/loop-dump" ]; then
   bash scripts/probe-loop-kernel.sh "$OUT/loop-dump" "$OUT/loop-kernel" || echo "loop kernel check: FAILED" >&2
 fi
+# Negative controls of the two rules: wrong variants of every distinct
+# accepted proposal, which the kernel has to refuse.
+if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/fresh-kernel/verdicts.tsv" ] && [ -s "$OUT/loop-kernel/verdicts.tsv" ]; then
+  mkdir -p "$OUT/controls"
+  python3 -I scripts/probe-rule-controls.py make "$OUT/fresh-dump" "$OUT/fresh-kernel/verdicts.tsv" "$OUT/loop-dump" "$OUT/loop-kernel/verdicts.tsv" "$OUT/controls" \
+    && find "$OUT/controls" -maxdepth 1 -name 'Ctl_*.v' | LC_ALL=C sort \
+       | xargs -P 4 -I{} bash -c 'c="${1%.v}"; coqc -Q proofs AlmideTrust "$1" > "$c.out" 2> "$c.err" || echo "FAIL $1: $(head -3 "$c.err")"' _ {} \
+    && python3 -I scripts/probe-rule-controls.py read "$OUT/controls" | tee "$OUT/controls/summary.txt" \
+    || echo "rule controls: FAILED" >&2
+fi
 if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/scan-dump" ]; then
   bash scripts/probe-scan-lens.sh "$OUT/scan-dump" "$OUT/scan-lens" || echo "scan lengths: FAILED" >&2
 fi
