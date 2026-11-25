@@ -358,6 +358,8 @@ fn main() {
             let hex = |v: &[u8]| v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
             for f in almide_anchor_check::fresh_windows(&w, &bodies, &a, alloc) {
                 println!("FRESHHEX {} {} {} {} {} | {} | {} | {}", f.func, f.access, alloc, u8::from(f.write), f.located, hex(&f.pre), hex(&f.mid), hex(&f.tail));
+                // The scanned bytes and the decoder's instruction lengths (GuardLoop.v `lens_ok`).
+                println!("SCANLENS {} | {}", hex(&f.mid), f.mid_lens.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" "));
             }
         }
     }
@@ -379,6 +381,8 @@ fn main() {
                     hex(&l.ht),
                     hex(&l.rest)
                 );
+                let scanned: Vec<u8> = l.mid.iter().chain(&l.ht).chain(&l.rest).copied().collect();
+                println!("SCANLENS {} | {}", hex(&scanned), l.lens.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" "));
             }
         }
     }
