@@ -771,8 +771,10 @@ Definition width (op : Z) : option Z :=
           || (op =? 59) || (op =? 61) then Some 2
   else None.
 
-(* An aborting arm, after its `if` (0x04 0x40): constants, local and global
-   reads and calls, then `unreachable; end`. Nothing in it can branch. *)
+(* An aborting arm, after its `if` (0x04 0x40): any run of constants, local
+   and global reads and writes, calls, drops, numeric instructions, loads
+   and stores, then `unreachable; end`. No block, no branch and no return is
+   read, so nothing in it can leave the arm but the abort. *)
 Fixpoint darm (fuel : nat) (bs : list Z) : option (list Z) :=
   match fuel with
   | O => None
@@ -787,8 +789,14 @@ Fixpoint darm (fuel : nat) (bs : list Z) : option (list Z) :=
             end
           else if (op =? 65) || (op =? 66) then
             match sleb 10 r with Some (_, r') => darm f r' | None => None end
-          else if (op =? 32) || (op =? 35) || (op =? 16) then
+          else if ((32 <=? op) && (op <=? 36)) || (op =? 16) then
             match uleb 5 r with Some (_, r') => darm f r' | None => None end
+          else if (op =? 26) || is_un op || is_bin op then darm f r
+          else if (40 <=? op) && (op <=? 62) then
+            match uleb 5 r with
+            | Some (_, r1) => match uleb 5 r1 with Some (_, r2) => darm f r2 | None => None end
+            | None => None
+            end
           else None
       end
   end.
@@ -881,12 +889,42 @@ Proof.
   exact (check_sound L0 G memf uo bo Hmem ws k off w b rest loc stk Hw Hrun).
 Qed.
 
-(* ── the emitter's read `xs[i]` as it ships (the figure in the docs): the
-     compare, the aborting arm with its exit call, the load ── *)
+(* ── the emitter's read `xs[i]` as it ships: the compare, the aborting arm
+     with the exit call the stock-WASI transform puts before its trap, the
+     load ── *)
 Example read_window :
   window_ok
     [ 32; 1; 32; 0; 40; 2; 4; 65; 8; 110; 173; 90;
       4; 64; 65; 128; 8; 16; 3; 65; 1; 16; 0; 0; 11;
+      32; 0; 32; 1; 167; 65; 8; 108; 106; 41; 3; 12 ] = true.
+Proof. vm_compute. reflexivity. Qed.
+
+(* A read as one corpus module ships it (spec/wasm_cross/
+   accum_recursion_int.almd): a constant index kept in a local, and an arm
+   that sets a local and makes four calls before its trap. *)
+Example shipped_read_window :
+  window_ok
+    [ 66; 159; 141; 6; 34; 31; 32; 7; 40; 2; 4; 65; 8; 110; 173; 90;
+      4; 64; 65; 240; 0; 33; 3; 65; 143; 1; 32; 3; 16; 5; 16; 2;
+      65; 1; 16; 16; 65; 1; 16; 1; 0; 11;
+      32; 7; 32; 31; 167; 65; 8; 108; 106; 41; 2; 12 ] = true.
+Proof. vm_compute. reflexivity. Qed.
+
+(* An arm that can leave without aborting is not read: a `br` in it. *)
+Example refuses_arm_that_branches :
+  window_ok
+    [ 32; 1; 32; 0; 40; 2; 4; 65; 8; 110; 173; 90;
+      4; 64; 12; 0; 0; 11;
+      32; 0; 32; 1; 167; 65; 8; 108; 106; 41; 3; 12 ] = false.
+Proof. vm_compute. reflexivity. Qed.
+
+(* The window crates/almide-anchor-check/tests/window.rs holds the cutter to:
+   the same read without the exit call, byte for byte the list that test
+   expects the cutter to print. *)
+Example cutter_read_window :
+  window_ok
+    [ 32; 1; 32; 0; 40; 2; 4; 65; 8; 110; 173; 90;
+      4; 64; 65; 128; 8; 16; 0; 0; 11;
       32; 0; 32; 1; 167; 65; 8; 108; 106; 41; 3; 12 ] = true.
 Proof. vm_compute. reflexivity. Qed.
 
