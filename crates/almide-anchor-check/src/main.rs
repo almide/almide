@@ -117,6 +117,33 @@ fn main() {
     // own. Its allocator is the function whose instructions are, byte for
     // byte, those of the function the base module's anchor file names (the
     // same index first); without one, nothing is proposed.
+    // Probe only: every access of a module that a straight-line window
+    // proves on its own, cut from the module alone (no witness, no anchor
+    // file), in the lines the census prints for an accepted module.
+    if args.first().map(String::as_str) == Some("--windows-all") {
+        let Some(m) = args.get(1) else { std::process::exit(2) };
+        let module = std::fs::read(m).unwrap_or_default();
+        if let Ok(bodies) = almide_anchor_check::decode(&module) {
+            let (mut seen, mut proved) = (0usize, 0usize);
+            for (func, b) in bodies.iter().enumerate() {
+                for j in 0..b.ops.len() {
+                    if !almide_anchor_check::window::is_access(&b.ops[j]) {
+                        continue;
+                    }
+                    seen += 1;
+                    let (ok, shape, start) = almide_anchor_check::window::prove(b, j, j);
+                    if ok {
+                        proved += 1;
+                        let hi = if j + 1 < b.at.len() { b.at[j + 1] } else { b.end };
+                        let bytes: Vec<String> = module[b.at[start]..hi].iter().map(|x| x.to_string()).collect();
+                        println!("WINDOWALL {func} {j} {shape} {}", bytes.join(" "));
+                    }
+                }
+            }
+            println!("WINDOWSWEEP {seen} {proved}");
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--fresh-like") {
         let (Some(m), Some(b), Some(a)) = (args.get(1), args.get(2), args.get(3)) else { std::process::exit(2) };
         let (m, b) = (std::fs::read(m).unwrap_or_default(), std::fs::read(b).unwrap_or_default());

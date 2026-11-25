@@ -90,5 +90,10 @@ jobs:
             ${{ runner.temp }}/held-fresh/uniq-dump
             ${{ runner.temp }}/held-fresh/held-loop.tsv
             ${{ runner.temp }}/held-fresh/held-loop-programs.tsv
+            ${{ runner.temp }}/held-fresh/held-windows.tsv
+            ${{ runner.temp }}/held-fresh/held-windows-programs.tsv
+            ${{ runner.temp }}/held-fresh/win-kernel.log
+            ${{ runner.temp }}/held-fresh/win-kernel/verdicts.tsv
+            ${{ runner.temp }}/held-fresh/win-uniq-dump
             ${{ runner.temp }}/held-fresh/loop-kernel.log
             ${{ runner.temp }}/held-fresh/loop-kernel/verdicts.tsv

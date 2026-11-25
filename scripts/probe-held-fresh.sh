@@ -109,3 +109,20 @@ bash "$ROOT/scripts/probe-loop-kernel.sh" "$OUT/dump" "$OUT/loop-kernel" > "$OUT
 grep -E 'proposal\(s\) in the dump|kernel time|Closed under' "$OUT/loop-kernel.log"
 grep -A 12 '^loop kernel check \[base\]' "$OUT/loop-kernel.log" | head -n 13
 python3 -I "$ROOT/scripts/probe-held-loop-join.py" "$OUT/dump" "$OUT/loop-kernel/verdicts.tsv" "$SH" "$OUT"
+
+# The guarded windows (proofs/GuardWindow.v) of the same modules: every access
+# a straight-line window proves on its own, cut from the module alone. The
+# kernel is asked once per distinct byte string.
+wins() {
+  local label="$1" m="$2" n="$3"
+  mkdir -p "$OUT/wins/$label"
+  timeout 300 "$CUT" --windows-all "$m" > "$OUT/wins/$label/$n.txt" 2> /dev/null || : > "$OUT/wins/$label/$n.txt"
+}
+export -f wins
+t0=$(date +%s)
+tr '\t' '\n' < "$OUT/jobs.tsv" | xargs -P 4 -n 3 bash -c 'wins "$1" "$2" "$3"' _
+echo "window proposals: $(( $(date +%s) - t0 )) s"
+python3 -I "$ROOT/scripts/probe-held-windows-join.py" fold "$OUT/jobs.tsv" "$OUT/wins" "$OUT/win-uniq-dump" "$OUT/win-index.tsv"
+bash "$ROOT/scripts/probe-window-kernel.sh" "$OUT/win-uniq-dump" "$OUT/win-kernel" > "$OUT/win-kernel.log" 2>&1 || { echo "the window kernel run failed"; tail -n 20 "$OUT/win-kernel.log"; }
+grep -E 'window\(s\) in the dump|Closed under' "$OUT/win-kernel.log"
+python3 -I "$ROOT/scripts/probe-held-windows-join.py" spread "$OUT/win-kernel/verdicts.tsv" "$OUT/win-index.tsv" "$OUT"
