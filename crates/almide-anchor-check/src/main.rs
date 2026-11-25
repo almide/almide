@@ -36,6 +36,52 @@ fn body_shape(bodies: &[almide_anchor_check::Body<'_>], imports: u32, f: u32, me
     h
 }
 
+/// Probe only: every body's shape in one pass over the module. A call reads
+/// as its callee's own shape (in which calls are one fixed token; a call of
+/// an import is another), and global indices and large constants are masked.
+/// Each instruction is formatted twice in all, whatever calls what.
+fn shapes_one_call_deep(bodies: &[almide_anchor_check::Body<'_>], imports: u32) -> Vec<u64> {
+    let hash = |toks: &mut dyn Iterator<Item = String>| -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for s in toks {
+            for c in s.bytes() {
+                h ^= u64::from(c);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        h
+    };
+    let plain = |op: &wasmparser::Operator<'_>| -> String {
+        match op {
+            wasmparser::Operator::I32Const { value } if *value >= 1024 || *value < -1024 => "i32.const#big;".to_string(),
+            wasmparser::Operator::GlobalGet { .. } => "global.get;".to_string(),
+            wasmparser::Operator::GlobalSet { .. } => "global.set;".to_string(),
+            o => format!("{o:?};"),
+        }
+    };
+    let flat: Vec<u64> = bodies
+        .iter()
+        .map(|b| {
+            hash(&mut b.ops.iter().map(|op| match op {
+                wasmparser::Operator::Call { .. } => "call#3333;".to_string(),
+                o => plain(o),
+            }))
+        })
+        .collect();
+    bodies
+        .iter()
+        .map(|b| {
+            hash(&mut b.ops.iter().map(|op| match op {
+                wasmparser::Operator::Call { function_index } => {
+                    let c = function_index.checked_sub(imports).and_then(|p| flat.get(p as usize)).copied().unwrap_or(0x1111);
+                    format!("call#{c:x};")
+                }
+                o => plain(o),
+            }))
+        })
+        .collect()
+}
+
 /// Probe only: one hash per body after `rounds` rounds of refinement. Round 0
 /// hashes a body's own instructions; each later round replaces a call by its
 /// callee's hash from the round before, so the value does not depend on the
@@ -161,14 +207,15 @@ fn main() {
         // the ONE function whose shape is the base routine's, a call read as
         // its callee's shape and global indices and large constants masked.
         // Two candidates are no answer.
+        let (base_shapes, module_shapes) = (shapes_one_call_deep(&bb, bi), shapes_one_call_deep(&mb, mi));
         let locate = |role: u32| -> Option<(u32, &'static str)> {
             let want = role.checked_sub(bi).and_then(|p| code(&b, &bb, p as usize))?;
             let same = |p: &usize| code(&m, &mb, *p).as_ref() == Some(&want);
             if let Some(p) = role.checked_sub(mi).map(|p| p as usize).filter(same).or_else(|| (0..mb.len()).find(same)) {
                 return Some((mi + p as u32, "bytes"));
             }
-            let shape = body_shape(&bb, bi, role, &mut std::collections::HashMap::new(), 1);
-            let hits: Vec<u32> = (0..mb.len() as u32).map(|p| mi + p).filter(|f| body_shape(&mb, mi, *f, &mut std::collections::HashMap::new(), 1) == shape).collect();
+            let shape = role.checked_sub(bi).and_then(|p| base_shapes.get(p as usize)).copied()?;
+            let hits: Vec<u32> = module_shapes.iter().enumerate().filter(|(_, s)| **s == shape).map(|(p, _)| mi + p as u32).collect();
             match hits.as_slice() {
                 [f] => Some((*f, "shape")),
                 _ => None,
