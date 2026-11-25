@@ -24,6 +24,12 @@ fn almide() -> &'static str { env!("CARGO_BIN_EXE_almide") }
 
 fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")) }
 
+/// The programs proofs/incomplete-verification.toml lists for the `test` route.
+fn incomplete_listed() -> Vec<String> {
+    let text = std::fs::read_to_string(repo_root().join("proofs/incomplete-verification.toml")).expect("the ledger");
+    text.lines().filter_map(|l| l.strip_prefix("entry = \"test ")?.strip_suffix('"').map(str::to_string)).collect()
+}
+
 /// Pure `// wasm:skip` directives — files that legitimately cannot run
 /// on WASM (native-only `process` fns; `testing.assert_throws`, which
 /// relied on panic catching, left at dialect epoch 14). The 3 matrix ops (`rms_norm_rows`,
@@ -57,12 +63,20 @@ fn stdlib_spec_compiles_and_runs_on_wasm() {
             format!("spec/stdlib/{}", p.file_name().unwrap_or_default().to_string_lossy())
         })
     };
+    // C-462: a file the INCOMPLETE ledger lists for `test` carries
+    // `--allow-incomplete-verification` (scripts/lib/incomplete-verification.sh's
+    // rule); the directory run carries it for every file and is then held to
+    // the ledger, as scripts/check-incomplete-verification.sh holds CI's log.
+    let listed = incomplete_listed();
+    let rel = |p: &std::path::Path| p.strip_prefix(repo_root()).unwrap_or(p).to_string_lossy().into_owned();
     let (mut stdout, mut stderr, mut summaries) = (String::new(), String::new(), Vec::new());
     for t in &targets {
-        let out = Command::new(almide())
-            .args(["test", t.to_str().unwrap(), "--target", "wasm"])
-            .output()
-            .expect("almide test --target wasm");
+        let mut cmd = Command::new(almide());
+        cmd.args(["test", t.to_str().unwrap(), "--target", "wasm"]);
+        if t.is_dir() || listed.contains(&rel(t)) {
+            cmd.arg("--allow-incomplete-verification");
+        }
+        let out = cmd.output().expect("almide test --target wasm");
         let (o, e) = (String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string());
         summaries.push(
             format!("{o}{e}").lines().find(|l| l.contains(" passed") && l.contains(" failed")).unwrap_or("<no summary>").to_string(),
@@ -71,6 +85,13 @@ fn stdlib_spec_compiles_and_runs_on_wasm() {
         stderr.push_str(&e);
     }
     let combined = format!("{}{}", stdout, stderr);
+    let unlisted: Vec<String> = combined
+        .lines()
+        .filter_map(|l| l.strip_prefix("warning[verification-incomplete]: ")?.split(": passed under ").next())
+        .map(|f| f.strip_prefix(&format!("{}/", repo_root().display())).unwrap_or(f).trim_start_matches("./").to_string())
+        .filter(|f| !listed.contains(f))
+        .collect();
+    assert!(unlisted.is_empty(), "INCOMPLETE but not listed in proofs/incomplete-verification.toml: {unlisted:?}");
 
     let ice_hits: Vec<&str> = combined.lines()
         .filter(|l| l.contains("[ICE] emit_wasm"))
