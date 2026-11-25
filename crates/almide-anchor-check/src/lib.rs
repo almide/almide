@@ -127,6 +127,9 @@ pub struct Report {
     /// of the shipped instructions alone proves it (window.rs), the shape or
     /// the reason, and where the window starts.
     pub windows: Vec<(At, &'static str, bool, bool, String, usize)>,
+    /// Probe only: per PROVED window, its function, its access instruction and
+    /// the module byte range `[lo, hi)` of its instructions.
+    pub window_bytes: Vec<(usize, usize, usize, usize)>,
     /// #4013 / #4279: the fields witness's located construction sites,
     /// their field stores, field accesses (of which `field_guarded` are
     /// variant case fields held to their tag test), tag reads, and events

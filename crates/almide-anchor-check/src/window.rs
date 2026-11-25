@@ -116,6 +116,25 @@ fn name(op: &Op<'_>) -> String {
     s.split(|c: char| c == ' ' || c == '{' || c == '(').next().unwrap_or("?").to_string()
 }
 
+/// Any other numeric instruction of the one-byte opcode space (0x45..0xc4):
+/// a function of its operands, by arity. The proof gives these no meaning,
+/// so the name only has to tell two of them apart.
+fn opaque(op: &Op<'_>) -> Option<(usize, &'static str)> {
+    let n = name(op);
+    let numeric = ["I32", "I64", "F32", "F64"].iter().any(|p| n.starts_with(p));
+    let excluded = ["Load", "Store", "Const", "Atomic", "TruncSat"].iter().any(|p| n.contains(p));
+    if !numeric || excluded {
+        return None;
+    }
+    const UNARY: &[&str] = &[
+        "Eqz", "Clz", "Ctz", "Popcnt", "Abs", "Neg", "Ceil", "Floor", "Trunc", "Nearest", "Sqrt", "WrapI64", "ExtendI32S", "ExtendI32U", "Extend8S",
+        "Extend16S", "Extend32S", "TruncF32S", "TruncF32U", "TruncF64S", "TruncF64U", "ConvertI32S", "ConvertI32U", "ConvertI64S", "ConvertI64U",
+        "DemoteF64", "PromoteF32", "ReinterpretF32", "ReinterpretF64", "ReinterpretI32", "ReinterpretI64",
+    ];
+    let arity = if UNARY.iter().any(|u| &n[3..] == *u) { 1 } else { 2 };
+    Some((arity, Box::leak(n.into_boxed_str())))
+}
+
 enum Stop {
     /// The window starts too late: an instruction pops what it did not push.
     Underflow,
@@ -200,6 +219,15 @@ fn run(b: &Body<'_>, s: usize, acc: usize) -> Result<Run, Stop> {
                 } else if let Some((k, _, off)) = load(op) {
                     let a = pop(&mut stack)?;
                     stack.push(Tm::M(k, off, Box::new(a)));
+                } else if let Some((arity, n)) = opaque(op) {
+                    if arity == 1 {
+                        let a = pop(&mut stack)?;
+                        stack.push(Tm::U(n, Box::new(a)));
+                    } else {
+                        let y = pop(&mut stack)?;
+                        let x = pop(&mut stack)?;
+                        stack.push(Tm::B(n, Box::new(x), Box::new(y)));
+                    }
                 } else {
                     return Err(Stop::Blocked(name(op)));
                 }
@@ -331,11 +359,20 @@ fn recognise(r: &Run) -> Result<&'static str, String> {
     }
 }
 
+/// The access instruction an `a` / `w` anchored at `acc0` names: an `a`
+/// anchored at the call that consumes a loaded element is the load before it.
+pub fn access_op(b: &Body<'_>, acc0: usize) -> usize {
+    if matches!(b.ops[acc0], Op::Call { .. }) && acc0 > 0 && load(&b.ops[acc0 - 1]).is_some() {
+        acc0 - 1
+    } else {
+        acc0
+    }
+}
+
 /// Whether the access at `acc0`, guarded by the compare at `cmp`, follows
 /// from a straight-line window: `(proved, shape or reason, window start)`.
 pub fn prove(b: &Body<'_>, cmp: usize, acc0: usize) -> (bool, String, usize) {
-    // An `a` anchored at the call that consumes a loaded element: the load.
-    let acc = if matches!(b.ops[acc0], Op::Call { .. }) && acc0 > 0 && load(&b.ops[acc0 - 1]).is_some() { acc0 - 1 } else { acc0 };
+    let acc = access_op(b, acc0);
     let d = b.depth[acc];
     let mut last = String::from("no-window");
     let lo = acc.saturating_sub(160);

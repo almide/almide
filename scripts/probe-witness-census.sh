@@ -84,6 +84,7 @@ one() { # one <leg> <file>
     if [ "${CENSUS_LIGHT:-0}" != 1 ]; then
       "$ANCHORCHECK" --mutate "$W/a.wasm" "$W/a.bundle" "$W/a.anchors" 2>/dev/null | awk -v l="$leg" -v f="$f" '{print l "\t" f "\t" $0}' >> "$OUT/mutrows.tsv" || true
     fi
+    { echo "MODULE $leg $f"; grep '^WINDOWHEX' "$W/a.census" || true; } >> "$OUT/window-dump"
     grep '^WINDOWFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/windowrows.tsv" || true
     grep '^STOREFN' "$W/a.census" | awk -v l="$leg" -v f="$f" '{$1=""; print l "\t" f "\t" substr($0,2)}' >> "$OUT/storerows.tsv" || true
     if [ -n "$ANCHOROLD" ]; then
@@ -116,6 +117,10 @@ one() { # one <leg> <file>
 
 grep -v -E '^(#|$)' crates/almide-wasm/tests/golden/witness-fixtures.txt | while IFS= read -r f; do one fixtures "$f"; done
 ls spec/stdlib/*_test.almd | while IFS= read -r f; do one tests "$f"; done
+
+if command -v coqc >/dev/null 2>&1 && [ -s "$OUT/window-dump" ]; then
+  bash scripts/probe-window-kernel.sh "$OUT/window-dump" "$OUT/window-kernel" || echo "window kernel check: FAILED" >&2
+fi
 
 python3 - "$OUT/rows.tsv" <<'PY'
 import csv, re, sys, statistics

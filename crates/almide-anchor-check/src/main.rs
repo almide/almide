@@ -334,8 +334,13 @@ fn main() {
             );
         }
     }
+    let module = w.clone();
     match almide_anchor_check::check_within(w, b, a, limit) {
         Ok(r) => {
+            for (func, acc, lo, hi) in &r.window_bytes {
+                let bytes: Vec<String> = module[*lo..*hi].iter().map(|x| x.to_string()).collect();
+                println!("WINDOWHEX {func} {acc} {}", bytes.join(" "));
+            }
             println!(
                 "ANCHORS OK: init {} site(s) / {} store(s), {} fill(s), {} unlocated; bounds {} check(s), {} access(es), {} unlocated, {} operand pair(s)",
                 r.init_sites, r.init_stores, r.fill_sites, r.init_unlocated, r.bounds_checks, r.bounds_accesses, r.bounds_unlocated, r.bounds_operands

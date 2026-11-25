@@ -272,6 +272,12 @@ impl<'b, 'a> Bounds<'b, '_, 'a> {
                 rep.bounds_shapes.push((at, shape, kind == 'w'));
                 let (ok, detail, start) = crate::window::prove(&self.ctx.bodies[at.func], cmp, at.op);
                 rep.windows.push((at, shape, kind == 'w', ok, detail, start));
+                if ok {
+                    let b = &self.ctx.bodies[at.func];
+                    let acc = crate::window::access_op(b, at.op);
+                    let hi = if acc + 1 < b.at.len() { b.at[acc + 1] } else { b.end };
+                    rep.window_bytes.push((at.func, acc, b.at[start], hi));
+                }
             }
         }
         Ok(())

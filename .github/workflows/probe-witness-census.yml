@@ -24,6 +24,17 @@ jobs:
           save-if: false
           workspaces: "."
           prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
       - name: Install wabt
         run: sudo apt-get update -q && sudo apt-get install -y -q wabt
       - name: Measure
@@ -47,6 +58,11 @@ jobs:
             ${{ runner.temp }}/census/storerows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
             ${{ runner.temp }}/census/windowrows.tsv
+            ${{ runner.temp }}/census/window-dump
+            ${{ runner.temp }}/census/window-kernel/verdicts.tsv
+            ${{ runner.temp }}/census/window-kernel/index.tsv
+            ${{ runner.temp }}/census/window-kernel/refused_*.v
+            ${{ runner.temp }}/census/window-kernel/GuardWindow.log
             ${{ runner.temp }}/census/routinerows.tsv
             ${{ runner.temp }}/census/mutctx.txt
             ${{ runner.temp }}/census/keep
