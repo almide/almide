@@ -16,11 +16,11 @@ permissions:
 
 env:
   # The tree the sample was drawn over, and the run that judged it.
-  HELD_REF: probe/emitter-s2-modules
+  HELD_REF: 3d7f8e7ead6dedbd883a4a1333f359f07f2be28e
   # The sample run kept the modules of the mutants that change at most a
   # hundred programs (45536243441, judged first); this run judged the other
   # thirty-six again and kept every changed module.
-  HELD_RUN: "45578884578"
+  HELD_RUN: "45536243441"
   # The run that built the replayed defects of the paper, each with and
   # without its defect.
   REPLAY_RUN: "45001834111"
