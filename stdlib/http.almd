@@ -40,9 +40,10 @@ effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 // type; no header string can relabel it. Content-Type is the header the body
 // owns: `set_header` and `with_headers` refuse it (E116 when the name is a
 // literal, an abort otherwise), read off `@header_write`, which names the
-// owned-header list below. A script-capable media type (HTML, SVG, XML) has
-// no way in but its safe module's type; `typed` takes any other one, as a
-// literal (E117), and refuses a type a safe module owns (`@media_owns`).
+// owned-header list below. A script-capable media type (HTML, SVG, XML,
+// JavaScript) comes in through its safe module's type, or through `typed`
+// only when the application grants itself that exact type; `typed` takes its
+// type as a literal (E117) and refuses a type a safe module owns (`@media_owns`).
 /// Reply with body; its type gives the Content-Type (String: text/plain; charset=utf-8).
 @sized_by(body)
 fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_response_flat(
@@ -77,7 +78,7 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
   body.__self_media_type(),
 )
 
-/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+/// A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 @literal_media(media_type)
 fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
   media_type: media_type,

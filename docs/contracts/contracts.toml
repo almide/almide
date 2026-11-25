@@ -5440,13 +5440,13 @@ evidence  = [
 [[contract]]
 id        = "C-407"
 spec      = "ALS-R5"
-title     = "every http.serve response carries X-Content-Type-Options: nosniff unless the handler set the field"
-statement = "ALS-R5 (almide/almide#4134): on the socket hosts and the export host every response `http.serve` writes — a handler's, and the `400` / `413` / `500` / `503` the server answers itself — carries `X-Content-Type-Options: nosniff` after the handler's own fields, unless the handler set `X-Content-Type-Options` itself (ASCII case-insensitively), in which case its value is kept. Before, no default was written, so a browser could sniff a text body as script. Evidence: spec/serve_cross/http_serve_limits.almd, whose driver compares each leg's answer bytes, and the implementation's rt-core tests of the response bytes."
+title     = "every http.serve response carries X-Content-Type-Options: nosniff, a field the server writes and a handler cannot replace"
+statement = "ALS-R5 (almide/almide#4134): on the socket hosts and the export host every response `http.serve` writes — a handler's, and the `400` / `413` / `500` / `503` the server answers itself — carries `X-Content-Type-Options: nosniff` after the handler's own fields, unless the handler set `X-Content-Type-Options` itself (ASCII case-insensitively), in which case its value is kept. Before, no default was written, so a browser could sniff a text body as script. Evidence: spec/serve_cross/http_serve_limits.almd, whose driver compares each leg's answer bytes, and the implementation's rt-core tests of the response bytes. AMENDED (owner ruling 2026-11-25, 0.70.0): the field is the server's, as `Connection` is: a handler's own `X-Content-Type-Options` field (any ASCII case, any value) is dropped, and every response carries `X-Content-Type-Options: nosniff` after the handler's fields, so no body is sniffed, a script-capable type the application grants itself (C-465) included."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/serve_cross/http_serve_limits.almd", class = "fixture" },
-  { path = "crates/almide-rt-core/tests/almide_rt_core_http.rs", name = "the_response_carries_nosniff_unless_the_handler_set_it", class = "fixture" },
+  { path = "crates/almide-rt-core/tests/almide_rt_core_http.rs", name = "the_response_always_carries_nosniff", class = "fixture" },
 ]
 
 [[contract]]

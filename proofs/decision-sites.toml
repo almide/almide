@@ -4410,12 +4410,12 @@ items = [
 keys = [
   "crates/almide-frontend/src/check/body_rules.rs::Checker::e117::S1::E117",
 ]
-decides = "a `@literal_media` builder (http.typed) takes its media type as a literal from the closed `@media_table` its result type's media fn declares (standard non-script types), or one the root manifest grants the application itself (`[trust] media` \"self\"); script-capable and stdlib-owned types are refused whatever the grant"
+decides = "a `@literal_media` builder (http.typed) takes its media type as a literal from the closed `@media_table` its result type's media fn declares (standard non-script types), or one the root manifest grants the application itself (`[trust] media` \"self\"); a script-capable type only when that grant names it exactly, a stdlib-owned type whatever the grant is refused"
 from = "declaration"
 unknown = "refuse"
 status = "STAMPED"
 reasons = []
-unknown_note = "owner ruling 2026-11-24 (closed table): a well-formed type neither in the declared table (stdlib/http.almd `@media_table` on __typed_body_media_type, read through http.typed's declared result type) nor in the application's own grant is E117 (novel test); a builder whose result type declares no table refuses every type; a computed or malformed type, a script-capable one (html's `@script_capable`) or a stdlib-owned one (`@media_owns`) is E117 whatever the grant; a `\"self\"` entry naming one of those is E118 (media_grant.rs); only bundled callees are judged"
+unknown_note = "owner ruling 2026-11-24 (closed table): a well-formed type neither in the declared table (stdlib/http.almd `@media_table` on __typed_body_media_type, read through http.typed's declared result type) nor in the application's own grant is E117 (novel test); a builder whose result type declares no table refuses every type; a computed or malformed type or a stdlib-owned one (`@media_owns`) is E117 whatever the grant; a script-capable one (html's `@script_capable`, the JavaScript types included) is E117 unless the `\"self\"` grant names that exact type (owner ruling 2026-11-25: a pattern admits none); a `\"self\"` entry that is malformed, stdlib-owned or a pattern reaching a script-capable type is E118 (media_grant.rs); only bundled callees are judged"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
 tests = ["tests/diagnostics/e117-typed-html", "tests/diagnostics/e117-typed-unlisted-media", "tests/media_self_grant_test.rs"]
 issues = []

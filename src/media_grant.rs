@@ -182,15 +182,16 @@ pub fn refusal(proj: &Project, deps: &[DepMedia]) -> Option<String> {
             d.name, manifest.display()
         ));
     }
-    // The application's own grant: each type well formed, and none a type
-    // only its owner may serve (script-capable, or a stdlib owner's), which
-    // `http.typed` refuses whatever the grant says.
+    // The application's own grant: each type well formed, none a stdlib
+    // owner's (which `http.typed` refuses whatever the grant says), and a
+    // script-capable type only by its exact name (owner ruling 2026-11-25):
+    // a pattern reaching one would admit types the application never named.
     for g in proj.media_grants.iter().filter(|g| g.key == SELF_KEY) {
         for t in &g.media {
             let why = if !mo::well_formed_pattern(t) {
                 Some("is not a media type (`type/subtype`)".to_string())
-            } else if mo::is_script_capable(t) {
-                Some("runs script in a browser, so only a type that owns it may serve it".to_string())
+            } else if t.contains('*') && mo::is_script_capable(t) {
+                Some("is a pattern reaching types a browser runs script in, which the application grants itself only one exact type at a time (as `\"text/javascript\"`)".to_string())
             } else {
                 mo::stdlib_owners().iter().find(|(p, _)| mo::overlap(t, p)).map(|(_, f)| format!("is owned by `{f}`"))
             };

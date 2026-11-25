@@ -98,9 +98,11 @@ fn is_tchar(c: char) -> bool {
 }
 
 /// Why a literal media type cannot be `@literal_media`'s argument: malformed
-/// (not `type/subtype[; params]`), owned by a stdlib body type,
-/// script-capable, or neither in the declaration's closed `table` nor granted
-/// by the application to itself (`[trust] media` "self").
+/// (not `type/subtype[; params]`), owned by a stdlib body type, script-capable
+/// without the application's grant of that exact type (owner ruling
+/// 2026-11-25: a pattern grant admits none), or neither in the declaration's
+/// closed `table` nor granted by the application to itself (`[trust] media`
+/// "self").
 fn media_refusal(value: &str, table: &[String], granted: &[String]) -> Option<String> {
     let essence = value.split(';').next().unwrap_or("").trim();
     let Some((ty, sub)) = essence.split_once('/') else {
@@ -115,7 +117,12 @@ fn media_refusal(value: &str, table: &[String], granted: &[String]) -> Option<St
         return Some(format!("`{essence}` runs script in a browser and is owned by `{module}`: build the body with the `{module}` builders, whose type serves it"));
     }
     if media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)) {
-        return Some(format!("`{essence}` runs script in a browser, so only a type that owns it may serve it: a package's safe type, granted in almide.toml `[trust] media` (ADR-0032 D7)"));
+        if granted.iter().any(|g| *g == t) {
+            return None;
+        }
+        return Some(format!(
+            "`{essence}` runs script in a browser, so it is served only by a type that owns it (a package's safe type) or when the application names this exact type in almide.toml: `[trust] media = {{ \"self\" = [\"{t}\"] }}` (ADR-0032 D7)"
+        ));
     }
     if table.iter().any(|x| *x == t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
         return None;

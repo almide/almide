@@ -1289,7 +1289,9 @@ closed table of standard non-script types (text/plain, text/csv, text/css,
 application/json, application/octet-stream, image/png, image/jpeg, image/gif,
 image/webp, and similar); any other type is E117 unless the application grants
 it to itself in `almide.toml`, `[trust] media = { "self" = ["application/vnd.acme"] }`.
-E117 also refuses a computed type, and HTML / XML / SVG whatever the grant: SVG comes from a package such as
+E117 also refuses a computed type, and HTML / XHTML whatever the grant. A script-capable type (JavaScript, SVG, XML) is
+served by `http.typed` only when the `"self"` grant names that exact type (`"self" = ["text/javascript"]`; a pattern such as
+`"*/*+xml"` is E118), and every `http.serve` response carries `X-Content-Type-Options: nosniff`, which a handler cannot replace. SVG also comes from a package such as
 almide/svg, which the application grants in `almide.toml` with `[trust]
 media = { "github.com/almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /
