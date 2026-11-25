@@ -6130,3 +6130,81 @@ evidence  = [
   { path = "tests/fs_category_test.rs", name = "a_call_that_reaches_a_file_needs_its_fs_leaf_on_every_route", class = "fixture" },
   { path = "crates/almide-codegen/src/fs_scope.rs", name = "every_file_touching_runtime_fn_declares_an_fs_category", class = "fixture" },
 ]
+
+# ── EXTERN: A FN WITH NO NATIVE BINDING AND NO BODY IS REFUSED ON NATIVE ──
+[[contract]]
+id        = "C-461"
+spec      = "ALS-D7"
+title     = "The native build route refuses a reachable @extern fn with no native binding and no Almide body with E081 before anything is rendered, never building a binary that aborts at the call"
+statement = "ALS-D7 (almide/almide#4006): the native build route — `almide build` and `almide run` without a wasm target, `almide bench`, and `almide check --target native`, which reports that route's verdict — refuses a program whose native roots (`main`, every `@export(c)` fn, every top-level `let` initializer) reach an `@extern` fn that names no native binding (no `@extern(rust, ...)` or `@extern(c, ...)`; for example only `@extern(wasm, \"js\", ...)`) and has no Almide body. The refusal is E081, given before anything is rendered: the diagnostic names the fn, says it has no implementation on the native target, and offers the wasm build for its host, a native binding, or an Almide body. The command exits 1 and no binary is written or run. A fn that also declares a native binding binds through it; one with an Almide body runs the body natively while the wasm route still lowers it to its import. A call that only a test or an unexported `pub fn` makes is not refused (the native test harness keeps a typed hole there, an abort only a test that runs it reaches). `almide check` without `--target` is the language check every target shares and does not report it, and `almide check --target wasm` and `almide build --target wasm` are unchanged."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e081-extern-no-native-binding/broken.almd", class = "fixture" },
+]
+
+# ── BUILD: AN INCOMPLETE CERTIFICATE IS REFUSED UNLESS THE FLAG ALLOWS IT ──
+[[contract]]
+id        = "C-462"
+spec      = "ALS-I5"
+title     = "A wasm module whose own certificate is INCOMPLETE is refused by default on every route that makes one; --allow-incomplete-verification lets it pass with a warning naming each uncertified function"
+statement = "ALS-I5 (owner ruling 2026-11-24 on almide decision-site row verify.gate-build-incomplete-accepted): every route that makes a wasm module — `almide build --target wasm` (and the core module `build --component` packages), `almide run --target wasm`, `almide test --target wasm`, `almide bench --target wasm` — judges the module's own certificate with the verifier before it writes or runs it. INCOMPLETE (every witness accepted, at least one function the producer declared uncertified) is refused by default exactly as REJECTED is: exit code 1, no artifact written, nothing run, and stderr names each uncertified function with the producer's reason and names the flag. With `--allow-incomplete-verification` on that command the module passes: stderr carries a `warning[verification-incomplete]` line and one line per uncertified function, and `almide build` records the pass on its `Built` line. A REJECTED certificate is refused with or without the flag, and a CERTIFIED one passes without it."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/verify_incomplete_refused_test.rs", name = "an_incomplete_certificate_is_refused_unless_the_flag_allows_it", class = "fixture" },
+]
+
+# ── NATIVE: THE UNVERIFIED ROUTES ARE DECLARED, WARN, AND CRITICAL REFUSES ─
+[[contract]]
+id        = "C-463"
+spec      = "ALS-I5"
+title     = "The native routes no certificate covers warn on every use, and the critical profile refuses the rustc --target wasi route"
+statement = "ALS-I5 (almide/almide#4006, owner ruling 2026-11-24 W3): the verified native render serves `almide build`, `almide run` and `almide bench`. The routes it does not serve ship the standard codegen's Rust, which no certificate covers, and stay as declared unverified routes: Rust source output (`almide <file> --target rust`), `almide build --repr-c`, `almide build --cdylib`, the rustc route `almide build --target wasi`, and the REPL. Each prints, on stderr, a warning that begins `warning: ` and names the route as an unverified route, and its output is otherwise unchanged (the source is still written, the build still runs). `almide check --profile critical --target wasi` is refused: exit code 1 and stderr `error: --profile critical refuses --target wasi`, because the critical profile admits only routes a certificate covers; `almide check --profile critical` with `--target wasm` or `--target native`, and `almide check --target wasi` without the profile, are unchanged."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/unverified_route_test.rs", name = "the_critical_profile_refuses_the_rustc_wasi_route_and_admits_the_verified_ones", class = "fixture" },
+  { path = "tests/unverified_route_test.rs", name = "the_rust_source_route_warns_that_it_is_unverified", class = "fixture" },
+]
+
+# ── NATIVE: SHAPES THE VERIFIED RENDER HAS NO FORM FOR ARE REFUSED ─────────
+[[contract]]
+id        = "C-464"
+spec      = "ALS-I5"
+title     = "The native build route refuses an @extern(rust) fn returning a Region (E090) and a Set whose element holds a nested Float (E081) before anything is rendered"
+statement = "ALS-I5 (almide/almide#4006, owner ruling 2026-11-24): the native build route — `almide build` and `almide run` without a wasm target, `almide bench`, and `almide check --target native`, which reports that route's verdict — refuses, before anything is rendered, two shapes the verified native render has no form for, when the program's native roots (`main`, every `@export(c)` fn, every top-level `let` initializer) reach them. (1) An `@extern` fn whose first native binding is `@extern(rust, ...)` and whose return type holds a `Region`: E090; the diagnostic names the fn, says its Region return has no native form, and offers returning `Bytes` or an `@extern(c, ...)` binding with `@region(len = n, release = \"free_fn\")`. A Region parameter of such a fn is unchanged. (2) A fn holding a `Set` whose element type holds a `Float`, `Float32` or `Float64` below the element's top level (for example `Set[List[Float]]`, `Set[Option[Float]]`, or a Set of a record with a Float field): E081; the diagnostic names the fn and the set type and says the type has no implementation on the native target. In both cases the command exits 1 and no binary is written or run. A `Set[Float]`, whose element is itself the Float, is unchanged. `almide check` without `--target` is the language check every target shares and reports neither, and the wasm route is unchanged. SUPERSEDED IN PART (0.70.0, ADR-0039, C-466, owner ruling 2026-11-24 evening): clause (2) is retired. A Set element and a Map key compare with the collection key equality of ALS-C11 on every leg, so the native route renders a Set whose element holds a nested Float and no longer refuses it with E081; clause (1) stands."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e090-extern-rust-region-return/broken.almd", class = "fixture" },
+]
+
+# ── http.typed: A CLOSED TABLE OF NON-SCRIPT MEDIA TYPES, AND THE APPLICATION'S OWN GRANT ─
+[[contract]]
+id        = "C-465"
+spec      = "ALS-R8"
+title     = "http.typed takes only a media type from the stdlib's closed non-script table or one the application grants itself under [trust] media \"self\", a script-capable one only by its exact name; anything else is E117"
+statement = "ALS-R8 (ADR-0032 D7, owner ruling 2026-11-24): `http.typed(t, bytes)` takes `t` as a string literal, judged at check time on its lowercased essence (the text before `;`). The stdlib declares a CLOSED table of standard media types no browser runs script in, as `@media_table` on TypedBody's media fn: text/plain, text/csv, text/css, text/markdown, text/tab-separated-values, application/json, application/octet-stream, application/zip, application/gzip, image/png, image/jpeg, image/gif, image/webp, image/avif, audio/mpeg, audio/ogg, audio/wav, video/mp4, video/webm, font/woff, font/woff2. A type in the table needs no grant. Any other well-formed type is refused with E117 (`almide check` exits 1 and names the grant) unless the root manifest grants it to the application itself under the reserved `[trust] media` key `\"self\"` (`media = { \"self\" = [\"application/vnd.acme+json\"] }`); a grant admits exactly the types it names, so an unknown type (a script such as text/javascript, a new +xml type) is never served by default. A computed, malformed, script-capable (html's `@script_capable`) or stdlib-owned (`@media_owns`) type stays E117 whatever the grant. A `\"self\"` entry naming a malformed, script-capable or stdlib-owned type is refused with E118, and so is a dependency whose `[trust] media` key would be `self`. No media-type list exists at run time: a program the checker admits serves the literal it wrote, unchanged (C-275). AMENDED (owner ruling 2026-11-25, 0.70.0): a script-capable type is no longer refused outright. html's `@script_capable` lists the types a browser runs script in, now including the JavaScript MIME types (text/javascript, application/javascript, application/ecmascript, application/x-javascript, application/x-ecmascript, text/ecmascript, text/x-javascript, text/x-ecmascript, text/jscript, text/livescript, text/javascript1.0 to text/javascript1.5); `http.typed` admits such a type when, and only when, the `\"self\"` grant names that exact type (its lowercased essence, as `\"text/javascript\"` or `\"image/svg+xml\"`). A pattern grant (`*/*+xml`, `text/*`) admits no script-capable type, and a `\"self\"` entry that is a pattern matching one is E118, which names the exact entry to write. A stdlib-owned type (`@media_owns`: text/html, application/xhtml+xml) stays E117 under any grant and E118 as a `\"self\"` entry. Every response serving such a body carries `X-Content-Type-Options: nosniff`, which no handler can replace (C-407)."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e117-typed-unlisted-media/broken.almd", class = "fixture" },
+  { path = "tests/media_self_grant_test.rs", name = "novel_an_unlisted_type_is_refused_until_the_application_grants_it", class = "fixture" },
+  { path = "tests/media_self_grant_test.rs", name = "a_self_grant_cannot_name_a_type_only_its_owner_serves", class = "fixture" },
+  { path = "tests/media_self_grant_test.rs", name = "a_listed_type_needs_no_grant", class = "fixture" },
+  { path = "tests/media_self_grant_test.rs", name = "a_script_type_is_admitted_only_by_its_exact_self_grant", class = "fixture" },
+  { path = "tests/media_self_grant_test.rs", name = "a_self_grant_pattern_over_a_script_type_is_refused", class = "fixture" },
+]
+
+# ── COLLECTION KEY EQUALITY: EVERY NaN IS ONE KEY, -0.0 IS THE KEY 0.0 ──────
+[[contract]]
+id        = "C-466"
+spec      = "ALS-C11"
+title     = "A Set element and a Map key compare with the collection key equality: every NaN is one key and -0.0 is the key 0.0, through every nested component, while == stays IEEE"
+statement = "ALS-C11 (ADR-0039, owner ruling 2026-11-24 evening): Set membership and Map key lookup use the collection key equality `~`. Two Floats (Float, Float32 at its own width) are `~` when both are NaN — any sign bit, any payload, any producer (`0.0 / 0.0`, `inf - inf`, a negation) — or when neither is NaN and they are `==`, so `0.0 ~ -0.0`. Every other scalar is `~` exactly when it is `==`. A List, tuple, record, variant or Option is `~` to another of the same shape when its components are pairwise `~`, so the rule reaches a Float nested at any depth of an element or key. The rule decides every membership question of `set.from_list`, `insert`, `remove`, `contains`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset` and `is_disjoint`, and every entry question of `map.from_list`, `get`, `set`, `contains`, `remove` and the index read and write: `set.from_list([nan, -0.0, -nan, 0.0, inf - inf, 1.0])` has 3 members, `set.contains(s, -nan)` is true, and a `Set[List[Float]]`, a Set of a record, variant, tuple or Option with a Float component, and a `Map[Float32, V]` or `Map[(Float32, String), V]` follow the same rule. A member or key already present keeps the value first stored: inserting `0.0` into a set holding `-0.0` leaves `-0.0`, and `map.set` on a key `~` to a present one replaces the value and keeps the stored key in its place. Set `==` is equal size and mutual membership and Map `==` is equal keys under `~` with `==` values, so a Set or Map holding a NaN is `==` to itself. `==` / `!=` on Floats and on every List, tuple, record, variant and Option stay IEEE (ALS-C3: `nan == nan` and `[nan] == [nan]` are false, `0.0 == -0.0` is true), and `list.contains`, `list.index_of`, `list.unique` and `list.dedup` keep `==` (C-289: `list.unique([nan, nan])` has 2 elements). Orderings keep IEEE-754 totalOrder (ALS-C9). The answers are byte-identical on native, wasm and the reference evaluator, and the native build route renders every such Set (C-464 clause (2) retired)."
+since     = "0.70.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/collection_key_total_equality.almd", class = "fixture" },
+]
