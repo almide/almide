@@ -169,12 +169,26 @@ if mode == "judge":
     serial, lock = itertools.count(), threading.Lock()
     runs = {"finished": 0, "memory or error": 0, "time": 0}
 
-    # The memory limit is the shell's, set in the child before it becomes the
-    # compiler (0 = none, for a self-test on a system without that limit).
-    cmd = ["bash", "-c", (f"ulimit -v {mem_kb} && " if mem_kb else "") + 'exec coqc -Q proofs AlmideTrust "$0"']
+    def group_rss_kb(pgid):
+        """Resident memory of every process in the group, from /proc (0 where there is none)."""
+        total = 0
+        try:
+            pids = [d for d in os.listdir("/proc") if d.isdigit()]
+        except OSError:
+            return 0
+        for d in pids:
+            try:
+                t = open(f"/proc/{d}/stat", encoding="utf-8", errors="replace").read().rsplit(")", 1)[1].split()
+            except (OSError, IndexError):
+                continue
+            if int(t[2]) == pgid:
+                total += int(t[21]) * 4
+        return total
 
     def run(goals, allow):
-        """The values the compiler printed for `goals`, or (None, why)."""
+        """The values the compiler printed for `goals`, or (None, why).
+        The compiler runs in its own process group; a watcher stops the group
+        when its resident memory passes the limit or its time runs out."""
         with lock:
             n = next(serial)
         path = os.path.join(work, f"J_{n:06d}.v")
@@ -182,20 +196,28 @@ if mode == "judge":
             f.write(HEAD)
             for g in goals:
                 f.write(f"Eval vm_compute in ({g}).\n")
-        try:
-            r = subprocess.run(cmd + [path], capture_output=True, text=True, timeout=allow)
-        except subprocess.TimeoutExpired:
-            with lock:
-                runs["time"] += 1
-            return None, "time"
-        got = [l.split("=", 1)[1].strip() for l in r.stdout.splitlines() if l.strip().startswith("= ")]
-        if r.returncode != 0 or len(got) != len(goals):
-            with lock:
-                runs["memory or error"] += 1
-            return None, "memory or error: " + " ".join(r.stderr.split())[:160]
+        why, t0 = "", time.time()
+        with open(path + ".out", "w", encoding="utf-8") as fo, open(path + ".err", "w", encoding="utf-8") as fe:
+            p = subprocess.Popen(["coqc", "-Q", "proofs", "AlmideTrust", path], stdout=fo, stderr=fe, start_new_session=True)
+            while p.poll() is None:
+                if time.time() - t0 > allow:
+                    why = "time"
+                elif mem_kb and group_rss_kb(p.pid) > mem_kb:
+                    why = "memory"
+                if why:
+                    try:
+                        os.killpg(p.pid, 9)
+                    except OSError:
+                        pass
+                    break
+                time.sleep(0.05)
+            p.wait()
+        got = [l.split("=", 1)[1].strip() for l in open(path + ".out", encoding="utf-8") if l.strip().startswith("= ")]
+        if not why and (p.returncode != 0 or len(got) != len(goals)):
+            why = "error: " + " ".join(open(path + ".err", encoding="utf-8").read().split())[:160]
         with lock:
-            runs["finished"] += 1
-        return got, ""
+            runs["finished" if not why else "time" if why == "time" else "memory or error"] += 1
+        return (got, "") if not why else (None, why)
 
     def goal(i):
         return f"window_ok [{';'.join(rows[i][5].split())}]"
@@ -211,10 +233,14 @@ if mode == "judge":
             res.update(judge(batch[k:k + step]))
         return res
 
-    # The limits must not be what stops an ordinary run.
+    # The limits must not be what stops an ordinary run, and must stop one
+    # that builds a number of three thousand million binary digits.
     got, why = run(["window_ok [0;1;2]", "window_ok []"], 60)
     if got is None:
         sys.exit(f"the limits stop an ordinary run ({why}); nothing was judged")
+    got, why = run(["Z.eqb (2 ^ 3000000000) 1"], int(os.environ.get("CAL_SECS", "60")))
+    print(f"calibration: a run that builds 2 ^ 3000000000 " + ("FINISHED" if got is not None else f"is stopped ({why})"))
+    runs.update({"finished": 0, "memory or error": 0, "time": 0})
     t0 = time.time()
     verdict = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
