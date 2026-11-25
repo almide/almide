@@ -15,8 +15,6 @@
 mod harness;
 use harness::run_wasm;
 
-const LEN: i64 = 16;
-
 /// Every `get_*` of stdlib/bytes.almd whose body is one checked read.
 fn get_family() -> Vec<(String, &'static str)> {
     let src = include_str!("../../../stdlib/bytes.almd");
