@@ -138,7 +138,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         let off = r.original_position();
         let op = r.read().map_err(|e| e.to_string())?;
         let i = ops.len();
-        at.push(off);
+        at.push(off as usize);
         if control(&op) == Control::Refused {
             return Err(format!("instruction {i} ({op:?}) is a control operator this checker does not follow"));
         }
@@ -171,7 +171,7 @@ fn decode_body<'a>(func: FuncToValidate<ValidatorResources>, body: FunctionBody<
         reshadow(&mut shadow, arity, (pre, post, floor), i);
         ops.push(op);
     }
-    let end = r.original_position();
+    let end = r.original_position() as usize;
     Ok(Body { ops, depth, addr, args, at, end })
 }
 
