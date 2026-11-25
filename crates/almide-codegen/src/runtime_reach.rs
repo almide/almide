@@ -39,7 +39,7 @@ pub fn fn_bodies(text: &str) -> HashMap<String, String> {
 }
 
 /// The names `body` calls: `f(`, `.f(`, `m::f(`, `f::<..>(`.
-pub fn called_names(body: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn called_names(body: &str) -> impl Iterator<Item = &str> {
     crate::rust_idents::identifiers(body).filter(move |id| {
         let end = id.as_ptr() as usize - body.as_ptr() as usize + id.len();
         let rest = &body[end..];
@@ -132,10 +132,14 @@ mod tests {
     /// are not.
     #[test]
     fn an_intrinsic_reaching_an_aborting_call_through_a_helper_is_found() {
-        let rt = "pub fn almide_rt_x_a() -> i64 { helper() }\nfn helper() -> i64 { std::process::id() as i64 }\n\
-                  pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\n\
-                  pub fn almide_rt_x_c() -> bool { std::net::TcpStream::connect(\"a:1\").is_ok() }\n\
-                  pub fn almide_rt_x_d() { std::thread::spawn(|| ()); }\n"; // test input text naming the forbidden call; never compiled
+        // Each piece opens with its quote, so no source line here starts with
+        // `pub fn`: the text is test input, not this crate's items.
+        let rt = concat!(
+            "pub fn almide_rt_x_a() -> i64 { helper() }\nfn helper() -> i64 { std::process::id() as i64 }\n",
+            "pub fn almide_rt_x_b(n: i64) -> i64 { n + 1 }\n",
+            "pub fn almide_rt_x_c() -> bool { std::net::TcpStream::connect(\"a:1\").is_ok() }\n",
+            "pub fn almide_rt_x_d() { std::thread::spawn(|| ()); }\n", // test input text naming the forbidden call; never compiled
+        );
         let reached = reaching_fns(&[("x", rt)], WASIP1_ABORTING_CALLS);
         let src = "@intrinsic(\"almide_rt_x_a\")\nfn a() -> Int = _\n@intrinsic(\"almide_rt_x_b\")\nfn b(n: Int) -> Int = _\n\
                    @intrinsic(\"almide_rt_x_c\")\nfn c() -> Bool = _\n@intrinsic(\"almide_rt_x_d\")\nfn d() -> Unit = _\n";

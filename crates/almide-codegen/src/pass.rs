@@ -248,7 +248,7 @@ impl SplitMix64 {
 
 impl Pipeline {
     /// The names of the passes this pipeline declares, in declared order.
-    pub fn pass_names(&self) -> Vec<String> {
+    pub(crate) fn pass_names(&self) -> Vec<String> {
         self.passes.iter().map(|p| p.name().to_string()).collect()
     }
 
