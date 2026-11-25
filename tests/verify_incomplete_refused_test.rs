@@ -7,10 +7,11 @@
 //! verification` lets it through with a `warning[verification-incomplete]`,
 //! and `almide build` records the pass on its `Built` line.
 //!
-//! The program declines on purpose: a match tail whose arm selects between
-//! two borrowed views is a frame shape the structural wasm leg's ownership
+//! The program declines on purpose: an Option `?` at a fn's tail over an
+//! owned temporary is a frame shape the structural wasm leg's ownership
 //! witness does not certify yet (`tail:view-result`, witness_hooks.rs; the
-//! guarded list rest this test used certifies since the 29th integrator).
+//! guarded list rest and then the match-arm select this test used certify
+//! since the 29th and 31st engineers).
 //! When that shape is certified,
 //! this test needs another declining shape — it asserts the program IS
 //! declined before it asserts anything about the refusal.
@@ -29,18 +30,14 @@ fn text(o: &Output) -> String {
 
 const FLAG: &str = "--allow-incomplete-verification";
 
-const PROGRAM: &str = r#"fn tagged(line: String) -> String =
-  match string.split_once(line, ";") {
-    some((k, v)) => if k == "x" then v else k,
-    none => line,
-  }
+const PROGRAM: &str = r#"fn try_first(xs: List[Int]) -> Int? = list.first(xs)?
 
 effect fn main() -> Unit = {
-  println(tagged("x;a+2"))
+  println("a+${try_first([2]) ?? 0}")
 }
 
-test "tagged" {
-  assert_eq(tagged("a;b"), "a")
+test "try_first" {
+  assert_eq(try_first([1, 2]), some(1))
 }
 "#;
 
@@ -63,7 +60,7 @@ fn an_incomplete_certificate_is_refused_unless_the_flag_allows_it() {
         let t = text(&o);
         assert_eq!(o.status.code(), Some(1), "`almide {route}` did not refuse an INCOMPLETE certificate:\n{t}");
         assert!(t.contains("error[certificate-incomplete]"), "`almide {route}` did not name the refusal:\n{t}");
-        assert!(t.contains("UNCERTIFIED  tagged: tail:view-result"), "`almide {route}` did not name the uncertified function:\n{t}");
+        assert!(t.contains("UNCERTIFIED  try_first: tail:view-result"), "`almide {route}` did not name the uncertified function:\n{t}");
         assert!(t.contains(FLAG), "`almide {route}` did not name the flag:\n{t}");
         assert!(!String::from_utf8_lossy(&o.stdout).contains("a+2"), "`almide {route}` ran the refused module:\n{t}");
     }
@@ -77,7 +74,7 @@ fn an_incomplete_certificate_is_refused_unless_the_flag_allows_it() {
         let t = text(&o);
         assert!(o.status.success(), "`almide {route} {FLAG}` refused:\n{t}");
         assert!(t.contains("warning[verification-incomplete]"), "`almide {route} {FLAG}` did not warn:\n{t}");
-        assert!(t.contains("UNCERTIFIED  tagged: tail:view-result"), "`almide {route} {FLAG}` did not name the function:\n{t}");
+        assert!(t.contains("UNCERTIFIED  try_first: tail:view-result"), "`almide {route} {FLAG}` did not name the function:\n{t}");
         if *route == "build" {
             assert!(dir.join("app.wasm").exists(), "the allowed build wrote no module");
             assert!(

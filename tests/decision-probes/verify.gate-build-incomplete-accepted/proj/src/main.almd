@@ -1,9 +1,5 @@
-fn tagged(line: String) -> String =
-  match string.split_once(line, ";") {
-    some((k, v)) => if k == "x" then v else k,
-    none => line,
-  }
+fn try_first(xs: List[Int]) -> Int? = list.first(xs)?
 
 effect fn main() -> Unit = {
-  println(tagged("x;y"))
+  println("${try_first([1, 2]) ?? 0}")
 }

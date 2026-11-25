@@ -1,9 +1,5 @@
-fn tagged(line: String) -> String =
-  match string.split_once(line, ";") {
-    some((k, v)) => if k == "x" then v else k,
-    none => line,
-  }
+fn try_first(xs: List[Int]) -> Int? = list.first(xs)?
 
-test "tagged" {
-  assert_eq(tagged("a;b"), "a")
+test "try_first" {
+  assert_eq(try_first([1, 2]), some(1))
 }
