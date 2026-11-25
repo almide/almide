@@ -125,7 +125,10 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
         // form (list.rs fn-value route) and passes the literal as the closure
         // VALUE it is: the ordinary argument rule and the module-call audit
         // judge it, as any other self-hosted callee's closure argument.
-        if (module, func) == ("list", "map") {
+        // A `fan` callback that still propagates is lowered once as that
+        // closure value and called per element (fan.rs): the element's share
+        // into the callee is recorded, the call's carrier is the fan's.
+        if (module, func) == ("list", "map") || module == "fan" {
             return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg")));
         }
         return here(":propagating");
