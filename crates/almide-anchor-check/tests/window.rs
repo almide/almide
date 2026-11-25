@@ -110,6 +110,25 @@ fn an_arm_that_does_not_abort_is_not_a_window() {
 }
 
 #[test]
+fn an_arm_that_sets_a_local_and_calls_before_its_trap_is_still_a_window() {
+    // The arm as the stock-WASI build ships it: the message's length kept in
+    // a local, the report, the exit call, then the trap.
+    let body = READ.replace(
+        "      i32.const 1024\n      call $abort\n",
+        "      i32.const 112\n      local.set $cnt\n      local.get $cnt\n      call $abort\n      i32.const 1\n      call $other\n",
+    );
+    assert_ne!(body, READ);
+    assert_eq!(proposed(&body), 1);
+}
+
+#[test]
+fn an_arm_that_branches_out_is_not_a_window() {
+    let body = READ.replace("      i32.const 1024\n      call $abort\n", "      br 0\n");
+    assert_ne!(body, READ);
+    assert_eq!(proposed(&body), 0);
+}
+
+#[test]
 fn an_access_at_another_index_is_not_a_window() {
     let body = READ.replace("    local.get $i\n    i32.wrap_i64", "    local.get $j\n    i32.wrap_i64");
     assert_ne!(body, READ);
