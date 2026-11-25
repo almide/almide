@@ -248,6 +248,14 @@ one_mutant() {
   # three differ: a mutant that hangs every program would otherwise cost
   # T_RUN for each of them.
   : > "$OUT/behave.tsv"
+  # BEHAVE_FIRST: a file of programs to run before the rest of the changed
+  # ones, for a question about particular programs under a mutant that
+  # changes hundreds. Their outputs are kept beside the detail rows.
+  if [ -s "$OUT/changed.txt" ] && [ -n "${BEHAVE_FIRST:-}" ] && [ -s "$BEHAVE_FIRST" ]; then
+    { grep -F -x -f "$BEHAVE_FIRST" "$OUT/changed.txt" || true
+      grep -F -x -v -f "$BEHAVE_FIRST" "$OUT/changed.txt" || true; } > "$OUT/changed.next"
+    mv "$OUT/changed.next" "$OUT/changed.txt"
+  fi
   if [ -s "$OUT/changed.txt" ]; then
     while [ -s "$OUT/changed.txt" ] && [ "$bdiff" -lt 3 ] && [ "$(date +%s)" -lt "$deadline" ]; do
       head -24 "$OUT/changed.txt" > "$OUT/batch.txt"
@@ -272,6 +280,16 @@ one_mutant() {
   if [ "$(wc -l < "$OUT/rows.tsv")" -gt 1 ]; then
     cp "$OUT/rows.tsv" "$OUT/detail/$id.rows.tsv"
     [ ! -s "$OUT/behave.tsv" ] || cp "$OUT/behave.tsv" "$OUT/detail/$id.behave.tsv"
+    if [ -n "${BEHAVE_FIRST:-}" ] && [ -s "$BEHAVE_FIRST" ]; then
+      mkdir -p "$OUT/detail/$id.first"
+      while IFS= read -r f; do
+        local n; n="$(name_of "$f")"
+        [ -f "$d/$n.out" ] || continue
+        head -c 4000 "$OUT/base/$n.out" > "$OUT/detail/$id.first/$n.base.out" 2> /dev/null || true
+        head -c 4000 "$d/$n.out" > "$OUT/detail/$id.first/$n.mutant.out"
+        head -c 2000 "$d/$n.err" > "$OUT/detail/$id.first/$n.mutant.err" 2> /dev/null || true
+      done < "$BEHAVE_FIRST"
+    fi
     { echo "== $id $file:$line $genre"; echo "$name"; cat "$MUT/$id.diff"; } > "$OUT/detail/$id.txt"
   fi
   git apply -R "$MUT/$id.diff"

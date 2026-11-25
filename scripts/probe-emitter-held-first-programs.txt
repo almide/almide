@@ -1,0 +1,5 @@
+spec/wasm_cross/bytes_writer_mut_from_declaration.almd
+spec/wasm_cross/closure_capture_escapes_frame.almd
+spec/wasm_cross/effect_slot_unit_block_tail.almd
+spec/wasm_cross/grain_functions.almd
+spec/wasm_cross/top_let_fn_value_closure_param.almd

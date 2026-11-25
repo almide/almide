@@ -33,6 +33,9 @@ env:
 jobs:
   gates:
     name: Ledgers, shard ${{ matrix.shard }}
+    # Answered by an earlier run of this workflow; off while one mutant's
+    # behaviour on five named programs is asked below.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
@@ -77,9 +80,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0]
     env:
       KEEP_MODULES: "2000"
+      BEHAVE_FIRST: ${{ github.workspace }}/scripts/probe-emitter-held-first-programs.txt
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/root-tmpdir
@@ -96,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --name emitter-mutants-list --dir "$RUNNER_TEMP/list"
       - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-wide-ids.txt)"
+        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-first-ids.txt)"
       - name: Measure
         run: bash scripts/probe-emitter-mutants.sh "$RUNNER_TEMP/emut" "$RUNNER_TEMP/pick"
       - name: Upload results
