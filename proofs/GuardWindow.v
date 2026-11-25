@@ -402,9 +402,12 @@ Definition is_count (t b : tm) (s : Z) : bool :=
   || match t with
      | TB op l (TK k) =>
          ((op =? 110) && (k =? s) && is_len l b)
-         || ((op =? 118) && (0 <=? k) && (k <? 32) && (2 ^ k =? s) && is_len l b)
+         || ((op =? 118) && (if (0 <=? k) && (k <? 32) then 2 ^ k =? s else false) && is_len l b)
      | _ => false
      end.
+(* The power sits under the test of `k`, not beside it: an evaluator that
+   computes both sides of `&&` would otherwise build `2 ^ k` for whatever
+   constant the bytes hold. *)
 
 Lemma len_range : forall b, 0 <= len_of b < M32.
 Proof. intro b. unfold len_of. apply Hmem. Qed.
@@ -430,9 +433,9 @@ Proof.
       rewrite (Z.mod_small s M32) by lia.
       reflexivity.
     + apply andb_true_iff in H. destruct H as [H H5].
-      apply andb_true_iff in H. destruct H as [H H4].
-      apply andb_true_iff in H. destruct H as [H H3].
-      apply andb_true_iff in H. destruct H as [H1 H2].
+      apply andb_true_iff in H. destruct H as [H1 H4].
+      destruct ((0 <=? k) && (k <? 32)) eqn:E; [| discriminate H4].
+      apply andb_true_iff in E. destruct E as [H2 H3].
       apply Z.eqb_eq in H1. apply Z.leb_le in H2. apply Z.ltb_lt in H3.
       apply Z.eqb_eq in H4. subst op s.
       cbn [den]. rewrite bsem_shru. rewrite (is_len_sound l b H5).
