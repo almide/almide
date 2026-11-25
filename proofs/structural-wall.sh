@@ -209,6 +209,9 @@ while IFS= read -r f; do
       sed 's/^/  /' "$OUT/$N.shipped-err" >&2
       exit 1
     fi
+    # Which file the three sweeps below read for this label: a second decoder
+    # re-derives every byte string they print from it (check-shipped-slices.sh).
+    printf '%s\t%s\n' "$f" "$OUT/$N.wasm" >> "$OUT/slice-manifest"
     # The guarded-access windows of this artifact: every load and store is
     # swept, no witness read; the kernel judges the windows after the loop
     # (check-shipped-windows.sh).
@@ -337,6 +340,43 @@ bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE
 echo "== the reads a loop's exit test guards, proven inside the looped block from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/loops-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for loop reads — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE" | sed 's/^/  /'
+# WHERE THOSE BYTES ARE: the three gates above judge byte strings that
+# almide-anchor-check cut out of each artifact by the decoder library's
+# offsets, and their theorems are about those bytes run as instructions of one
+# function. A second decoder (check-shipped-slices.sh: the module's sections
+# and every instruction's length, no library) re-derives every proposal from
+# the artifact: the strings are the module's bytes, end to end, inside the one
+# function body named, cut where instructions start. Then the drill: dumps
+# with ONE proposal altered each (a start or a cut moved inside an
+# instruction, a byte changed, another function named, a module's block
+# removed) must every one be refused, for its own reason.
+echo "== the byte strings the kernel judged are instruction runs of the functions they name (a second decoder) =="
+bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$OUT/window-dump" "$OUT/fresh-dump" "$OUT/loops-dump" | sed 's/^/  /'
+# A slice may hold no proposal of one kind to forge from; a full run must.
+partial=0
+if ci_slice_active; then partial=1; fi
+if ! SLICES_FORGE_PARTIAL="$partial" bash "$ROOT/proofs/check-shipped-slices.sh" --forge "$OUT/slices-forged" "$OUT/slice-manifest" "$OUT/window-dump" "$OUT/fresh-dump" "$OUT/loops-dump" > "$OUT/slices-forge.out" 2>&1; then
+  echo "STRUCTURAL WALL FAIL: the drill on the byte strings could not be set up:" >&2
+  sed 's/^/  /' "$OUT/slices-forge.out" >&2
+  exit 1
+fi
+forged=0
+for d in "$OUT"/slices-forged/*/; do
+  [ -f "$d/expect" ] || continue
+  rc=0
+  bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$d/window-dump" "$d/fresh-dump" "$d/loops-dump" > "$d/out" 2>&1 || rc=$?
+  if [ "$rc" -ne 1 ] || ! grep -qF -- "$(cat "$d/expect")" "$d/out"; then
+    echo "STRUCTURAL WALL FAIL: the forged dump \`$(basename "$d")\` was not refused for its reason (exit $rc; want 1 and \`$(cat "$d/expect")\`):" >&2
+    head -3 "$d/out" | sed 's/^/  /' >&2
+    exit 1
+  fi
+  forged=$((forged + 1))
+done
+if [ "$forged" -eq 0 ]; then
+  echo "STRUCTURAL WALL FAIL: no forged dump was made — the drill on the byte strings would pass vacuously" >&2
+  exit 1
+fi
+echo "  ok: $forged forged dump(s), one proposal altered in each, every one refused for its reason ($(ls "$OUT/slices-forged" | tr '\n' ' ' | sed 's/ $//'))"
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"
