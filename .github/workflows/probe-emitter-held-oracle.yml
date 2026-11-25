@@ -1,0 +1,69 @@
+name: Probe — a dynamic heap oracle on the held-out sample's module-changing mutants
+# Probe only: the project's checked allocator (frees poisoned, a canary past
+# each block; scripts/wasm-checked-alloc.sh) as a dynamic oracle for the
+# held-out sample's module-changing mutants. Per mutant, every contract
+# program whose module it changes is built twice with the mutated compiler,
+# ordinary and checked, and run; a difference is a write or read the oracle
+# sees. The unmutated compiler is run the same way as the control.
+# Not a gate.
+on:
+  push:
+    branches: [probe/emitter-held-oracle]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SAMPLE_N: "480"
+  SAMPLE_SEED: "20261126"
+  SHARDS: "16"
+  # The run that drew the sample: its listing is used as it is, so the ids
+  # here are that run's ids whatever the mutation tool lists today.
+  HELD_RUN: "45536243441"
+
+jobs:
+  oracle:
+    name: Checked allocator, shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Install wasmtime (the pin the nightly checked-allocator job uses)
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Fetch the sample run's listing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --name emitter-mutants-list --dir "$RUNNER_TEMP/list"
+      - name: Draw this shard's mutants
+        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-oracle-ids.txt)"
+      - name: Measure
+        run: bash scripts/probe-emitter-oracle.sh "$RUNNER_TEMP/oracle" "$RUNNER_TEMP/pick" ${{ matrix.shard }} "$SHARDS"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: emitter-oracle-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/oracle/oracle.tsv
+            ${{ runner.temp }}/oracle/detail
+            ${{ runner.temp }}/pick/index.tsv
