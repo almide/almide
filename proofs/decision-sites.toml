@@ -3640,17 +3640,22 @@ decides = "the native build route refuses, before any render, a reachable @exter
 from = "mixed:declaration+type+reach"
 unknown = "refuse"
 unknown_note = "reachability is reachable_native_program (main, @export(c), top-level lets); a type the scan cannot resolve (an undeclared Named) is not refused here and walls in the render instead"
-routes = { check = "n.a.: plain check is the shared language check (owner ruling W1)", check_json = "runs: check --json --target native (check.rs check_json_one)", check_effects = "n.a.", run = "runs", build = "runs", test = "n.a.: the native test harness keeps a typed hole", bench = "runs (the v1 program)", native = "runs: build/run/bench/verify --mir and check --target native", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a.: --target rust is a declared unverified route (C-463)" }
+routes = { check = "n.a.: plain check is the shared language check (owner ruling W1)", check_json = "runs: check --json --target native (check.rs check_json_one)", check_effects = "n.a.: check --effects is the shared effect check every target reads; it builds no native code", run = "runs", build = "runs", test = "n.a.: outside C-461's native build route: the native test harness keeps its holes, so a test reaching one fails at the call (`not yet implemented: hole`, observed 2026-11-25 on the probe with test --target native); the default test target is wasm, which binds the import", bench = "runs (the v1 program)", native = "runs: build/run/bench/verify --mir and check --target native", wasm = "n.a.: a wasm route binds an @extern(wasm) import and has its own E081 (check --target wasm); this decides the native build route", wasi = "n.a.: a wasm route; this decides the native build route", component = "n.a.: a wasm route; this decides the native build route", lsp = "n.a.: the editor reports the shared language check (owner ruling W1), which builds no native code", mcp = "n.a.: almide_check runs plain check, the shared language check (owner ruling W1)", emit = "n.a.: --target rust is a declared unverified route (C-463)" }
 tests = [
   "tests/diagnostics/e081-extern-no-native-binding/broken.almd",
   "tests/diagnostics/e090-extern-rust-region-return/broken.almd",
   "tests/diagnostics/e081-set-of-nested-floats/broken.almd",
+  "tests/decision_fixes_test.rs",
 ]
-control_note = "tests/diagnostic_harness_test.rs runs each broken.almd with check --target native"
+control_note = "tests/diagnostic_harness_test.rs runs each broken.almd with check --target native; the control patch drops refusals' rows, and the novel test (check --target native and build, three fresh subjects) turns red"
 issues = [4006]
 status = "UNSTAMPED"
 reasons = ["c3: no control patch yet"]
 note = "C-461 (W1) and C-464 (owner ruling 2026-11-24: the shapes outside the corpus are rendered or refused before the flip)."
+probe = "tests/decision-probes/witness.native-route-refusals"
+novel = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
+control_patch = "proofs/decision-controls/witness.native-route-refusals.patch"
+control_test = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
 
 [[site]]
 id = "witness.codegen-ownership-certifier"
