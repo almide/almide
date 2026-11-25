@@ -397,10 +397,10 @@ fn load_width(op: &Op<'_>) -> Option<u64> {
 /// header, any payload])`: `straight` has nothing nested between the call
 /// and the access, `any` allows whole nested blocks that do not assign the
 /// local.
-pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 10])> {
+pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 12])> {
     let mut out = Vec::new();
     for (func, b) in bodies.iter().enumerate() {
-        let mut n = [0usize; 10];
+        let mut n = [0usize; 12];
         for (k, op) in b.ops.iter().enumerate() {
             let (base, w, off) = match (store_width(op), load_width(op)) {
                 (Some((w, off)), _) => (0, u64::from(w), off),
@@ -443,6 +443,36 @@ pub fn census_fresh(bodies: &[Body<'_>], alloc: u32) -> Vec<(usize, [usize; 10])
             n[base + 3 + slot] += 1;
             if straight {
                 n[base + 1 + slot] += 1;
+            }
+            // The call's result goes straight into the local, and the value
+            // operand (a store's) is computed by plain instructions: nothing
+            // between the address and the access calls, branches, assigns a
+            // variable or writes memory.
+            let plain = |o: &Op<'_>| {
+                !matches!(
+                    o,
+                    Op::Call { .. }
+                        | Op::CallIndirect { .. }
+                        | Op::Block { .. }
+                        | Op::Loop { .. }
+                        | Op::If { .. }
+                        | Op::Else
+                        | Op::End
+                        | Op::Br { .. }
+                        | Op::BrIf { .. }
+                        | Op::BrTable { .. }
+                        | Op::Return
+                        | Op::Unreachable
+                        | Op::LocalSet { .. }
+                        | Op::LocalTee { .. }
+                        | Op::GlobalSet { .. }
+                        | Op::MemoryCopy { .. }
+                        | Op::MemoryFill { .. }
+                        | Op::MemoryGrow { .. }
+                ) && store_width(o).is_none()
+            };
+            if j == q + 1 && (p + 1..k).all(|t| b.depth[t] == b.depth[k] && plain(&b.ops[t])) {
+                n[10 + usize::from(base == 5)] += 1;
             }
         }
         if n[0] + n[5] > 0 {
