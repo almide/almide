@@ -76,9 +76,15 @@ fn tail_diverges(e: &IrExpr, hit: &impl Fn(&CallTarget) -> bool) -> bool {
 
 impl Emitter<'_> {
     /// A call to a fn of [`diverging_fns`] returned to no one: the path
-    /// ends in the checker's abort terminal, as after `panic` (#2758).
+    /// ends in the checker's abort terminal, as after `panic` (#2758). A
+    /// callee that answers a Result block (an effect fn's ABI) COMES BACK
+    /// with an err an earlier `!` in it propagated (`effect fn stop(c) = {
+    /// prepare(c)!; process.exit(c) }`), and the `!`'s ok arm releases the
+    /// carrier with a call in the bytes: that path goes on, recorded as any
+    /// call's (the RC byte check found that release with no event).
     pub(crate) fn witness_diverged(&mut self, callee: usize) {
         if self.table.infos[callee].diverges
+            && !matches!(self.table.infos[callee].ret, Some(SliceTy::Result(..)))
             && let Some(w) = self.witness.as_mut()
         {
             w.abort_end();
