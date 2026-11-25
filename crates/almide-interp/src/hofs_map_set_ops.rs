@@ -46,7 +46,7 @@ impl<'a> Interpreter<'a> {
     fn map_remove(&mut self, args: &[Value]) -> Flow {
         match (args.first(), args.get(1)) {
             (Some(Value::Map(e)), Some(k)) => Flow::val(Value::Map(Rc::new(
-                e.iter().filter(|(ek, _)| ek != k).cloned().collect(),
+                e.iter().filter(|(ek, _)| !crate::value::key_eq(ek, k)).cloned().collect(),
             ))),
             _ => Flow::Abort("internal: map.remove bad args".into()),
         }
