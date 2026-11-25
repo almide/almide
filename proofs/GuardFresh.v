@@ -260,10 +260,9 @@ End Semantics.
 
 (* ══ THE THREE STRINGS ════════════════════════════════════════════════ *)
 
-(* `pre` is `i32.const n ; call alloc ; local.set x` (or `local.tee x`), no
-   instruction of `mid` assigns `x`, and the tail's access is inside the
-   block. *)
-Definition fresh_ok (alloc : Z) (pre mid tail : list Z) : bool :=
+(* `pre` read as `i32.const n ; call alloc ; local.set x` (or `local.tee x`),
+   and nothing after it: the local and the constant. *)
+Definition fresh_pre (alloc : Z) (pre : list Z) : option (Z * Z) :=
   match pre with
   | c :: r =>
       if c =? 65 then
@@ -274,27 +273,39 @@ Definition fresh_ok (alloc : Z) (pre mid tail : list Z) : bool :=
               | Some (a, st :: r2) =>
                   if (a =? alloc) && ((st =? 33) || (st =? 34)) then
                     match uleb 5 r2 with
-                    | Some (x, []) =>
-                        (PAYLOAD + n <? M32)
-                        && scan_keep (S (length mid)) x 0 mid
-                        && fresh_tail x n tail
-                    | _ => false
+                    | Some (x, []) => Some (x, n)
+                    | _ => None
                     end
-                  else false
-              | _ => false
+                  else None
+              | _ => None
               end
-            else false
-        | _ => false
+            else None
+        | _ => None
         end
-      else false
-  | [] => false
+      else None
+  | [] => None
   end.
 
-(* What an accepted triple means for its tail. *)
+(* `pre` allocates `n` payload bytes into local `x`, no instruction of `mid`
+   assigns `x` and its nesting ends where it began, and the tail's access is
+   inside the block. *)
+Definition fresh_ok (alloc : Z) (pre mid tail : list Z) : bool :=
+  match fresh_pre alloc pre with
+  | Some (x, n) =>
+      (PAYLOAD + n <? M32) && scan_keep (S (length mid)) x 0 mid && fresh_tail x n tail
+  | None => false
+  end.
+
+(* What an accepted triple means: `pre` reads as the allocation of `n` bytes
+   into `x`, the scan of `mid` held, and every run of the tail that reaches
+   its access touches only the block of `12 + n` bytes at the value `x` holds
+   when the tail starts. *)
 Theorem fresh_sound : forall L0 G memf uo bo alloc pre mid tail,
   fresh_ok alloc pre mid tail = true ->
   exists x n ws k off w,
-    dec (S (length tail)) tail [] = Some (ws, k, off, w)
+    fresh_pre alloc pre = Some (x, n)
+    /\ scan_keep (S (length mid)) x 0 mid = true
+    /\ dec (S (length tail)) tail [] = Some (ws, k, off, w)
     /\ 0 <= n /\ PAYLOAD + n < M32
     /\ forall rest loc stk,
          crun G memf uo bo ws (L0, rest) = Some (loc, stk) ->
@@ -305,19 +316,16 @@ Theorem fresh_sound : forall L0 G memf uo bo alloc pre mid tail,
                /\ av mod M32 + off + w <= L0 x mod M32 + PAYLOAD + n).
 Proof.
   intros L0 G memf uo bo alloc pre mid tail H. unfold fresh_ok in H.
-  destruct pre as [|c r]; [discriminate H |].
-  destruct (c =? 65); [| discriminate H].
-  destruct (sleb 5 r) as [[n [|cl r1]]|]; try discriminate H.
-  destruct (cl =? 16); [| discriminate H].
-  destruct (uleb 5 r1) as [[a [|st r2]]|]; try discriminate H.
-  destruct ((a =? alloc) && ((st =? 33) || (st =? 34))); [| discriminate H].
-  destruct (uleb 5 r2) as [[x [|z r3]]|]; try discriminate H.
+  destruct (fresh_pre alloc pre) as [[x n]|] eqn:Ep; [| discriminate H].
   apply andb_prop in H. destruct H as [H Ht].
-  apply andb_prop in H. destruct H as [Hn _].
+  apply andb_prop in H. destruct H as [Hn Hk].
   apply Z.ltb_lt in Hn.
   assert (Ht' := Ht). unfold fresh_tail in Ht'.
   destruct (dec (S (length tail)) tail []) as [[[[ws k] off] w]|] eqn:Ed; [| discriminate Ht'].
-  exists x, n, ws, k, off, w. split; [reflexivity |].
+  exists x, n, ws, k, off, w.
+  split; [first [reflexivity | exact Ep] |].
+  split; [exact Hk |].
+  split; [first [reflexivity | exact Ed] |].
   assert (Hn0 : 0 <= n).
   { destruct (srun ws (mkS [] [] [])) as [s|]; [| discriminate Ht'].
     destruct (addr_of k (sstk s)) as [a0|]; [| discriminate Ht'].

@@ -61,6 +61,10 @@ jobs:
             ${{ runner.temp }}/census/fresh-kernel/verdicts.tsv
             ${{ runner.temp }}/census/fresh-kernel/summary.txt
             ${{ runner.temp }}/census/fresh-kernel/GuardFresh.log
+            ${{ runner.temp }}/census/loop-kernel/verdicts.tsv
+            ${{ runner.temp }}/census/loop-kernel/summary.txt
+            ${{ runner.temp }}/census/loop-kernel/GuardLoop.log
+            ${{ runner.temp }}/census/loop-dump
             ${{ runner.temp }}/census/okrows.tsv
             ${{ runner.temp }}/census/shaperows.tsv
             ${{ runner.temp }}/census/windowrows.tsv
