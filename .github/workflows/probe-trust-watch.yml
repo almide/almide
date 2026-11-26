@@ -1,0 +1,122 @@
+name: Probe — the trust spine, phase by phase, under a watchdog
+# A one-off measurement on its own branch: `make verify-trust` as the Trust
+# Spine job runs it, but one step per phase and each phase under
+# scripts/probe-watch.sh, which prints free memory and disk and stops a phase
+# before the runner stops answering. Not a gate.
+on:
+  push:
+    branches: [probe/trust-watch-merged]
+
+permissions:
+  contents: read
+
+env:
+  # Print the largest processes every minute: the point of this run is which
+  # phase leaves the runner without memory on this tree.
+  WATCH_LARGEST_EVERY: "12"
+  ALMIDE_CI_SLICE: "1"
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ""
+  OPAM_CACHE_VERSION: v1
+  OCAML_VERSION: "5.4.1"
+  ROCQ_CORE_VERSION: "9.3.0"
+  OPAM_REPO_SHA: a04b045f1534714416da6b4f8e8e67d2defbb750
+
+jobs:
+  watch:
+    name: verify-trust, phase by phase
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Restore opam root (OCaml + Rocq)
+        id: opam-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}-${{ env.OPAM_REPO_SHA }}
+      - name: Install opam + wabt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends opam wabt
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v50.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v50.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v50.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          bash scripts/fetch-pinned.sh "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" "$TARBALL"
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: Build opam switch + Rocq (cache miss only)
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam init --bare --disable-sandboxing -y default "git+https://github.com/ocaml/opam-repository.git#${OPAM_REPO_SHA}"
+          opam switch create "${OCAML_VERSION}" -y
+          eval "$(opam env)"
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
+      - name: Ensure coqc / coqchk on PATH
+        run: |
+          eval "$(opam env)"
+          BIN="$HOME/.local/bin"; mkdir -p "$BIN"
+          if ! command -v coqc >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"
+          fi
+          if ! command -v coqchk >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec rocq check "$@"\n' > "$BIN/coqchk"; chmod +x "$BIN/coqchk"
+          fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: The machine
+        run: |
+          nproc; free -m; df -h / /tmp; echo "TMPDIR=${TMPDIR:-}"
+      - name: check.sh
+        run: |
+          eval "$(opam env)"
+          rc=0
+          bash scripts/probe-watch.sh check proofs/check.sh > "$RUNNER_TEMP/check.log" 2>&1 || rc=$?
+          grep -v -E 'checking (cst|ind|module)|Checking library' "$RUNNER_TEMP/check.log" | tail -150 || true
+          exit "$rc"
+      - name: gate.sh
+        if: always()
+        run: |
+          eval "$(opam env)"
+          bash scripts/probe-watch.sh gate proofs/gate.sh
+      - name: corpus-wall.sh
+        if: always()
+        run: |
+          eval "$(opam env)"
+          bash scripts/probe-watch.sh corpus proofs/corpus-wall.sh
+      - name: structural-wall.sh
+        if: always()
+        run: |
+          eval "$(opam env)"
+          bash scripts/probe-watch.sh structural proofs/structural-wall.sh
+      - name: structural-wall.sh --stdlib-tests
+        if: always()
+        run: |
+          eval "$(opam env)"
+          bash scripts/probe-watch.sh stdlib-tests proofs/structural-wall.sh --stdlib-tests
+      - name: native-wall.sh
+        if: always()
+        run: |
+          eval "$(opam env)"
+          bash scripts/probe-watch.sh native proofs/native-wall.sh
+      - name: cargo test -p almide-mir
+        if: always()
+        run: bash scripts/probe-watch.sh mir cargo test -p almide-mir
+      - name: cargo test -p almide-verify
+        if: always()
+        run: bash scripts/probe-watch.sh verify cargo test -p almide-verify
