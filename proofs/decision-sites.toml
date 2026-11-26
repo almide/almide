@@ -48,8 +48,8 @@
 # naming the PR and why):
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "70"
-# failopen_ceiling      = "7"
+# skipped_route_ceiling = "69"
+# failopen_ceiling      = "6"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -238,6 +238,12 @@
 #               holds; a program fn spelled another way; constructor; derived helper; declared
 #               intrinsic); the rest is every category. Corpus 2458 files: 8495 unknown call
 #               sites -> 0, newly refused 0. fail-open 8 -> 7.
+#   2026-11-26  front.diagnostic-echo unknown -> refuse: one escaping output sink
+#               (almide_base::echo, src/lib.rs) every write of the binary leaves through, the
+#               LSP / MCP transports included, and a source gate refusing a raw print outside it
+#               (novel: a fresh path with hidden characters on 7 routes; probe on 14 columns,
+#               none prints raw; controls red). Its test cell was skipped (#4819): skipped
+#               route cells 70 -> 69. fail-open 7 -> 6.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -4115,25 +4121,26 @@ probe = "tests/decision-probes/front.e101-confusables"
 
 [[site]]
 id = "front.diagnostic-echo"
-at = "src/diagnostic_render.rs (source-line echo) / crates/almide-syntax/src/parser/diagnostics.rs::unknown_char_error"
-items = [
-  "crates/almide-syntax/src/parser/diagnostics.rs::Parser::unknown_char_error",
-]
+at = "src/lib.rs (the output sink: out / out_no_nl / err / err_no_nl / out_json_line / out_lsp_frame) / crates/almide-base/src/echo.rs::visible"
+items = ["crates/almide-syntax/src/parser/diagnostics.rs::Parser::unknown_char_error", "crates/almide-base/src/echo.rs::visible"]
 keys = []
 decides = "hidden characters reaching compiler output are escaped"
 from = "declaration"
-unknown = "allow"
-unknown_note = "#4819 escaped the terminal and JSON sinks: message, hint, notes, context and the echoed line (diagnostic_render.rs:25-29 and its callers), the JSON rows (json_escape, diagnostic_render.rs:259-283), the --json envelope (envelope.rs:61-80), MCP (mcp.rs:155-159), test names (test_report.rs:379, 805; test_output.rs:90). Each sink escapes on its own: a new sink is raw by default; the LSP escapes its diagnostics, code-action titles and hover since #4879"
-routes = { check = "partial #4819", check_json = "partial #4819", check_effects = "partial", run = "partial", build = "partial", test = "skipped for test names #4819", bench = "partial", native = "partial", wasm = "partial", wasi = "partial", component = "partial", lsp = "partial: the published diagnostics, the repair code-action titles and hover escape (#4879, tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw)", mcp = "partial", emit = "partial" }
-tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw"]
-control_note = "NONE"
+unknown = "refuse"
+unknown_note = "every write the `almide` binary makes to its own stdout / stderr leaves through the sink of src/lib.rs, and each sink fn writes almide_base::echo::visible of its text (JSON: echo::json_visible): a hidden character (C-418's set less TAB/LF/CR) no caller escaped is escaped there; a colour SGR sequence the renderer writes is the one structure kept. tests/echo_sink_test.rs refuses a print macro or a raw stdout()/stderr() handle anywhere else in src/ (syn, test code excepted; novel: a fresh output path written eight ways is refused). The LSP's transport writes each frame through the sink (out_lsp_frame), MCP each line (out_json_line). The one raw channel is relay_program_output: a user program's own bytes under `run --target wasm`. Per-sink escapes of #4819 / #4879 stay (defence in depth)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw", "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink", "tests/echo_sink_test.rs::novel_a_fresh_output_path_outside_the_sink_is_refused", "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped", "crates/almide-base/src/echo.rs::tests::only_a_colour_sgr_sequence_stays_raw"]
+control_note = "proofs/decision-controls/front.diagnostic-echo.patch: the sink writes raw again; .raw-print.patch: a command writes its stderr past the sink"
 issues = [4819, 4879]
 status = "UNSTAMPED"
-reasons = ["c2: a new output sink is unescaped by default (each sink escapes on its own; no one constructor)", "c3: no probe (an expected substring cannot say `not raw`)"]
-note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879)."
-novel = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
-control_test = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
+reasons = ["c4: the controls have not run (control_seen empty)"]
+note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879). 2026-11-26 (fail-open-front, 33rd engineer): one escaping output sink (almide_base::echo + src/lib.rs), every raw print in src/ routed through it, LSP / MCP transports through it, a source gate for new paths; probe tests/decision-probes/front.diagnostic-echo (raw U+202E, U+200B, U+E0041 in an expression: every route refuses E101 and prints none raw, the matrix test's `forbid`)."
+novel = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
+control_test = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
 control_patch = "proofs/decision-controls/front.diagnostic-echo.patch"
+probe = "tests/decision-probes/front.diagnostic-echo"
+control_extra = "proofs/decision-controls/front.diagnostic-echo.raw-print.patch"
+control_extra_test = "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink"
 
 [[site]]
 id = "front.nesting-budget"

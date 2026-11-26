@@ -1,0 +1,13 @@
+# Negative control of front.diagnostic-echo.raw-print (proofs/decision-sites.toml): a command writes its own stderr past the sink
+# control_test: tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink
+diff --git a/src/cli/check.rs b/src/cli/check.rs
+--- a/src/cli/check.rs
++++ b/src/cli/check.rs
+@@ -605,6 +605,7 @@ fn enforce_effect_permissions(
+ }
+ 
+ pub fn cmd_check_effects(file: &str) {
++    eprintln!("{file}:");
+     let (mut program, source_text, parse_errors) = parse_file(file);
+ 
+     if !parse_errors.is_empty() {
