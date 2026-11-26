@@ -274,12 +274,16 @@ Fixpoint prun (ws : list pin) (s : psym) : option psym :=
   | i :: r => match pstep i s with Some s' => prun r s' | None => None end
   end.
 
-(* The access a path ends in, and the range of it a statement is about. *)
+(* The access a path ends in, and the range of it a statement is about. A
+   path may also end in a call of a function other than the allocator
+   (`FCall`): no range is stated of it here (GuardAcquire.v reads what the
+   call is handed). *)
 Inductive fin : Type :=
   | FCopy
   | FFill
   | FLoad (off w : Z)
-  | FStore (off w : Z).
+  | FStore (off w : Z)
+  | FCall (f : Z).
 
 Inductive range : Type :=
   | RBulk (a n : ptm)            (* `n` bytes from address `a` *)
@@ -304,6 +308,7 @@ Definition frange (f : fin) (dst : bool) (st : list ptm) : option range :=
                     | _ :: a :: _ => if dst then Some (RWord a off w) else None
                     | _ => None
                     end
+  | FCall _ => None
   end.
 
 (* The block a range is stated against, as the proposer names it and as the
@@ -378,6 +383,7 @@ Definition crange (f : fin) (dst : bool) (stk : list Z) : option (Z * Z) :=
                     | _ :: a :: _ => if dst then Some (u32 a + off, w) else None
                     | _ => None
                     end
+  | FCall _ => None
   end.
 
 Section Semantics.
@@ -889,8 +895,9 @@ Fixpoint le_bytes (n : nat) (bs : list Z) : option (Z * list Z) :=
 (* A path's bytes `bs`: its instructions, ending in the access and nothing
    after; `rest` is what follows the access in the function, read only to
    find where a loop the path entered closes. An unconditional branch, a
-   `return`, a call of anything but the function at `alloc`, or an `else` or
-   `end` of a block the path did not open, is not a path. *)
+   `return`, a call of anything but the function at `alloc` before the last
+   instruction, or an `else` or `end` of a block the path did not open, is
+   not a path. A path whose last instruction is such a call ends in it. *)
 Fixpoint pdec (alloc : Z) (fuel : nat) (bs rest : list Z) (acc : list pin)
   : option (list pin * fin) :=
   match fuel with
@@ -930,7 +937,12 @@ Fixpoint pdec (alloc : Z) (fuel : nat) (bs rest : list Z) (acc : list pin)
             match uleb 5 r with Some (_, r') => pdec alloc f r' rest (PZero :: acc) | None => None end
           else if op =? 16 then
             match uleb 5 r with
-            | Some (x, r') => if x =? alloc then pdec alloc f r' rest (PAlloc :: acc) else None
+            | Some (x, r') =>
+                if x =? alloc then pdec alloc f r' rest (PAlloc :: acc)
+                else match r' with
+                     | [] => Some (rev acc, FCall x)
+                     | _ :: _ => None
+                     end
             | None => None
             end
           else if op =? 2 then

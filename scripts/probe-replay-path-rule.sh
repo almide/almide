@@ -16,9 +16,9 @@
 #
 #   scripts/probe-replay-path-rule.sh <out-dir>      (ONLY="<patch name> ..." to select)
 #
-# Writes <out-dir>/summary.tsv (replay, module, sha, ranges, proved, not
-# proved, no guess, header words, out of time, accesses with no path) and
-# <out-dir>/<replay>.ranges.tsv. Needs coqc.
+# Writes <out-dir>/summary.tsv (replay, module, sha, ranges, proved, proved
+# but not carried, not proved, no guess, header words, out of time, accesses
+# with no path) and <out-dir>/<replay>.ranges.tsv. Needs coqc.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -34,10 +34,11 @@ export LIMIT="${PATH_GOAL_SECONDS:-300}"
 
 t0=$(date +%s)
 if ! (cd proofs && coqc -Q . AlmideTrust GuardWindow.v && coqc -Q . AlmideTrust GuardFresh.v \
-      && coqc -Q . AlmideTrust GuardPath.v && coqc -Q . AlmideTrust GuardPathShipped.v) > "$OUT/coqc.log" 2>&1; then
+      && coqc -Q . AlmideTrust GuardPath.v && coqc -Q . AlmideTrust GuardPathShipped.v \
+      && coqc -Q . AlmideTrust GuardAcquire.v) > "$OUT/coqc.log" 2>&1; then
   echo "the proofs do not compile:"; tail -n 60 "$OUT/coqc.log"; exit 1
 fi
-echo "== proofs/GuardPath.v and GuardPathShipped.v compile in $(( $(date +%s) - t0 )) s; $(coqc --version | head -1)"
+echo "== proofs/GuardPath.v, GuardPathShipped.v and GuardAcquire.v compile in $(( $(date +%s) - t0 )) s; $(coqc --version | head -1)"
 grep -n -B1 -A2 'Closed under the global context\|Axioms:' "$OUT/coqc.log" | tail -n 12
 
 build() { cargo build -q -p almide-wasm --example emit_structural_bundle; }
@@ -102,6 +103,22 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
     "unpatched=$(sha256sum < "$OUT/$name.base/a.anchors.wasm" | cut -c1-12)" \
     "defect=$(sha256sum < "$OUT/$name.bug/a.anchors.wasm" | cut -c1-12)" \
     "$OUT/summary.tsv" | sed 's/^/   /'
+  # The acquire rule (proofs/GuardAcquire.v): per frame of the anchor file's
+  # `rc` line, every named acquire (`a<local>`) has its own call of the rc_inc
+  # routine (`rcfns`, first index) that is handed the value that local holds.
+  # The cutter proposes the calls; the kernel evaluates `acquire_ok`.
+  A="$OUT/$name.acquire"
+  mkdir -p "$A"
+  python3 -I "$TOOLS/cut_acquires.py" "$OUT/$name.base/a.anchors.wasm" "$OUT/$name.base/a.anchors" > "$A/base.cut" || { echo "   the acquire cutter failed on the unpatched module"; continue; }
+  python3 -I "$TOOLS/cut_acquires.py" "$OUT/$name.bug/a.anchors.wasm" "$OUT/$name.bug/a.anchors" > "$A/bug.cut" || { echo "   the acquire cutter failed on the defect module"; continue; }
+  python3 -I "$TOOLS/acquire_goals.py" "$A" "unpatched=$A/base.cut" "defect=$A/bug.cut" | sed 's/^/   /'
+  find "$A" -maxdepth 1 -name 'A_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
+  python3 -I "$TOOLS/acquire_verdicts.py" "$A" "$OUT/$name.frames.tsv" --replay "$name" \
+    "unpatched=$(sha256sum < "$OUT/$name.base/a.anchors.wasm" | cut -c1-12)" \
+    "defect=$(sha256sum < "$OUT/$name.bug/a.anchors.wasm" | cut -c1-12)" \
+    "$OUT/acquire-summary.tsv" | sed 's/^/   /'
 done
-echo "== summary (replay, module, sha, ranges, proved, not proved, no guess, header words, out of time, accesses with no path)"
+echo "== acquire rule summary (replay, module, sha, frames with a named acquire, acquires, accepted, refused, with an acquire not placed, out of time)"
+cat "$OUT/acquire-summary.tsv" 2>/dev/null
+echo "== summary (replay, module, sha, ranges, proved, proved but not carried, not proved, no guess, header words, out of time, accesses with no path)"
 cat "$OUT/summary.tsv"

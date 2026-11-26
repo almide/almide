@@ -61,6 +61,15 @@ jobs:
           name: path-rule-${{ matrix.variant }}
           path: |
             ${{ runner.temp }}/path/summary.tsv
+            ${{ runner.temp }}/path/acquire-summary.tsv
+            ${{ runner.temp }}/path/*.frames.tsv
+            ${{ runner.temp }}/path/*.acquire/*.cut
+            ${{ runner.temp }}/path/*.acquire/index.tsv
+            ${{ runner.temp }}/path/*.acquire/*.v
+            ${{ runner.temp }}/path/*.acquire/*.log
+            ${{ runner.temp }}/path/*.acquire/*.rc
+            ${{ runner.temp }}/path/*.base/a.anchors
+            ${{ runner.temp }}/path/*.bug/a.anchors
             ${{ runner.temp }}/path/coqc.log
             ${{ runner.temp }}/path/*.ranges.tsv
             ${{ runner.temp }}/path/*.cut

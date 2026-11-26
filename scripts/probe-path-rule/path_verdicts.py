@@ -32,7 +32,9 @@ With --replay, the two labels must be `unpatched` and `defect`. The same access 
 both modules by its function, kind, signature (the access and the eight instructions before
 it) and range; a signature may occur several times (one per call site inlined). The rule
 tells the modules apart when some signature occurs equally often in both, none of its ranges
-ran out of time, and fewer of them are proved in the defect module.
+ran out of time, and the kernel checked a proof for fewer of them in the defect module
+(`proved` or `not carried`: what lies between is the cutter's reading, so a difference in
+that alone is listed and not counted).
 """
 import collections
 import re
@@ -147,7 +149,8 @@ def main():
             f.write(f"{replay}\t{label}\t{shas[label]}\t{sum(t.values())}\t{t['proved']}\t{t['not carried']}\t"
                     f"{t['not proved']}\t{t['no guess']}\t{t['header']}\t{t['out of time']}\t{nopath[label]}\n")
     base, bug = by_sig["unpatched"], by_sig["defect"]
-    lost, timed, uneven = [], 0, 0
+    kernel = ("proved", "not carried")      # the kernel checked a proof of the statement
+    lost, timed, uneven, carry = [], 0, 0, []
     for key in sorted(set(base) | set(bug)):
         b, d = base.get(key, []), bug.get(key, [])
         if len(b) != len(d):
@@ -156,15 +159,20 @@ def main():
         if any(v == "out of time" for _, v, _ in b + d):
             timed += 1
             continue
-        nb, nd = sum(v == "proved" for _, v, _ in b), sum(v == "proved" for _, v, _ in d)
+        nb, nd = sum(v in kernel for _, v, _ in b), sum(v in kernel for _, v, _ in d)
         if nd < nb:
-            lost.append((key, len(b), nb, nd, [(at, v, how) for at, v, how in d if v != "proved"]))
+            lost.append((key, len(b), nb, nd, [(at, v, how) for at, v, how in d if v not in kernel]))
+        elif sum(v == "proved" for _, v, _ in d) < sum(v == "proved" for _, v, _ in b):
+            carry.append(key)
     for key, n, nb, nd, bad in lost:
         func, kind, sig, side = key
         print(f"  function {func}, {kind} {sig}, bytes {side}: {n} occurrence(s); proved {nb} in the unpatched "
               f"module, {nd} in the defect module")
         for at, v, how in bad:
             print(f"    defect module, instruction {at}: {v} ({how})")
+    for func, kind, sig, side in carry:
+        print(f"  function {func}, {kind} {sig}, bytes {side}: as many statements proved in both modules, fewer "
+              f"carried in the defect module (the cutter's reading of what lies between; not counted)")
     note = f"{uneven} signature(s) occur unequally often and {timed} have a range out of time (neither counted)"
     if lost:
         print(f"VERDICT {replay}: the path rule tells them apart: {sum(x[2] - x[3] for x in lost)} range(s) of "
