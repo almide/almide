@@ -1,4 +1,4 @@
-name: Probe — the copy rule against the twelve replayed memory bugs
+name: Probe — the path rule against the twelve replayed memory bugs
 # A one-off measurement on its own branch. Not a gate.
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
 
 jobs:
   replay:
-    name: Copy rule on ${{ matrix.variant }}
+    name: Path rule on ${{ matrix.variant }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -53,20 +53,21 @@ jobs:
       - name: Replay and ask the kernel
         env:
           ONLY: ${{ matrix.variant }}
-        run: bash scripts/probe-replay-copy-rule.sh "$RUNNER_TEMP/copy"
+        run: bash scripts/probe-replay-path-rule.sh "$RUNNER_TEMP/path"
       - name: Upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: copy-rule-${{ matrix.variant }}
+          name: path-rule-${{ matrix.variant }}
           path: |
-            ${{ runner.temp }}/copy/summary.tsv
-            ${{ runner.temp }}/copy/coqc.log
-            ${{ runner.temp }}/copy/*.sides.tsv
-            ${{ runner.temp }}/copy/*.cut
-            ${{ runner.temp }}/copy/*.base/a.anchors.wasm
-            ${{ runner.temp }}/copy/*.bug/a.anchors.wasm
-            ${{ runner.temp }}/copy/*.goals/index.tsv
-            ${{ runner.temp }}/copy/*.goals/*.v
-            ${{ runner.temp }}/copy/*.goals/*.log
-            ${{ runner.temp }}/copy/*.goals/*.rc
+            ${{ runner.temp }}/path/summary.tsv
+            ${{ runner.temp }}/path/coqc.log
+            ${{ runner.temp }}/path/*.ranges.tsv
+            ${{ runner.temp }}/path/*.cut
+            ${{ runner.temp }}/path/*.base/a.anchors.wasm
+            ${{ runner.temp }}/path/*.bug/a.anchors.wasm
+            ${{ runner.temp }}/path/*.goals/index.tsv
+            ${{ runner.temp }}/path/*.goals/nopath.tsv
+            ${{ runner.temp }}/path/*.goals/*.v
+            ${{ runner.temp }}/path/*.goals/*.log
+            ${{ runner.temp }}/path/*.goals/*.rc

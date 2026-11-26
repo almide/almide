@@ -1,42 +1,43 @@
 #!/usr/bin/env bash
-# Probe only, not a gate: does the kernel's copy rule (proofs/GuardCopy.v)
+# Probe only, not a gate: does the kernel's path rule (proofs/GuardPath.v)
 # tell the module a fixed compiler emits from the module the same compiler
 # emits with a historical memory bug put back?
 #
 # For each replay patch (the ones scripts/probe-replay-history.sh runs), the
 # bug's own reproduction is emitted twice, by the unpatched compiler and by
-# the compiler with the patch applied. Every `memory.copy` of both modules is
-# cut with the longest straight-line run before it, which may call the
-# allocator and nothing else (scripts/probe-copy-rule/cut_copies.py,
-# untrusted: it only proposes), and the kernel is asked, per copy and per
-# side (the bytes written, the bytes read), for a proof that the side lies
+# the compiler with the patch applied. Every load, store, `memory.copy` and
+# `memory.fill` of both modules is cut with the longest run of its function
+# before it that the rule reads (scripts/probe-path-rule/cut_paths.py,
+# untrusted: it only proposes), and the kernel is asked, per access and per
+# range (the bytes written, the bytes read), for a proof that the range lies
 # in the payload of a block the cutter guessed: one a local holds, by its
-# length word, or one the window allocated, by the size asked for. A side is
+# length word, or one the path allocated, by the size asked for. A range is
 # `proved` when the file with one of its statements compiles.
 #
-#   scripts/probe-replay-copy-rule.sh <out-dir>      (ONLY="<patch name> ..." to select)
+#   scripts/probe-replay-path-rule.sh <out-dir>      (ONLY="<patch name> ..." to select)
 #
-# Writes <out-dir>/summary.tsv (replay, module, sha, copies, sides, proved,
-# not proved or not guessed, out of time) and <out-dir>/<replay>.sides.tsv.
-# Needs coqc.
+# Writes <out-dir>/summary.tsv (replay, module, sha, ranges, proved, not
+# proved, no guess, header words, out of time, accesses with no path) and
+# <out-dir>/<replay>.ranges.tsv. Needs coqc.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-OUT="${1:?usage: scripts/probe-replay-copy-rule.sh <out-dir>}"
+OUT="${1:?usage: scripts/probe-replay-path-rule.sh <out-dir>}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 T="${CARGO_TARGET_DIR:-$PWD/target}/debug"
-TOOLS="$ROOT/scripts/probe-copy-rule"
+TOOLS="$ROOT/scripts/probe-path-rule"
 PROOFS="$ROOT/proofs"
 export PROOFS
-export LIMIT="${COPY_GOAL_SECONDS:-600}"
+export LIMIT="${PATH_GOAL_SECONDS:-300}"
 
 t0=$(date +%s)
-if ! (cd proofs && coqc -Q . AlmideTrust GuardWindow.v && coqc -Q . AlmideTrust GuardCopy.v) > "$OUT/coqc.log" 2>&1; then
+if ! (cd proofs && coqc -Q . AlmideTrust GuardWindow.v && coqc -Q . AlmideTrust GuardFresh.v \
+      && coqc -Q . AlmideTrust GuardPath.v && coqc -Q . AlmideTrust GuardPathShipped.v) > "$OUT/coqc.log" 2>&1; then
   echo "the proofs do not compile:"; tail -n 60 "$OUT/coqc.log"; exit 1
 fi
-echo "== proofs/GuardCopy.v compiles in $(( $(date +%s) - t0 )) s; $(coqc --version | head -1)"
+echo "== proofs/GuardPath.v and GuardPathShipped.v compile in $(( $(date +%s) - t0 )) s; $(coqc --version | head -1)"
 grep -n -B1 -A2 'Closed under the global context\|Axioms:' "$OUT/coqc.log" | tail -n 12
 
 build() { cargo build -q -p almide-wasm --example emit_structural_bundle; }
@@ -87,20 +88,20 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
   if cmp -s "$OUT/$name.base/a.anchors.wasm" "$OUT/$name.bug/a.anchors.wasm"; then echo "   module: same bytes as unpatched"; else echo "   module: bytes DIFFER from unpatched"; fi
   G="$OUT/$name.goals"
   mkdir -p "$G"
-  # the one function a window may call: the anchor file's `alloc` line
+  # the one function a path may call: the anchor file's `alloc` line
   abase="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.base/a.anchors")"
   abug="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.bug/a.anchors")"
   echo "   allocator index: unpatched ${abase:-none}, defect ${abug:-none}"
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.base/a.anchors.wasm" "${abase:--}" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.bug/a.anchors.wasm" "${abug:--}" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
-  python3 -I "$TOOLS/copy_goals.py" "$G" "unpatched=$OUT/$name.base.cut" "defect=$OUT/$name.bug.cut" | sed 's/^/   /'
+  python3 -I "$TOOLS/cut_paths.py" "$OUT/$name.base/a.anchors.wasm" "${abase:--}" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
+  python3 -I "$TOOLS/cut_paths.py" "$OUT/$name.bug/a.anchors.wasm" "${abug:--}" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
+  python3 -I "$TOOLS/path_goals.py" "$G" "unpatched=$OUT/$name.base.cut" "defect=$OUT/$name.bug.cut" | sed 's/^/   /'
   t1=$(date +%s)
-  find "$G" -maxdepth 1 -name 'C_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
+  find "$G" -maxdepth 1 -name 'P_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
   echo "   the kernel answered in $(( $(date +%s) - t1 )) s"
-  python3 -I "$TOOLS/copy_verdicts.py" "$G" "$OUT/$name.sides.tsv" --replay "$name" \
+  python3 -I "$TOOLS/path_verdicts.py" "$G" "$OUT/$name.ranges.tsv" --replay "$name" \
     "unpatched=$(sha256sum < "$OUT/$name.base/a.anchors.wasm" | cut -c1-12)" \
     "defect=$(sha256sum < "$OUT/$name.bug/a.anchors.wasm" | cut -c1-12)" \
     "$OUT/summary.tsv" | sed 's/^/   /'
 done
-echo "== summary (replay, module, sha, copies, sides, proved, not proved or not guessed, out of time)"
+echo "== summary (replay, module, sha, ranges, proved, not proved, no guess, header words, out of time, accesses with no path)"
 cat "$OUT/summary.tsv"
