@@ -323,7 +323,9 @@ pub fn is_pure(module: &str, func: &str) -> bool {
 fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
     crate::host_ops::host_op(module, func).is_none()
         && !almide_ir::host_reach::serving_bodies(module, func).is_empty()
-        && almide_ir::effect::stdlib_call_effect(module, func).is_empty()
+        // No category — or only the halt a testing assertion declares
+        // (#4951: `Abort` + its stderr report, which needs no capability).
+        && { let cats = almide_ir::effect::stdlib_call_effect(module, func); cats.is_empty() || almide_ir::effect::only_halts(&cats) }
         && !almide_ir::host_reach::stdlib_fn_reaches_host(module, func)
 }
 

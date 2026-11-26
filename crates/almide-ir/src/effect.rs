@@ -120,6 +120,16 @@ pub(crate) fn builtin_writes_without_aborting(name: &str) -> bool {
     !e.is_empty() && !e.contains(&Effect::Abort)
 }
 
+/// Do `cats` describe only ADR-0022's halt — `Abort`, with nothing beyond
+/// what an abort builtin (`panic`, `assert`) carries, its report on stderr?
+/// A testing assertion is such a fn (#4951): it reaches no host capability,
+/// so a consumer asking "may this run without one" (the native renderer's
+/// purity) admits it, while `@pure` and `[permissions]` still see the leaves.
+pub fn only_halts(cats: &[Effect]) -> bool {
+    let halt: Vec<Effect> = BUILTIN_EFFECTS.iter().filter(|(_, e)| e.contains(&Effect::Abort)).flat_map(|(_, e)| e.iter().copied()).collect();
+    cats.contains(&Effect::Abort) && cats.iter().all(|c| halt.contains(c))
+}
+
 /// The leaves a plain `fn` may carry (ADR-0022): those of the output and
 /// abort builtins, which a plain fn may call. Any other leaf belongs to an
 /// `effect fn`.

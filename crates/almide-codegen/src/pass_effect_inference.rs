@@ -29,7 +29,11 @@ pub use almide_ir::effect::{Effect, FunctionEffects, EffectMap};
 /// in `almide_ir::effect::STDLIB_MODULE_EFFECTS` (#3246). With
 /// [`runtime_name_to_effect`], the only per-operation input of
 /// `crate::effect_flow`.
+///
+/// A monomorphised instance (`list.__almd_mono4_join__String`, on a route
+/// judged after mono) is classified as the generic it instantiates.
 pub(crate) fn module_to_effect(module: &str, func: &str) -> Vec<Effect> {
+    let func = almide_ir::mono_name::mono_instance_base(func).unwrap_or(func);
     almide_ir::effect::stdlib_call_effect(module, func)
 }
 
