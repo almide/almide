@@ -19,7 +19,7 @@ use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_pattern, walk_stmt, IrVisitor};
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::graph::{bit, Edge, FnIx, Graph, NodeId, EFFECT_FN};
-use super::callee::{dispatch_var, Callees, Conformer};
+use super::callee::{bounds_of, dispatch_var, Callees, Conformer};
 use super::index::{Index, Pools};
 use almide_base::intern::Sym;
 use super::{module_to_effect, runtime_name_to_effect};
@@ -298,10 +298,10 @@ impl Scan<'_, '_> {
     /// ([`Callees::conformers`]), each a call with the same arguments; what
     /// it returns is the join of theirs. With no conformer the dispatch can
     /// never run (no value of a conforming type exists).
-    fn dispatch(&mut self, method: &str, vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+    fn dispatch(&mut self, method: &str, bounds: &[String], vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
         let label = format!("{} ({})", method, loc(e.span));
         let mut rets = Vec::new();
-        for c in self.callees.conformers(self.ix, self.table, method) {
+        for c in self.callees.conformers(self.ix, self.table, method, bounds) {
             match c {
                 Conformer::Scanned { f, stdlib } => {
                     if let Some((m, func)) = stdlib {
@@ -457,8 +457,9 @@ impl Scan<'_, '_> {
                 let label = format!("{} ({})", name, loc(e.span));
                 // A protocol requirement called through a type variable of the
                 // enclosing generic: every conformer the program may pick.
-                if let Some((_, method)) = dispatch_var(name, self.ix.fns[self.scope].func) {
-                    return self.dispatch(method, vals, args, e);
+                if let Some((tv, method)) = dispatch_var(name, self.ix.fns[self.scope].func) {
+                    let bounds = bounds_of(tv, self.ix.fns[self.scope].func);
+                    return self.dispatch(method, &bounds, vals, args, e);
                 }
                 // An output or abort builtin (`println`, `panic`, …) carries
                 // its D2 leaves (ADR-0026, #4155); a classified runtime symbol
@@ -538,8 +539,11 @@ impl Scan<'_, '_> {
                 }
                 // A requirement called on a receiver typed by a type variable:
                 // every conformer the program may pick.
-                if matches!(object.ty, Ty::TypeVar(_)) {
-                    return self.dispatch(method.as_str(), vals, &all, e);
+                // The lowering spells it `<var>.<requirement>` (`H.__self_read`).
+                if let Ty::TypeVar(tv) = &object.ty {
+                    let requirement = method.as_str().strip_prefix(&format!("{tv}.")).unwrap_or(method.as_str()).to_string();
+                    let bounds = bounds_of(tv.as_str(), self.ix.fns[self.scope].func);
+                    return self.dispatch(&requirement, &bounds, vals, &all, e);
                 }
                 self.perform_unknown(format!("{} ({})", method, loc(e.span)));
                 self.opaque_call_vals(&vals, &all, &e.ty)

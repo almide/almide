@@ -4,10 +4,10 @@ diff --git a/crates/almide-codegen/src/effect_flow/scan.rs b/crates/almide-codeg
 --- a/crates/almide-codegen/src/effect_flow/scan.rs
 +++ b/crates/almide-codegen/src/effect_flow/scan.rs
 @@ -301,7 +301,7 @@ impl Scan<'_, '_> {
-     fn dispatch(&mut self, method: &str, vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+     fn dispatch(&mut self, method: &str, bounds: &[String], vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
          let label = format!("{} ({})", method, loc(e.span));
          let mut rets = Vec::new();
--        for c in self.callees.conformers(self.ix, self.table, method) {
+-        for c in self.callees.conformers(self.ix, self.table, method, bounds) {
 +        for c in Vec::<Conformer>::new() {
              match c {
                  Conformer::Scanned { f, stdlib } => {

@@ -606,7 +606,13 @@ fn novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer() {
     std::fs::write(proj.join("almide.toml"), manifest).unwrap();
     let o = run(&proj, &["check", "src/main.almd"]);
     let t = text(&o);
-    assert!(!o.status.success() && t.contains("FS.write"), "a dispatch to a file-writing conformer is admitted:\n{t}");
+    // The conformer itself is refused whatever the dispatch does; the
+    // generic fn that dispatches to it is refused only when the dispatch is
+    // charged with the conformer.
+    assert!(
+        !o.status.success() && t.contains(&format!("capability violation in `{run_fn}`")),
+        "a dispatch to a file-writing conformer charges the dispatching fn nothing:\n{t}"
+    );
     let (_t2, proj) = project(&[("src/main.almd", src("println(int.to_string(self.n))"))]);
     std::fs::write(proj.join("almide.toml"), manifest).unwrap();
     let o = run(&proj, &["check", "src/main.almd"]);

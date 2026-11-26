@@ -60,6 +60,9 @@ pub(super) struct Callees {
     methods: HashMap<String, Vec<(String, FnIx)>>,
     /// Variant cases by name: the declared types (bare names) that have it.
     cases: HashMap<String, BTreeSet<String>>,
+    /// The protocols each declared type says it conforms to (`type T: P`),
+    /// by bare names.
+    declared: HashMap<String, BTreeSet<String>>,
     /// Conformer sets already computed, by requirement name.
     memo: RefCell<HashMap<String, Vec<Conformer>>>,
     /// Every scanned fn by its qualified key (`m.f`, or `f` at the root),
@@ -137,8 +140,11 @@ impl Callees {
             }
         }
         let mut cases: HashMap<String, BTreeSet<String>> = HashMap::new();
+        let mut declared: HashMap<String, BTreeSet<String>> = HashMap::new();
         let decls = program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
         for d in decls {
+            let ps = declared.entry(last(d.name.as_str()).to_string()).or_default();
+            ps.extend(d.deriving.iter().flatten().map(|p| last(p.as_str()).to_string()));
             if let IrTypeDeclKind::Variant { cases: cs, .. } = &d.kind {
                 for c in cs {
                     cases.entry(c.name.to_string()).or_default().insert(last(d.name.as_str()).to_string());
@@ -155,7 +161,7 @@ impl Callees {
                 Some((info.name.clone(), module, func.name.to_string(), f))
             })
             .collect();
-        Callees { types, methods, cases, memo: RefCell::new(HashMap::new()), keys }
+        Callees { types, methods, cases, declared, memo: RefCell::new(HashMap::new()), keys }
     }
 
     /// The program's own functions a name the scan's resolver did not find
@@ -199,15 +205,26 @@ impl Callees {
     }
 
     /// The conformers a requirement `method` called through a type variable
-    /// may run: for every concrete type the program holds a value of, the
-    /// function monomorphisation would rewrite the call to, when one exists.
-    pub fn conformers(&self, ix: &Index<'_>, table: usize, method: &str) -> Vec<Conformer> {
-        if let Some(c) = self.memo.borrow().get(method) {
+    /// bounded by `bounds` may run: for every concrete type the program holds
+    /// a value of that may conform — a declared type that says it conforms
+    /// to a bound, or that declares no protocol at all, and every built-in
+    /// type — the function monomorphisation would rewrite the call to, when
+    /// one exists.
+    pub fn conformers(&self, ix: &Index<'_>, table: usize, method: &str, bounds: &[String]) -> Vec<Conformer> {
+        let memo_key = format!("{method}:{}", bounds.join(","));
+        if let Some(c) = self.memo.borrow().get(&memo_key) {
             return c.clone();
         }
+        let may_conform = |ty: &Ty| {
+            let Some(n) = ty_name(ty) else { return true };
+            match self.declared.get(last(&n)) {
+                Some(ps) if !ps.is_empty() && !bounds.is_empty() => bounds.iter().any(|b| ps.contains(b)),
+                _ => true,
+            }
+        };
         let mut out: BTreeSet<Conformer> = BTreeSet::new();
         let public = almide_lang::stdlib_info::requirement_public_name(method);
-        for ty in &self.types {
+        for ty in self.types.iter().filter(|t| may_conform(t)) {
             if let Some(module) = ty.owning_module() {
                 let func = match ty_name(ty) {
                     Some(n) => almide_lang::stdlib_info::requirement_fn_name(&n, method),
@@ -234,7 +251,7 @@ impl Callees {
             }
         }
         let out: Vec<Conformer> = out.into_iter().collect();
-        self.memo.borrow_mut().insert(method.to_string(), out.clone());
+        self.memo.borrow_mut().insert(memo_key, out.clone());
         out
     }
 }
@@ -267,6 +284,16 @@ fn ty_name(ty: &Ty) -> Option<String> {
 
 /// The type variable a dispatch is called through: `T` of `T.__join` when
 /// `T` is a generic of the enclosing function.
+/// The protocol bounds (bare names) of the type variable `tv` of `func`.
+pub(super) fn bounds_of(tv: &str, func: Option<&IrFunction>) -> Vec<String> {
+    func.and_then(|f| f.generics.as_ref())
+        .into_iter()
+        .flatten()
+        .filter(|g| g.name.as_str() == tv)
+        .flat_map(|g| g.bounds.iter().flatten().map(|b| last(b.as_str()).to_string()))
+        .collect()
+}
+
 pub(super) fn dispatch_var<'n>(name: &'n str, func: Option<&IrFunction>) -> Option<(&'n str, &'n str)> {
     let (tv, method) = name.split_once('.')?;
     let generic = func?.generics.iter().flatten().any(|g| g.name.as_str() == tv);
