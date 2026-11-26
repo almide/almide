@@ -3607,16 +3607,16 @@ from = "text"
 unknown = "refuse"
 unknown_note = "an out-of-program callee has no row only by membership in a set the render serves and whose convention is declared (certificate_native_calls.rs render_served_callee: the self-host registry call names, the native shims, the declared native floor, the list concat ops, the host-op rows, mir_ops::INJECTED_ACCESSORS; e26ca2188d / 3cdf2c3d3b, #4828); any other callee — whatever its spelling, a `.` or a leading `__` — gets the out-of-range index the checker rejects (novel test: a fresh `__` helper and a fresh `module.fn`)"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4828 native certs discarded", build = "skipped: #4828 same", test = "skipped: #4828", bench = "skipped: #4828", native = "skipped: #4828 proofs/native-wall.sh, verify --mir", wasm = "n.a.: the structural leg has its own call-modes", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = ["crates/almide-mir/src/certificate_p2.rs::tests::call_modes_witness_matches_the_coq_parser_format", "crates/almide-mir/src/certificate_p2.rs::an_unserved_callee_is_rejected_whatever_its_spelling", "crates/almide-mir/tests/call_modes_served_membership.rs", "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"]
+tests = ["crates/almide-mir/src/certificate_p2.rs::tests::call_modes_witness_matches_the_coq_parser_format", "crates/almide-mir/src/certificate_p2.rs::an_unserved_callee_is_rejected_whatever_its_spelling", "crates/almide-mir/tests/call_modes_served_membership.rs", "tests/decision_novel_test.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"]
 control_note = "proofs/decision-controls/witness.call-modes-skip.patch: a callee spelled with a `.` or a leading `__` is admitted again"
 issues = [4828]
 status = "UNSTAMPED"
 reasons = ["c1: decides by membership in served sets, some of them hand lists (render_native_shims, mir_ops::INJECTED_ACCESSORS)", "c3: the route cells still name #4828 (native certificates are judged by build / run since d55d1d3c75; not re-observed)"]
 note = "#4828 fixed the spelling rule (e26ca2188d, 3cdf2c3d3b); 2026-11-26 (fail-open-zero): its novel test and control."
-novel = "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
+novel = "tests/decision_novel_test.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
 control_patch = "proofs/decision-controls/witness.call-modes-skip.patch"
-control_test = "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
-control_seen = "071f8e828e 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh, unit-test leg)"
+control_test = "tests/decision_novel_test.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
+control_seen = "cf29fbaa72 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "witness.native-verified-fallback"

@@ -1,5 +1,5 @@
 # Negative control of witness.call-modes-skip (proofs/decision-sites.toml): an out-of-program callee is admitted (no row) by its spelling, a `.` or a leading `__`
-# control_test: crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling
 diff --git a/crates/almide-mir/src/certificate_native_calls.rs b/crates/almide-mir/src/certificate_native_calls.rs
 --- a/crates/almide-mir/src/certificate_native_calls.rs
 +++ b/crates/almide-mir/src/certificate_native_calls.rs
