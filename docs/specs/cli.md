@@ -1510,6 +1510,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_NATIVE_DRILL_COND_I64` | ablation | make the certified native render keep every comparison an i64 0/1 tested with `!= 0`, never a branch-only `bool` — the negative control of the branch-only comparison render in scripts/check-native-v1-perf-small.sh (recursion_depth_within_limits) |
 | `ALMIDE_NATIVE_DRILL_FORCE_MOVES` | ablation | make the certified native render move every copy whose source it does not already know is dead, ignoring the MIR liveness verdict — the negative control of the copy-to-move liveness rule (#4006) |
 | `ALMIDE_NATIVE_DRILL_NO_MOVES` | ablation | make the certified native render keep every copy it would elide (no in-place `list.push`, a clone for each last-use Dup/SetLocal) — the negative control of scripts/check-native-v1-perf.sh (#4006) |
+| `ALMIDE_NATIVE_WALL_LOG=value` | tool | a file each verified native render wall appends one `wall<TAB>route<TAB>source-hash<TAB>reason<TAB>caller` line to (#4006): how scripts/check-native-walls.sh --cli-log counts the walls of the programs the CLI test files build |
 | `ALMIDE_NO_AVAIL_CHECK` | gate | bypass the E081 stdlib availability check (the measurement escape the availability probe builds through) |
 | `ALMIDE_NO_RTLIB` | route | build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build) |
 | `ALMIDE_NO_VERIFIED_OK` | gate | re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag |
