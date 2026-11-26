@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Cut the copy windows of a module: for every `memory.copy`, the longest straight-line run
 before it that proofs/GuardCopy.v's `pdec` reads (untrusted: it only proposes; the kernel
-decodes the bytes again and proves or does not prove the statement).
+decodes the bytes again and proves or does not prove each statement).
 
-  cut_copies.py <module.wasm> [<label>]
+  cut_copies.py <module.wasm> <allocator index>
 
-Prints, per copy, `COPY <function> <instruction> <dst local> <src local> | <bytes>`; the
-two locals are the cutter's guess at the blocks written into and read from (a local whose
-value at the copy is an addend of the address; 4294967295 when there is none). A copy with
-no window of three operands is printed as `NOWINDOW <function> <instruction>`.
+The allocator index is the anchor file's `alloc` line (4294967295 for none): a window may
+call that function and no other. Prints, per copy,
+
+  COPY <function> <instruction> <allocator> | <written> | <read> | <bytes>
+
+where <written> and <read> are the cutter's guesses at the block each side lies in, zero or
+more of `L<local>.<v>` (the block that local holds at the copy, by the length word read
+after the window's v-th allocation) and `F<k>` (the block the k-th allocation returned), or
+`-` for no guess. A copy with no window of three operands is `NOWINDOW <function> <instruction>`.
 """
 import os
 import sys
@@ -17,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wasm_read as W
 
 NONE = 4294967295
+MAX_GUESSES = 4
 
 
 def is_un(op):
@@ -46,7 +52,7 @@ def aborting_arm(ins, i):
     return None
 
 
-def units(ins, j):
+def units(ins, j, alloc):
     """The window's units before instruction j, nearest first: (first, last, effect, need),
     where effect is the stack change and need the depth it must find. Stops at anything
     `pdec` does not read."""
@@ -77,6 +83,8 @@ def units(ins, j):
             out.append((k, k, 0, 1))
         elif x.op == 0x1B:
             out.append((k, k, -2, 3))
+        elif x.op == 0x10 and x.imm == alloc:
+            out.append((k, k, 0, 1))
         elif 0x28 <= x.op <= 0x35 or is_un(x.op):
             out.append((k, k, 0, 1))
         elif is_bin(x.op):
@@ -88,8 +96,9 @@ def units(ins, j):
 
 
 def term_run(ins, first, j):
-    """The symbolic run of instructions first..j-1 as `prun` does it: (stack, env)."""
-    env, stk = {}, []
+    """The symbolic run of instructions first..j-1 as `prun` does it:
+    (stack, env, conditions, allocations made)."""
+    env, stk, conds, v = {}, [], [], 0
     k = first
     while k < j:
         x = ins[k]
@@ -100,7 +109,7 @@ def term_run(ins, first, j):
         elif x.op == 0x22:
             env[x.imm] = stk[-1]
         elif x.op == 0x23:
-            stk.append(("G", x.imm))
+            stk.append(("G", v, x.imm))
         elif x.op in (0x41, 0x42):
             stk.append(("K", x.imm))
         elif x.op == 0x1A:
@@ -109,21 +118,25 @@ def term_run(ins, first, j):
             c, b, a = stk.pop(), stk.pop(), stk.pop()
             stk.append(("S", a, b, c))
         elif x.op == 0x0D:
-            stk.pop()
+            conds.append(stk.pop())
         elif x.op == 0x04:
-            stk.pop()
+            conds.append(stk.pop())
             e = aborting_arm(ins, k)
             if e is not None and e < j:
                 k = e
+        elif x.op == 0x10:
+            conds.append(stk.pop())
+            stk.append(("A", v))
+            v += 1
         elif 0x28 <= x.op <= 0x35:
-            stk.append(("M", x.op, x.imm, stk.pop()))
+            stk.append(("M", v, x.op, x.imm, stk.pop()))
         elif is_un(x.op):
             stk.append(("U", x.op, stk.pop()))
         else:
             b, a = stk.pop(), stk.pop()
             stk.append(("B", x.op, a, b))
         k += 1
-    return stk, env
+    return stk, env, conds, v
 
 
 def addends(t):
@@ -132,22 +145,44 @@ def addends(t):
     return [t]
 
 
-def base_local(addr, env, seen):
-    """A local whose value at the copy is an addend of `addr`: one beside a constant 12
-    first, then any."""
-    adds = addends(addr)
+def length_reads(t, out):
+    """Every (block term, version) whose length word (`i32.load` at + 4) is read in `t`."""
+    if t[0] == "M":
+        if t[2] == 0x28 and t[3] == 4:
+            out.add((t[4], t[1]))
+        length_reads(t[4], out)
+    elif t[0] == "U":
+        length_reads(t[2], out)
+    elif t[0] == "B":
+        length_reads(t[2], out)
+        length_reads(t[3], out)
+    elif t[0] == "S":
+        for u in t[1:]:
+            length_reads(u, out)
+
+
+def guesses(addr, env, seen, reads, version):
+    """The blocks one side may lie in, as `F<k>` and `L<local>.<v>`."""
+    out = []
     now = {x: env.get(x, ("L", x)) for x in seen}
-    for a in adds:
+    for a in addends(addr):
         if a[0] == "K":
             continue
-        for x in sorted(now):
-            if now[x] == a:
-                return x
-    return NONE
+        if a[0] == "A":
+            out.append(f"F{a[1]}")
+            continue
+        holders = sorted(x for x in now if now[x] == a)
+        if not holders:
+            continue
+        vs = sorted(v for (b, v) in reads if b == a) or [version]
+        for v in vs:
+            out.append(f"L{holders[0]}.{v}")
+    return out[:MAX_GUESSES]
 
 
 def main():
     m = W.Module(sys.argv[1])
+    alloc = int(sys.argv[2])
     for k in range(len(m.bodies)):
         try:
             ins = W.instructions(m, k)
@@ -157,7 +192,7 @@ def main():
         for j, x in enumerate(ins):
             if not (x.op == 0xFC and x.sub == 10):
                 continue
-            us = units(ins, j)
+            us = units(ins, j, alloc)
             # the longest suffix of units that runs from an empty stack and leaves three
             best = None
             for cut in range(len(us), 0, -1):
@@ -173,12 +208,16 @@ def main():
             if best is None:
                 print(f"NOWINDOW {k + m.nimp} {j}")
                 continue
-            stk, env = term_run(ins, best, j)
+            stk, env, conds, version = term_run(ins, best, j)
             seen = {y.imm for y in ins[best:j] if y.op in (0x20, 0x21, 0x22)}
-            hd = base_local(stk[-3], env, seen)
-            hs = base_local(stk[-2], env, seen)
+            reads = set()
+            for t in stk + conds + list(env.values()):
+                length_reads(t, reads)
+            wr = guesses(stk[-3], env, seen, reads, version)
+            rd = guesses(stk[-2], env, seen, reads, version)
             raw = m.bytes[ins[best].at:x.end]
-            print(f"COPY {k + m.nimp} {j} {hd} {hs} | {' '.join(str(b) for b in raw)}")
+            print(f"COPY {k + m.nimp} {j} {alloc} | {' '.join(wr) or '-'} | {' '.join(rd) or '-'} | "
+                  f"{' '.join(str(b) for b in raw)}")
 
 
 if __name__ == "__main__":

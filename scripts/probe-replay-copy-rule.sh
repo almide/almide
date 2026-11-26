@@ -6,16 +6,19 @@
 # For each replay patch (the ones scripts/probe-replay-history.sh runs), the
 # bug's own reproduction is emitted twice, by the unpatched compiler and by
 # the compiler with the patch applied. Every `memory.copy` of both modules is
-# cut with the longest straight-line run before it
-# (scripts/probe-copy-rule/cut_copies.py, untrusted: it only proposes), and
-# the kernel is asked, per copy and per side (the bytes written, the bytes
-# read), for a proof that the side lies in the payload of the block a named
-# local holds. A side is `proved` when the file with its statement compiles.
+# cut with the longest straight-line run before it, which may call the
+# allocator and nothing else (scripts/probe-copy-rule/cut_copies.py,
+# untrusted: it only proposes), and the kernel is asked, per copy and per
+# side (the bytes written, the bytes read), for a proof that the side lies
+# in the payload of a block the cutter guessed: one a local holds, by its
+# length word, or one the window allocated, by the size asked for. A side is
+# `proved` when the file with one of its statements compiles.
 #
 #   scripts/probe-replay-copy-rule.sh <out-dir>      (ONLY="<patch name> ..." to select)
 #
 # Writes <out-dir>/summary.tsv (replay, module, sha, copies, sides, proved,
-# not proved, out of time) and <out-dir>/<replay>.sides.tsv. Needs coqc.
+# not proved or not guessed, out of time) and <out-dir>/<replay>.sides.tsv.
+# Needs coqc.
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -84,16 +87,20 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
   if cmp -s "$OUT/$name.base/a.anchors.wasm" "$OUT/$name.bug/a.anchors.wasm"; then echo "   module: same bytes as unpatched"; else echo "   module: bytes DIFFER from unpatched"; fi
   G="$OUT/$name.goals"
   mkdir -p "$G"
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.base/a.anchors.wasm" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.bug/a.anchors.wasm" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
+  # the one function a window may call: the anchor file's `alloc` line
+  abase="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.base/a.anchors")"
+  abug="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.bug/a.anchors")"
+  echo "   allocator index: unpatched ${abase:-none}, defect ${abug:-none}"
+  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.base/a.anchors.wasm" "${abase:-4294967295}" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
+  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.bug/a.anchors.wasm" "${abug:-4294967295}" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
   python3 -I "$TOOLS/copy_goals.py" "$G" "unpatched=$OUT/$name.base.cut" "defect=$OUT/$name.bug.cut" | sed 's/^/   /'
   t1=$(date +%s)
   find "$G" -maxdepth 1 -name 'C_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
   echo "   the kernel answered in $(( $(date +%s) - t1 )) s"
-  python3 -I "$TOOLS/copy_verdicts.py" "$G" "$name" \
+  python3 -I "$TOOLS/copy_verdicts.py" "$G" "$OUT/$name.sides.tsv" --replay "$name" \
     "unpatched=$(sha256sum < "$OUT/$name.base/a.anchors.wasm" | cut -c1-12)" \
     "defect=$(sha256sum < "$OUT/$name.bug/a.anchors.wasm" | cut -c1-12)" \
-    "$OUT/$name.sides.tsv" "$OUT/summary.tsv" | sed 's/^/   /'
+    "$OUT/summary.tsv" | sed 's/^/   /'
 done
-echo "== summary (replay, module, sha, copies, sides, proved, not proved, out of time)"
+echo "== summary (replay, module, sha, copies, sides, proved, not proved or not guessed, out of time)"
 cat "$OUT/summary.tsv"
