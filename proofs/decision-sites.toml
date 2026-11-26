@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "14"
+# failopen_ceiling      = "13"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -210,6 +210,9 @@
 #   2026-11-26  toolchain.rustc-floor unknown -> refuse: the judged and the run rustc is the
 #               toolchain binary its sysroot names (a rustup proxy cannot select another
 #               toolchain where cargo runs; novel test, control red). fail-open 15 -> 14.
+#   2026-11-26  native.crate-inputs-backstop unknown -> refuse: the injection point refuses a
+#               fresh ungranted dependency itself (in-crate novel test, control red); the
+#               no-walk-up hole was closed by #4830. fail-open 14 -> 13.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3041,23 +3044,23 @@ items = [
 keys = []
 decides = "at the point native/ files and [native-deps] are injected into the generated crate, an ungranted dependency's native code is refused again"
 from = "mixed:declaration+name"
-unknown = "allow"
-unknown_note = "runs only when load_native_build_config finds a manifest beside the entry or in cwd (no walk-up) — otherwise source_root None and nothing is collected or judged; an @extern(rust) dependency fn is spliced by codegen regardless"
+unknown = "refuse"
+unknown_note = "the injection point judges every dependency module resolution fetched (project_fetch::fetch_all_deps) with native_grant::survey before it reads one native file: native/ modules and assets, [native-deps], every @extern / @inline_rust fn in the package's sources, and anything the scan cannot read (NativeCode::unscanned) count as native code; an ungranted one is refused (novel test: a fresh dependency whose only native code is one @extern(rust) fn). The manifest is the entry's governing one (project::manifest_for_entry, #4830, walk-up), so a dependency cannot reach the crate without it; with no manifest there are no dependencies and every @extern is the root's own"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs:entry dir or cwd", build = "runs", test = "runs:test_native.rs:73", bench = "runs:bench.rs:64", native = "runs", wasm = "n.a.:no cargo", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs:children", emit = "n.a." }
 tests = [
   "tests/native_grant_test.rs",
   "tests/dep_native_deps_test.rs",
   "tests/dep_native_locked_checkout_test.rs",
 ]
-control_note = "NONE"
+control_note = "proofs/decision-controls/native.crate-inputs-backstop.patch: the injection point collects every fetched dependency without judging its grant"
 issues = [4830, 4834]
 status = "UNSTAMPED"
-reasons = [
-  "c3:route-skipped",
-  "c1:name-keyed",
-  "c4:no-control",
-]
-note = "crate_inputs.rs:56-77; cli/mod.rs:573-604. Dependency native/ files read with is_file()/is_dir() (follow symlinks) — granted packages only. bugs-final: unchanged."
+reasons = ["c1:name-keyed (a direct dependency is granted by its manifest entry name; transitive ones by origin since #4834)", "c3: no route-matrix probe can show this site: every route refuses the same graph earlier, in dispatch (native.dispatch-gate), so a CLI probe would pass for that reason"]
+note = "crate_inputs.rs CrateInputs::collect; cli/mod.rs enforce_native_grants / load_native_build_config (manifest_for_entry since #4830: the old `no walk-up` hole is gone). 2026-11-26 (fail-open-zero): the site judged directly by an in-crate novel test and its control."
+novel = "src/cli/crate_inputs.rs::novel_an_ungranted_fresh_dependency_is_refused_at_the_injection_point"
+control_patch = "proofs/decision-controls/native.crate-inputs-backstop.patch"
+control_test = "src/cli/crate_inputs.rs::novel_an_ungranted_fresh_dependency_is_refused_at_the_injection_point"
+control_seen = "f3dd4bc794 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh, unit-test leg)"
 
 [[site]]
 id = "native.install-allow-native"
