@@ -29,26 +29,10 @@ fn fixture(name: &str) -> String {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/fixtures").join(name).display().to_string()
 }
 
-/// The real verifier binary. The workspace's default members build it next
-/// to almide (and the test archive carries it); a `cargo test -p almide` run
-/// that did not, builds it into a private target directory — never the one
-/// this test process is running from, whose lock the outer cargo may hold.
-fn verifier() -> PathBuf {
-    let beside = almide().with_file_name(exe("almide-verify"));
-    if beside.is_file() {
-        return beside;
-    }
-    let target = std::env::temp_dir().join("almide-verify-shim-target");
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let status = Command::new(cargo)
-        .args(["build", "-q", "-p", "almide-verify", "--target-dir"])
-        .arg(&target)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .status()
-        .expect("cargo runs");
-    assert!(status.success(), "building almide-verify for the shim test failed");
-    target.join("debug").join(exe("almide-verify"))
-}
+#[path = "support/verifier.rs"]
+#[allow(dead_code)] // `path_with_verifier` is the route matrix's
+mod support_verifier;
+use support_verifier::verifier;
 
 /// One stage at a time. macOS validates a freshly created executable on its
 /// first exec (AMFI + the syspolicy provenance scan), and concurrent first
