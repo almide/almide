@@ -507,15 +507,25 @@ impl Scan<'_, '_> {
                     }
                     return self.user_call(f, vals, args, e);
                 }
+                // A monomorphised instance (`list.__almd_mono4_join__String`,
+                // on a route that judges the program after mono) is its
+                // generic's instance: the generic's body, else its declaration.
+                let func = almide_ir::mono_name::mono_instance_base(func.as_str()).unwrap_or(func.as_str());
+                if let Some(f) = self.ix.resolve(self.table, &format!("{module}.{func}")) {
+                    if self.ix.is_stdlib_fn(f) {
+                        self.perform(module_to_effect(module, func), label);
+                    }
+                    return self.user_call(f, vals, args, e);
+                }
                 // Not held: a stdlib declaration (⊤ for a fn no stdlib source
                 // declares — stdlib_call_effect's unknown).
                 self.perform(module_to_effect(module, func), label);
                 // Unscanned: the stdlib declaration says whether it is an
                 // `effect fn` (a scanned one carries the bit on its own node).
-                let is_effect = almide_ir::effect::stdlib_fn_is_effect(module.as_str(), func.as_str());
+                let is_effect = almide_ir::effect::stdlib_fn_is_effect(module.as_str(), func);
                 self.perform_effect_fn(is_effect, format!("{}.{} ({})", module, func, loc(e.span)));
                 // What its declaration says it does with each fn argument.
-                if let Some(uses) = almide_ir::effect::stdlib_param_uses(module.as_str(), func.as_str()) {
+                if let Some(uses) = almide_ir::effect::stdlib_param_uses(module.as_str(), func) {
                     for (i, (v, a)) in vals.iter().zip(args).enumerate() {
                         let u = uses.get(i).copied().unwrap_or(almide_ir::effect::ParamUse { runs: true, keeps: true });
                         if u.runs {

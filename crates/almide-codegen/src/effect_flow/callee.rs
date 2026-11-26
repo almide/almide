@@ -32,7 +32,7 @@
 //! Every rule reads declarations, types or bodies — never a callee's name.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
 use almide_ir::*;
 use almide_lang::types::Ty;
@@ -52,9 +52,10 @@ pub(super) enum Conformer {
 
 /// The program-wide facts the callee rules read, built once per solve.
 pub(super) struct Callees {
-    /// Every concrete type the program holds a value of: each subterm of
-    /// every expression, parameter, result and `let` type, aliases expanded.
-    types: Vec<Ty>,
+    /// Every concrete type the program holds a value of — each subterm of
+    /// every expression, parameter, result and `let` type, aliases expanded
+    /// — as what dispatch reads of it: its owning stdlib module and its name.
+    types: BTreeSet<(Option<&'static str>, Option<String>)>,
     /// Convention methods by their method name: `(type, fn)` for every
     /// scanned fn declared `Type.method`.
     methods: HashMap<String, Vec<(String, FnIx)>>,
@@ -74,21 +75,47 @@ fn last(s: &str) -> &str {
     s.rsplit_once('.').map_or(s, |(_, b)| b)
 }
 
-/// Every type subterm an IR walk sees.
-struct Types<'t>(&'t mut BTreeMap<String, Ty>);
+/// Every type subterm an IR walk sees, each node visited once (a type
+/// shared by reference — the doubling chains the compile budgets bound — is
+/// not unfolded) and each alias expanded once.
+struct Types<'t> {
+    out: &'t mut BTreeSet<(Option<&'static str>, Option<String>)>,
+    nodes: HashSet<*const Ty>,
+    aliases: HashSet<String>,
+}
 
 impl Types<'_> {
+    /// A type the IR holds: each node once (by address — the IR keeps it
+    /// alive for the whole build).
     fn add(&mut self, ty: &Ty) {
-        let key = format!("{ty:?}");
-        if self.0.contains_key(&key) {
+        if !self.nodes.insert(ty as *const Ty) {
             return;
         }
-        self.0.insert(key, ty.clone());
-        if let Some(t) = super::scan::aliases::target(ty) {
-            self.add(&t);
-        }
+        self.record(ty);
         for c in ty.children() {
             self.add(c);
+        }
+    }
+
+    /// An alias's expansion: a fresh value no node address can name, walked
+    /// whole — it is the alias's declared target, and each alias inside it
+    /// is expanded once.
+    fn add_expanded(&mut self, ty: &Ty) {
+        self.record(ty);
+        for c in ty.children() {
+            self.add_expanded(c);
+        }
+    }
+
+    fn record(&mut self, ty: &Ty) {
+        if !matches!(ty, Ty::TypeVar(_) | Ty::Unknown) {
+            self.out.insert((ty.owning_module(), ty_name(ty)));
+        }
+        if let Ty::Named(n, _) = ty
+            && self.aliases.insert(n.to_string())
+            && let Some(t) = super::scan::aliases::target(ty)
+        {
+            self.add_expanded(&t);
         }
     }
 }
@@ -114,9 +141,9 @@ impl IrVisitor for Types<'_> {
 
 impl Callees {
     pub(super) fn build(program: &IrProgram, ix: &Index<'_>) -> Callees {
-        let mut seen: BTreeMap<String, Ty> = BTreeMap::new();
+        let mut types = BTreeSet::new();
         {
-            let mut w = Types(&mut seen);
+            let mut w = Types { out: &mut types, nodes: HashSet::new(), aliases: HashSet::new() };
             let funcs = program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter()));
             for f in funcs {
                 for p in &f.params {
@@ -131,7 +158,6 @@ impl Callees {
                 w.visit_expr(&l.value);
             }
         }
-        let types = seen.into_values().filter(|t| !matches!(t, Ty::TypeVar(_) | Ty::Unknown)).collect();
         let mut methods: HashMap<String, Vec<(String, FnIx)>> = HashMap::new();
         for (f, info) in ix.fns.iter().enumerate() {
             let Some(func) = info.func else { continue };
@@ -215,19 +241,19 @@ impl Callees {
         if let Some(c) = self.memo.borrow().get(&memo_key) {
             return c.clone();
         }
-        let may_conform = |ty: &Ty| {
-            let Some(n) = ty_name(ty) else { return true };
-            match self.declared.get(last(&n)) {
+        let may_conform = |name: &Option<String>| {
+            let Some(n) = name else { return true };
+            match self.declared.get(last(n)) {
                 Some(ps) if !ps.is_empty() && !bounds.is_empty() => bounds.iter().any(|b| ps.contains(b)),
                 _ => true,
             }
         };
         let mut out: BTreeSet<Conformer> = BTreeSet::new();
         let public = almide_lang::stdlib_info::requirement_public_name(method);
-        for ty in self.types.iter().filter(|t| may_conform(t)) {
-            if let Some(module) = ty.owning_module() {
-                let func = match ty_name(ty) {
-                    Some(n) => almide_lang::stdlib_info::requirement_fn_name(&n, method),
+        for (owner, name) in self.types.iter().filter(|(_, n)| may_conform(n)) {
+            if let Some(module) = owner {
+                let func = match name {
+                    Some(n) => almide_lang::stdlib_info::requirement_fn_name(n, method),
                     None => method.to_string(),
                 };
                 let stdlib = Some((module.to_string(), func.clone()));
@@ -242,8 +268,8 @@ impl Callees {
                 }
                 continue;
             }
-            let Some(n) = ty_name(ty) else { continue };
-            let bare = last(&n).to_string();
+            let Some(n) = name else { continue };
+            let bare = last(n).to_string();
             for (t, f) in self.methods.get(public).into_iter().flatten() {
                 if *t == bare {
                     out.insert(Conformer::Scanned { f: *f, stdlib: None });
