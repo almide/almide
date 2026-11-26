@@ -25,7 +25,14 @@ src, out, n, seed, shard, shards = sys.argv[1], sys.argv[2], int(sys.argv[3]), i
 only = [s for s in sys.argv[7].split(",") if s] if len(sys.argv) > 7 else []
 mutants = json.load(open(src, encoding="utf-8"))
 mutants.sort(key=lambda m: (m["file"], m["span"]["start"]["line"], m["span"]["start"]["column"], m["name"]))
-picked = sorted(random.Random(seed).sample(range(len(mutants)), min(n, len(mutants))))
+# Draws from one listing are made without replacement: a mutant an earlier seed drew is out of
+# the pool for every later seed (SAMPLE_PRIOR_SEEDS, in the order the draws were made). With no
+# prior seed this is the draw the earlier samples used.
+pool = list(range(len(mutants)))
+for earlier in [int(x) for x in os.environ.get("SAMPLE_PRIOR_SEEDS", "").split(",") if x.strip()]:
+    gone = set(random.Random(earlier).sample(pool, min(n, len(pool))))
+    pool = [i for i in pool if i not in gone]
+picked = sorted(random.Random(seed).sample(pool, min(n, len(pool))))
 os.makedirs(out, exist_ok=True)
 with open(os.path.join(out, "sample.tsv"), "w", encoding="utf-8") as allf, \
         open(os.path.join(out, "index.tsv"), "w", encoding="utf-8") as idx:
@@ -47,4 +54,4 @@ with open(os.path.join(out, "sample.tsv"), "w", encoding="utf-8") as allf, \
         with open(os.path.join(out, mid + ".diff"), "w", encoding="utf-8") as d:
             d.write(text)
         idx.write("\t".join(row) + "\n")
-print(f"listed {len(mutants)}, sampled {len(picked)} with seed {seed}, this shard ({shard}/{shards}) takes {sum(1 for _ in open(os.path.join(out, 'index.tsv'), encoding='utf-8'))}" + (f" of the {len(only)} named" if only else ""))
+print(f"listed {len(mutants)}, pool {len(pool)}, sampled {len(picked)} with seed {seed}, this shard ({shard}/{shards}) takes {sum(1 for _ in open(os.path.join(out, 'index.tsv'), encoding='utf-8'))}" + (f" of the {len(only)} named" if only else ""))
