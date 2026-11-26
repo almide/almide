@@ -735,11 +735,15 @@ block in the other direction: its crate-root adapter copies the C caller's
 `len` bytes at `ptr` into a fresh block (`almide_rt_ffi_block_lend`), lends
 the fn a Region over it, and after the call stops the process if a copy of
 the Region is still held, else copies a `@region(out = p)` parameter's bytes
-back to `ptr` (`almide_rt_ffi_block_lent_end`). TRUSTED there: the caller's
-`[ptr, ptr + len)` is valid (and, for an out parameter, writable) for the
-call, and the caller does not read or write it while the fn runs (the fn sees
-the bytes as they were at the call; its writes reach the caller when it
-returns). A C Region return (`@region(len, release)`), a Region inside
+back to `ptr` (`almide_rt_ffi_block_lent_end`). Two things are TRUSTED there,
+and nothing checks either (owner ruling 2026-11-27):
+(1) the pointer and length the C caller passes describe memory that really
+exists and stays alive until the call returns — readable, and writable too
+for a `@region(out = p)` parameter; (2) the C caller does not read or change
+that memory while the Almide fn runs — the fn works on a copy taken when the
+call starts, and its writes reach the caller's memory only when it returns,
+so a caller that looked at the buffer mid-call (from a callback, another
+thread) would see the old bytes. A C Region return (`@region(len, release)`), a Region inside
 another value, a returned, written-back or callback Region, and a host call
 that takes the address itself are refused, so these are the places a block's
 address or bytes cross the boundary. Target-priority tests use deliberately different fallback bodies so
