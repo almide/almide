@@ -8,7 +8,7 @@ name: Probe — a held-out sample of source mutants of the wasm emitter
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-held]
+    branches: [probe/emitter-s5]
 
 permissions:
   contents: read
@@ -17,7 +17,9 @@ env:
   # How many mutants are drawn from the tool's listing, by which seed, and
   # over how many shards (the matrix below lists the same shards).
   SAMPLE_N: "480"
-  SAMPLE_SEED: "20261126"
+  SAMPLE_SEED: "20261128"
+  # The seeds of the earlier draws from this listing, in order: their mutants are out of the pool.
+  SAMPLE_PRIOR_SEEDS: "20261126,20261127"
   SHARDS: "16"
   # Empty for the whole sample; a comma-separated list of the sample's ids
   # restricts the run to those mutants (a trial of the harness).
