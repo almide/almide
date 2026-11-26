@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "10"
+# failopen_ceiling      = "9"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -223,6 +223,11 @@
 #   2026-11-26  bounded.member-module-gate unknown -> refuse: the @bounded pure list is held to
 #               the classification's Pure modules, which the host-reach gate covers (test +
 #               control_extra red). fail-open 11 -> 10.
+#   2026-11-26  fail-open-front (33rd engineer, ds-2): pure.e092-reach unknown -> refuse: every
+#               stdlib fn the classification charges nothing reaches no floor host op and no
+#               output builtin (the #4827 gate generalized, 63 offenders -> 0), and the testing
+#               assertions declare Abort + IO.stderr (#4951; test over every testing.assert_*,
+#               control_extra). fail-open 10 -> 9.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -675,19 +680,21 @@ items = [
 keys = ["crates/almide-frontend/src/check/pure_attr.rs::Checker::report_impure_argument::S1::E092"]
 decides = "a @pure fn is refused when anything it reaches (BFS over checker-resolved calls and fn values, cross-module) is an output/abort builtin, a stdlib fn with a category, or an @extern"
 from = "mixed:reach+name"
-unknown = "allow"
-unknown_note = "BFS over checker-resolved calls and fn values, cross-module (pure_attr.rs:178-198). A builtin is judged by the builtin table, which answers a bare call first (identity); an @extern or @inline_rust user fn is foreign (pure_attr.rs:212-218, #4824). A stdlib callee is judged by stdlib_call_effect: empty for a Pure-classified module and for an undeclared fn (effect.rs:308-318), so a Pure-module fn reaching a prim host op is pure (#4827). fn-typed params/locals are transparent (ADR-0026 D1, by design)"
+unknown = "refuse"
+unknown_note = "BFS over checker-resolved calls and fn values, cross-module (pure_attr.rs:178-198). A builtin is judged by the builtin table, which answers a bare call first (identity); an @extern or @inline_rust user fn is foreign (pure_attr.rs:212-218, #4824). A stdlib callee is judged by its declaration (effect.rs stdlib_call_effect): its own `@category`, else its module's row, and a fn no stdlib source declares is every category (fail-closed). A stdlib fn the classification charges nothing reaches no floor host op and no output builtin (effect.rs uncharged_fns_reaching_a_category, run over every bundled source at run time; novel test injects a fresh fn, control_extra of purity.effect-classification red): so a `Pure`-module fn reaching a prim host op is never pure (#4827 closed). The testing assertions declare `Abort` and `IO.stderr` (#4951: a @pure fn calling testing.assert_ok was admitted). fn-typed params/locals are transparent (ADR-0026 D1, by design)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
-tests = ["tests/diagnostics/e092-pure-calls-println", "tests/diagnostics/e092-pure-calls-categorised-stdlib", "tests/diagnostics/e092-pure-reaches-assert-via-helper", "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused", "tests/diagnostics/e092-pure-calls-inline-rust"]
+tests = ["tests/diagnostics/e092-pure-calls-println", "tests/diagnostics/e092-pure-calls-categorised-stdlib", "tests/diagnostics/e092-pure-reaches-assert-via-helper", "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused", "tests/diagnostics/e092-pure-calls-inline-rust", "tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951", "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"]
 control_note = "tests/diagnostics/e092-* broken.almd (refusal expected)"
-issues = [4824, 4827]
+issues = [4824, 4827, 4951]
 status = "UNSTAMPED"
-reasons = ["c2: a stdlib callee is judged by stdlib_call_effect; a plain fn of a Pure-classified module that reaches a prim host op is pure (effect.rs:231, 308-318; #4827)"]
-note = "#4824 closed (8deacf27c3). The bare-name builtin table (pure_attr.rs:83) is the builtin's identity, not a spelling; c1 then rests on the stdlib module table (#4827)."
+reasons = ["c1: a stdlib callee's categories come from the module table when the fn declares none (STDLIB_MODULE_EFFECTS is keyed by module name; owned by purity.effect-classification)"]
+note = "#4824 closed (8deacf27c3). The bare-name builtin table (pure_attr.rs:83) is the builtin's identity, not a spelling; c1 then rests on the stdlib module table (#4827). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse — the generalized host-reach gate (every fn charged nothing reaches no host op / output builtin) and #4951 (the testing assertions declare Abort + IO.stderr; test enumerates every public testing.assert_* and refuses each through a fresh @pure fn)."
 novel = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
 control_test = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
 control_patch = "proofs/decision-controls/pure.e092-reach.patch"
 probe = "tests/decision-probes/pure.e092-reach"
+control_extra = "proofs/decision-controls/pure.e092-reach.testing-assert.patch"
+control_extra_test = "tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951"
 
 [[site]]
 id = "critical.profile-arming"
