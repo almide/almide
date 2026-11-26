@@ -502,3 +502,49 @@ fn novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling() {
         assert_eq!(site(&callee), "|1 0", "a fresh out-of-program callee `{callee}` was admitted with no row");
     }
 }
+
+/// witness.subset-gate: a NOVEL compiler arm — one the gate's arm table has
+/// never seen, taking a literal callback with neither a loop activation nor a
+/// closure value (`almide_wasm::test_novel_callback_arm`) — is refused by the
+/// module-call audit (`module-arm:unaudited`), whatever the table says about
+/// the call's name. The subjects are read from the stdlib declarations at run
+/// time: every `list` predicate HOF with a scalar result. Without the novel
+/// arm the same frame is certified (the positive case), so the refusal is the
+/// arm's, not the program's.
+#[test]
+fn novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/list.almd")).unwrap();
+    let hofs: Vec<(String, String)> = text
+        .lines()
+        .filter_map(|l| {
+            let sig = l.trim_start().strip_prefix("pub ").unwrap_or(l.trim_start()).strip_prefix("fn ")?;
+            let (name, rest) = sig.split_once("[A](xs: List[A], f: (A) -> Bool) -> ")?;
+            let ret = rest.split_whitespace().next()?;
+            matches!(ret, "Int" | "Bool").then(|| (name.to_string(), ret.to_string()))
+        })
+        .collect();
+    assert!(hofs.len() >= 2, "no list predicate HOF with a scalar result found: {hofs:?}");
+    for (hof, ret) in &hofs {
+        let probe = novel::ident("probe");
+        let src = format!(
+            "fn {probe}(xs: List[Int]) -> {ret} = list.{hof}(xs, (x) => x > 1)\n\neffect fn main() -> Unit = println(\"${{{probe}([1, 2, 3])}}\")\n"
+        );
+        let ir = almide::wasm_leg::lower_to_ir("novel_arm.almd", &src).unwrap_or_else(|e| panic!("list.{hof}: front: {e}"));
+        let frame = |arm: Option<(&str, &str)>| {
+            almide_wasm::test_novel_callback_arm(arm);
+            almide_wasm::witness::start_collecting();
+            let emitted = almide_wasm::emit_program(&ir);
+            let w: std::collections::BTreeMap<String, String> = almide_wasm::witness::take().into_iter().collect();
+            almide_wasm::test_novel_callback_arm(None);
+            emitted.unwrap_or_else(|e| panic!("list.{hof}: the structural leg lowers the probe: {e:?}"));
+            w.get(&probe).cloned().unwrap_or_else(|| panic!("list.{hof}: no frame for {probe}: {:?}", w.keys().collect::<Vec<_>>()))
+        };
+        let ordinary = frame(None);
+        assert!(!ordinary.starts_with('!'), "list.{hof}: the ordinary arm's frame must certify, got `{ordinary}`");
+        let novel = frame(Some(("list", hof)));
+        assert!(
+            novel.starts_with('!') && novel.contains("module-arm:unaudited"),
+            "list.{hof}: a callback arm with no activation was admitted: `{novel}`"
+        );
+    }
+}
