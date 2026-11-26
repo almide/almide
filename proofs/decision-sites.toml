@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "12"
+# failopen_ceiling      = "11"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -216,6 +216,10 @@
 #   2026-11-26  witness.call-modes-skip unknown -> refuse: an out-of-program callee is admitted
 #               by served-set membership only (#4828 fixed the spelling rule); novel test of a
 #               fresh `__` helper and `module.fn`, control red. fail-open 13 -> 12.
+#   2026-11-26  purity.host-ops-classify unknown -> refuse: a call outside the capability
+#               modules is uncounted when its serving body reaches a floor host op (reach,
+#               not the module list); novel test over the declared host ops, control red,
+#               classify_corpus 0 uncounted. fail-open 12 -> 11.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3922,21 +3926,19 @@ items = [
 keys = []
 decides = "a lowered dotted call into a capability module that is neither a host-op row nor pure is the accept-but-unsafe case the corpus classifier refuses"
 from = "name"
-unknown = "allow"
-unknown_note = "`if !CAP_MODULES.contains(&module) ... return false` (host_ops.rs:466): a module outside CAP_MODULES is never uncounted; the partition test forces every STDLIB/BUNDLED module (except `prim`) into exactly one of PURE_MODULES / CAP_MODULES"
+unknown = "refuse"
+unknown_note = "a call into a CAP_MODULES module is uncounted unless it is a host-op row or pure (purity::is_pure); a call into any other module is judged by reach: uncounted when a body serving it reaches a floor host op (`@prim_op(host)`, almide_ir::host_reach::stdlib_fn_reaches_host) and it has no host-op row — never admitted because its module is not listed (novel test: every floor host op declared in stdlib/prim.almd at run time, rowless ones uncounted; a fresh user module has no stdlib body). The partition test still puts every registry module (but `prim`) in PURE_MODULES or CAP_MODULES"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "n.a.: corpus classifier", build = "n.a.", test = "n.a.", bench = "n.a.", native = "runs: classify_corpus example / proofs", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "crates/almide-mir/tests/host_ops_contract.rs::every_capability_module_intrinsic_is_classified",
-  "crates/almide-mir/tests/host_ops_contract.rs::an_unlisted_capability_bearing_intrinsic_fails_the_matrix",
-]
-control_note = "crates/almide-mir/tests/host_ops_contract.rs::an_unlisted_capability_bearing_intrinsic_fails_the_matrix"
+tests = ["crates/almide-mir/src/host_ops.rs::tests::an_uncounted_host_call_is_reported", "tests/decision_novel_test.rs::novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call"]
+control_note = "proofs/decision-controls/purity.host-ops-classify.patch: a call outside CAP_MODULES is never uncounted again"
 issues = [4827]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed module lists",
-  "c2:matrix covers @intrinsic only, not plain fns over prim host ops (#4827)",
-]
-note = "Partition test excludes `prim` (host_ops_contract.rs:329)."
+reasons = ["c1: the CAP_MODULES / PURE_MODULES partition is a module-name list (the reach rule covers what lies outside it)", "c3: no route-matrix probe (the corpus classifier is a CI example, not a CLI route)"]
+note = "Partition test excludes `prim` (host_ops_contract.rs:329); the reach rule covers it. 2026-11-26 (fail-open-zero): classify_corpus over spec/ on ds-2: 14000 functions, uncounted host calls 0 (no corpus program refused)."
+novel = "tests/decision_novel_test.rs::novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call"
+control_patch = "proofs/decision-controls/purity.host-ops-classify.patch"
+control_test = "tests/decision_novel_test.rs::novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call"
+control_seen = "1172cf7862 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "purity.effect-classification"
