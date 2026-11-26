@@ -144,7 +144,9 @@ mod tests {
         assert_eq!(runtime_name_to_effect("almide_rt_datetime_now"), vec![Effect::Time]);
         assert_eq!(runtime_name_to_effect("almide_rt_random_float"), vec![Effect::Rand]);
         assert!(runtime_name_to_effect("almide_rt_list_map").is_empty());
-        assert!(runtime_name_to_effect("println").is_empty());
+        // Not a runtime symbol: unknown, every category (the scan asks only
+        // about the symbols it classifies, after the builtins).
+        assert_eq!(runtime_name_to_effect("println"), Effect::ALL.to_vec());
     }
 
     fn extern_fn(name: &str, is_effect: bool) -> IrFunction {

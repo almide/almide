@@ -19,6 +19,7 @@ use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_pattern, walk_stmt, IrVisitor};
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::graph::{bit, Edge, FnIx, Graph, NodeId, EFFECT_FN};
+use super::callee::{dispatch_var, Callees, Conformer};
 use super::index::{Index, Pools};
 use almide_base::intern::Sym;
 use super::{module_to_effect, runtime_name_to_effect};
@@ -113,6 +114,7 @@ pub(super) struct Scan<'g, 'a> {
     pub g: &'g mut Graph,
     pub ix: &'g Index<'a>,
     pub pools: &'g Pools,
+    pub callees: &'g Callees,
     pub sh: &'g mut Shared,
     pub table: usize,
     pub scope: FnIx,
@@ -157,7 +159,11 @@ impl Scan<'_, '_> {
             IrExprKind::RuntimeCall { symbol, args } => {
                 self.g.site = e.span;
                 let label = format!("{} ({})", symbol, loc(e.span));
-                self.perform(runtime_name_to_effect(symbol), label.clone());
+                if almide_ir::effect::runtime_symbol_classified(symbol) {
+                    self.perform(runtime_name_to_effect(symbol), label.clone());
+                } else {
+                    self.perform_unknown(label.clone());
+                }
                 self.perform_effect_fn(almide_ir::effect::runtime_symbol_is_effect(symbol), label);
                 self.opaque_call(args, &e.ty)
             }
@@ -281,6 +287,40 @@ impl Scan<'_, '_> {
         }
     }
 
+    /// The current performer runs a call no rule answers for (decision row
+    /// effect.flow-categories): every category, ⊤, as an `@extern`.
+    fn perform_unknown(&mut self, label: String) {
+        self.perform(almide_ir::effect::unknown_call_effects(), format!("unclassified call {label}"));
+    }
+
+    /// A protocol requirement `method` called through a type variable: the
+    /// call of every conformer the program may pick
+    /// ([`Callees::conformers`]), each a call with the same arguments; what
+    /// it returns is the join of theirs. With no conformer the dispatch can
+    /// never run (no value of a conforming type exists).
+    fn dispatch(&mut self, method: &str, vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+        let label = format!("{} ({})", method, loc(e.span));
+        let mut rets = Vec::new();
+        for c in self.callees.conformers(self.ix, self.table, method) {
+            match c {
+                Conformer::Scanned { f, stdlib } => {
+                    if let Some((m, func)) = stdlib {
+                        self.perform(module_to_effect(&m, &func), label.clone());
+                    }
+                    rets.push(self.user_call(f, vals.clone(), args, e));
+                }
+                Conformer::Declared { module, func } => {
+                    self.perform(module_to_effect(&module, &func), label.clone());
+                    let is_effect = almide_ir::effect::stdlib_fn_is_effect(&module, &func);
+                    self.perform_effect_fn(is_effect, label.clone());
+                }
+            }
+        }
+        self.opaque_call_vals(&vals, args, &e.ty);
+        rets.push(self.untracked(&e.ty));
+        self.join(&rets)
+    }
+
     /// The current performer runs a stdlib `effect fn` the program does not
     /// scan: it carries the effect bit (#4151).
     fn perform_effect_fn(&mut self, is_effect: bool, label: String) {
@@ -355,7 +395,10 @@ impl Scan<'_, '_> {
             let val = self.ix.fns[f].fn_val;
             // A stdlib fn the program carries (bundled): its category rides
             // the value too, as a call of it performs it (#4152).
-            let cats = name.split_once('.').map_or(0, |(m, f)| module_to_effect(m, f).into_iter().fold(0, |a, c| a | bit(c)));
+            let cats = match name.split_once('.') {
+                Some((m, func)) if self.ix.is_stdlib_fn(f) => module_to_effect(m, func).into_iter().fold(0, |a, c| a | bit(c)),
+                _ => 0,
+            };
             if cats == 0 {
                 return Some(val);
             }
@@ -364,12 +407,23 @@ impl Scan<'_, '_> {
             self.g.push(Edge::Const { to: n, cats, sym: None, label: Some(name.to_string()) });
             return Some(n);
         }
-        // A stdlib fn taken as a value: its module's category, and the
-        // effect bit when it is an `effect fn` (#4151).
-        let mut cat = name.split_once('.').map(|(m, f)| module_to_effect(m, f)).unwrap_or_default();
-        if cat.is_empty() {
-            cat = runtime_name_to_effect(name);
-        }
+        // A stdlib fn taken as a value: its declaration's category, and the
+        // effect bit when it is an `effect fn` (#4151). A value no stdlib
+        // declaration, classified runtime symbol or builtin answers for is
+        // unknown: every category rides it (decision row
+        // effect.flow-categories).
+        let declared = name.split_once('.').is_some_and(|(m, f)| almide_ir::effect::stdlib_declares(m, f));
+        let cat = if declared {
+            name.split_once('.').map(|(m, f)| module_to_effect(m, f)).unwrap_or_default()
+        } else if almide_ir::effect::runtime_symbol_classified(name) {
+            runtime_name_to_effect(name)
+        } else if !almide_ir::effect::builtin_call_effects(name).is_empty() {
+            almide_ir::effect::builtin_call_effects(name)
+        } else if let Some(c) = almide_ir::effect::derived_helper_effect(name) {
+            c
+        } else {
+            almide_ir::effect::unknown_call_effects()
+        };
         let effect = name.split_once('.').is_some_and(|(m, f)| almide_ir::effect::stdlib_fn_is_effect(m, f))
             || almide_ir::effect::runtime_symbol_is_effect(name);
         let cats = cat.into_iter().fold(0, |m, c| m | bit(c)) | if effect { EFFECT_FN } else { 0 };
@@ -401,11 +455,39 @@ impl Scan<'_, '_> {
                     return self.user_call(f, vals, args, e);
                 }
                 let label = format!("{} ({})", name, loc(e.span));
+                // A protocol requirement called through a type variable of the
+                // enclosing generic: every conformer the program may pick.
+                if let Some((_, method)) = dispatch_var(name, self.ix.fns[self.scope].func) {
+                    return self.dispatch(method, vals, args, e);
+                }
                 // An output or abort builtin (`println`, `panic`, …) carries
-                // its D2 leaves (ADR-0026, #4155); a runtime symbol its module's.
-                let mut cats = almide_ir::effect::builtin_call_effects(name);
-                cats.extend(runtime_name_to_effect(name));
-                self.perform(cats, label.clone());
+                // its D2 leaves (ADR-0026, #4155); a classified runtime symbol
+                // its declaring fn's; a constructor nothing; a derived helper
+                // its registry bodies'; anything else is unknown (⊤).
+                let builtin = almide_ir::effect::builtin_call_effects(name);
+                // A function of the program spelled another way than the
+                // scan's resolver keys it: each one it may be.
+                let own = if builtin.is_empty() { self.callees.program_fns(name) } else { Vec::new() };
+                if !own.is_empty() {
+                    let mut rets = Vec::new();
+                    for f in own {
+                        rets.push(self.user_call(f, vals.clone(), args, e));
+                    }
+                    return self.join(&rets);
+                }
+                let cats = if !builtin.is_empty() {
+                    Some(builtin)
+                } else if almide_ir::effect::runtime_symbol_classified(name) {
+                    Some(runtime_name_to_effect(name))
+                } else if self.callees.is_constructor(name, &e.ty) {
+                    Some(Vec::new())
+                } else {
+                    almide_ir::effect::derived_helper_effect(name)
+                };
+                match cats {
+                    Some(c) => self.perform(c, label.clone()),
+                    None => self.perform_unknown(label.clone()),
+                }
                 self.perform_effect_fn(almide_ir::effect::runtime_symbol_is_effect(name), label);
                 self.store_args(&vals, args);
                 self.untracked(&e.ty)
@@ -413,10 +495,20 @@ impl Scan<'_, '_> {
             CallTarget::Module { module, func, .. } => {
                 let vals: Vec<Option<NodeId>> = args.iter().map(|a| self.flow(a)).collect();
                 self.g.site = e.span;
-                self.perform(module_to_effect(module, func), format!("{}.{} ({})", module, func, loc(e.span)));
+                let label = format!("{}.{} ({})", module, func, loc(e.span));
+                // A function the program holds: a user module's is judged by
+                // its body alone (#2223: a user module may share a stdlib
+                // module's name); a bundled stdlib module's by its declaration
+                // and its body.
                 if let Some(f) = self.ix.resolve(self.table, &format!("{module}.{func}")) {
+                    if self.ix.is_stdlib_fn(f) {
+                        self.perform(module_to_effect(module, func), label);
+                    }
                     return self.user_call(f, vals, args, e);
                 }
+                // Not held: a stdlib declaration (⊤ for a fn no stdlib source
+                // declares — stdlib_call_effect's unknown).
+                self.perform(module_to_effect(module, func), label);
                 // Unscanned: the stdlib declaration says whether it is an
                 // `effect fn` (a scanned one carries the bit on its own node).
                 let is_effect = almide_ir::effect::stdlib_fn_is_effect(module.as_str(), func.as_str());
@@ -444,6 +536,12 @@ impl Scan<'_, '_> {
                 if let Some(f) = self.ix.resolve(self.table, method) {
                     return self.user_call(f, vals, &all, e);
                 }
+                // A requirement called on a receiver typed by a type variable:
+                // every conformer the program may pick.
+                if matches!(object.ty, Ty::TypeVar(_)) {
+                    return self.dispatch(method.as_str(), vals, &all, e);
+                }
+                self.perform_unknown(format!("{} ({})", method, loc(e.span)));
                 self.opaque_call_vals(&vals, &all, &e.ty)
             }
             CallTarget::Computed { callee } => {

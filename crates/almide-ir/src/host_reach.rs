@@ -65,10 +65,44 @@ pub fn serving_bodies(module: &str, func: &str) -> Vec<(&'static Program, String
     out
 }
 
+/// The self-host registry bodies served under the bare call name `call` (a
+/// compiler-derived helper the IR names without a module: the derived
+/// Codec's `__err_at`, `__decode_option_string`, …).
+pub fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
+    let mut out = Vec::new();
+    for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
+        for (imp, name) in rows.iter() {
+            if *name == call {
+                if let Some(prog) = almide_lang::parse_cached(src) {
+                    out.push((prog, imp.to_string()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Does fn `name` of the stdlib source `prog` reach a floor host op or an
+/// output builtin that does not abort, directly or through what it calls?
+/// A bodyless declaration it reaches is judged by its own `@category`.
+pub fn body_reaches_category(prog: &Program, name: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_in(prog, "", name, &mut seen, Mode::CATEGORY)
+}
+
 /// Does a body serving the stdlib call `module.func` reach a floor host op?
 pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
     let mut seen = HashSet::new();
-    reaches_stdlib(module, func, &mut seen)
+    reaches_stdlib(module, func, &mut seen, Mode::HOST)
+}
+
+/// Does a body serving the stdlib call `module.func` reach a floor host op,
+/// or call an output builtin that does not abort (`println`, `eprintln`:
+/// [`crate::effect::builtin_writes_without_aborting`])? A builtin is named by
+/// a bare call that no fn of the source declares.
+pub fn stdlib_fn_reaches_category(module: &str, func: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_stdlib(module, func, &mut seen, Mode::CATEGORY)
 }
 
 /// Does fn `name` of `prog`, a source of stdlib `module`, reach a floor host
@@ -77,19 +111,53 @@ pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
 #[cfg(test)]
 pub(crate) fn fn_reaches_host(prog: &Program, module: &str, name: &str) -> bool {
     let mut seen = HashSet::new();
-    reaches_in(prog, module, name, &mut seen)
+    reaches_in(prog, module, name, &mut seen, Mode::HOST)
+}
+
+/// [`stdlib_fn_reaches_category`] for fn `name` of `prog`, a source of
+/// stdlib `module` that is not (yet) bundled — the gate's control.
+pub fn fn_reaches_category_in(prog: &Program, module: &str, name: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_in(prog, module, name, &mut seen, Mode::CATEGORY)
 }
 
 type Seen = HashSet<(usize, String)>;
 
+/// What a reach counts besides a floor host op.
+#[derive(Clone, Copy)]
+pub(crate) struct Mode {
+    /// An output builtin that does not abort (`println`, `eprintln`).
+    builtins: bool,
+    /// A method an `effect fn` dispatches on a protocol-bounded param.
+    dispatch: bool,
+}
+
+impl Mode {
+    /// The host reach (#4827): host ops and bounded dispatch.
+    const HOST: Mode = Mode { builtins: false, dispatch: true };
+    /// Anything that carries a category: host ops, output builtins, bounded
+    /// dispatch.
+    const CATEGORY: Mode = Mode { builtins: true, dispatch: true };
+    /// [`Mode::CATEGORY`] less the bounded dispatch, which the effect flow
+    /// charges at the conformer the instantiation picks.
+    const CATEGORY_BUT_DISPATCH: Mode = Mode { builtins: true, dispatch: false };
+}
+
+/// [`stdlib_fn_reaches_category`] less a bounded dispatch: does `module.func`
+/// reach a category through anything but the conformer it dispatches to?
+pub fn stdlib_fn_reaches_category_but_dispatch(module: &str, func: &str) -> bool {
+    let mut seen = HashSet::new();
+    reaches_stdlib(module, func, &mut seen, Mode::CATEGORY_BUT_DISPATCH)
+}
+
 /// A bodyless declaration that a self-host body also serves is that body's
 /// signature: the body is what is followed. Only a call served by nothing
 /// but a bodyless declaration is judged by that declaration.
-fn reaches_stdlib(module: &str, func: &str, seen: &mut Seen) -> bool {
+fn reaches_stdlib(module: &str, func: &str, seen: &mut Seen, mode: Mode) -> bool {
     let all = serving_bodies(module, func);
     let bodied: Vec<_> = all.iter().filter(|(p, n)| find_fn(p, n).is_some_and(has_body)).cloned().collect();
     let judged = if bodied.is_empty() { all } else { bodied };
-    judged.into_iter().any(|(prog, name)| reaches_in(prog, module, &name, seen))
+    judged.into_iter().any(|(prog, name)| reaches_in(prog, module, &name, seen, mode))
 }
 
 fn has_body(decl: &Decl) -> bool {
@@ -103,7 +171,7 @@ fn has_body(decl: &Decl) -> bool {
 /// reaches the host unless its module is classified `Pure`. An `effect fn`
 /// body that dispatches a method on a protocol-bounded generic parameter
 /// reaches it too ([`dispatches_on_a_bounded_param`]).
-fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool {
+fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen, mode: Mode) -> bool {
     if !seen.insert((prog as *const Program as usize, name.to_string())) {
         return false;
     }
@@ -119,16 +187,22 @@ fn reaches_in(prog: &Program, module: &str, name: &str, seen: &mut Seen) -> bool
             };
         }
     }
-    if dispatches_on_a_bounded_param(decl) {
+    if mode.dispatch && dispatches_on_a_bounded_param(decl) {
         return true;
     }
     named(decl).into_iter().any(|r| match r {
-        Named::Qualified(m, f) => reaches_stdlib(&m, &f, seen),
+        Named::Qualified(m, f) => reaches_stdlib(&m, &f, seen, mode),
         // A bare name of a bodyless declaration that a self-host body serves
         // is followed into that body, as a qualified call is.
         Named::Bare(f) => match find_fn(prog, &f) {
-            Some(d) if !has_body(d) && !serving_bodies(module, &f).is_empty() => reaches_stdlib(module, &f, seen),
-            _ => reaches_in(prog, module, &f, seen),
+            Some(d) if !has_body(d) && !serving_bodies(module, &f).is_empty() => reaches_stdlib(module, &f, seen, mode),
+            Some(_) => reaches_in(prog, module, &f, seen, mode),
+            // No fn of the source: a builtin. An output builtin (`println`,
+            // `eprintln`) writes a stream; an abort builtin (`panic`,
+            // `assert*`) is ADR-0022's halt, the class of a division-by-zero
+            // trap, which a stdlib body may end on without a category — a fn
+            // whose PURPOSE is the abort declares it (#4951).
+            None => mode.builtins && crate::effect::builtin_writes_without_aborting(&f),
         },
     })
 }
@@ -180,13 +254,24 @@ enum Named {
 /// Every name a declaration's body spells as `f` or `m.f` — a call, a pipe
 /// target, a fn passed as a value. Over-approximate on purpose: a local that
 /// shares a fn's name only widens the reach.
+///
+/// The qualifier of `m.f` is not itself a name the body uses as a fn: a
+/// local spelled like a fn of the source (`let float = …` beside
+/// `random.float`) read as `float.__from_int(x)` names `float.__from_int`,
+/// not `random.float`.
 fn named(decl: &Decl) -> Vec<Named> {
     let mut d = decl.clone();
     let mut out = Vec::new();
+    let mut qualifiers: Vec<*const Expr> = Vec::new();
     almide_lang::ast::visit_decl_exprs_mut(&mut d, &mut |e: &mut Expr| match &e.kind {
-        ExprKind::Ident { name } => out.push(Named::Bare(name.to_string())),
+        ExprKind::Ident { name } => {
+            if !qualifiers.contains(&(&*e as *const Expr)) {
+                out.push(Named::Bare(name.to_string()));
+            }
+        }
         ExprKind::Member { object, field } => {
             if let ExprKind::Ident { name } = &object.kind {
+                qualifiers.push(&**object as *const Expr);
                 out.push(Named::Qualified(name.to_string(), field.to_string()));
             }
         }
