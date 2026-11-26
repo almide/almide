@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "9"
+# failopen_ceiling      = "8"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -228,6 +228,11 @@
 #               output builtin (the #4827 gate generalized, 63 offenders -> 0), and the testing
 #               assertions declare Abort + IO.stderr (#4951; test over every testing.assert_*,
 #               control_extra). fail-open 10 -> 9.
+#   2026-11-26  purity.effect-classification unknown -> refuse: a stdlib call no source
+#               declares, an unclassified module and a runtime symbol no @intrinsic declares and
+#               naming no module are every category; a runtime symbol is classified by its
+#               declaring @intrinsic (novel test + control red; the uncharged-reach gate is
+#               control_extra). fail-open 9 -> 8.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3963,18 +3968,20 @@ items = [
 keys = []
 decides = "the effect categories a stdlib call or runtime symbol carries (feeds effect_flow, [permissions], @pure, --profile critical)"
 from = "mixed:name+declaration"
-unknown = "allow"
-unknown_note = "`prim` is Pure (effect.rs:231); a runtime symbol whose head names no table module => empty (effect.rs:334); a call to a name the module does not declare => empty (treated as a user module, 317); an undeclared symbol of a known module => the module default (fail-closed)"
+unknown = "refuse"
+unknown_note = "a stdlib call of a fn no stdlib source declares, a module the table does not classify, and a runtime symbol that is no declared `@intrinsic` and whose head names no classified module are UNKNOWN: every category (effect.rs unknown_call_effects), never the empty set; a runtime symbol is classified by the declaration whose `@intrinsic` names it, wherever its head points. Consumers ask only about a call they resolved to the stdlib (a user module sharing a stdlib module's name is judged by its body, #2223). Every fn the classification charges nothing — a `Pure` module's, a plain fn of an `EffectFns` module, an `@category()` — reaches no floor host op and no output builtin through any body serving it (uncharged_fns_reaching_a_category, every bundled source at run time); the one exception is an `effect fn` declaring `@category()` whose only reach is a dispatch on a protocol-bounded param (io.read/read_exact/read_to_end/write/close), charged at the conformer by effect.flow-categories. 49 bodyless datetime / http builders declare `@category()` (runtime bodies read: arithmetic and value access), the testing assertions `Abort` + `IO.stderr` (#4951)"
 routes = { check = "runs", check_json = "skipped:#4815 (no permissions gate)", check_effects = "runs: entry file only #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped:#4815", emit = "unknown" }
-tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs"]
-control_note = "crates/almide-ir/src/effect.rs tests (classification gate: row per module, Pure module with an unexplained effect fn refused)"
-issues = [4827, 4815]
+tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs", "crates/almide-ir/src/effect.rs::classification_gate::a_fn_charged_no_category_reaches_no_category", "crates/almide-ir/src/effect.rs::classification_gate::a_fresh_uncharged_fn_reaching_an_output_is_refused", "crates/almide-ir/src/effect.rs::classification_gate::the_rows_3246_fixed", "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category", "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"]
+control_note = "proofs/decision-controls/purity.effect-classification.patch: an unknown call carries no category again; .uncharged-reach.patch: a fn charged nothing may reach a host op again"
+issues = [4827, 4815, 4951]
 status = "UNSTAMPED"
-reasons = [
-  "c1: module rows are keyed by module name (STDLIB_MODULE_EFFECTS, effect.rs:143-233) and a runtime symbol finds its module by the `almide_rt_<module>_` prefix (effect.rs:334-342)",
-  "c2 (re-read 2026-11-24, 23rd): #4827's hole is closed in the tree — `prim` Pure is backed by the gate a_pure_module_reaches_no_declared_host_op (host_reach over @prim_op(host), 2f3a490159) and an undeclared intrinsic fails closed to its module's default (effect.rs:348-353); still open: a symbol whose head names no module, and a fn its module does not declare, get the empty set (effect.rs:335, 343, 326)",
-]
-note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM)."
+reasons = ["c1: module rows are keyed by module name (STDLIB_MODULE_EFFECTS) and a runtime symbol that no `@intrinsic` declares finds its module by the `almide_rt_<module>_` prefix (fail-closed to the module's default)", "c3: no route-matrix probe (the registry is read by the consumers' rows; lsp / emit cells unknown)"]
+note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse; the #4827 gate generalized to every fn charged nothing (63 offenders on fail-open-zero -> 0: datetime/http builders declared, testing assertions charged, a local spelled like a fn no longer read as a call of it, the io handle fns judged at the conformer)."
+novel = "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category"
+control_test = "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category"
+control_patch = "proofs/decision-controls/purity.effect-classification.patch"
+control_extra = "proofs/decision-controls/purity.effect-classification.uncharged-reach.patch"
+control_extra_test = "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"
 
 [[site]]
 id = "purity.fan-par-pure-modules"
