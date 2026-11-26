@@ -100,7 +100,7 @@ pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
 /// or call an output builtin that does not abort (`println`, `eprintln`:
 /// [`crate::effect::builtin_writes_without_aborting`])? A builtin is named by
 /// a bare call that no fn of the source declares.
-pub(crate) fn stdlib_fn_reaches_category(module: &str, func: &str) -> bool {
+pub fn stdlib_fn_reaches_category(module: &str, func: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_stdlib(module, func, &mut seen, Mode::CATEGORY)
 }
