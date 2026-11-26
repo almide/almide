@@ -1,0 +1,14 @@
+# Negative control of verify.bundle-coverage (proofs/decision-sites.toml): the gate no longer judges coverage, so a wasm body the certificate does not cover passes again
+# control_test: tests/decision_verify_gate_novel_test.rs::novel_a_wasm_body_the_certificate_does_not_cover_is_refused
+diff --git a/src/certificate_gate.rs b/src/certificate_gate.rs
+--- a/src/certificate_gate.rs
++++ b/src/certificate_gate.rs
+@@ -51,7 +51,7 @@ pub fn judge(bundle_text: &[u8], shipped: &[u8], allow_incomplete: bool) -> Resu
+     let (verdicts, outcome) = bundle::verify(&parsed);
+     let outcome = if pinned { outcome } else { Outcome::Rejected };
+     // Every defined body of the module is a function the verdict names.
+-    let uncovered = almide_verify::coverage::judge(&parsed, Some(shipped)).err();
++    let uncovered: Option<String> = None;
+     let outcome = if uncovered.is_some() { Outcome::Rejected } else { outcome };
+     match outcome {
+         Outcome::Certified => Ok(Pass::Certified),

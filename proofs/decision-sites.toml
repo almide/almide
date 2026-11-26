@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "65"
-# failopen_ceiling      = "7"
+# failopen_ceiling      = "6"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -239,6 +239,12 @@
 #               control red, native walls 0 / 0 over 1359 programs. Its run / build / test /
 #               bench / native cells read from the code (judged in process since W2 / #4932):
 #               skipped 70 -> 65. fail-open 8 -> 7.
+#   2026-11-26  fail-open-verify: verify.bundle-coverage unknown -> refuse: a version-8 bundle
+#               carries a coverage record (per defined body of the shipped wasm module, the
+#               functions it is) that almide-verify holds to the artifact's code-section count,
+#               to the bundle's records and to every certified function; a bundle over a wasm
+#               module without one is a reject. Novel test, control red, structural wall OK over
+#               1063 fixtures on ds-2. fail-open 7 -> 6.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3386,28 +3392,34 @@ note = "The parser itself meets c1/c2/c4; only the routes that never call the ve
 
 [[site]]
 id = "verify.bundle-coverage"
-at = "crates/almide-verify/src/bundle.rs::verify"
+at = "crates/almide-verify/src/coverage.rs::judge"
 items = [
   "crates/almide-verify/src/bundle.rs::verify",
+  "crates/almide-verify/src/coverage.rs::judge",
 ]
 keys = []
-decides = "CERTIFIED iff ≥1 witness and all accepted and no uncertified line; the set of functions that must carry a witness is not checked against the artifact"
+decides = "CERTIFIED iff ≥1 witness and all accepted and no uncertified line, and — over a wasm artifact — a version-8 coverage record with one line per entry of the artifact's code section, every name in it covered by a witness or uncertified record, and every certified function placed"
 from = "declaration"
-unknown = "allow"
-unknown_note = "a defined function of the shipped module with neither a witness record nor an `uncertified` line is simply absent from the verdict: the verifier links no wasm decoder (Cargo.toml: no dependencies) and never enumerates the artifact's functions; completeness is the producer's claim"
+unknown = "refuse"
+unknown_note = "a defined body of the shipped module is a line of the coverage record, or the bundle is refused: a record of another length than the artifact's code section (coverage.rs reads the section framing itself), a bundle over a wasm module with no record (versions 1-7), a name no witness or uncertified record covers, and a certified function the record places at no body are each a reject (novel test with a fresh body count and fresh names). The producer names every sealed body of a source function or helper frame (witness_anchor.rs) and finds it in the shipped module through to_wasi_mapped's map; a `*` body (a runtime routine) and an unshipped function are its claims (proofs/TRUSTED_BASE.md, Bundle coverage)"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "skipped: #4836", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::no_witness_is_not_an_accept",
+  "crates/almide-verify/src/bundle.rs::tests::a_version_eight_bundle_covers_every_body_of_its_artifact",
+  "tests/decision_verify_gate_novel_test.rs::novel_a_wasm_body_the_certificate_does_not_cover_is_refused",
 ]
-control_note = "NONE"
+control_note = "proofs/decision-controls/verify.bundle-coverage.patch: the gate no longer judges coverage"
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c2:fail-open (unwitnessed function unjudged)",
   "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: native, wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
-  "c4:no-control",
 ]
-note = "bundle.rs:174-192. The artifact hash (main.rs:66-76) binds the verdict to a file, not to coverage of that file; a v1 bundle (no artifact record) is judged with artifact_ok = true. The anchor check (CI only) is what ties events to bytes."
+note = "2026-11-26 (fail-open-verify, 34th engineer): fail-open closed — before, a defined function with neither a witness nor an uncertified line was absent from the verdict (the verifier never counted the artifact's functions). Now the bundle (version 8) names every defined body and the verifier counts the code section itself. Nothing that ran is refused: the structural wall (1063 fixtures, the standalone verifier over the pinned artifacts) is OK, and `almide run` and `almide build --target wasm` over every spec/wasm_cross fixture raised no coverage refusal (ds-2). A native artifact has no code section to cover and is not judged by it (the native cells stay skipped)."
+novel = "tests/decision_verify_gate_novel_test.rs::novel_a_wasm_body_the_certificate_does_not_cover_is_refused"
+control_patch = "proofs/decision-controls/verify.bundle-coverage.patch"
+control_test = "tests/decision_verify_gate_novel_test.rs::novel_a_wasm_body_the_certificate_does_not_cover_is_refused"
+control_seen = "f7bbe3853f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+
 
 [[site]]
 id = "verify.property-checkers"
