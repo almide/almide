@@ -570,7 +570,11 @@ fn a_pure_fn_calling_a_testing_assertion_is_refused_4951() {
             "src/main.almd",
             format!("import testing\n\n@pure\nfn {f}() -> Unit = {}\n\neffect fn main() -> Unit = {f}()\n", call(a)),
         )]);
-        refused_with(&run(&proj, &["check", "src/main.almd"]), "E092", &format!("a @pure fn calling testing.{a}"));
+        // `assert_aborts` runs only as a direct call in a test block, so a
+        // `@pure` fn calling it is refused first by E099 (it declares the
+        // same leaves).
+        let code = if a == "assert_aborts" { "E099" } else { "E092" };
+        refused_with(&run(&proj, &["check", "src/main.almd"]), code, &format!("a @pure fn calling testing.{a}"));
     }
     let f = novel::ident("calm");
     let (_t, proj) = project(&[(
