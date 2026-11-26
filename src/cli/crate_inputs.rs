@@ -332,3 +332,43 @@ pub(super) fn env_pairs(keep: impl Fn(&str) -> bool) -> Vec<(String, String)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/novel.rs"]
+mod novel;
+
+#[cfg(test)]
+mod backstop_tests {
+    use super::novel;
+
+    /// native.crate-inputs-backstop (decision row; its c2 novel item): the
+    /// injection point itself refuses an ungranted dependency's native code,
+    /// whichever command reached it. A fresh dependency, under a fresh name,
+    /// whose only native code is one `@extern(rust)` fn (no `native/` tree,
+    /// no `[native-deps]`) is refused by `CrateInputs::collect` — the site, not
+    /// the earlier dispatch gate. Its granted twin is collected.
+    #[test]
+    fn novel_an_ungranted_fresh_dependency_is_refused_at_the_injection_point() {
+        let td = tempfile::TempDir::new().unwrap();
+        let dep = novel::ident("natdep");
+        let f = novel::ident("native_fn");
+        let root = td.path().join("app");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(td.path().join(&dep).join("src")).unwrap();
+        std::fs::write(td.path().join(&dep).join("almide.toml"), format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n")).unwrap();
+        std::fs::write(
+            td.path().join(&dep).join("src/mod.almd"),
+            format!("@extern(rust, \"std::process\", \"id\")\npub fn {f}() -> Int = _\n"),
+        )
+        .unwrap();
+        std::fs::write(root.join("src/main.almd"), "effect fn main() -> Unit = println(\"x\")\n").unwrap();
+        let manifest = |grant: &str| {
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ path = \"../{dep}\" }}\n{grant}")
+        };
+        std::fs::write(root.join("almide.toml"), manifest("")).unwrap();
+        let refused = super::CrateInputs::collect(Some(&root)).expect_err("an ungranted fresh dependency's @extern was admitted at the injection point");
+        assert!(refused.contains(&format!("dependency `{dep}`")) && refused.contains("brings native code"), "{refused}");
+        std::fs::write(root.join("almide.toml"), manifest(&format!("\n[permissions]\nnative = [\"{dep}\"]\n"))).unwrap();
+        assert!(super::CrateInputs::collect(Some(&root)).is_ok(), "the granted twin must be collected");
+    }
+}

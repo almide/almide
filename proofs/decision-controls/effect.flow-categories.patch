@@ -1,0 +1,14 @@
+# Negative control of effect.flow-categories (proofs/decision-sites.toml): a call no rule answers for charges nothing again
+# control_test: tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category
+diff --git a/crates/almide-codegen/src/effect_flow/scan.rs b/crates/almide-codegen/src/effect_flow/scan.rs
+--- a/crates/almide-codegen/src/effect_flow/scan.rs
++++ b/crates/almide-codegen/src/effect_flow/scan.rs
+@@ -290,7 +290,7 @@ impl Scan<'_, '_> {
+     /// The current performer runs a call no rule answers for (decision row
+     /// effect.flow-categories): every category, ⊤, as an `@extern`.
+     fn perform_unknown(&mut self, label: String) {
+-        self.perform(almide_ir::effect::unknown_call_effects(), format!("unclassified call {label}"));
++        let _ = label;
+     }
+ 
+     /// A protocol requirement `method` called through a type variable: the

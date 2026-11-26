@@ -1,0 +1,14 @@
+# Negative control of purity.effect-classification.uncharged-reach (proofs/decision-sites.toml): a stdlib fn charged nothing may reach a host op or an output builtin again
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused
+diff --git a/crates/almide-ir/src/effect.rs b/crates/almide-ir/src/effect.rs
+--- a/crates/almide-ir/src/effect.rs
++++ b/crates/almide-ir/src/effect.rs
+@@ -487,7 +487,7 @@ pub fn uncharged_fns_reaching_a_category(extra: Option<(&str, &'static almide_la
+             let at_the_conformer = fn_is_effect(d)
+                 && declared_categories(d).is_some_and(|c| c.is_empty())
+                 && !crate::host_reach::stdlib_fn_reaches_category_but_dispatch(m, fn_name(d));
+-            if reaches && !at_the_conformer {
++            if false && reaches && !at_the_conformer {
+                 bad.push(format!("{m}.{}", fn_name(d)));
+             }
+         }

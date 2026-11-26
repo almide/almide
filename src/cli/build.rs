@@ -294,13 +294,13 @@ pub fn cmd_build(args: BuildArgs) {
     // #3604: scoped like the triple; read by every native release build path.
     let _cpu = super::native_target::TargetCpuGuard::set(target_cpu.map(str::to_string));
     if print_release_rustflags {
-        println!("{}", super::native_target::release_codegen_rustc_args().join(" "));
+        crate::out(&format!("{}", super::native_target::release_codegen_rustc_args().join(" ")));
         return;
     }
 
     let requested_output = output;
     let output = compute_output_path(file, output, is_wasm).unwrap_or_else(|e| {
-        eprintln!("error: {e}");
+        crate::err(&format!("error: {e}"));
         std::process::exit(1)
     });
 

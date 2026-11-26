@@ -1,0 +1,14 @@
+# Negative control of purity.host-ops-classify (proofs/decision-sites.toml): a call into a module outside the capability list is never uncounted, whatever its body reaches
+# control_test: tests/decision_novel_test.rs::novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call
+diff --git a/crates/almide-mir/src/host_ops.rs b/crates/almide-mir/src/host_ops.rs
+--- a/crates/almide-mir/src/host_ops.rs
++++ b/crates/almide-mir/src/host_ops.rs
+@@ -494,7 +494,7 @@ pub fn is_uncounted_host_call(name: &str) -> bool {
+         // directly or through what it calls) and has no host-op row is
+         // uncounted — read off the bodies, never the module's list. A user
+         // module's call has no stdlib body and is scanned on its own.
+-        return almide_ir::host_reach::stdlib_fn_reaches_host(module, base);
++        return false;
+     }
+     !crate::purity::is_pure(module, base)
+ }

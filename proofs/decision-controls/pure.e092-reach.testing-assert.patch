@@ -1,0 +1,13 @@
+# Negative control of pure.e092-reach.testing-assert (proofs/decision-sites.toml): testing.assert_ok declares no category again (#4951)
+# control_test: tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951
+diff --git a/stdlib/testing.almd b/stdlib/testing.almd
+--- a/stdlib/testing.almd
++++ b/stdlib/testing.almd
+@@ -103,7 +103,6 @@ fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt fai
+ fn assert_some[A](o: A?) -> Unit = _
+ 
+ /// Fails when r is an err.
+-@category("Abort", "IO.stderr")
+ @intrinsic("almide_rt_test_assert_ok")
+ @borrow_ref(r)
+ fn assert_ok[A, B](r: Result[A, B]) -> Unit = _

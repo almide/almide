@@ -98,16 +98,41 @@ impl Checker {
                 {
                     return None;
                 }
-                let mut hits = self.env.opaque_user_records.iter()
-                    .filter(|(k, _)| k.as_str().rsplit('.').next() == Some(bare));
-                let first = hits.next()?;
-                if hits.next().is_some() {
-                    return None;
+                // Inside a module that declares its own user opaque record of
+                // this name, the bare spelling names that one.
+                if let Some(c) = self.current_module_prefix.as_deref()
+                    && let Some(own) = self.env.opaque_user_records.get(&sym(&format!("{c}.{bare}")))
+                {
+                    let (owner, vis) = *own;
+                    return Some(if self.user_opaque_visible_here(owner, vis) { None } else { Some((bare.to_string(), owner)) });
                 }
-                *first.1
+                // Every user opaque record of that bare name: a bare spelling
+                // two of them share is not resolved to one by guessing — it is
+                // foreign here when ANY of them is (decision row
+                // scope.e033-opaque-outside-module: an ambiguous name is
+                // refused, never admitted).
+                let mut hits: Vec<(Sym, crate::ast::Visibility)> = self.env.opaque_user_records.iter()
+                    .filter(|(k, _)| k.as_str().rsplit('.').next() == Some(bare))
+                    .map(|(_, v)| *v)
+                    .collect();
+                hits.sort_by(|x, y| x.0.as_str().cmp(y.0.as_str()));
+                let first = *hits.first()?;
+                if hits.len() > 1 {
+                    return Some(hits.into_iter().find(|(owner, vis)| !self.user_opaque_visible_here(*owner, *vis))
+                        .map(|(owner, _)| (bare.to_string(), owner)));
+                }
+                first
             }
             None => return None,
         };
+        Some(if self.user_opaque_visible_here(owner, vis) { None } else { Some((bare.to_string(), owner)) })
+    }
+
+    /// Is a user opaque record owned by module `owner` with visibility `vis`
+    /// visible from the module being checked? A `mod type` is visible to its
+    /// whole PROJECT (the same package rule as `mod fn`), a `local type` to
+    /// its file.
+    fn user_opaque_visible_here(&self, owner: Sym, vis: crate::ast::Visibility) -> bool {
         let caller = self.current_module_prefix.clone();
         let pkg_of = |m: Option<&str>| -> String {
             let Some(m) = m else { return String::new() };
@@ -116,12 +141,11 @@ impl Checker {
             }
             if self.env.dep_root_modules.contains(&sym(m)) { m.to_string() } else { String::new() }
         };
-        let inside = match vis {
+        match vis {
             crate::ast::Visibility::Public => true,
             crate::ast::Visibility::Local => caller.as_deref() == Some(owner.as_str()),
             crate::ast::Visibility::Mod => pkg_of(caller.as_deref()) == pkg_of(Some(owner.as_str())),
-        };
-        Some(if inside { None } else { Some((bare.to_string(), owner)) })
+        }
     }
 
     /// Where a value of `actual` fills an `expected` slot, the foreign
@@ -137,11 +161,19 @@ impl Checker {
     }
 
     fn opaque_crossing_at(&self, expected: &Ty, actual: &Ty, depth: usize) -> Option<(Ty, bool)> {
-        if depth > 32 {
-            return None;
-        }
         let e = resolve_ty(expected, &self.uf);
         let a = resolve_ty(actual, &self.uf);
+        if depth > 32 {
+            // Past the walk's depth the slot is not judged shape by shape;
+            // it is not admitted unjudged either (decision row
+            // scope.e033-opaque-outside-module): two different types that
+            // still hold a foreign opaque record below this point cross.
+            if e == a {
+                return None;
+            }
+            return self.foreign_opaque_below(&a).map(|t| (t, true))
+                .or_else(|| self.foreign_opaque_below(&e).map(|t| (t, false)));
+        }
         let open = |t: &Ty| matches!(t, Ty::TypeVar(_) | Ty::Unknown);
         let fo_e = self.foreign_opaque_record(&e);
         let fo_a = self.foreign_opaque_record(&a);
@@ -186,6 +218,19 @@ impl Checker {
             }
             _ => None,
         }
+    }
+
+    /// The first foreign opaque record anywhere in `ty` (resolved), walked
+    /// with an explicit stack so no depth bound decides the answer.
+    fn foreign_opaque_below(&self, ty: &Ty) -> Option<Ty> {
+        let mut stack = vec![resolve_ty(ty, &self.uf)];
+        while let Some(t) = stack.pop() {
+            if self.foreign_opaque_record(&t).is_some() {
+                return Some(t);
+            }
+            stack.extend(t.children().into_iter().map(|c| resolve_ty(c, &self.uf)));
+        }
+        None
     }
 
     /// The E033 for an [`Self::opaque_crossing`].

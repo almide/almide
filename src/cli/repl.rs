@@ -1,4 +1,4 @@
-use std::io::{self, Write, BufRead};
+use std::io::{self, BufRead};
 use std::path::PathBuf;
 use crate::{out, out_no_nl, err};
 
@@ -21,7 +21,7 @@ pub fn run_repl() {
     loop {
         if interactive {
             out_no_nl(&format!(">>> "));
-            io::stdout().flush().ok();
+            crate::flush_out();
         }
 
         let mut line = String::new();

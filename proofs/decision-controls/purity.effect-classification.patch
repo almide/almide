@@ -1,0 +1,23 @@
+# Negative control of purity.effect-classification (proofs/decision-sites.toml): a stdlib call no source declares and a runtime symbol naming no module carry no category again
+# control_test: tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category
+diff --git a/crates/almide-ir/src/effect.rs b/crates/almide-ir/src/effect.rs
+--- a/crates/almide-ir/src/effect.rs
++++ b/crates/almide-ir/src/effect.rs
+@@ -358,7 +358,7 @@ pub fn stdlib_call_effect(module: &str, func: &str) -> Vec<Effect> {
+         // A language form with no stdlib source.
+         return match row { ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => e.to_vec(), ModuleEffects::Pure => Vec::new() };
+     }
+-    module_fns(module).find(|d| fn_name(d) == func).map_or_else(unknown_call_effects, |d| decl_effects(row, d))
++    module_fns(module).find(|d| fn_name(d) == func).map_or_else(Vec::new, |d| decl_effects(row, d))
+ }
+ 
+ /// The classified module a runtime symbol's head names: the longest table
+@@ -411,7 +411,7 @@ pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
+     if let Some((m, d)) = intrinsic_declarations().get(symbol) {
+         return module_effects(m).map_or_else(unknown_call_effects, |row| decl_effects(row, d));
+     }
+-    let Some(module) = runtime_symbol_module(symbol) else { return unknown_call_effects() };
++    let Some(module) = runtime_symbol_module(symbol) else { return Vec::new() };
+     let Some(row) = module_effects(module) else { return unknown_call_effects() };
+     if row == ModuleEffects::Pure {
+         return Vec::new();

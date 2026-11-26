@@ -1,0 +1,13 @@
+# Negative control of native.crate-inputs-backstop (proofs/decision-sites.toml): the injection point collects every fetched dependency's native code without judging its grant
+# control_test: src/cli/crate_inputs.rs::novel_an_ungranted_fresh_dependency_is_refused_at_the_injection_point
+diff --git a/src/cli/crate_inputs.rs b/src/cli/crate_inputs.rs
+--- a/src/cli/crate_inputs.rs
++++ b/src/cli/crate_inputs.rs
+@@ -65,7 +65,6 @@ impl CrateInputs {
+         // The injection point itself refuses an ungranted dependency's native
+         // code (#4093), whichever command reached it; `dispatch` refuses the
+         // same graph earlier, on every target.
+-        super::enforce_native_grants(&proj, &fetched, true)?;
+         for dep in fetched {
+             inputs.packages.push(PackageNatives::read(&dep.package_dir)?);
+             let dep_toml = dep.package_dir.join("almide.toml");

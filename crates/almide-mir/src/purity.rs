@@ -323,7 +323,17 @@ pub fn is_pure(module: &str, func: &str) -> bool {
 fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
     crate::host_ops::host_op(module, func).is_none()
         && !almide_ir::host_reach::serving_bodies(module, func).is_empty()
-        && almide_ir::effect::stdlib_call_effect(module, func).is_empty()
+        // No category — or only the halt a testing assertion declares
+        // (#4951: `Abort` + its stderr report, which needs no capability).
+        // A fn no declaration names but a registry body serves (a lowering
+        // twin such as `testing.assert_ok_sc`, #1233) is judged by those
+        // bodies: admitted only when none reaches a category.
+        && if almide_ir::effect::stdlib_declares(module, func) {
+            let cats = almide_ir::effect::stdlib_call_effect(module, func);
+            cats.is_empty() || almide_ir::effect::only_halts(&cats)
+        } else {
+            !almide_ir::host_reach::stdlib_fn_reaches_category(module, func)
+        }
         && !almide_ir::host_reach::stdlib_fn_reaches_host(module, func)
 }
 
@@ -375,6 +385,17 @@ mod tests {
     /// #4827: holding a handle is the capability, not purity. The generic
     /// handle fns dispatch to the caller's conformer (`h.__self_read`), so
     /// they stay refused although they declare `@category()`.
+    /// A lowering twin no declaration names (#1233's scalar-Ok
+    /// `assert_ok_sc`) is judged by the registry body serving it; a name with
+    /// no serving body stays refused.
+    #[test]
+    fn an_undeclared_registry_twin_is_judged_by_its_body() {
+        assert!(is_pure("testing", "assert_ok_sc"));
+        assert!(is_pure("testing", "assert_err_sc"));
+        assert!(!is_pure("testing", "assert_ok_zz_no_body"));
+        assert!(!is_pure("fs", "assert_ok_sc"));
+    }
+
     #[test]
     fn the_generic_handle_fns_are_not_pure() {
         for f in ["read", "read_exact", "read_to_end", "write", "close"] {

@@ -10807,14 +10807,17 @@ fn __http_response_repr(resp: HttpResponse) -> String = _
 
 
 
+@category
 @intrinsic("almide_http_req_eq")
 @borrow_ref(a, b)
 fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
 
+@category
 @intrinsic("almide_http_call_eq")
 @borrow_ref(a, b)
 fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
 
+@category
 @intrinsic("almide_http_resp_eq")
 @borrow_ref(a, b)
 fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _
@@ -40774,6 +40777,7 @@ pub const SRC_TESTING: &str = r#"
 
 
 /// Fails unless f, run alone in a child, aborts with text containing expected.
+@category("Abort", "IO.stderr")
 fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
 
 
@@ -40825,6 +40829,7 @@ local fn child_section(name: String, text: String) -> String = {
 }
 
 
+@category("Abort", "IO.stderr")
 fn __assert_aborts_check(expected: String, child: List[String], line: Int) -> Unit = {
   let status = int.parse(list.get(child, 0) ?? "-1") ?? -1
   let stdout = list.get(child, 1) ?? ""
@@ -40840,10 +40845,12 @@ fn __assert_aborts_check(expected: String, child: List[String], line: Int) -> Un
 }
 
 /// Fails unless needle is in haystack; "" passes.
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_contains")
 fn assert_contains(haystack: String, needle: String) -> Unit = _
 
 /// Fails unless abs(a - b) < tolerance (strict).
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
@@ -40852,27 +40859,33 @@ fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
 
 /// Fails unless a > b; equal fails.
+@category("Abort", "IO.stderr")
 fn assert_gt[A](a: A, b: A) -> Unit = if a > b then () else panic("assert_gt failed")
 
 /// Fails unless a < b; equal fails.
+@category("Abort", "IO.stderr")
 fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt failed")
 
 /// Fails when o is none.
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_some")
 @borrow_ref(o)
 fn assert_some[A](o: A?) -> Unit = _
 
 /// Fails when r is an err.
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_ok")
 @borrow_ref(r)
 fn assert_ok[A, B](r: Result[A, B]) -> Unit = _
 
 /// Fails when o is some.
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_none")
 @borrow_ref(o)
 fn assert_none[A](o: A?) -> Unit = _
 
 /// Fails when r is ok.
+@category("Abort", "IO.stderr")
 @intrinsic("almide_rt_test_assert_err")
 @borrow_ref(r)
 fn assert_err[A, B](r: Result[A, B]) -> Unit = _
@@ -40885,6 +40898,7 @@ fn assert_err[A, B](r: Result[A, B]) -> Unit = _
 
 
 /// Fails unless actual == expected; --update-snapshots rewrites.
+@category("Abort", "IO.stderr")
 fn assert_snapshot(actual: String, expected: String) -> Unit = if actual == expected then ()
 else panic("snapshot mismatch\n  expected: ${expected}\n  found: ${actual}")
 "#;

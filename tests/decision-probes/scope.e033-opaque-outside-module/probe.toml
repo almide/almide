@@ -1,0 +1,6 @@
+# The probe of scope.e033-opaque-outside-module: two dependencies each declare
+# a `mod type Vault` record, so the bare spelling `Vault` names two opaque
+# types. A fn of the root reads a field through that bare name: it is foreign
+# here whichever one it names, so the read is refused (it was admitted while an
+# ambiguous bare name resolved to no record at all).
+expect = "E033"

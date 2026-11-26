@@ -17,7 +17,7 @@
 //! JSON-RPC `-32601` rather than a guess.
 
 use serde_json::{json, Value};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 
 /// MCP revision this server implements. A client that asks for a different one
 /// gets its own version echoed back when we can serve it — the tool surface is
@@ -48,7 +48,6 @@ intend to change files.";
 /// request on stdout. Returns when the client closes the pipe.
 pub fn run_mcp() {
     let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
     let mut reader = stdin.lock();
     let mut line = String::new();
     loop {
@@ -62,7 +61,7 @@ pub fn run_mcp() {
             continue;
         }
         if let Some(response) = handle_message(text) {
-            if writeln!(stdout, "{}", response).is_err() || stdout.flush().is_err() {
+            if crate::out_json_line(&response).is_err() {
                 return;
             }
         }

@@ -484,10 +484,18 @@ pub fn classify(module: &str, func: &str) -> Cell {
 /// function holding one; it is the accept-but-unsafe case.
 pub fn is_uncounted_host_call(name: &str) -> bool {
     let Some((module, func)) = name.split_once('.') else { return false };
-    if !CAP_MODULES.contains(&module) || host_op_for_call_name(name).is_some() {
+    if host_op_for_call_name(name).is_some() {
         return false;
     }
     let base = func.strip_suffix("_x").unwrap_or(func);
+    if !CAP_MODULES.contains(&module) {
+        // Any other module (decision row purity.host-ops-classify): a stdlib
+        // call whose serving body reaches a floor host op (`@prim_op(host)`,
+        // directly or through what it calls) and has no host-op row is
+        // uncounted — read off the bodies, never the module's list. A user
+        // module's call has no stdlib body and is scanned on its own.
+        return almide_ir::host_reach::stdlib_fn_reaches_host(module, base);
+    }
     !crate::purity::is_pure(module, base)
 }
 
