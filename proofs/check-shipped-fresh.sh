@@ -51,9 +51,16 @@ COQC="${COQC:-$(command -v coqc)}"
 # One .v per chunk of DISTINCT triples: `<work>/Fresh_<k>.v`; `<work>/goals.tsv`
 # (chunk, example name, the goal's four arguments) and `<work>/index.tsv`
 # (example name, label, function, access), one line per proposal.
-python3 -I - "$DUMP" "$WORK" "${FRESH_CHUNK:-400}" <<'PY'
+#
+# A chunk ends at FRESH_CHUNK goals or at FRESH_CHUNK_TEXT characters of goal
+# text, whichever comes first. A function that fills one block with a
+# thousand stores proposes a thousand triples whose middle string grows with
+# each store; 400 of those in one file is megabytes of byte lists, and the
+# kernel's memory for a file grows with its text (about 1.4 MB per 1,000
+# characters, measured), so a count alone lets one file take the machine.
+python3 -I - "$DUMP" "$WORK" "${FRESH_CHUNK:-400}" "${FRESH_CHUNK_TEXT:-300000}" <<'PY'
 import sys
-dump, work, chunk = sys.argv[1], sys.argv[2], int(sys.argv[3])
+dump, work, chunk, budget = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 mods, props, cur = [], [], None
 for line in open(dump, encoding="utf-8"):
     t = line.split()
@@ -88,24 +95,29 @@ Import ListNotations.
 Open Scope Z_scope.
 """
 names = {}
+k, held, text, largest = 0, 0, 0, 0
 with open(f"{work}/goals.tsv", "w", encoding="utf-8") as goals:
     for _, _, _, g in props:
         if g in names:
             continue
-        i = len(names)
-        k, name = i // chunk, f"f{i:06d}"
+        name = f"f{len(names):06d}"
         names[g] = name
-        with open(f"{work}/Fresh_{k:04d}.v", "a" if i % chunk else "w", encoding="utf-8") as f:
-            if i % chunk == 0:
+        goal = f"\nExample {name} : fresh_ok {g[0]} [{g[1]}] [{g[2]}] [{g[3]}] = true.\nProof. vm_compute. reflexivity. Qed.\n"
+        if held and (held >= chunk or text + len(goal) > budget):
+            k, held, text = k + 1, 0, 0
+        with open(f"{work}/Fresh_{k:04d}.v", "a" if held else "w", encoding="utf-8") as f:
+            if not held:
                 f.write(HEAD)
-            f.write(f"\nExample {name} : fresh_ok {g[0]} [{g[1]}] [{g[2]}] [{g[3]}] = true.\nProof. vm_compute. reflexivity. Qed.\n")
+            f.write(goal)
+        held, text = held + 1, text + len(goal)
+        largest = max(largest, text)
         goals.write(f"Fresh_{k:04d}\t{name}\n")
 with open(f"{work}/index.tsv", "w", encoding="utf-8") as idx:
     for label, func, acc, g in props:
         idx.write(f"{names[g]}\t{label}\t{func}\t{acc}\n")
 with open(f"{work}/swept.txt", "w", encoding="utf-8") as f:
     f.write(f"{len(mods)} {sum(1 for m in mods if m['alloc'] != '4294967295')} {len(props)} {len(names)}\n")
-print(f"{len(mods)} module(s), {len(props)} access(es) proposed, {len(names)} distinct triple(s)")
+print(f"{len(mods)} module(s), {len(props)} access(es) proposed, {len(names)} distinct triple(s) in {k + 1 if names else 0} file(s), the largest {largest} characters of goals")
 PY
 
 fail=0
