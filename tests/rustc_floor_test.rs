@@ -15,6 +15,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/novel.rs"]
+mod novel;
+
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -57,21 +60,35 @@ fn real_rustc() -> PathBuf {
     p
 }
 
-/// A `rustc` executable (`rustc.exe` on Windows) that answers `--version` / `-vV`
-/// with $ALMIDE_FAKE_RUSTC_VERSION and runs $ALMIDE_REAL_RUSTC for anything
-/// else. It is compiled from Rust so the same test runs on Windows, where the
-/// CVE this floor exists for lives: a shell script is no `rustc.exe`.
-fn fake_rustc(dir: &Path) {
+/// A toolchain whose `bin/rustc` (`rustc.exe` on Windows) answers `--version` /
+/// `-vV` with `<dir>/version` when that file exists, else
+/// $ALMIDE_FAKE_RUSTC_VERSION; `--print sysroot` with `<dir>/redirect` when
+/// that file exists (a proxy that picks another toolchain), else `<dir>`
+/// itself; and runs $ALMIDE_REAL_RUSTC for anything else. It is compiled from
+/// Rust so the same test runs on Windows, where the CVE this floor exists for
+/// lives: a shell script is no `rustc.exe`. Returns `<dir>/bin`.
+fn fake_rustc(dir: &Path) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
     let src = dir.join("fake_rustc.rs");
     std::fs::write(
         &src,
         r#"fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let home = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+    if args.len() == 2 && args[0] == "--print" && args[1] == "sysroot" {
+        match std::fs::read_to_string(home.join("redirect")) {
+            Ok(other) => println!("{}", other.trim()),
+            Err(_) => println!("{}", home.display()),
+        }
+        return;
+    }
     if args.len() == 1 && (args[0] == "--version" || args[0] == "-vV") {
         use std::io::Write;
         let path = std::env::var("ALMIDE_VERSION_PROBES").unwrap();
         writeln!(std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap(), "probe").unwrap();
-        println!("rustc {} (0000000 2020-01-01)", std::env::var("ALMIDE_FAKE_RUSTC_VERSION").unwrap());
+        let version = std::fs::read_to_string(home.join("version")).map(|v| v.trim().to_string())
+            .unwrap_or_else(|_| std::env::var("ALMIDE_FAKE_RUSTC_VERSION").unwrap());
+        println!("rustc {} (0000000 2020-01-01)", version);
         if args[0] == "-vV" {
             let real = std::env::var("ALMIDE_REAL_RUSTC").unwrap();
             let out = std::process::Command::new(real).arg("-vV").output().unwrap();
@@ -88,9 +105,12 @@ fn fake_rustc(dir: &Path) {
 "#,
     )
     .unwrap();
-    let out = dir.join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let out = bin.join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
     let st = Command::new(real_rustc()).arg(&src).arg("-o").arg(&out).status().unwrap();
     assert!(st.success(), "the stub rustc did not compile");
+    bin
 }
 
 fn build_with(bin: &Path, version: &str) -> (bool, String, PathBuf, tempfile::TempDir) {
@@ -121,15 +141,15 @@ fn build_with(bin: &Path, version: &str) -> (bool, String, PathBuf, tempfile::Te
 fn a_rustc_below_the_floor_is_refused_and_the_floor_itself_builds() {
     let f = floor();
     let stub = tempfile::tempdir().unwrap();
-    fake_rustc(stub.path());
+    let bin = fake_rustc(stub.path());
     let below = if f.2 > 0 { (f.0, f.1, f.2 - 1) } else { (f.0, f.1 - 1, 99) };
     for old in ["1.77.1".to_string(), dotted(below)] {
-        let (ok, err, _, _t) = build_with(stub.path(), &old);
+        let (ok, err, _, _t) = build_with(&bin, &old);
         assert!(!ok, "a native build with rustc {old} was accepted");
         assert!(err.contains(&format!("rustc {old} is too old")), "no refusal naming {old}:\n{err}");
         assert!(err.contains(&dotted(f)) && err.contains("rustup update"), "the refusal does not name the floor and the fix:\n{err}");
     }
-    let (ok, err, out, _t) = build_with(stub.path(), &dotted(f));
+    let (ok, err, out, _t) = build_with(&bin, &dotted(f));
     assert!(!err.contains("too old"), "rustc {} (the floor) was refused:\n{err}", dotted(f));
     assert!(ok, "the build with rustc {} failed:\n{err}", dotted(f));
     let run = Command::new(&out).output().unwrap();
@@ -164,8 +184,7 @@ fn build_env(envs: &[(&str, &std::ffi::OsStr)]) -> (bool, String) {
 #[test]
 fn every_spelling_of_the_build_rustc_is_judged() {
     let stub = tempfile::tempdir().unwrap();
-    fake_rustc(stub.path());
-    let old = stub.path().join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+    let old = fake_rustc(stub.path()).join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
     for key in ["RUSTC", "CARGO_BUILD_RUSTC"] {
         let (ok, err) = build_env(&[(key, old.as_os_str())]);
         assert!(!ok, "{key}=<rustc 1.70.0> was accepted:\n{err}");
@@ -176,4 +195,30 @@ fn every_spelling_of_the_build_rustc_is_judged() {
     let (ok, err) = build_env(&[("RUSTC", not_rustc.as_os_str())]);
     assert!(!ok, "a RUSTC whose version cannot be read was accepted:\n{err}");
     assert!(err.contains("could not read the rustc version"), "{err}");
+}
+
+/// toolchain.rustc-floor (decision row; its c2 novel item): a `rustc` that is
+/// a proxy — it answers the floor's own version where the build starts, but
+/// hands the build a toolchain of its choosing (a `rust-toolchain.toml` in the
+/// generated crate's directory, a directory override) — is judged by the
+/// toolchain binary its sysroot names, the one every route then runs. A
+/// fresh toolchain below the floor behind a proxy that reports the floor is
+/// refused by its own version.
+#[test]
+fn a_rustc_proxy_is_judged_by_the_toolchain_it_selects() {
+    let f = floor();
+    let toolchains = tempfile::tempdir().unwrap();
+    let selected = toolchains.path().join(novel::path_segment());
+    fake_rustc(&selected);
+    std::fs::write(selected.join("version"), "1.70.0").unwrap();
+    let proxy = toolchains.path().join(novel::path_segment());
+    let proxy_bin = fake_rustc(&proxy);
+    std::fs::write(proxy.join("version"), dotted(f)).unwrap();
+    std::fs::write(proxy.join("redirect"), selected.to_string_lossy().as_bytes()).unwrap();
+    let mut dirs = vec![proxy_bin];
+    dirs.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    let path = std::env::join_paths(dirs).unwrap();
+    let (ok, err) = build_env(&[("PATH", path.as_os_str())]);
+    assert!(!ok, "a proxy reporting rustc {} that selects a rustc 1.70.0 toolchain was accepted:\n{err}", dotted(f));
+    assert!(err.contains("rustc 1.70.0 is too old"), "no refusal naming the selected toolchain's 1.70.0:\n{err}");
 }
