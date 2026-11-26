@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "11"
+# failopen_ceiling      = "10"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -220,6 +220,9 @@
 #               modules is uncounted when its serving body reaches a floor host op (reach,
 #               not the module list); novel test over the declared host ops, control red,
 #               classify_corpus 0 uncounted. fail-open 12 -> 11.
+#   2026-11-26  bounded.member-module-gate unknown -> refuse: the @bounded pure list is held to
+#               the classification's Pure modules, which the host-reach gate covers (test +
+#               control_extra red). fail-open 11 -> 10.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -844,19 +847,22 @@ keys = [
 ]
 decides = "a `m.f(...)` callee: m resolved through the import table (else taken as written); io -> only print*/eprint* without grant; BOUNDED_DENIED_MODULES -> E076 unless --allow; not in BOUNDED_PURE_MODULES -> E074; pure -> shape rules"
 from = "mixed:type+name"
-unknown = "allow"
-unknown_note = "a receiver the checker typed as a value is an indirect callee (type_map, bounded.rs:942-959, #4840); an io member is judged by its declared category (bounded.rs:990-1007, #4823); an unlisted module is E074 (bounded.rs:1024-1031, fail-closed). Fail-open remains for a plain fn of a pure-listed module that reaches a prim host op (#4827)"
+unknown = "refuse"
+unknown_note = "a receiver the checker typed as a value is an indirect callee (type_map, #4840); an io member is admitted only when its declared categories are all standard output / error, so a member declaring none is E076 (#4823); a denied module is E076 unless granted; a module outside the pure list is E074. A pure-listed module is one the effect classification calls `Pure` (every_bounded_pure_module_is_classified_pure, control red), and no fn of a `Pure` module reaches a floor host op (almide-ir effect.rs a_pure_module_reaches_no_declared_host_op, whose own control injects a file-writing fn): so a pure-listed member reaching a prim host op cannot be admitted. Bodyless members of a `Pure` module are the trusted runtime floor, as everywhere"
 routes = { check = "runs", check_json = "runs", check_effects = "runs (observed 2026-11-20, inside and outside the project)", run = "runs for @bounded", build = "runs for @bounded", test = "runs for @bounded", bench = "runs for @bounded", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs for @bounded", mcp = "runs", emit = "runs" }
-tests = ["tests/diagnostics/e076-bounded-fs-effect", "tests/diagnostics/e076-bounded-aliased-env", "tests/diagnostics/e074-bounded-indirect-member-receiver", "tests/diagnostics/e074-bounded-ufcs-receiver", "crates/almide-frontend/src/check/bounded.rs::every_registry_module_is_classified", "crates/almide-frontend/src/check/bounded.rs::bounded_tables_name_real_modules", "tests/critical_profile_test.rs::capability_deny_all_with_explicit_grant", "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee", "tests/critical_profile_test.rs::a_value_named_like_a_module_is_an_indirect_callee"]
+tests = ["tests/diagnostics/e076-bounded-fs-effect", "tests/diagnostics/e076-bounded-aliased-env", "tests/diagnostics/e074-bounded-indirect-member-receiver", "tests/diagnostics/e074-bounded-ufcs-receiver", "crates/almide-frontend/src/check/bounded.rs::every_registry_module_is_classified", "crates/almide-frontend/src/check/bounded.rs::bounded_tables_name_real_modules", "crates/almide-frontend/src/check/bounded.rs::every_bounded_pure_module_is_classified_pure", "crates/almide-ir/src/effect.rs::classification_gate::a_pure_module_reaches_no_declared_host_op", "tests/critical_profile_test.rs::capability_deny_all_with_explicit_grant", "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee", "tests/critical_profile_test.rs::a_value_named_like_a_module_is_an_indirect_callee"]
 control_note = "tests/diagnostics/e076-bounded-fs-effect (broken expects E076)"
 issues = [4827, 4840]
 status = "UNSTAMPED"
-reasons = ["c1: the pure / denied module tables are hand lists of module names (bounded.rs:115-130; owned by purity.bounded-pure-modules)", "c2: a pure-listed module's plain fn that reaches a prim host op is admitted (#4827)"]
-note = "#4840 closed (bffe97f5d6, 8dbece8cbc): the shadowing receiver of the draft is now E074. `from` name -> mixed:type+name (the receiver is decided by type; the module by the table)."
+reasons = ["c1: the pure / denied module tables are hand lists of module names (bounded.rs BOUNDED_PURE_MODULES / BOUNDED_DENIED_MODULES; owned by purity.bounded-pure-modules)", "c4: the row's own control_patch has not run (its control_extra has)"]
+note = "#4840 closed (bffe97f5d6, 8dbece8cbc): the shadowing receiver of the draft is now E074. `from` name -> mixed:type+name (the receiver is decided by type; the module by the table). 2026-11-26 (fail-open-zero): the #4827 hole (a pure-listed member reaching a prim host op) closed by holding the pure list to the classification's Pure modules, which the host-reach gate covers."
 novel = "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee"
 control_test = "tests/decision_batch1a_test.rs::novel_a_value_named_like_any_module_is_an_indirect_callee"
 control_patch = "proofs/decision-controls/bounded.member-module-gate.patch"
 probe = "tests/decision-probes/bounded.member-module-gate"
+control_extra = "proofs/decision-controls/bounded.member-module-gate.pure-list.patch"
+control_extra_test = "crates/almide-frontend/src/check/bounded.rs::every_bounded_pure_module_is_classified_pure"
+control_extra_seen = "92a654f624 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh, unit-test leg)"
 
 [[site]]
 id = "bounded.shape-rules"
