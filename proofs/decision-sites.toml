@@ -48,8 +48,8 @@
 # naming the PR and why):
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "70"
-# failopen_ceiling      = "8"
+# skipped_route_ceiling = "65"
+# failopen_ceiling      = "7"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -233,6 +233,12 @@
 #               value) is refused by the module-call audit over every list predicate HOF the
 #               stdlib declares; the same frame certifies under the ordinary arm; control red.
 #               fail-open 9 -> 8.
+#   2026-11-26  fail-open-verify: verify.native-calls-hosts unknown -> refuse: every host-op row of
+#               every capability module is recorded natively (a row set derived from the
+#               host-op table, NativeCalls.v + almide-verify copies held to it); novel test,
+#               control red, native walls 0 / 0 over 1359 programs. Its run / build / test /
+#               bench / native cells read from the code (judged in process since W2 / #4932):
+#               skipped 70 -> 65. fail-open 8 -> 7.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3435,23 +3441,21 @@ items = [
   "crates/almide-verify/src/native_calls.rs::hosts_ok",
 ]
 keys = []
-decides = "every native host-call id in a native-calls block names a function of NATIVE_FS_HOST_CALLS ++ NATIVE_UNIX_HOST_CALLS"
+decides = "every native host-call id in a native-calls block names a function of NATIVE_FS_HOST_CALLS ++ NATIVE_UNIX_HOST_CALLS ++ native_row_host_calls (every other capability module's host-op rows, derived from host_ops::HOST_OPS)"
 from = "name"
-unknown = "allow"
-unknown_note = "the producer gives an id only to host ops whose module has a native host class (fs, unix: certificate_native_calls.rs:190-195, host_ops.rs:365); a process / http / net / env host call gets no id and is not judged. An unnamed symbol inside a class gets the out-of-range id (refused)"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4828 native certs discarded (src/cli/mod.rs:456-457 `.map(|(rust, _)| rust)`)", build = "skipped: #4828 same", test = "skipped: #4828 test lane renders v0", bench = "skipped: #4828 v0", native = "skipped: #4828 proofs/native-wall.sh only", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "tests/native_fs_host_calls_test.rs",
-]
-control_note = "scripts/witness-reinject.sh native-calls"
-issues = [4828]
+unknown = "refuse"
+unknown_note = "every host-op row of every capability module gets a host id (certificate_native_calls.rs native_host_site / native_host_id_of_call): fs and unix calls by the floor symbol they call, every other module's (process, http, net, env, io, datetime, random, testing, uuid) by its row in host_ops::native_row_host_calls, a set DERIVED from the host-op table that NativeCalls.v and almide-verify copy (tests/native_fs_host_calls_test.rs holds the copies to the derivation). No host call is left unrecorded for want of a class; a class call whose floor symbol is unnamed, and a fresh runtime symbol in any module, get the out-of-range id (a class call served through its declaration's runtime body is recorded at that runtime-served site), which hosts_ok rejects (novel test)"
+routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: the native route judges the v1 render's native-calls witness in process before rustc (src/cli/mod.rs render_v1_native_or_fallback -> certificate_gate_native::judge_native, W2); read from the code, not driven by a probe", build = "runs: the native route judges the v1 render's native-calls witness in process before rustc (src/cli/mod.rs render_v1_native_or_fallback -> certificate_gate_native::judge_native, W2); read from the code, not driven by a probe", test = "runs: the native test render's certificates go to the same linked verifier (src/compile_driver_native.rs render_native_tests -> certificate_gate_native::judge_native, #4932); read from the code, not driven by a probe", bench = "runs: bench builds the v1 program (run.rs native_program_source) and judges it as run does; read from the code, not driven by a probe", native = "runs: build/run/bench/test as above, and verify --mir", wasm = "n.a.", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+tests = ["tests/native_fs_host_calls_test.rs", "tests/decision_novel_test.rs::novel_every_native_host_call_is_judged_and_a_fresh_one_rejected", "crates/almide-verify/tests/coq_examples.rs"]
+control_note = "proofs/decision-controls/verify.native-calls-hosts.patch: a host call of a module with no class gets no host id again; scripts/witness-reinject.sh native-calls"
+issues = []
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed (symbol lists)",
-  "c2:fail-open for modules outside the host classes",
-  "c3:no CLI route judges native certificates",
-]
-note = "The same witness's `known` closure admits any `.`/`__` callee with no site row (certificate_native_calls.rs:74-80) — #4828."
+reasons = ["c1:name-keyed (an id is a runtime symbol's place in the named sets; the row set is derived from the host-op table, the fs/unix sets are hand lists)", "c3: the `runs` cells are read from the code; no probe drives them"]
+note = "2026-11-26 (fail-open-verify, 34th engineer): fail-open closed — before, a process / http / net / env (and io, datetime, random, testing, uuid) host call got no host id and was not judged (certificate_native_calls.rs gated the id on a native host class); now every host-op row is recorded and the id set grows by the derived row set (NativeCalls.v native_row_host_calls, 63 symbols; ids 50..112, out-of-range 113). Nothing that ran is refused: every row id is in range by construction (novel test over every HOST_OPS row), and the native walls gate measured 0 rejects over the corpus. The same witness's `known` closure admits a served callee with no site row (#4828)."
+novel = "tests/decision_novel_test.rs::novel_every_native_host_call_is_judged_and_a_fresh_one_rejected"
+control_patch = "proofs/decision-controls/verify.native-calls-hosts.patch"
+control_test = "tests/decision_novel_test.rs::novel_every_native_host_call_is_judged_and_a_fresh_one_rejected"
+control_seen = "1a5f7ed780 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "anchor.check"

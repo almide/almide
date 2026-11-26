@@ -1,0 +1,13 @@
+# Negative control of verify.native-calls-hosts (proofs/decision-sites.toml): a host call of a module with no class (process, http, net, env, ...) gets no host id again and is not judged
+# control_test: tests/decision_novel_test.rs::novel_every_native_host_call_is_judged_and_a_fresh_one_rejected
+diff --git a/crates/almide-mir/src/certificate_native_calls.rs b/crates/almide-mir/src/certificate_native_calls.rs
+--- a/crates/almide-mir/src/certificate_native_calls.rs
++++ b/crates/almide-mir/src/certificate_native_calls.rs
+@@ -189,6 +189,7 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
+ /// the sets do not name gets their total length (out of range: refused).
+ fn native_host_site(callee: &str) -> Option<usize> {
+     let row = crate::host_ops::host_op_for_call_name(callee)?;
++    crate::host_ops::native_host_class(row.module)?;
+     let symbol = crate::native_floor::declared(callee).map(|d| d.symbol.clone());
+     // A class call the floor declares no body for under this name is served
+     // through the runtime body its declaration names (a callback walker's
