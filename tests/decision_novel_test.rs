@@ -414,3 +414,45 @@ fn novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer() {
         }
     }
 }
+
+/// scope.e033-opaque-outside-module: two fresh dependencies each declare a
+/// `mod type` record under one fresh name, so the bare spelling names two
+/// opaque types. A root fn reading a field through that bare name is refused
+/// (it is foreign here whichever one it names); building the value through
+/// the dependency's own fn checks. The ambiguous bare name used to resolve to
+/// no record at all, and the read was admitted.
+#[test]
+fn novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused() {
+    let ty = format!("T{}", novel::ident("vault"));
+    let (a, b) = (novel::module(), novel::module());
+    let field = novel::ident("key");
+    let dep = |name: &str| {
+        (
+            format!("{name}/almide.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            format!("{name}/src/mod.almd"),
+            format!("mod type {ty} = {{ {field}: String }}\n\npub fn make(s: String) -> {ty} = {{ {field}: s }}\n"),
+        )
+    };
+    let (a_toml, a_toml_text, a_mod, a_mod_text) = dep(&a);
+    let (b_toml, b_toml_text, b_mod, b_mod_text) = dep(&b);
+    let manifest = format!("[package]\nname = \"novel\"\nversion = \"0.1.0\"\n\n[dependencies]\n{a} = {{ path = \"{a}\" }}\n{b} = {{ path = \"{b}\" }}\n");
+    let read = format!("import {a}\nimport {b}\n\nfn peek(v: {ty}) -> String = v.{field}\n\neffect fn main() -> Unit = println(\"x\")\n");
+    let api = format!("import {a}\nimport {b}\n\neffect fn main() -> Unit = println(\"${{{a}.make(\\\"x\\\") == {a}.make(\\\"y\\\")}}\")\n");
+    for (main, refused) in [(read, true), (api, false)] {
+        let (_t, proj) = project(&[
+            (&a_toml, a_toml_text.clone()),
+            (&a_mod, a_mod_text.clone()),
+            (&b_toml, b_toml_text.clone()),
+            (&b_mod, b_mod_text.clone()),
+            ("src/main.almd", main),
+        ]);
+        std::fs::write(proj.join("almide.toml"), &manifest).unwrap();
+        let o = run(&proj, &["check", "src/main.almd"]);
+        if refused {
+            refused_with(&o, "E033", "a field read through a bare opaque name two fresh dependencies share");
+        } else {
+            assert!(o.status.success(), "the dependency's own fn must check:\n{}", text(&o));
+        }
+    }
+}
