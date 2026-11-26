@@ -6,53 +6,43 @@
 // templates around. `from_unix` / `to_unix` are identity conversions
 // and stay as pure Almide bodies.
 /// ts + n * 86400; no DST or calendar logic.
-@category()
 @intrinsic("almide_rt_datetime_add_days")
 fn add_days(ts: Int, n: Int) -> Int = _
 
 /// ts + n * 3600; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_hours")
 fn add_hours(ts: Int, n: Int) -> Int = _
 
 /// ts + n * 60; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_minutes")
 fn add_minutes(ts: Int, n: Int) -> Int = _
 
 /// ts + n; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_seconds")
 fn add_seconds(ts: Int, n: Int) -> Int = _
 
 /// Calendar day 1..31 (UTC).
-@category()
 @intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
 /// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
-@category()
 @intrinsic("almide_rt_datetime_format")
 @sized_by(pattern)
 fn format(ts: Int, pattern: String) -> String = _
 
 /// UTC epoch secs; a field out of range is err, as in parse_iso.
-@category()
 @intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] = _
 
 /// UTC hour of day, 0..23.
-@category()
 @intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
 
 /// UTC minute, 0..59.
-@category()
 @intrinsic("almide_rt_datetime_minute")
 fn minute(ts: Int) -> Int = _
 
 /// UTC month, 1..12.
-@category()
 @intrinsic("almide_rt_datetime_month")
 fn month(ts: Int) -> Int = _
 
@@ -77,26 +67,21 @@ effect fn monotonic_ns() -> Int = _
 effect fn now_ms() -> Int = _
 
 /// Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
-@category()
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
 /// UTC second, 0..59.
-@category()
 @intrinsic("almide_rt_datetime_second")
 fn second(ts: Int) -> Int = _
 
 /// YYYY-MM-DDTHH:MM:SSZ in UTC.
-@category()
 @intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
 
 /// English day name in UTC; 0 is Thursday.
-@category()
 @intrinsic("almide_rt_datetime_weekday")
 fn weekday(ts: Int) -> String = _
 
 /// Calendar year in UTC.
-@category()
 @intrinsic("almide_rt_datetime_year")
 fn year(ts: Int) -> Int = _

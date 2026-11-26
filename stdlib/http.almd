@@ -53,7 +53,6 @@ fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_respons
 )
 
 /// Reply with Content-Type application/json; body is JSON text.
-@category()
 @intrinsic("almide_rt_http_json")
 @sized_by(body)
 fn json(status: Int, body: String) -> HttpResponse = _
@@ -98,7 +97,6 @@ fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
 fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
 
-@category()
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
 local fn __with_headers(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
@@ -106,7 +104,6 @@ local fn __with_headers(status: Int, body: Bytes, flat: List[String]) -> HttpRes
 // A response holding exactly these header pairs, in order, each name written
 // once by the caller: what `response` and `redirect` build, so a program that
 // answers with one body never links with_headers' case-insensitive merge.
-@category()
 @intrinsic("almide_rt_http___http_response_flat")
 @borrow_ref(flat)
 local fn __http_response_flat(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
@@ -120,14 +117,12 @@ fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
 
 // ── Response status ──
 /// resp with code set; not range-checked.
-@category()
 @intrinsic("almide_http_set_status")
 @consume(resp)
 @sized_by(resp)
 fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
 /// HTTP status code; 0 if the status line was bad.
-@category()
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
 fn status(resp: HttpResponse) -> Int = _
@@ -162,29 +157,24 @@ fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 // The response's HttpMessage requirements.
-@category()
 @intrinsic("almide_http_get_header")
 @borrow_ref(m)
 fn __http_response_header(m: HttpResponse, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_header_values")
 @borrow_ref(m)
 fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
 
 fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
 
-@category()
 @intrinsic("almide_http_headers_flat")
 @borrow_ref(m)
 fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
 
-@category()
 @intrinsic("almide_http_get_body")
 @borrow_ref(m)
 fn __http_response_body(m: HttpResponse) -> String = _
 
-@category()
 @intrinsic("almide_http_get_body_bytes")
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
@@ -200,18 +190,15 @@ fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> H
 fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
 
 // The raw writers. Local: only the writers above reach them.
-@category()
 @intrinsic("almide_http_set_header")
 @consume(m)
 local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
-@category()
 @intrinsic("almide_http_set_body")
 @consume(m)
 local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
 // A Body's bytes (#4311): kept exactly, `body` answering their lossy text.
-@category()
 @intrinsic("almide_http_set_body_bytes")
 @consume(m)
 local fn __http_response_put_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = _
@@ -222,7 +209,6 @@ local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 // ASCII-lowercase a header name (RFC 9110 §5.1): the same fold the response
 // rep's own case-insensitive merge uses, so a program that writes headers links
 // one fold, not two (native: `to_ascii_lowercase`).
-@category()
 @intrinsic("almide_rt_http___http_response_ascii_lower")
 local fn __http_response_ascii_lower(s: String) -> String = _
 
@@ -234,46 +220,38 @@ local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 // The request's HttpMessage requirements.
-@category()
 @intrinsic("almide_http_req_header")
 @borrow_ref(m)
 fn __http_request_header(m: HttpRequest, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_req_header_values")
 @borrow_ref(m)
 fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
 
 fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
 
-@category()
 @intrinsic("almide_http_req_headers_flat")
 @borrow_ref(m)
 fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 
-@category()
 @intrinsic("almide_http_req_body")
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
 // A request's body is its bytes (#4744): what set_body_bytes was given goes
 // out exactly as given, beside the lossy text `body` answers.
-@category()
 @intrinsic("almide_http_req_body_bytes")
 @borrow_ref(m)
 fn __http_request_body_bytes(m: HttpRequest) -> Bytes = _
 
-@category()
 @intrinsic("almide_http_req_set_header")
 @consume(m)
 fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_set_body")
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_set_body_bytes")
 @consume(m)
 fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = _
@@ -285,13 +263,11 @@ fn __pairs(flat: List[String]) -> List[(String, String)] = list.range(0, list.le
 
 // ── Request accessors (pure) ──
 /// Request method as sent, e.g. GET.
-@category()
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
 fn method(req: HttpRequest) -> String = _
 
 /// Request target, query string included (a full URL for a request built to send).
-@category()
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
 fn path(req: HttpRequest) -> String = _
@@ -433,25 +409,21 @@ fn new_request(method: String, target: String, body: String, headers: List[(Stri
   http.__new_request(method, target, body, flat)
 }
 
-@category()
 @intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
 @consume(method, target, body)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
-@category()
 @intrinsic("almide_http_param")
 @borrow_ref(req)
 fn param(req: HttpRequest, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_req_with_params")
 @consume(req)
 @borrow_ref(flat)
 fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_with_path")
 @consume(req)
 fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
@@ -462,17 +434,14 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 // carry its Authorization / Cookie values. Named after the runtime-backed row
 // (`stdlib_info::runtime_backed_repr_surface`), so the display engine finds
 // them from the type, not from a list.
-@category()
 @intrinsic("almide_http_req_repr")
 @borrow_ref(req)
 fn __http_request_repr(req: HttpRequest) -> String = _
 
-@category()
 @intrinsic("almide_http_call_repr")
 @borrow_ref(c)
 fn __http_call_repr(c: HttpCall) -> String = _
 
-@category()
 @intrinsic("almide_http_resp_repr")
 @borrow_ref(resp)
 fn __http_response_repr(resp: HttpResponse) -> String = _
@@ -481,17 +450,17 @@ fn __http_response_repr(resp: HttpResponse) -> String = _
 // means on the certified native render — the runtime struct's own equality.
 // Named after the runtime-backed row (`stdlib_info::runtime_backed_eq_surface`).
 // The wasm legs compare the self-hosted rep and never call these.
-@category()
+@category
 @intrinsic("almide_http_req_eq")
 @borrow_ref(a, b)
 fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
 
-@category()
+@category
 @intrinsic("almide_http_call_eq")
 @borrow_ref(a, b)
 fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
 
-@category()
+@category
 @intrinsic("almide_http_resp_eq")
 @borrow_ref(a, b)
 fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _

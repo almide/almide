@@ -113,7 +113,7 @@ impl IrVisitor for Types<'_> {
 }
 
 impl Callees {
-    pub fn build(program: &IrProgram, ix: &Index<'_>) -> Callees {
+    pub(super) fn build(program: &IrProgram, ix: &Index<'_>) -> Callees {
         let mut seen: BTreeMap<String, Ty> = BTreeMap::new();
         {
             let mut w = Types(&mut seen);
@@ -172,7 +172,7 @@ impl Callees {
     /// (a derived helper named for a module's type: `__encode_list_varlib.Pigment`
     /// is varlib's `__encode_list_Pigment`). Loose on purpose: a fn it keeps
     /// that is never called only widens the charge.
-    pub fn program_fns(&self, name: &str) -> Vec<FnIx> {
+    pub(super) fn program_fns(&self, name: &str) -> Vec<FnIx> {
         let dotted = |long: &str, short: &str| {
             long.len() > short.len() && long.ends_with(short) && long.as_bytes()[long.len() - short.len() - 1] == b'.'
         };
@@ -191,7 +191,7 @@ impl Callees {
     /// Is a call of `name` whose result has type `ret` a constructor — a
     /// declared variant case of the type it builds, or the type's own name
     /// (an opaque or newtype wrapper)?
-    pub fn is_constructor(&self, name: &str, ret: &Ty) -> bool {
+    pub(super) fn is_constructor(&self, name: &str, ret: &Ty) -> bool {
         let built = match ret {
             Ty::Named(n, _) => last(n.as_str()).to_string(),
             Ty::Variant { name: n, .. } => last(n.as_str()).to_string(),
@@ -210,7 +210,7 @@ impl Callees {
     /// to a bound, or that declares no protocol at all, and every built-in
     /// type — the function monomorphisation would rewrite the call to, when
     /// one exists.
-    pub fn conformers(&self, ix: &Index<'_>, table: usize, method: &str, bounds: &[String]) -> Vec<Conformer> {
+    pub(super) fn conformers(&self, ix: &Index<'_>, table: usize, method: &str, bounds: &[String]) -> Vec<Conformer> {
         let memo_key = format!("{method}:{}", bounds.join(","));
         if let Some(c) = self.memo.borrow().get(&memo_key) {
             return c.clone();

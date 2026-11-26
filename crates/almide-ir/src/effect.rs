@@ -115,7 +115,7 @@ pub fn builtin_call_effects(name: &str) -> Vec<Effect> {
 /// Is `name` an output builtin that does not end the program — one whose
 /// leaves are streams only (`println`, `eprintln`), as opposed to an abort
 /// builtin (`panic`, `assert*`), which carries `Abort`?
-pub fn builtin_writes_without_aborting(name: &str) -> bool {
+pub(crate) fn builtin_writes_without_aborting(name: &str) -> bool {
     let e = builtin_call_effects(name);
     !e.is_empty() && !e.contains(&Effect::Abort)
 }
@@ -123,7 +123,8 @@ pub fn builtin_writes_without_aborting(name: &str) -> bool {
 /// The leaves a plain `fn` may carry (ADR-0022): those of the output and
 /// abort builtins, which a plain fn may call. Any other leaf belongs to an
 /// `effect fn`.
-pub fn plain_fn_leaves() -> Vec<Effect> {
+#[cfg(test)]
+pub(crate) fn plain_fn_leaves() -> Vec<Effect> {
     let mut v: Vec<Effect> = BUILTIN_EFFECTS.iter().flat_map(|(_, e)| e.iter().copied()).collect();
     v.sort_by_key(|e| e.name());
     v.dedup();

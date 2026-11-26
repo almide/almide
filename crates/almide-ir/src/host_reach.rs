@@ -68,7 +68,7 @@ pub fn serving_bodies(module: &str, func: &str) -> Vec<(&'static Program, String
 /// The self-host registry bodies served under the bare call name `call` (a
 /// compiler-derived helper the IR names without a module: the derived
 /// Codec's `__err_at`, `__decode_option_string`, …).
-pub fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
+pub(crate) fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
     let mut out = Vec::new();
     for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
         for (imp, name) in rows.iter() {
@@ -85,7 +85,7 @@ pub fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
 /// Does fn `name` of the stdlib source `prog` reach a floor host op or an
 /// output builtin that does not abort, directly or through what it calls?
 /// A bodyless declaration it reaches is judged by its own `@category`.
-pub fn body_reaches_category(prog: &Program, name: &str) -> bool {
+pub(crate) fn body_reaches_category(prog: &Program, name: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_in(prog, "", name, &mut seen, Mode::CATEGORY)
 }
@@ -100,7 +100,7 @@ pub fn stdlib_fn_reaches_host(module: &str, func: &str) -> bool {
 /// or call an output builtin that does not abort (`println`, `eprintln`:
 /// [`crate::effect::builtin_writes_without_aborting`])? A builtin is named by
 /// a bare call that no fn of the source declares.
-pub fn stdlib_fn_reaches_category(module: &str, func: &str) -> bool {
+pub(crate) fn stdlib_fn_reaches_category(module: &str, func: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_stdlib(module, func, &mut seen, Mode::CATEGORY)
 }
@@ -116,7 +116,7 @@ pub(crate) fn fn_reaches_host(prog: &Program, module: &str, name: &str) -> bool 
 
 /// [`stdlib_fn_reaches_category`] for fn `name` of `prog`, a source of
 /// stdlib `module` that is not (yet) bundled — the gate's control.
-pub fn fn_reaches_category_in(prog: &Program, module: &str, name: &str) -> bool {
+pub(crate) fn fn_reaches_category_in(prog: &Program, module: &str, name: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_in(prog, module, name, &mut seen, Mode::CATEGORY)
 }
@@ -145,7 +145,7 @@ impl Mode {
 
 /// [`stdlib_fn_reaches_category`] less a bounded dispatch: does `module.func`
 /// reach a category through anything but the conformer it dispatches to?
-pub fn stdlib_fn_reaches_category_but_dispatch(module: &str, func: &str) -> bool {
+pub(crate) fn stdlib_fn_reaches_category_but_dispatch(module: &str, func: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_stdlib(module, func, &mut seen, Mode::CATEGORY_BUT_DISPATCH)
 }

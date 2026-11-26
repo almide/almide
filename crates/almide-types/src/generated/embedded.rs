@@ -4583,53 +4583,43 @@ pub const SRC_DATETIME: &str = r#"
 
 
 /// ts + n * 86400; no DST or calendar logic.
-@category()
 @intrinsic("almide_rt_datetime_add_days")
 fn add_days(ts: Int, n: Int) -> Int = _
 
 /// ts + n * 3600; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_hours")
 fn add_hours(ts: Int, n: Int) -> Int = _
 
 /// ts + n * 60; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_minutes")
 fn add_minutes(ts: Int, n: Int) -> Int = _
 
 /// ts + n; n may be negative.
-@category()
 @intrinsic("almide_rt_datetime_add_seconds")
 fn add_seconds(ts: Int, n: Int) -> Int = _
 
 /// Calendar day 1..31 (UTC).
-@category()
 @intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
 /// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
-@category()
 @intrinsic("almide_rt_datetime_format")
 @sized_by(pattern)
 fn format(ts: Int, pattern: String) -> String = _
 
 /// UTC epoch secs; a field out of range is err, as in parse_iso.
-@category()
 @intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] = _
 
 /// UTC hour of day, 0..23.
-@category()
 @intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
 
 /// UTC minute, 0..59.
-@category()
 @intrinsic("almide_rt_datetime_minute")
 fn minute(ts: Int) -> Int = _
 
 /// UTC month, 1..12.
-@category()
 @intrinsic("almide_rt_datetime_month")
 fn month(ts: Int) -> Int = _
 
@@ -4654,27 +4644,22 @@ effect fn monotonic_ns() -> Int = _
 effect fn now_ms() -> Int = _
 
 /// Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
-@category()
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
 /// UTC second, 0..59.
-@category()
 @intrinsic("almide_rt_datetime_second")
 fn second(ts: Int) -> Int = _
 
 /// YYYY-MM-DDTHH:MM:SSZ in UTC.
-@category()
 @intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
 
 /// English day name in UTC; 0 is Thursday.
-@category()
 @intrinsic("almide_rt_datetime_weekday")
 fn weekday(ts: Int) -> String = _
 
 /// Calendar year in UTC.
-@category()
 @intrinsic("almide_rt_datetime_year")
 fn year(ts: Int) -> Int = _
 "#;
@@ -10425,7 +10410,6 @@ fn response[B: Body](status: Int, body: B) -> HttpResponse = http.__http_respons
 )
 
 /// Reply with Content-Type application/json; body is JSON text.
-@category()
 @intrinsic("almide_rt_http_json")
 @sized_by(body)
 fn json(status: Int, body: String) -> HttpResponse = _
@@ -10470,7 +10454,6 @@ fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
 fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
 
-@category()
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
 local fn __with_headers(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
@@ -10478,7 +10461,6 @@ local fn __with_headers(status: Int, body: Bytes, flat: List[String]) -> HttpRes
 
 
 
-@category()
 @intrinsic("almide_rt_http___http_response_flat")
 @borrow_ref(flat)
 local fn __http_response_flat(status: Int, body: Bytes, flat: List[String]) -> HttpResponse = _
@@ -10492,14 +10474,12 @@ fn redirect(url: String) -> HttpResponse = http.__http_response_flat(
 
 
 /// resp with code set; not range-checked.
-@category()
 @intrinsic("almide_http_set_status")
 @consume(resp)
 @sized_by(resp)
 fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
 /// HTTP status code; 0 if the status line was bad.
-@category()
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
 fn status(resp: HttpResponse) -> Int = _
@@ -10534,29 +10514,24 @@ fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
 fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
 
 
-@category()
 @intrinsic("almide_http_get_header")
 @borrow_ref(m)
 fn __http_response_header(m: HttpResponse, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_header_values")
 @borrow_ref(m)
 fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
 
 fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
 
-@category()
 @intrinsic("almide_http_headers_flat")
 @borrow_ref(m)
 fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
 
-@category()
 @intrinsic("almide_http_get_body")
 @borrow_ref(m)
 fn __http_response_body(m: HttpResponse) -> String = _
 
-@category()
 @intrinsic("almide_http_get_body_bytes")
 @borrow_ref(m)
 fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
@@ -10572,18 +10547,15 @@ fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> H
 fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = with_body(m, body)
 
 
-@category()
 @intrinsic("almide_http_set_header")
 @consume(m)
 local fn __http_response_put_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
 
-@category()
 @intrinsic("almide_http_set_body")
 @consume(m)
 local fn __http_response_put_body(m: HttpResponse, body: String) -> HttpResponse = _
 
 
-@category()
 @intrinsic("almide_http_set_body_bytes")
 @consume(m)
 local fn __http_response_put_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = _
@@ -10594,7 +10566,6 @@ local fn __http_response_body_headers() -> List[String] = ["Content-Type"]
 
 
 
-@category()
 @intrinsic("almide_rt_http___http_response_ascii_lower")
 local fn __http_response_ascii_lower(s: String) -> String = _
 
@@ -10606,46 +10577,38 @@ local fn __http_response_owned_refusal(op: String, name: String) -> Unit =
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = with_body(m, body)
 
 
-@category()
 @intrinsic("almide_http_req_header")
 @borrow_ref(m)
 fn __http_request_header(m: HttpRequest, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_req_header_values")
 @borrow_ref(m)
 fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
 
 fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
 
-@category()
 @intrinsic("almide_http_req_headers_flat")
 @borrow_ref(m)
 fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 
-@category()
 @intrinsic("almide_http_req_body")
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
 
 
-@category()
 @intrinsic("almide_http_req_body_bytes")
 @borrow_ref(m)
 fn __http_request_body_bytes(m: HttpRequest) -> Bytes = _
 
-@category()
 @intrinsic("almide_http_req_set_header")
 @consume(m)
 fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_set_body")
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_set_body_bytes")
 @consume(m)
 fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = _
@@ -10657,13 +10620,11 @@ fn __pairs(flat: List[String]) -> List[(String, String)] = list.range(0, list.le
 
 
 /// Request method as sent, e.g. GET.
-@category()
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
 fn method(req: HttpRequest) -> String = _
 
 /// Request target, query string included (a full URL for a request built to send).
-@category()
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
 fn path(req: HttpRequest) -> String = _
@@ -10805,25 +10766,21 @@ fn new_request(method: String, target: String, body: String, headers: List[(Stri
   http.__new_request(method, target, body, flat)
 }
 
-@category()
 @intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
 @consume(method, target, body)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
-@category()
 @intrinsic("almide_http_param")
 @borrow_ref(req)
 fn param(req: HttpRequest, name: String) -> String? = _
 
-@category()
 @intrinsic("almide_http_req_with_params")
 @consume(req)
 @borrow_ref(flat)
 fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
 
-@category()
 @intrinsic("almide_http_req_with_path")
 @consume(req)
 fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
@@ -10834,17 +10791,14 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 
 
 
-@category()
 @intrinsic("almide_http_req_repr")
 @borrow_ref(req)
 fn __http_request_repr(req: HttpRequest) -> String = _
 
-@category()
 @intrinsic("almide_http_call_repr")
 @borrow_ref(c)
 fn __http_call_repr(c: HttpCall) -> String = _
 
-@category()
 @intrinsic("almide_http_resp_repr")
 @borrow_ref(resp)
 fn __http_response_repr(resp: HttpResponse) -> String = _
@@ -10853,17 +10807,17 @@ fn __http_response_repr(resp: HttpResponse) -> String = _
 
 
 
-@category()
+@category
 @intrinsic("almide_http_req_eq")
 @borrow_ref(a, b)
 fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
 
-@category()
+@category
 @intrinsic("almide_http_call_eq")
 @borrow_ref(a, b)
 fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
 
-@category()
+@category
 @intrinsic("almide_http_resp_eq")
 @borrow_ref(a, b)
 fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _
