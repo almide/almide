@@ -1,0 +1,14 @@
+# Negative control of effect.flow-categories.dispatch (proofs/decision-sites.toml): a dispatch through a type variable charges no conformer again
+# control_test: tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer
+diff --git a/crates/almide-codegen/src/effect_flow/scan.rs b/crates/almide-codegen/src/effect_flow/scan.rs
+--- a/crates/almide-codegen/src/effect_flow/scan.rs
++++ b/crates/almide-codegen/src/effect_flow/scan.rs
+@@ -301,7 +301,7 @@ impl Scan<'_, '_> {
+     fn dispatch(&mut self, method: &str, vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+         let label = format!("{} ({})", method, loc(e.span));
+         let mut rets = Vec::new();
+-        for c in self.callees.conformers(self.ix, self.table, method) {
++        for c in Vec::<Conformer>::new() {
+             match c {
+                 Conformer::Scanned { f, stdlib } => {
+                     if let Some((m, func)) = stdlib {

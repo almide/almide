@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "8"
+# failopen_ceiling      = "7"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -233,6 +233,11 @@
 #               naming no module are every category; a runtime symbol is classified by its
 #               declaring @intrinsic (novel test + control red; the uncharged-reach gate is
 #               control_extra). fail-open 9 -> 8.
+#   2026-11-26  effect.flow-categories unknown -> refuse: each kind of callee the scan cannot
+#               resolve is classified (type-variable dispatch -> every conformer the program
+#               holds; a program fn spelled another way; constructor; derived helper; declared
+#               intrinsic); the rest is every category. Corpus 2458 files: 8495 unknown call
+#               sites -> 0, newly refused 0. fail-open 8 -> 7.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -526,21 +531,24 @@ note = "Defense in depth behind perm.proc-allowlist-static; __os_* on wasm is an
 [[site]]
 id = "effect.flow-categories"
 at = "crates/almide-codegen/src/effect_flow/scan.rs::Scan::call"
-items = [
-  "crates/almide-codegen/src/effect_flow/scan.rs::Scan::call",
-]
+items = ["crates/almide-codegen/src/effect_flow/scan.rs::Scan::call", "crates/almide-codegen/src/effect_flow/callee.rs::Callees::conformers"]
 keys = []
-decides = "which categories a call charges: Module call -> stdlib_call_effect(module, fn) + body reach if bundled; Named unresolved -> builtin_call_effects + runtime_symbol_effect; RuntimeCall -> runtime_symbol_effect; Method unresolved -> nothing; Computed -> the value's set"
-from = "mixed:reach+name"
-unknown = "allow"
-unknown_note = "unknown module (not in STDLIB_MODULE_EFFECTS) and unknown fn of a module => empty set (effect.rs:309,317); unresolved Named that is no builtin/runtime symbol and unresolved Method => no category; gated only by every_stdlib_module_is_classified_once"
+decides = "which categories a call charges, by the KIND of callee: a scanned fn -> its body (a bundled stdlib module's also its declaration); a protocol requirement through a type variable (`T.__join`, `h.__self_read` on `h: H`) -> every conformer of a concrete type the program holds, resolved as monomorphisation does; a program fn spelled another way (another module's convention method, a derived helper named for a module's type) -> each fn it links to; an output/abort builtin -> its leaves; a declared @intrinsic / classified runtime symbol -> its declaration; a constructor (a declared variant case / the type's own name) -> nothing; a derived helper the self-host registry serves -> its bodies; a stdlib fn not held -> its declaration; anything else -> every category"
+from = "mixed:declaration+type+reach+name"
+unknown = "refuse"
+unknown_note = "a call no rule answers for is UNKNOWN and charged every category (Scan::perform_unknown, ⊤ as an @extern); a stdlib fn no source declares and an undeclared runtime symbol naming no module are ⊤ in the classification (purity.effect-classification). Corpus 2458 files (spec, examples, research/benchmark exercises + perf, stdlib, tools/almide-gates): unknown call sites 8495 on fail-open-zero -> 0, `almide check` newly refused 0. `check --effects` infers over the whole program when it has user modules (a call into one is judged by its body)"
 routes = { check = "runs", check_json = "skipped: #4815", check_effects = "runs (entry only #4815)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = ["tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes", "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs", "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once", "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function", "crates/almide-ir/src/effect.rs::the_rows_3246_fixed"]
-control_note = "security-by-construction.md row 26 (rc2 controls for effect_value_laundering/permissions_routes)"
+tests = ["tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes", "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs", "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once", "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function", "crates/almide-ir/src/effect.rs::the_rows_3246_fixed", "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category", "tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer"]
+control_note = "proofs/decision-controls/effect.flow-categories.patch: an unknown call charges nothing again; .dispatch.patch: a type-variable dispatch charges no conformer again"
 issues = [4827, 4815]
 status = "UNSTAMPED"
-reasons = ["c1: runtime symbols by `almide_rt_<module>_` prefix (effect.rs:325-346); module rows by name", "c2: an unknown module or an undeclared fn is the empty set (effect.rs:308-318); prim host ops are Pure (effect.rs:231, #4827); an unresolved Method charges nothing"]
-note = "the_rows_3246_fixed asserts stdlib_call_effect(\"not_a_module\", f) is empty — fail-open by design, closed only by the classification test. #4815 closed: check --json / --effects run the gate over the whole program, so those cells are runs-candidates (VM). No evidence written (c1 / c2 need #4827)."
+reasons = ["c1: a stdlib callee's declaration falls back to its module's row (STDLIB_MODULE_EFFECTS, keyed by module name), and a program fn spelled another way is matched by its module-qualified spelling (the linker's)", "c3: no route-matrix probe; check_json / mcp cells still cite #4815 (closed)"]
+note = "the_rows_3246_fixed asserts an unknown module / undeclared fn is every category. #4815 closed: check --json / --effects run the gate over the whole program, so those cells are runs-candidates (VM). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse; each callee kind classified structurally (census over the corpus: 8495 unknown sites / 1447 files -> 0)."
+novel = "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category"
+control_test = "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category"
+control_patch = "proofs/decision-controls/effect.flow-categories.patch"
+control_extra = "proofs/decision-controls/effect.flow-categories.dispatch.patch"
+control_extra_test = "tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer"
 
 [[site]]
 id = "effect.foreign-top"
