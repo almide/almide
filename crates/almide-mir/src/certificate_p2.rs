@@ -629,6 +629,29 @@
         assert_eq!(site(served), "|", "{served} is served by the self-host registry");
     }
 
+    /// witness.call-modes-skip (decision row; its c2 novel item): a callee
+    /// outside the program under a FRESH name — a fresh `__` helper, a fresh
+    /// `module.fn` — is in no set the render serves, so it gets the
+    /// out-of-range row the checker rejects, whatever its spelling.
+    #[test]
+    fn novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling() {
+        use std::collections::BTreeMap;
+        let site = |callee: &str| {
+            let mut main = func(vec![
+                Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
+                Op::CallFn { dst: None, name: callee.into(), args: vec![CallArg::Handle(ValueId(0))], result: None },
+                Op::Drop { v: ValueId(0) },
+            ]);
+            main.name = "main".into();
+            let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+            program.insert(main.name.clone(), main);
+            call_modes_witness(&program, &render_served_callee)
+        };
+        for callee in [format!("__{}", crate::novel::ident("helper")), format!("{}.{}", crate::novel::module(), crate::novel::ident("f"))] {
+            assert_eq!(site(&callee), "|1 0", "a fresh out-of-program callee `{callee}` was admitted with no row");
+        }
+    }
+
     #[test]
     fn branch_grouping_accepts_agreement_and_rejects_cross_arm_compensation() {
         // AGREEMENT at net +1: each arm acquires one alias of a pre-branch
