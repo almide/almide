@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "65"
-# failopen_ceiling      = "6"
+# failopen_ceiling      = "5"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -245,6 +245,11 @@
 #               to the bundle's records and to every certified function; a bundle over a wasm
 #               module without one is a reject. Novel test, control red, structural wall OK over
 #               1063 fixtures on ds-2. fail-open 7 -> 6.
+#   2026-11-27  fail-open-verify: verify.wasm-e081-availability unknown -> refuse, by owner ruling
+#               2026-11-26 (option 2): a fn the availability table does not list is decided by the
+#               stock-p1 audit of the ops the module emits (wasm_route.rs stock_p1_unserved); the
+#               host-capability class keeps building as for a listed process fn. Novel test, control
+#               red; check --target wasm over 2040 corpus files: 0 newly refused. fail-open 6 -> 5.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3823,30 +3828,35 @@ id = "verify.wasm-e081-availability"
 at = "src/cli/wasm_compile.rs::check_wasm_availability"
 items = [
   "src/cli/wasm_compile.rs::check_wasm_availability",
+  "src/wasm_route.rs::stock_p1_unserved",
 ]
 keys = [
   "src/cli/wasm_compile.rs::check_wasm_availability::S1::E081",
   "src/cli/wasm_compile.rs::check_wasm_availability::S3::ALMIDE_COMPONENT_P3",
   "src/cli/wasm_compile.rs::check_wasm_availability::S3::ALMIDE_NO_AVAIL_CHECK",
 ]
-decides = "a call to a stdlib fn the declared both-legs table marks unavailable on this leg is E081 at check time"
+decides = "a call to a stdlib fn the declared both-legs table marks unavailable on this leg is E081 at check time; a fn the table does not list is decided by the stock-p1 audit of the ops the module emits: an op the preview-1 shim does not serve is refused (E082 wall at check --target wasm and build); the subprocess family takes the host-capability verdict, as a listed process fn does (owner ruling 2026-11-26)"
 from = "name"
-unknown = "allow"
-unknown_note = "keyed by fn name from proofs/target-availability.toml (wasm_compile.rs:213-250); a fn not in the table passes here and is caught (or not) by the render wall E082; ALMIDE_NO_AVAIL_CHECK skips it (registered Gate switch)"
+unknown = "refuse"
+unknown_note = "a fn the table does not list is not admitted for want of a row: the route audits the host ops the module EMITS against the p1 shim's served set (wasm_route.rs stock_p1_unserved), so an op no stock runtime serves is refused at check --target wasm and at build whatever the table says (novel test: a fresh op number, and with the table disarmed a fresh program calling unix.connect, op 104). By owner ruling 2026-11-26 the subprocess family (host-capability, ADR-0025) stays in the served set: its artifact builds with the private almide:process/spawn import and the build note, as for a listed process fn, so the 8 corpus programs that build that way keep building. ALMIDE_NO_AVAIL_CHECK skips the table only (registered Gate switch); ALMIDE_WASM_SKIP_STOCK_AUDIT skips the audit (a probe switch the CLI reads into RouteOptions)"
 routes = { check = "runs: --target wasm only (check.rs:249)", check_json = "runs: check --json --target wasm reports E081 as a JSON row (#4857)", check_effects = "n.a.", run = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", build = "runs: wasm, stock-p1 leg", test = "n.a.: the --target wasm test lane runs on the embedded host and makes run's own decision (wasm_compile.rs embedded_leg_availability, test_wasm.rs; #4857 ruling A): an embedded-leg row is E081 FAILED, and the p1 audit only decides whether a stock artifact exists; observed 2026-11-20 ds-2: the probe runs, as run does. The default lane's reported native fallback is that lane's design (src/cli/test_wasm.rs WasmTestOutcome); no contract states it", bench = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", native = "n.a.", wasm = "n.a.: executes on the embedded host, which serves every stdlib fn (proofs/target-availability.toml declares no `embedded` leg row; observed 2026-11-19: the probe runs); E081 is the stock-artifact verdict (build / component / check --target wasm)", wasi = "n.a.: the wasi target is the native runtime built for wasip1, where the call returns a defined Err (`shm_create: Unix-domain sockets and shared-memory files need a Unix platform`); observed 2026-11-20 ds-2 under wasmtime", component = "runs", lsp = "n.a.", mcp = "runs: almide_check with target = \"wasm\"; an unknown target is refused (#4857)", emit = "n.a." }
 tests = [
   "tests/wasm_availability_e081_test.rs",
+  "tests/decision_e081_audit_novel_test.rs::novel_an_unserved_op_of_a_fn_no_row_names_is_refused_by_the_p1_audit",
 ]
 control_note = "scripts/check-target-availability.sh (four-directional table ⇄ measured walls)"
 issues = [4857, 4874]
 status = "UNSTAMPED"
-reasons = ["c1:name table, fails closed; host-op derivation deferred past 0.70.0 by owner ruling 2026-11-20 (proofs/target-availability.toml; the render wall E082 is the backstop)", "c2:unknown = allow (a fn the table does not list is admitted until the render wall)", "c3:route-skipped (see cells)"]
+reasons = ["c1:name table for the declared rows, fails closed (proofs/target-availability.toml); an unlisted fn is decided by the emitted-op audit (owner ruling 2026-11-26)", "c3:route-skipped (see cells)"]
 note = "Availability, not a security property; the render wall is the backstop (wasm_compile.rs:195-196)."
 control_patch = "proofs/decision-controls/verify.wasm-e081-availability.patch"
 control_test = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
 novel = "tests/decision_fixes_test.rs::novel_check_json_and_mcp_report_e081_for_a_fresh_program"
 control_seen = "2026-11-20 ds-2 (tree = ecc2e639a1 + #4871/#4857): base green, patched red (scripts/run-decision-controls.sh); the test-lane hunk alone turns novel_wasm_test_lane_runs_what_run_runs_on_the_embedded_host red"
 probe = "tests/decision-probes/verify.wasm-e081-availability"
+control_extra = "proofs/decision-controls/verify.wasm-e081-availability.audit.patch"
+control_extra_test = "tests/decision_e081_audit_novel_test.rs::novel_an_unserved_op_of_a_fn_no_row_names_is_refused_by_the_p1_audit"
+control_extra_seen = "d9198497ed 2026-11-27 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "verify.wasi-e081-availability"
