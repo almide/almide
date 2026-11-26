@@ -1,5 +1,5 @@
-name: Probe — the kind pass compiles and its examples hold
-# A one-off check on its own branch. Not a gate.
+name: Probe — the kind pass against the reference pass, on every shipped function
+# A one-off measurement on its own branch. Not a gate.
 on:
   push:
     branches: [probe/guard-kind]
@@ -8,12 +8,13 @@ permissions:
   contents: read
 
 jobs:
-  compile:
-    name: GuardKind.v in the kernel
+  kinds:
+    name: GuardKind.v on the contract programs as they ship
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
       - name: Restore opam root (OCaml + Rocq)
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -25,9 +26,32 @@ jobs:
           ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
           if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
           echo "$BIN" >> "$GITHUB_PATH"
-      - name: The proofs compile
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Build the driver, the producer and the cutter
         run: |
-          cd proofs
-          coqc -Q . AlmideTrust GuardWindow.v
-          coqc -Q . AlmideTrust GuardKind.v
-          echo "GuardKind.v compiled"
+          cargo build -q --release --locked --bin almide
+          cargo build -q --release --locked -p almide-wasm --example emit_structural_bundle
+          cargo build -q --release --locked -p almide-anchor-check
+      - name: Keep the shipped modules
+        run: bash scripts/probe-keep-corpus.sh "$RUNNER_TEMP/keep"
+      - name: Measure
+        run: bash scripts/probe-guard-kind.sh "$RUNNER_TEMP/keep" "$RUNNER_TEMP/gk"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: guard-kind
+          path: |
+            ${{ runner.temp }}/gk/summary.txt
+            ${{ runner.temp }}/gk/results.tsv
+            ${{ runner.temp }}/gk/coqc.log
+            ${{ runner.temp }}/gk/goals/index.tsv
+            ${{ runner.temp }}/gk/goals/*.err
+            ${{ runner.temp }}/gk/goals/K_0000.v
