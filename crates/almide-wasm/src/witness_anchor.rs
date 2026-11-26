@@ -35,6 +35,11 @@ struct State {
     /// conversion, tco.rs): its recorded end offsets, mapped to the end
     /// offsets of the instructions they became.
     remaps: HashMap<u64, HashMap<usize, usize>>,
+    /// The emission pass the bodies being sealed belong to.
+    pass: usize,
+    /// Per sealed body of a source function, its pass and the function's
+    /// witness name: the bundle's `coverage` record (witness_bundle.rs).
+    names: HashMap<u64, (usize, String)>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -57,6 +62,21 @@ pub(crate) fn begin_fn() -> u64 {
             s.serial
         }
         None => 0,
+    }
+}
+
+/// An emission pass begins (witness_frames.rs `mark_pass`).
+pub(crate) fn begin_pass(pass: usize) {
+    if let Some(s) = state().lock().expect("anchor sink").as_mut() {
+        s.pass = pass;
+    }
+}
+
+/// Body `k`, sealed, is source function `name` of the current pass.
+pub(crate) fn name(k: u64, name: &str) {
+    if let Some(s) = state().lock().expect("anchor sink").as_mut() {
+        let pass = s.pass;
+        s.names.insert(k, (pass, name.to_string()));
     }
 }
 
@@ -169,18 +189,27 @@ pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Functio
     }
 }
 
-/// The sealed bodies, `serial -> digest`, and the remapped offsets of the
-/// bodies rewritten after sealing.
-pub fn take_all() -> (HashMap<u64, u64>, HashMap<u64, HashMap<usize, usize>>) {
+/// What the sink recorded: the sealed bodies (`serial -> digest`), the
+/// remapped offsets of the bodies rewritten after sealing, and the source
+/// function each named body is (`serial -> (pass, name)`).
+#[derive(Default)]
+pub struct Sealed {
+    pub sealed: HashMap<u64, u64>,
+    pub remaps: HashMap<u64, HashMap<usize, usize>>,
+    pub names: HashMap<u64, (usize, String)>,
+}
+
+/// Drain the sink.
+pub fn take_all() -> Sealed {
     state()
         .lock()
         .expect("anchor sink")
         .take()
-        .map(|s| (s.sealed, s.remaps))
+        .map(|s| Sealed { sealed: s.sealed, remaps: s.remaps, names: s.names })
         .unwrap_or_default()
 }
 
 /// The sealed bodies, `serial -> digest`.
 pub fn take() -> HashMap<u64, u64> {
-    take_all().0
+    take_all().sealed
 }

@@ -105,7 +105,7 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
         err(&format!("error: {file} cannot be certified — it does not build for --target wasm (above)"));
         return Err(1);
     };
-    let shipped = match super::build_wasm::shipped_core_module(file, &emitted, &host_ops) {
+    let (shipped, fmap) = match super::build_wasm::shipped_core_module(file, &emitted, &host_ops) {
         Ok(b) => b,
         Err(leg) => {
             let _ = almide_wasm::witness::take();
@@ -116,7 +116,7 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
         }
     };
     let allow = manifest_allow(file);
-    let (records, uncertified) = almide_wasm::witness::bundle::records(&emitted, &shipped, allow.as_deref()).map_err(|e| {
+    let ((records, uncertified), coverage) = almide_wasm::witness::bundle::records(&emitted, &shipped, allow.as_deref(), fmap.as_deref()).map_err(|e| {
         err(&format!("error: {file}: the structural build recorded no complete certificate: {e}"));
         1
     })?;
@@ -159,6 +159,7 @@ fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
         artifact.as_ref().map(|(h, p)| (h.as_str(), p.as_str())),
         &records,
         &uncertified,
+        Some(&coverage),
     );
     std::fs::write(out, text).map_err(|e| {
         err(&format!("error: cannot write the certificate bundle {}: {e}", out.display()));
@@ -203,7 +204,7 @@ fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Ve
         let _ = almide_wasm::witness::take();
         return Ok((bytes, rest));
     }
-    match gate_build(file, &bytes, &bytes, runner) {
+    match gate_build(file, &bytes, &bytes, None, runner) {
         Ok(None) => super::wasm_run_cache::commit_judged(),
         // C-462: an INCOMPLETE module let through by the flag is never
         // cached as judged, so every run that reuses it warns again and a
@@ -276,12 +277,14 @@ pub(super) fn verifier_identity() -> String {
 /// to write the artifact. The verifier crate links no compiler crate
 /// (crates/almide-verify/Cargo.toml), so the judge stays independent code;
 /// `almide verify` still hands a bundle to the standalone binary.
-pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&str]) -> Result<Option<String>, String> {
+/// `fmap`: where each defined body of `emitted` ships in `shipped`
+/// (`None`: they are the same module).
+pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], fmap: Option<&[Option<u32>]>, runner: &[&str]) -> Result<Option<String>, String> {
     let allow = manifest_allow(file).map(|mut a| {
         a.extend(runner.iter().map(|g| g.to_string()));
         a
     });
-    let (records, uncertified) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref())
+    let ((records, uncertified), coverage) = almide_wasm::witness::bundle::records(emitted, shipped, allow.as_deref(), fmap)
         .map_err(|e| format!("the structural build recorded no complete certificate: {e}"))?;
     use sha2::Digest;
     let hex: String = sha2::Sha256::digest(shipped).iter().map(|b| format!("{b:02x}")).collect();
@@ -291,6 +294,7 @@ pub(super) fn gate_build(file: &str, emitted: &[u8], shipped: &[u8], runner: &[&
         Some((hex.as_str(), "artifact.wasm")),
         &records,
         &uncertified,
+        Some(&coverage),
     );
     match almide::certificate_gate::judge(text.as_bytes(), shipped, allow_incomplete())? {
         almide::certificate_gate::Pass::Certified => Ok(None),
