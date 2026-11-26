@@ -524,12 +524,17 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
     /// render's `panic` binds its marked message before the abort
     /// (`native_test_panic`), and its arm must split as the program
     /// render's bare `panic` call does (#4932).
+    ///
+    /// Any statements may precede the diverging tail (`{ println(m);
+    /// process.exit(1) }`), and a branch whose every arm diverges diverges
+    /// (`if ok then process.exit(0) else process.exit(1)`): in the split form
+    /// they run in statement position, where the value is not reached either.
     fn diverges(e: &IrExpr) -> bool {
         matches!(e.ty, Ty::Never) && match &e.kind {
             IrExprKind::Call { .. } => true,
-            IrExprKind::Block { stmts, expr: Some(tail) } => {
-                stmts.iter().all(|s| matches!(s.kind, IrStmtKind::Bind { .. })) && diverges(tail)
-            }
+            IrExprKind::Block { expr: Some(tail), .. } => diverges(tail),
+            IrExprKind::If { then, else_, .. } => diverges(then) && diverges(else_),
+            IrExprKind::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| a.guard.is_none() && diverges(&a.body)),
             _ => false,
         }
     }
@@ -651,3 +656,5 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
 }
+
+include!("desugar_diverging_operands.rs");

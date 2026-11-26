@@ -552,6 +552,7 @@ fn wrap_unit_block_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 /// it does not apply; a pass that fires feeds its rewrite to the next, so the
 /// whole chain is one fold. `None` overall means nothing rewrote the body.
 ///
+/// - `desugar_diverging_operands` — a `Never` operand in a value position → the operands to its left, then it (#3144).
 /// - `desugar_diverging_value_branches` — a value branch with a `panic` arm → the statement branch + the value (#2769).
 /// - `desugar_assert_calls` — assert/assert_eq/assert_ne → the controlled-halt `if`/die shape.
 /// - `desugar_map_access_calls` — `m[k]` → `map.get(m, k)`.
@@ -574,6 +575,9 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
     const PASSES: &[Pass] = &[
         // #2769: FIRST — it keys on the arm still being a `Never` call, which
         // `desugar_assert_calls` turns into a Unit `prim.die`.
+        // #3144: before it — a diverging operand turns its expression into
+        // the diverging block the branch split then sees as an arm.
+        desugar_diverging_operands,
         desugar_diverging_value_branches,
         desugar_assert_calls,
         desugar_map_access_calls,

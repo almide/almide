@@ -53,7 +53,9 @@ impl LowerCtx {
         // owns its return ABI, just as a named function's declaration does.
         let mut typed_body;
         let body = if let Ty::Fn { ret, is_effect: false, .. } = fn_ty {
-            if **ret != body.ty && !(body.ty.is_result() && !ret.is_result()) {
+            // A diverging body (`(x) => "${x} ${panic(m)}"`, #3144) keeps its
+            // `Never`, as a named fn's diverging body does under its return.
+            if **ret != body.ty && !(body.ty.is_result() && !ret.is_result()) && !matches!(body.ty, Ty::Never) {
                 typed_body = body.clone();
                 typed_body.ty = (**ret).clone();
                 &typed_body
@@ -63,7 +65,16 @@ impl LowerCtx {
         let layout = self.partition_capture_drop_classes(captured)?;
         let cap_vals = self.resolve_capture_values(&layout)?;
         let name = self.lower_lifted_lambda_body(params, body, &layout)?;
-        let ty = Ty::Fn { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(body.ty.clone()), is_effect: false };
+        // The closure's type is the declared one: a diverging body's `Never`
+        // is its body's, not its callers' view of its result.
+        let ret = match (fn_ty, &body.ty) {
+            (Ty::Fn { ret, .. }, Ty::Never) => (**ret).clone(),
+            _ => body.ty.clone(),
+        };
+        if matches!(body.ty, Ty::Never) {
+            crate::lambda_sigs::record(&name, params.iter().map(|(_, t)| t.clone()).collect(), ret.clone());
+        }
+        let ty = Ty::Fn { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: Box::new(ret), is_effect: false };
         crate::trace::trace("ALMIDE_DBG_ANF", || format!("[lift] {name} type {ty:?}"));
         let block = self.materialize_closure_block(name, &layout, cap_vals);
         self.aggregate_blocks.insert(block, crate::render_native_rec::block_key(&ty));
