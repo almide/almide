@@ -11,7 +11,7 @@ name: Probe — the ledgers, and every changed module, for the held-out sample o
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-held-gates]
+    branches: [probe/emitter-s4-follow]
 
 permissions:
   contents: read
@@ -19,11 +19,13 @@ permissions:
 
 env:
   SAMPLE_N: "480"
-  SAMPLE_SEED: "20261126"
+  SAMPLE_SEED: "20261127"
+  # The seeds of the earlier draws from this listing, in order: their mutants are out of the pool.
+  SAMPLE_PRIOR_SEEDS: "20261126"
   SHARDS: "16"
   # The run that drew the sample: its listing is used as it is, so the ids
   # here are that run's ids whatever the mutation tool lists today.
-  HELD_RUN: "45536243441"
+  HELD_RUN: "45729177362"
   V_CHECK: "3000000"
   # Each ledger test runs under a memory limit: a mutant that makes the
   # emitter allocate without bound then fails its test instead of taking the
@@ -33,9 +35,6 @@ env:
 jobs:
   gates:
     name: Ledgers, shard ${{ matrix.shard }}
-    # Answered by an earlier run of this workflow; off while one mutant's
-    # behaviour on five named programs is asked below.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
@@ -70,48 +69,5 @@ jobs:
             ${{ runner.temp }}/gates/results.tsv
             ${{ runner.temp }}/gates/detail
             ${{ runner.temp }}/gates/build.err
-            ${{ runner.temp }}/pick/sample.tsv
-            ${{ runner.temp }}/pick/index.tsv
-
-  wide:
-    name: Every changed module, shard ${{ matrix.shard }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 330
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0]
-    env:
-      KEEP_MODULES: "2000"
-      BEHAVE_FIRST: ${{ github.workspace }}/scripts/probe-emitter-held-first-programs.txt
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/root-tmpdir
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: "1.97.0"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: false
-          workspaces: "."
-          prefix-key: "trust-spine"
-      - name: Fetch the sample run's listing
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download "$HELD_RUN" --repo "$GITHUB_REPOSITORY" --name emitter-mutants-list --dir "$RUNNER_TEMP/list"
-      - name: Draw this shard's mutants
-        run: python3 -I scripts/probe-emitter-mutants-pick.py "$RUNNER_TEMP/list/mutants.json" "$RUNNER_TEMP/pick" "$SAMPLE_N" "$SAMPLE_SEED" ${{ matrix.shard }} "$SHARDS" "$(paste -sd, scripts/probe-emitter-held-first-ids.txt)"
-      - name: Measure
-        run: bash scripts/probe-emitter-mutants.sh "$RUNNER_TEMP/emut" "$RUNNER_TEMP/pick"
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: emitter-mutants-${{ matrix.shard }}
-          path: |
-            ${{ runner.temp }}/emut/results.tsv
-            ${{ runner.temp }}/emut/detail
-            ${{ runner.temp }}/emut/windows
-            ${{ runner.temp }}/emut/modules
             ${{ runner.temp }}/pick/sample.tsv
             ${{ runner.temp }}/pick/index.tsv

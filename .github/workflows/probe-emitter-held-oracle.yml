@@ -8,7 +8,7 @@ name: Probe — a dynamic heap oracle on the held-out sample's module-changing m
 # Not a gate.
 on:
   push:
-    branches: [probe/emitter-held-oracle]
+    branches: [probe/emitter-s4-follow]
 
 permissions:
   contents: read
@@ -16,11 +16,13 @@ permissions:
 
 env:
   SAMPLE_N: "480"
-  SAMPLE_SEED: "20261126"
+  SAMPLE_SEED: "20261127"
+  # The seeds of the earlier draws from this listing, in order: their mutants are out of the pool.
+  SAMPLE_PRIOR_SEEDS: "20261126"
   SHARDS: "16"
   # The run that drew the sample: its listing is used as it is, so the ids
   # here are that run's ids whatever the mutation tool lists today.
-  HELD_RUN: "45536243441"
+  HELD_RUN: "45729177362"
 
 jobs:
   oracle:
