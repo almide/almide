@@ -46,7 +46,7 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "81"
+# unstamped_ceiling     = "80"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "69"
 # failopen_ceiling      = "6"
@@ -243,7 +243,8 @@
 #               LSP / MCP transports included, and a source gate refusing a raw print outside it
 #               (novel: a fresh path with hidden characters on 7 routes; probe on 14 columns,
 #               none prints raw; controls red). Its test cell was skipped (#4819): skipped
-#               route cells 70 -> 69. fail-open 7 -> 6.
+#               route cells 70 -> 69. fail-open 7 -> 6. STAMPED (c1 declaration, c2 novel,
+#               c3 14 runs cells, c4 two controls red): 81 stamped, 80 not.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -555,6 +556,8 @@ control_test = "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged
 control_patch = "proofs/decision-controls/effect.flow-categories.patch"
 control_extra = "proofs/decision-controls/effect.flow-categories.dispatch.patch"
 control_extra_test = "tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer"
+control_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "effect.foreign-top"
@@ -714,6 +717,8 @@ control_patch = "proofs/decision-controls/pure.e092-reach.patch"
 probe = "tests/decision-probes/pure.e092-reach"
 control_extra = "proofs/decision-controls/pure.e092-reach.testing-assert.patch"
 control_extra_test = "tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "critical.profile-arming"
@@ -740,7 +745,7 @@ novel = "tests/decision_novel_test.rs::novel_a_fresh_profile_name_or_grant_is_re
 control_test = "tests/decision_novel_test.rs::novel_a_fresh_profile_name_or_grant_is_refused"
 control_patch = "proofs/decision-controls/critical.profile-arming.patch"
 probe = "tests/decision-probes/critical.profile-arming"
-control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (control patch applied by hand, the failing assertion read in the test log); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh); re-derived on the sink's crate::err form"
 stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
@@ -3996,6 +4001,8 @@ control_test = "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_ru
 control_patch = "proofs/decision-controls/purity.effect-classification.patch"
 control_extra = "proofs/decision-controls/purity.effect-classification.uncharged-reach.patch"
 control_extra_test = "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "purity.fan-par-pure-modules"
@@ -4132,8 +4139,7 @@ routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "r
 tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw", "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink", "tests/echo_sink_test.rs::novel_a_fresh_output_path_outside_the_sink_is_refused", "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped", "crates/almide-base/src/echo.rs::tests::only_a_colour_sgr_sequence_stays_raw"]
 control_note = "proofs/decision-controls/front.diagnostic-echo.patch: the sink writes raw again; .raw-print.patch: a command writes its stderr past the sink"
 issues = [4819, 4879]
-status = "UNSTAMPED"
-reasons = ["c4: the controls have not run (control_seen empty)"]
+status = "STAMPED"
 note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879). 2026-11-26 (fail-open-front, 33rd engineer): one escaping output sink (almide_base::echo + src/lib.rs), every raw print in src/ routed through it, LSP / MCP transports through it, a source gate for new paths; probe tests/decision-probes/front.diagnostic-echo (raw U+202E, U+200B, U+E0041 in an expression: every route refuses E101 and prints none raw, the matrix test's `forbid`)."
 novel = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
 control_test = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
@@ -4141,6 +4147,9 @@ control_patch = "proofs/decision-controls/front.diagnostic-echo.patch"
 probe = "tests/decision-probes/front.diagnostic-echo"
 control_extra = "proofs/decision-controls/front.diagnostic-echo.raw-print.patch"
 control_extra_test = "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "24d171630f 2026-11-26 (fail-open-front, ds-2: probe refused raw-free on all 14 columns inside and outside the project; controls red)"
 
 [[site]]
 id = "front.nesting-budget"
