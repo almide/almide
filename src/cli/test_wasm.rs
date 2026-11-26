@@ -249,8 +249,8 @@ fn report_alloc_count(r: &almide_wasm_run::RunResult) {
         return;
     }
     match r.alloc_count {
-        Some(c) => eprintln!("__ALMD_WASM_ALLOC {c} heap_end={}", r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())),
-        None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+        Some(c) => crate::err(&format!("__ALMD_WASM_ALLOC {c} heap_end={}", r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string()))),
+        None => crate::err("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
     }
 }
 

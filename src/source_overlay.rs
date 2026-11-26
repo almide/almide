@@ -47,7 +47,7 @@ fn slot() -> &'static RwLock<Option<Overlay>> {
 /// would silently judge the wrong program — so it aborts rather than guessing.
 pub fn arm_from_args(target: &str, text_path: &str) {
     let text = std::fs::read_to_string(text_path).unwrap_or_else(|e| {
-        eprintln!("--survive-overlay-text: cannot read {}: {}", text_path, e);
+        crate::err(&format!("--survive-overlay-text: cannot read {}: {}", text_path, e));
         std::process::exit(2);
     });
     set(Path::new(target), text);

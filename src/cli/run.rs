@@ -117,12 +117,10 @@ impl PhaseTimer {
         let now = std::time::Instant::now();
         let mut clock = PHASE_CLOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (origin, last) = clock.get_or_insert((now, now));
-        eprintln!(
-            "[phase] {:<18} {:>7.0}ms   (cumulative {:>7.0}ms)",
+        crate::err(&format!("[phase] {:<18} {:>7.0}ms   (cumulative {:>7.0}ms)",
             label,
             now.duration_since(*last).as_secs_f64() * 1000.0,
-            now.duration_since(*origin).as_secs_f64() * 1000.0,
-        );
+            now.duration_since(*origin).as_secs_f64() * 1000.0));
         *last = now;
     }
 }
@@ -444,11 +442,9 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
 /// other failure is reported and exits 1 as before.
 #[cfg(unix)]
 fn exec_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
-    use std::io::Write as _;
     use std::os::unix::process::CommandExt as _;
     // exec discards the launcher's unflushed buffers.
-    let _ = std::io::stdout().flush();
-    let _ = std::io::stderr().flush();
+    crate::flush_out();
     let _: Option<()> = with_exec_retry(|| Err(binary_command(bin, program_args).exec()));
     1
 }
@@ -560,10 +556,10 @@ fn run_with_time_report(mut cmd: Command) -> i32 {
             let det_ms =
                 units as f64 * almide_mir::charge_probe::CM1_NS_PER_CHARGE as f64 / 1e6;
             let wall_ms = wall_ns as f64 / 1e6;
-            eprintln!("time: {det_ms:.3}ms deterministic (≈{wall_ms:.3}ms wall here)");
+            crate::err(&format!("time: {det_ms:.3}ms deterministic (≈{wall_ms:.3}ms wall here)"));
         }
         None => {
-            eprintln!("time: no deterministic meter in this run (probe line missing)");
+            crate::err("time: no deterministic meter in this run (probe line missing)");
         }
     }
     status.code().unwrap_or(1)
@@ -787,19 +783,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     almide_wasm_run::export_launcher_env(launcher_env());
     match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
         Ok(r) => {
-            print!("{}", r.stdout);
-            eprint!("{}", r.stderr);
-            use std::io::Write as _;
-            let _ = std::io::stdout().flush();
+            // The program's own output, byte for byte (not a compiler echo).
+            crate::relay_program_output(&r.stdout, &r.stderr);
             // ALMIDE_WASM_ALLOC_COUNT (#2407): the counters the armed
             // module carried, in native's `__ALMD_ALLOC` line form.
             if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
                 match r.alloc_count {
-                    Some(c) => eprintln!(
-                        "__ALMD_WASM_ALLOC {c} heap_end={}",
-                        r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())
-                    ),
-                    None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+                    Some(c) => crate::err(&format!("__ALMD_WASM_ALLOC {c} heap_end={}",
+                        r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string()))),
+                    None => crate::err("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
                 }
             }
             r.exit.clamp(0, 255)

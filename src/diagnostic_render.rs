@@ -10,8 +10,7 @@ static COLOR_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Call once at startup to enable colors if stderr is a TTY.
 pub fn init_color() {
-    use std::io::IsTerminal;
-    if std::io::stderr().is_terminal() {
+    if crate::stderr_is_terminal() {
         COLOR_ENABLED.store(true, Ordering::Relaxed);
     }
 }

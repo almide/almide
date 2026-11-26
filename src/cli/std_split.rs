@@ -117,7 +117,7 @@ pub(super) fn release_std_split() -> Option<&'static StdSplit> {
                 Ok(split) => split,
                 Err(e) => {
                     if almide_base::env::flag("ALMIDE_DEBUG_STD_SPLIT") {
-                        eprintln!("almide: release std split unavailable: {e}");
+                        crate::err(&format!("almide: release std split unavailable: {e}"));
                     }
                     None
                 }
