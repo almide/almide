@@ -554,6 +554,7 @@ fn wrap_unit_block_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 ///
 /// - `desugar_diverging_operands` — a `Never` operand in a value position → the operands to its left, then it (#3144).
 /// - `desugar_diverging_value_branches` — a value branch with a `panic` arm → the statement branch + the value (#2769).
+/// - `desugar_common_value_tail` — a value `if` whose arms end on one inert value → the statement `if`, then the value.
 /// - `desugar_assert_calls` — assert/assert_eq/assert_ne → the controlled-halt `if`/die shape.
 /// - `desugar_map_access_calls` — `m[k]` → `map.get(m, k)`.
 /// - `desugar_bytes_index_calls` — `buf[i]` over Bytes → `bytes.index(buf, i)`.
@@ -579,6 +580,9 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
         // the diverging block the branch split then sees as an arm.
         desugar_diverging_operands,
         desugar_diverging_value_branches,
+        // A value `if` whose arms end on the same inert value → the statement
+        // branch, then the value (a desugared `guard c else ok(())`).
+        desugar_common_value_tail,
         desugar_assert_calls,
         desugar_map_access_calls,
         desugar_bytes_index_calls,
