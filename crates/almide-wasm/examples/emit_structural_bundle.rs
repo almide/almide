@@ -103,7 +103,7 @@ fn main() {
         almide_wasm::host_exports::set_string_abi(true);
         produced = produce(&rel, &text, tests);
     }
-    let (records, uncertified, shipped, anchor_file) = produced;
+    let (records, uncertified, shipped, anchor_file, coverage) = produced;
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {
@@ -145,13 +145,14 @@ fn main() {
         pin.as_ref().map(|(h, p)| (h.as_str(), p.as_str())),
         &records,
         &uncertified,
+        Some(&coverage),
     );
     let _ = std::io::stdout().write_all(out.as_bytes());
 }
 
 /// What [`produce`] hands back: the witness records, the uncertified
-/// rows, the shipped stock-WASI bytes and the anchor file.
-type Produced = (Vec<Record>, Vec<(String, String)>, Vec<u8>, String);
+/// rows, the shipped stock-WASI bytes, the anchor file and the coverage.
+type Produced = (Vec<Record>, Vec<(String, String)>, Vec<u8>, String, almide_wasm::witness::bundle::Coverage);
 
 /// Build `rel` through the product route and collect every witness, with
 /// the stock-WASI bytes the witnesses describe (witness_bundle.rs).
@@ -179,8 +180,8 @@ fn produce(rel: &str, text: &str, tests: bool) -> Produced {
     if again != shipped {
         fail("to_wasi_mapped and to_wasi disagree on the shipped bytes");
     }
-    let ((records, uncertified), anchor_file) =
+    let ((records, uncertified), anchor_file, coverage) =
         almide_wasm::witness::bundle::records_with_anchors(&routed.bytes, &shipped, None, &fmap)
             .unwrap_or_else(|e| fail(&e));
-    (records, uncertified, shipped, anchor_file)
+    (records, uncertified, shipped, anchor_file, coverage)
 }

@@ -74,7 +74,14 @@ fn a_version_two_bundle_rejects_an_artifact_one_byte_off() {
     let wasm = b"\0asm\x01\0\0\0";
     let art = scratch("app.wasm", wasm);
     let hex = almide_verify::sha256::hex(wasm);
+    // Version 2 pins the bytes but says nothing of which function each body
+    // is: over a wasm module that is no coverage, a reject.
     let text = format!("almide-certificate-bundle 2\nartifact sha256 {hex} app.wasm\nwitness ownership 2 main\nid\n");
+    let o = run(&["bundle", &scratch("uncovered.bundle", text.as_bytes())]);
+    assert_eq!(o.status.code(), Some(1), "{}", stdout(&o));
+    assert!(stdout(&o).contains("COVERAGE"), "{}", stdout(&o));
+    // The module defines no body; `main` is placed as pruned.
+    let text = format!("almide-certificate-bundle 8\nartifact sha256 {hex} app.wasm\nwitness ownership 2 main\nid\ncoverage 0 1\nmain\n");
     let bundle = scratch("artifact.bundle", text.as_bytes());
     let o = run(&["bundle", &bundle]);
     assert_eq!(o.status.code(), Some(0), "{}", stdout(&o));

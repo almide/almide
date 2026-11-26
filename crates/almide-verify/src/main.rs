@@ -63,10 +63,10 @@ fn verify_bundle(path: &str) -> ExitCode {
     for (key, value) in &parsed.metadata {
         println!("{key}: {value} (producer claim, not checked)");
     }
-    let artifact_ok = match &parsed.artifact {
-        None => true,
+    let (artifact_ok, artifact) = match &parsed.artifact {
+        None => (true, None),
         Some(a) => match check_artifact(path, a) {
-            Ok(ok) => ok,
+            Ok((ok, bytes)) => (ok, Some(bytes)),
             Err(code) => return code,
         },
     };
@@ -74,6 +74,15 @@ fn verify_bundle(path: &str) -> ExitCode {
     // A bundle whose artifact does not hash to the recorded digest certifies
     // bytes that are not the file in hand: a reject, whatever the witnesses say.
     let outcome = if artifact_ok { outcome } else { bundle::Outcome::Rejected };
+    // A wasm artifact's every defined body is a function the verdict names
+    // (version 8): a bundle that does not cover it is a reject.
+    let outcome = match almide_verify::coverage::judge(&parsed, artifact.as_deref()) {
+        Ok(()) => outcome,
+        Err(why) => {
+            println!("COVERAGE  {why}");
+            bundle::Outcome::Rejected
+        }
+    };
     for v in &verdicts {
         let word = if v.accepted { "ACCEPT" } else { "REJECT" };
         println!("{word}  {:<15}  {}", v.property.name(), v.function);
@@ -94,8 +103,9 @@ fn verify_bundle(path: &str) -> ExitCode {
 
 /// Recompute the SHA-256 of the file a version-2 bundle names (relative to
 /// the bundle's directory unless absolute) and report it; `Ok(false)` on a
-/// mismatch, `Err` (exit 2) when the file cannot be read.
-fn check_artifact(bundle_path: &str, a: &bundle::Artifact) -> Result<bool, ExitCode> {
+/// mismatch, `Err` (exit 2) when the file cannot be read. The file's bytes
+/// come back with the answer.
+fn check_artifact(bundle_path: &str, a: &bundle::Artifact) -> Result<(bool, Vec<u8>), ExitCode> {
     let p = std::path::Path::new(&a.path);
     let file = if p.is_absolute() {
         p.to_path_buf()
@@ -106,10 +116,10 @@ fn check_artifact(bundle_path: &str, a: &bundle::Artifact) -> Result<bool, ExitC
     let got = almide_verify::sha256::hex(&bytes);
     if got == a.sha256 {
         println!("ARTIFACT  sha256 {got}  {}: MATCH", a.path);
-        Ok(true)
+        Ok((true, bytes))
     } else {
         println!("ARTIFACT  sha256 {got}  {}: MISMATCH (the bundle names {})", a.path, a.sha256);
-        Ok(false)
+        Ok((false, bytes))
     }
 }
 

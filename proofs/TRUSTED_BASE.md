@@ -913,6 +913,22 @@ holds `NativeCalls.native_row_host_calls` and almide-verify's copy to the
 derivation. TRUSTED: the runtime code of those modules (tested on both legs
 by the cross-target corpus, not proven).
 
+**Bundle coverage.** (Decision row verify.bundle-coverage, 2026-11-26.) A
+version-8 certificate bundle over a wasm module names, per defined body of
+the artifact, the source functions whose sealed body it is, or `*`; and the
+certified functions whose body was pruned. `almide-verify` (`coverage.rs`)
+counts the artifact's code-section entries itself and refuses a record of
+another length, a name no witness or `uncertified` record covers, and a
+certified function the record places nowhere, so a source function the
+producer dropped from the bundle while its body shipped under its name is
+refused, not left out of the verdict. NEWLY TRUSTED: that a `*` body is a
+runtime routine the emitter writes (an allocator, a release, a helper), not a
+source function, and that a function placed as unshipped was pruned. The
+producer reads both off the bodies it sealed (`witness_anchor.rs` names a
+body at its seal; the bundle finds it in the shipped module by the digest the
+seal took and the function map of `to_wasi_mapped`); the verifier, which links
+no wasm decoder, cannot check either.
+
 ## FFI: an `@extern`'s declared purity is the author's claim
 
 An `@extern(wasm, ..)` import is code outside the program, and the

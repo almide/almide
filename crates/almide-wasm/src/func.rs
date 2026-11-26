@@ -610,6 +610,9 @@ pub(crate) fn lower_fn(
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
     crate::witness::anchor::seal(anchor_serial, &f);
+    if let Some(name) = &witness_name {
+        crate::witness::anchor::name(anchor_serial, name);
+    }
     record_heap_params(anchor_serial, prims_before, params, ctx.types, env_shift, &fn_name);
     crate::prim_shape::log_fn(&fn_name, cur_module, &params.iter().map(|(v, _)| *v).collect::<Vec<_>>(), body, None);
     Ok((f, calls))

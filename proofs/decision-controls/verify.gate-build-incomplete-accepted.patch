@@ -3,8 +3,8 @@
 diff --git a/src/certificate_gate.rs b/src/certificate_gate.rs
 --- a/src/certificate_gate.rs
 +++ b/src/certificate_gate.rs
-@@ -52,7 +52,7 @@
-     let outcome = if pinned { outcome } else { Outcome::Rejected };
+@@ -55,7 +55,7 @@ pub fn judge(bundle_text: &[u8], shipped: &[u8], allow_incomplete: bool) -> Resu
+     let outcome = if uncovered.is_some() { Outcome::Rejected } else { outcome };
      match outcome {
          Outcome::Certified => Ok(Pass::Certified),
 -        Outcome::Incomplete if allow_incomplete => Ok(Pass::IncompleteAllowed(parsed.uncertified.clone())),

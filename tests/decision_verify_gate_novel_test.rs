@@ -75,3 +75,54 @@ fn novel_an_incomplete_certificate_is_refused_without_the_flag() {
     let other = novel::ident("other").into_bytes();
     assert!(judge(&incomplete, &other, true).is_err(), "the flag let a certificate over other bytes through");
 }
+
+/// A core module of `n` empty `() -> ()` bodies.
+fn module(n: usize) -> Vec<u8> {
+    let mut m = b"\0asm\x01\0\0\0\x01\x04\x01\x60\0\0".to_vec();
+    let mut funcs = vec![n as u8];
+    funcs.extend(std::iter::repeat_n(0u8, n));
+    m.extend([3, funcs.len() as u8]);
+    m.extend(funcs);
+    let mut code = vec![n as u8];
+    for _ in 0..n {
+        code.extend([2, 0, 0x0b]);
+    }
+    m.extend([10, code.len() as u8]);
+    m.extend(code);
+    m
+}
+
+/// Row `verify.bundle-coverage`: every defined body of a wasm module the
+/// certificate pins is a function the verdict names. A bundle that names no
+/// coverage, one whose positions are not the module's bodies, a certified
+/// function placed at no body, and a name no record covers are each refused;
+/// the module's body count and the function names are fresh.
+#[test]
+fn novel_a_wasm_body_the_certificate_does_not_cover_is_refused() {
+    let n = 2 + usize::from_str_radix(&novel::ident("n")[2..], 16).unwrap_or(0) % 5;
+    let shipped = module(n);
+    let f = novel::ident("f");
+    let g = novel::ident("g");
+    let v8 = |cov: &str| {
+        format!(
+            "almide-certificate-bundle 8\nproducer test\nartifact sha256 {} artifact.wasm\nwitness ownership 2 {f}\nid\n{cov}",
+            hex(&shipped)
+        )
+        .into_bytes()
+    };
+    let rest = "*\n".repeat(n - 1);
+    // Accepted half: `f` at the first body, the rest runtime bodies.
+    assert_eq!(judge(&v8(&format!("coverage {n} 0\n{f}\n{rest}")), &shipped, false), Ok(Pass::Certified));
+    // No coverage over a wasm module (an earlier bundle version): refused.
+    let r = judge(&bundle(&shipped, &format!("witness ownership 2 {f}\nid\n")), &shipped, false);
+    assert!(r.as_ref().is_err_and(|e| e.contains("COVERAGE") && e.contains("names no coverage")), "{r:?}");
+    // One body fewer than the module defines.
+    let r = judge(&v8(&format!("coverage {} 0\n{f}\n{}", n - 1, "*\n".repeat(n - 2))), &shipped, false);
+    assert!(r.as_ref().is_err_and(|e| e.contains(&format!("defines {n}"))), "{r:?}");
+    // The certified function placed nowhere.
+    let r = judge(&v8(&format!("coverage {n} 0\n*\n{rest}")), &shipped, false);
+    assert!(r.as_ref().is_err_and(|e| e.contains(&f) && e.contains("at no body")), "{r:?}");
+    // A body named for a function no record covers.
+    let r = judge(&v8(&format!("coverage {n} 0\n{f}\t{g}\n{rest}")), &shipped, false);
+    assert!(r.as_ref().is_err_and(|e| e.contains(&g) && e.contains("no witness or uncertified")), "{r:?}");
+}

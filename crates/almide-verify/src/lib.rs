@@ -29,6 +29,7 @@
 //! `proofs/corpus-wall.sh` runs it over the whole corpus witness set.
 
 pub mod bundle;
+pub mod coverage;
 mod bounds;
 mod rbounds;
 mod procs;
@@ -50,7 +51,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, fields v1, rc-sig v1, native-calls v1, bundle v1 to v4 (artifact sha256)";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bounds v1, init v1, fields v1, rc-sig v1, native-calls v1, bundle v1 to v8 (artifact sha256, coverage)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
