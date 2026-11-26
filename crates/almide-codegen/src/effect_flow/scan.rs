@@ -476,6 +476,21 @@ impl Scan<'_, '_> {
                     }
                     return self.join(&rets);
                 }
+                // A monomorphised stdlib instance named `m.__almd_mono…`
+                // (a route judged after mono): its generic's body when held,
+                // else its declaration.
+                if let Some((m, base)) = name.split_once('.').and_then(|(m, f)| almide_ir::mono_name::mono_instance_base(f).map(|b| (m, b))) {
+                    if let Some(f) = self.ix.resolve(self.table, &format!("{m}.{base}")) {
+                        if self.ix.is_stdlib_fn(f) {
+                            self.perform(module_to_effect(m, base), label.clone());
+                        }
+                        return self.user_call(f, vals, args, e);
+                    }
+                    self.perform(module_to_effect(m, base), label.clone());
+                    self.perform_effect_fn(almide_ir::effect::stdlib_fn_is_effect(m, base), label);
+                    self.store_args(&vals, args);
+                    return self.untracked(&e.ty);
+                }
                 let cats = if !builtin.is_empty() {
                     Some(builtin)
                 } else if almide_ir::effect::runtime_symbol_classified(name) {
