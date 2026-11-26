@@ -472,6 +472,9 @@ impl LowerCtx {
                 }
                 self.lower_tail(Some(expr))
             }
+            // A Unit variable read has no effect and carries no value (an
+            // empty `fan.bounded(b) { }` region body ends on one).
+            IrExprKind::Var { .. } => Ok(None),
             other => Err(LowerError::Unsupported(format!(
                 "Unit-typed tail {} not in this brick",
                 kind_name(other)
