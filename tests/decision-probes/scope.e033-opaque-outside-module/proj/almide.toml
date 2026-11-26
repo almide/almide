@@ -1,0 +1,7 @@
+[package]
+name = "probe"
+version = "0.1.0"
+
+[dependencies]
+alpha = { path = "alpha" }
+beta = { path = "beta" }

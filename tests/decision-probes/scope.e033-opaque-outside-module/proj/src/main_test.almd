@@ -1,0 +1,10 @@
+// The probe of scope.e033-opaque-outside-module: a field read through a bare
+// opaque name two dependencies share.
+import alpha
+import beta
+
+fn peek(v: Vault) -> String = v.key
+
+test "probe" {
+  assert_eq(alpha.make("a") == alpha.make("b"), false)
+}

@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "16"
+# failopen_ceiling      = "15"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -203,6 +203,10 @@
 #               `@media_table` declaration and the application's `[trust] media` "self" grant
 #               (unknown = refuse, novel + probe on 14 columns + control red): STAMPED.
 #               79 stamped, 81 not, 16 fail-open.
+#   2026-11-26  fail-open-zero (32nd engineer, ds-2): scope.e033-opaque-outside-module
+#               unknown -> refuse (a bare opaque name two user records share, an alias
+#               with no recorded visibility and a crossing past the depth walk are refused;
+#               novel test, control red, probe on 14 columns). fail-open 16 -> 15.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -4199,14 +4203,20 @@ keys = [
 ]
 decides = "an opaque (`mod type` / `local type`) type is constructed or its fields read only inside its own module or package"
 from = "mixed:declaration+name"
-unknown = "allow"
+unknown = "refuse"
 status = "UNSTAMPED"
-reasons = ["c1:name-keyed (bare opaque name, package prefix)", "c2:fail-open (unrecorded visibility -> Public; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "visibility is declared, but bundled opaque records are found by bare name (infer_members.rs:62-66) and the package by the module name's first segment (:112-118); an alias with no recorded visibility reads Public (calls_ufcs.rs:517), two user opaque records sharing a bare name, depth > 32, or a TypeVar/Unknown side answer None (admitted). Not probed"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e033-opaque-ctor-outside-module", "tests/diagnostics/e033-secret-field-read"]
+reasons = ["c1:name-keyed (a bundled opaque record is found by its bare name, infer_members.rs foreign_opaque_record; a package is its module name's first segment)", "c3: lsp admits the probe (observed 2026-11-26 ds-2: the editor reports no E033 for it)"]
+unknown_note = "visibility is declared (`mod type` / `local type`, registration_decls.rs). What the site cannot place is refused, never admitted: an alias with no recorded visibility is judged `local` (calls_ufcs.rs check_type_name_opaque_alias); a bare spelling several user opaque records share is foreign wherever any of them is (infer_members.rs foreign_user_opaque_record; novel test); a slot past the 32-level shape walk crosses when the two types differ and a foreign opaque record lies below (foreign_opaque_below). A type variable never crosses (a parametric slot reads no field); `Unknown` comes only from an error already reported"
+routes = { check = "runs (observed 2026-11-26 ds-2, inside and outside the project)", check_json = "runs (observed 2026-11-26 ds-2, inside and outside the project)", check_effects = "runs (observed 2026-11-26 ds-2, inside and outside the project)", run = "runs (observed 2026-11-26 ds-2, inside and outside the project)", build = "runs (observed 2026-11-26 ds-2, inside and outside the project)", test = "runs (observed 2026-11-26 ds-2, inside and outside the project)", bench = "runs (observed 2026-11-26 ds-2, inside and outside the project)", native = "runs (observed 2026-11-26 ds-2, inside and outside the project)", wasm = "runs (observed 2026-11-26 ds-2, inside and outside the project)", wasi = "runs (observed 2026-11-26 ds-2, inside and outside the project)", component = "runs (observed 2026-11-26 ds-2, inside and outside the project)", lsp = "admits: the editor's diagnostics carry no E033 for the probe (observed 2026-11-26 ds-2)", mcp = "runs (observed 2026-11-26 ds-2, inside and outside the project)", emit = "runs (observed 2026-11-26 ds-2, inside and outside the project)" }
+tests = ["tests/diagnostics/e033-opaque-ctor-outside-module", "tests/diagnostics/e033-secret-field-read", "tests/secret_opaque_alias_test.rs", "tests/decision_novel_test.rs::novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused"]
 issues = []
-note = "calls_ufcs.rs:515-554, infer_members.rs:43-215. Guards Secret confidentiality too. neuter: calls_ufcs.rs:536 `if !allowed {` + `&& name.is_empty()`."
+note = "calls_ufcs.rs check_type_name_opaque_alias, infer_members.rs foreign_opaque_record / foreign_user_opaque_record / opaque_crossing_at. 2026-11-26 (fail-open-zero): fail-open closed — measured before the fix, a field read through a bare `Vault` two dependencies share checked clean (the base binary admitted it); after it, E033. Guards Secret confidentiality too."
+probe = "tests/decision-probes/scope.e033-opaque-outside-module"
+control_note = "proofs/decision-controls/scope.e033-opaque-outside-module.patch: a bare name two user records share resolves to no record again"
+novel = "tests/decision_novel_test.rs::novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused"
+control_patch = "proofs/decision-controls/scope.e033-opaque-outside-module.patch"
+control_test = "tests/decision_novel_test.rs::novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused"
+control_seen = "4aba193076 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh); probe observed on 14 columns, inside and outside the project: 13 refuse, lsp admits"
 
 [[site]]
 id = "verify.e051-dialect-ahead"
