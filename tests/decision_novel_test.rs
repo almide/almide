@@ -456,3 +456,24 @@ fn novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused() {
         }
     }
 }
+
+/// purity.host-ops-classify: a dotted call into a module outside the
+/// capability list is judged by what its serving body reaches, never by the
+/// module's list. Every host op the floor declares (`@prim_op(host)`, read
+/// from stdlib/prim.almd at run time, so an op added later is covered) that
+/// has no host-op row is uncounted; a fresh user module's call has no stdlib
+/// body and is not.
+#[test]
+fn novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call() {
+    let ops: Vec<String> = novel::stdlib_fns_declared("@prim_op(host)").into_iter().filter(|(m, _, _)| m == "prim").map(|(_, f, _)| format!("prim.{f}")).collect();
+    assert!(!ops.is_empty(), "no floor host op found in stdlib/prim.almd");
+    let mut uncounted = 0;
+    for op in &ops {
+        let counted = almide_mir::host_ops::host_op_for_call_name(op).is_some();
+        assert_eq!(almide_mir::host_ops::is_uncounted_host_call(op), !counted, "{op}: a floor host op without a row must be uncounted");
+        uncounted += usize::from(!counted);
+    }
+    assert!(uncounted > 0, "every floor host op has a row: the test shows nothing");
+    let user = format!("{}.{}", novel::module(), novel::ident("f"));
+    assert!(!almide_mir::host_ops::is_uncounted_host_call(&user), "{user}: a user module's call has no stdlib body");
+}
