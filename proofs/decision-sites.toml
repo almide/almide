@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "10"
+# failopen_ceiling      = "9"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -223,6 +223,11 @@
 #   2026-11-26  bounded.member-module-gate unknown -> refuse: the @bounded pure list is held to
 #               the classification's Pure modules, which the host-reach gate covers (test +
 #               control_extra red). fail-open 11 -> 10.
+#   2026-11-26  fail-open-verify (34th engineer, ds-2): anchor.check unknown -> refuse (an absent
+#               init / bounds / fields record and a certified function with no RC frame are
+#               refused; loop-converted and helper bodies ship their frames, a loop-back
+#               release held to the rebind that performs it; novel test, two controls red).
+#               fail-open 10 -> 9.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3450,22 +3455,24 @@ items = [
   "crates/almide-anchor-check/src/lib.rs::check",
 ]
 keys = []
-decides = "every located init / bounds / fields / rc event of the bundle is the instruction it is anchored at in the shipped bytes (and its operands match); a timeout is a reject"
+decides = "every located init / bounds / fields / rc event of the bundle is the instruction it is anchored at in the shipped bytes (and its operands match), over a bundle that hands over every record and an anchor file whose rc frames cover every certified function; a timeout is a reject"
 from = "mixed:reach+text"
-unknown = "allow"
-unknown_note = "bundle_witness returns Ok(\"\") for an absent property (lib.rs:224): a bundle with no init/bounds/fields record and an empty anchor line is judged vacuously; the rc frames checked are the ones the anchor file names (lib.rs `check`: no rc lines, or fewer frames, is fewer functions judged). An init / bounds / fields event anchored `-` is refused since the unlocated-events change (a kill excepted: it carries no instruction)"
+unknown = "refuse"
+unknown_note = "what the check judges is no longer the producer's choice (lib.rs `required_witness`, `rc_frames_cover`): an absent init / bounds / fields record is refused (the producer writes all three for every program, empty when nothing was recorded); every function the bundle certifies (an `ownership` record) must be named once on the anchor file's `rcnames` line, at a position carrying an `rc` frame or `-` (its body did not ship: no bytes); a certified function left out, a named position with no frame, a missing rc block or rcnames line, and a name the bundle does not certify are refused. A body the self-tail-call loop conversion rewrote (tco.rs) now ships its frame and is judged: its windows read through the retarget map, and a carried local's release at the loop-back is `D<local>`, held by the LOOP-BACK rule (rc/matching.rs `loop_backs`) to the release that local's next rebind or an early exit performs (a call an `o` on that local holds; never a call no event or another event holds; loop-backs on exclusive paths share it). A certified helper body (display / named-op / scan) ships its frame too. An init / bounds / fields event anchored `-` is refused since the unlocated-events change (a kill excepted)"
 routes = { check = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_json = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", check_effects = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", run = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", build = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", test = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", bench = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", native = "n.a.", wasm = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", wasi = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", component = "n.a.: a CI-fixture verifier \u2014 not linked into almide or almide-verify; the claim is narrowed to the structural-wall fixtures (docs/contracts/proven-vs-trusted.md, #4849)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "crates/almide-anchor-check/tests/check.rs",
-  "crates/almide-anchor-check/tests/rc.rs",
-  "crates/almide-anchor-check/tests/fields.rs",
-  "crates/almide-anchor-check/tests/string_bytes.rs",
-]
-control_note = "scripts/witness-reinject.sh anchors (dead guard / misplaced store / doubled cursor / operand bugs: witnesses accepted, bytes rejected by anchor-check)"
+tests = ["crates/almide-anchor-check/tests/check.rs", "crates/almide-anchor-check/tests/rc.rs", "crates/almide-anchor-check/tests/fields.rs", "crates/almide-anchor-check/tests/string_bytes.rs", "crates/almide-anchor-check/tests/decision_anchor_check_novel.rs"]
+control_note = "proofs/decision-controls/anchor.check.patch (the coverage and the required records removed) and anchor.check.loop-back.patch (a loop-back release may take a release no event records); scripts/witness-reinject.sh anchors (dead guard / misplaced store / doubled cursor / operand bugs: witnesses accepted, bytes rejected by anchor-check)"
 issues = [4826, 4849]
 status = "UNSTAMPED"
-reasons = ["c3:CI fixtures only (#4849, claim narrowed)", "c2:absent witness = vacuous (#4826)"]
-note = "proven-vs-trusted.md:43-44 says `held ... by almide-anchor-check per build`; it is per CI fixture build, never per user build."
+reasons = ["c3:CI fixtures only (#4849, claim narrowed)", "c1: `mixed:reach+text` (the anchor file's positions and names are the producer's text)"]
+note = "proven-vs-trusted.md:43-44 says `held ... by almide-anchor-check per build`; it is per CI fixture build, never per user build. 2026-11-26 (fail-open-verify, 34th engineer): fail-open closed — measured on ds-2 over the 1063 listed fixtures, 0 rejects before and after and the frames judged 16683 -> 21038 (the loop-converted and helper bodies the producer used to leave out); on the stdlib-test leg the same 13 ledgered rejects before and after, frames 10842 -> 13031. Shipping the rewritten frames first exposed two producer slips, both fixed in 311749a5ca: an arm window opened at the body start (no instruction ends there) dropped its temporary's event, and a loop-back carried release had no rule. Unproven: the static matching does not show that the rebind a loop-back takes is the next one on its path."
+novel = "crates/almide-anchor-check/tests/decision_anchor_check_novel.rs::novel_every_certified_function_needs_its_rc_frame_and_every_record_its_witness"
+control_patch = "proofs/decision-controls/anchor.check.patch"
+control_test = "crates/almide-anchor-check/tests/decision_anchor_check_novel.rs::novel_every_certified_function_needs_its_rc_frame_and_every_record_its_witness"
+control_extra = "proofs/decision-controls/anchor.check.loop-back.patch"
+control_extra_test = "crates/almide-anchor-check/tests/decision_anchor_check_novel.rs::novel_a_loop_back_release_is_held_to_the_rebind_that_performs_it"
+control_seen = "311749a5ca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "311749a5ca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "anchor.may-write-memory"

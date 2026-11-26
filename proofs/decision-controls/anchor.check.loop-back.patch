@@ -1,0 +1,14 @@
+# Negative control of anchor.check (proofs/decision-sites.toml), second check: a loop-back release may take a release no event records
+# control_test: crates/almide-anchor-check/tests/decision_anchor_check_novel.rs::novel_a_loop_back_release_is_held_to_the_rebind_that_performs_it
+diff --git a/crates/almide-anchor-check/src/rc/matching.rs b/crates/almide-anchor-check/src/rc/matching.rs
+--- a/crates/almide-anchor-check/src/rc/matching.rs
++++ b/crates/almide-anchor-check/src/rc/matching.rs
+@@ -208,7 +208,7 @@ impl Frame<'_, '_> {
+             let rebind_held = |i: usize| {
+                 matches!(self.calls[i].1, 'd' | 'j')
+                     && super::through(&self.calls[i].2, l)
+-                    && owner[i].is_some_and(|o| evs[o] == ('o', Some(l)))
++                    && owner[i].is_none_or(|o| evs[o] == ('o', Some(l)))
+             };
+             if let Some(i) = (0..self.live).find(|&i| rebind_held(i)) {
+                 owner[i] = Some(e);
