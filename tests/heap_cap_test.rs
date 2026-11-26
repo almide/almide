@@ -177,8 +177,10 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 /// reads of itself, until the v1 render served it, and then a scalar
 /// `@export(c)` fn, until the native rungs adapted the scalar C rows (#4447).
 /// and then an `@export(c)` fn over a `Handle`, until the native rungs
-/// adapted that row (#4006). What walls now is an `@export(c)` fn over a
-/// `Region` parameter — so `main` renders through v3 — where,
+/// adapted that row (#4006), and the `@export(c)` Region parameter once that
+/// row did (C-452). What walls now is a C Region return (`@region(len,
+/// release)`, foreign storage no native form holds) — so `main` renders
+/// through v3 — where,
 /// before the fix, `big` was materialized as a 1 GiB `Vec<i64>` (the nightly
 /// fuzzer's seed 539646620663 index 1415 carried 16 GiB: 33.6 s native vs
 /// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
@@ -186,8 +188,9 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 /// is what makes this a green run.
 const WALLED_RANGE_PROBE: &str = r#"import ffi
 
-@export(c, "walled_range_probe_size")
-effect fn probe_size(buf: Region) -> Int = ffi.len(buf)
+@extern(c, "c", "malloc")
+@region(len = n, release = "free")
+fn c_malloc(n: UInt64) -> Region = _
 
 type Tag = { s: String, n: Int }
 
@@ -199,6 +202,7 @@ fn touch() -> Unit = {
 
 effect fn main() -> Unit = {
   touch()
+  let probe = c_malloc(8)
   let idx = 0..<5
   println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
   let big = 0..<134217728
@@ -207,7 +211,7 @@ effect fn main() -> Unit = {
   for _i in big {
     e = e + 1 + bump
   }
-  println("e=" + int.to_string(e))
+  println("e=" + int.to_string(e + ffi.len(probe) - 8))
 }
 "#;
 const WALLED_RANGE_EXPECTED: &str = "len=5 at2=2\ne=134217728";
@@ -244,7 +248,8 @@ fn walled_head_only_range_allocates_nothing_natively() {
     // got native cells — #4006 — when a heap slot written back from two
     // reads of itself was served, and when the scalar `@export(c)` rows got
     // their native adapter — #4447 — and when a `Handle` row got its
-    // adapter — #4006).
+    // adapter — #4006 — and when the `@export(c)` Region parameter got its
+    // adapter — C-452).
     assert!(
         build_note.contains("verified native render walled"),
         "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"

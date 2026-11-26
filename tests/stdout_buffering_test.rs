@@ -120,16 +120,17 @@ fn first_line_while_running(mut cmd: Command) -> Option<String> {
 /// output. The buffer is line-buffered: a printed line reaches the pipe while
 /// the program still runs.
 ///
-/// The wall is an `@export(c)` fn over a `Region` parameter: a plain and a
-/// `Handle` `@extern(rust)` fn both render natively now (#4641, #4006). The
-/// twin below holds the same promise on the native render.
+/// The wall is a C Region return (`@region(len, release)`): a plain and a
+/// `Handle` `@extern(rust)` fn and an `@export(c)` Region parameter all
+/// render natively now (#4641, #4006, C-452). The twin below holds the same
+/// promise on the native render.
 #[test]
 fn a_line_printed_by_a_long_running_standard_codegen_program_reaches_a_pipe_before_exit() {
     let dir = tempfile::tempdir().unwrap();
     let prog = write(
         dir.path(),
         "spin.almd",
-        "import ffi\n\n@extern(rust, \"std::thread\", \"yield_now\")\nfn yield_now() -> Unit = _\n@export(c, \"spin_size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\neffect fn main() -> Unit = {\n  println(\"hello\")\n  var i = 0\n  while i >= 0 { yield_now() }\n}\n",
+        "import ffi\n\n@extern(rust, \"std::thread\", \"yield_now\")\nfn yield_now() -> Unit = _\n@extern(c, \"c\", \"malloc\")\n@region(len = n, release = \"free\")\nfn c_malloc(n: UInt64) -> Region = _\neffect fn main() -> Unit = {\n  let probe = c_malloc(8)\n  println(\"hello ${ffi.len(probe)}\")\n  var i = 0\n  while i >= 0 { yield_now() }\n}\n",
     );
     let exe = dir.path().join("spin");
     let built = Command::new(almide()).arg("build").arg(&prog).arg("-o").arg(&exe).env("ALMIDE_VERBOSE", "1").output().unwrap();
@@ -140,7 +141,7 @@ fn a_line_printed_by_a_long_running_standard_codegen_program_reaches_a_pipe_befo
         String::from_utf8_lossy(&built.stderr)
     );
     let line = first_line_while_running(Command::new(&exe));
-    assert_eq!(line.as_deref(), Some("hello"), "the line was held in the stdout buffer while the program ran");
+    assert_eq!(line.as_deref(), Some("hello 8"), "the line was held in the stdout buffer while the program ran");
 }
 
 /// The same program without the raw-pointer extern renders on the verified
