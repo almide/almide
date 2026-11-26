@@ -484,7 +484,7 @@ impl WitnessRecorder {
     /// early exit, the site's dec-old — so the RC event is `D`, which the
     /// byte check holds to such a release (anchor-check matching.rs
     /// `loop_backs`), never to a release of its own.
-    pub fn loop_back_release(&mut self, local: u32) -> bool {
+    pub(crate) fn loop_back_release(&mut self, local: u32) -> bool {
         if !self.bound.contains_key(&local) {
             return false;
         }
