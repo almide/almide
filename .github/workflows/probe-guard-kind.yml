@@ -1,0 +1,33 @@
+name: Probe — the kind pass compiles and its examples hold
+# A one-off check on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/guard-kind]
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: GuardKind.v in the kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: The proofs compile
+        run: |
+          cd proofs
+          coqc -Q . AlmideTrust GuardWindow.v
+          coqc -Q . AlmideTrust GuardKind.v
+          echo "GuardKind.v compiled"
