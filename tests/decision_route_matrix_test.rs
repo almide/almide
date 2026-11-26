@@ -19,6 +19,9 @@
 //!   [expect_by] <column> = "" replaces `expect` for one column (the test
 //!                            route reports a passing refusal-asserting test)
 //!   [mcp] <key> = "..."      extra `almide_check` arguments (`target = "wasm"`)
+//!   forbid = "..."           characters no route may print raw — a refusal
+//!                            that quotes the subject must show it escaped
+//!                            (front.diagnostic-echo)
 //!
 //! For every route cell the row marks `runs`, the probe is driven from INSIDE
 //! the project (cwd = proj, `src/main.almd`) and from OUTSIDE it (cwd = its
@@ -72,6 +75,8 @@ struct Probe {
     /// succeeds, its output appended: a decision observable only when the
     /// built program runs (a serialized fan) is then read off the artifact.
     exec_out: Vec<String>,
+    /// Characters the output must not hold raw.
+    forbid: String,
 }
 
 fn strs(v: Option<&toml::Value>) -> Vec<String> {
@@ -113,6 +118,7 @@ fn load_probe(id: &str, dir: &Path) -> Probe {
             .map(|a| a.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
             .unwrap_or_default(),
         exec_out: strs(t.get("exec_out")),
+        forbid: t.get("forbid").and_then(|v| v.as_str()).unwrap_or("").to_string(),
     }
 }
 
@@ -263,6 +269,9 @@ fn drive(p: &Probe, col: &str, side: Side) -> Result<(), String> {
         }
     };
     let expect = p.expect_by.get(col).unwrap_or(&p.expect);
+    if let Some(c) = p.forbid.chars().find(|c| text.contains(*c)) {
+        return Err(format!("U+{:04X} printed raw:\n{}", c as u32, tail(&text).escape_debug()));
+    }
     if text.contains(expect.as_str()) {
         Ok(())
     } else {

@@ -100,7 +100,7 @@ pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostS
         "error[certificate-rejected]: the native v1 test render's own certificate does not hold, which is a compiler bug — please report it\n  {e}"
     ))?;
     if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
-        eprintln!("native: v1 trust-spine render (test harness)");
+        crate::err("native: v1 trust-spine render (test harness)");
     }
     Ok(rust)
 }

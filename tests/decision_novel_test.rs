@@ -600,3 +600,205 @@ fn novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit()
         );
     }
 }
+
+/// purity.effect-classification / pure.e092-reach (#4827, #4951): every
+/// stdlib fn the classification charges nothing — enumerated from the
+/// bundled sources at run time, so a fn added later is judged too — reaches
+/// no floor host op and no output builtin; and a FRESH fn added to a module
+/// whose fns are charged nothing, writing a file or stderr through a fresh
+/// helper, is refused, while the same fn declaring its leaf is not.
+#[test]
+fn novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused() {
+    use almide_ir::effect::uncharged_fns_reaching_a_category;
+    let (bad, judged) = uncharged_fns_reaching_a_category(None);
+    assert!(bad.is_empty(), "stdlib fns charged no category reach one: {bad:?}");
+    assert!(judged > 1000, "only {judged} fns judged — the source scan found nothing");
+    for (module, body, leaf) in [
+        ("string", "prim.write_text_file(p, p)", "FS.write"),
+        ("testing", "{ eprintln(p)\n  0 }", "IO.stderr"),
+    ] {
+        let real = almide_lang::stdlib_info::bundled_source(module).expect("a bundled source");
+        let helper = novel::ident("__helper");
+        let f = novel::ident("fresh");
+        let fresh = format!("{real}\nfn {helper}(p: String) -> Int = {body}\nfn {f}(p: String) -> Int = {helper}(p)\n");
+        let prog = almide_lang::parse_cached(Box::leak(fresh.into_boxed_str())).expect("parses");
+        let (bad, _) = uncharged_fns_reaching_a_category(Some((module, prog)));
+        assert!(bad.contains(&format!("{module}.{f}")), "{module}: a fresh fn reaching {leaf} through a fresh helper is admitted: {bad:?}");
+        if module != "string" {
+            // A `Pure` module may declare no category; elsewhere the fn says it.
+            let declared = format!("{real}\nfn {helper}(p: String) -> Int = {body}\n@category(\"{leaf}\")\nfn {f}(p: String) -> Int = {helper}(p)\n");
+            let prog = almide_lang::parse_cached(Box::leak(declared.into_boxed_str())).expect("parses");
+            let (bad, _) = uncharged_fns_reaching_a_category(Some((module, prog)));
+            assert!(!bad.contains(&format!("{module}.{f}")), "{module}: the declared fn is refused: {bad:?}");
+        }
+    }
+}
+
+/// #4951: a `@pure` fn may not call a testing assertion — each aborts and
+/// writes its report to stderr, so each declares `Abort` and `IO.stderr`.
+/// Every public `testing.assert_*` fn, enumerated from the module's source at
+/// run time, is refused E092 through a fresh `@pure` fn; the control is the
+/// same `@pure` fn calling a pure stdlib fn.
+#[test]
+fn a_pure_fn_calling_a_testing_assertion_is_refused_4951() {
+    let src = almide_lang::stdlib_info::bundled_source("testing").expect("testing has a source");
+    let prog = almide_lang::parse_cached(src).expect("testing parses");
+    let mut asserts = Vec::new();
+    for d in &prog.decls {
+        if let almide_lang::ast::Decl::Fn { name, visibility, .. } = d
+            && name.as_str().starts_with("assert_")
+            && *visibility == almide_lang::ast::Visibility::Public
+        {
+            asserts.push(name.to_string());
+        }
+    }
+    assert!(asserts.len() >= 10, "only {asserts:?} found");
+    let call = |a: &str| match a {
+        "assert_ok" | "assert_err" => "testing.assert_ok(ok(1))".replace("assert_ok", a),
+        "assert_some" | "assert_none" => format!("testing.{a}(some(1))"),
+        "assert_contains" | "assert_snapshot" => format!("testing.{a}(\"ab\", \"a\")"),
+        "assert_approx" => "testing.assert_approx(1.0, 1.0, 0.1)".to_string(),
+        "assert_gt" | "assert_lt" => format!("testing.{a}(2, 1)"),
+        "assert_aborts" => "testing.assert_aborts(\"x\", () => 1)".to_string(),
+        other => panic!("testing.{other}: no call shape for this assertion — add one"),
+    };
+    for a in &asserts {
+        let f = novel::ident("check");
+        let (_t, proj) = project(&[(
+            "src/main.almd",
+            format!("import testing\n\n@pure\nfn {f}() -> Unit = {}\n\neffect fn main() -> Unit = {f}()\n", call(a)),
+        )]);
+        // `assert_aborts` runs only as a direct call in a test block, so a
+        // `@pure` fn calling it is refused first by E099 (it declares the
+        // same leaves).
+        let code = if a == "assert_aborts" { "E099" } else { "E092" };
+        refused_with(&run(&proj, &["check", "src/main.almd"]), code, &format!("a @pure fn calling testing.{a}"));
+    }
+    let f = novel::ident("calm");
+    let (_t, proj) = project(&[(
+        "src/main.almd",
+        format!("@pure\nfn {f}() -> Int = string.len(\"ab\")\n\neffect fn main() -> Unit = println(int.to_string({f}()))\n"),
+    )]);
+    let o = run(&proj, &["check", "src/main.almd"]);
+    assert!(o.status.success(), "the control is refused:\n{}", text(&o));
+}
+
+/// effect.flow-categories: a protocol requirement called through a type
+/// variable runs the conformer the instantiation picks, so the dispatch is
+/// charged with it. A fresh protocol, a fresh conforming type whose method
+/// writes a file and a fresh generic fn dispatching on it: `[permissions]`
+/// refuses the program for `FS.write`. The control is the same program whose
+/// conformer only computes.
+#[test]
+fn novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer() {
+    let proto = format!("P{}", novel::ident("roto"));
+    let ty = format!("T{}", novel::ident("ype"));
+    let m = novel::ident("act");
+    let run_fn = novel::ident("drive");
+    let src = |body: &str| {
+        format!(
+            "import fs\n\nprotocol {proto} {{\n  effect fn {m}(self) -> Unit\n}}\n\ntype {ty}: {proto} = {{ n: Int }}\n\n\
+             effect fn {ty}.{m}(self) -> Unit = {body}\n\n\
+             effect fn {run_fn}[X: {proto}](x: X) -> Unit = x.{m}()!\n\n\
+             effect fn main() -> Unit = {run_fn}({ty} {{ n: 1 }})!\n"
+        )
+    };
+    let manifest = "[package]\nname = \"novel\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"IO.stdout\"]\n";
+    let (_t, proj) = project(&[("src/main.almd", src("fs.write_text(\"/tmp/x\", \"y\")!"))]);
+    std::fs::write(proj.join("almide.toml"), manifest).unwrap();
+    let o = run(&proj, &["check", "src/main.almd"]);
+    let t = text(&o);
+    // The conformer itself is refused whatever the dispatch does; the
+    // generic fn that dispatches to it is refused only when the dispatch is
+    // charged with the conformer.
+    assert!(
+        !o.status.success() && t.contains(&format!("capability violation in `{run_fn}`")),
+        "a dispatch to a file-writing conformer charges the dispatching fn nothing:\n{t}"
+    );
+    let (_t2, proj) = project(&[("src/main.almd", src("println(int.to_string(self.n))"))]);
+    std::fs::write(proj.join("almide.toml"), manifest).unwrap();
+    let o = run(&proj, &["check", "src/main.almd"]);
+    assert!(o.status.success(), "the computing conformer is refused:\n{}", text(&o));
+}
+
+/// effect.flow-categories: a call no rule answers for — a fresh name the
+/// program does not define and no stdlib source declares, a fresh runtime
+/// symbol whose head names no classified module — is unknown, and the fn
+/// that makes it is charged every category (⊤), never none. The control is
+/// the same program before its calls are renamed.
+#[test]
+fn novel_an_unknown_callee_is_charged_every_category() {
+    use almide::codegen::pass::NanoPass;
+    use almide::codegen::pass_effect_inference::EffectInferencePass;
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    let src = "fn helper(x: Int) -> Int = x + 1\n\nfn caller(x: Int) -> Int = helper(x)\n\neffect fn main() -> Unit = println(int.to_string(caller(1)))\n";
+    let lower = || {
+        let tokens = almide::lexer::Lexer::tokenize(src);
+        let mut parser = almide::parser::Parser::new(tokens);
+        let mut prog = parser.parse().expect("parses");
+        let canon = almide::canonicalize::canonicalize_program(&prog, std::iter::empty());
+        let mut checker = almide::check::Checker::from_env(canon.env);
+        let diags = checker.infer_program(&mut prog);
+        assert!(diags.iter().all(|d| d.level != almide::diagnostic::Level::Error), "{diags:?}");
+        almide_frontend::lower::lower_program(&prog, &checker.env, &checker.type_map)
+    };
+    let caller_set = |ir: almide_ir::IrProgram| {
+        let out = EffectInferencePass.run(ir, almide::codegen::pass::Target::Rust).program;
+        out.effect_map.functions.get("caller").map(|f| f.transitive.len()).expect("caller is inferred")
+    };
+    assert_eq!(caller_set(lower()), 0, "control: `caller` reaches nothing");
+    struct Rename(Box<dyn Fn() -> almide_ir::IrExprKind>);
+    impl IrMutVisitor for Rename {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } = &e.kind
+                && name.as_str() == "helper"
+            {
+                let args = args.clone();
+                e.kind = match (self.0)() {
+                    almide_ir::IrExprKind::RuntimeCall { symbol, .. } => almide_ir::IrExprKind::RuntimeCall { symbol, args },
+                    almide_ir::IrExprKind::Call { target, type_args, .. } => almide_ir::IrExprKind::Call { target, args, type_args },
+                    other => other,
+                };
+            }
+            walk_expr_mut(self, e);
+        }
+    }
+    let fresh_named = novel::ident("unheard");
+    let fresh_symbol = novel::runtime_symbol();
+    let all = almide::codegen::pass_effect_inference::Effect::ALL.len();
+    for (what, make) in [
+        ("a fresh name", Box::new(move || almide_ir::IrExprKind::Call {
+            target: almide_ir::CallTarget::Named { name: almide::intern::sym(&fresh_named) },
+            args: vec![],
+            type_args: vec![],
+        }) as Box<dyn Fn() -> almide_ir::IrExprKind>),
+        ("a fresh runtime symbol", Box::new(move || almide_ir::IrExprKind::RuntimeCall { symbol: almide::intern::sym(&fresh_symbol), args: vec![] })),
+    ] {
+        let mut ir = lower();
+        let mut v = Rename(make);
+        for f in ir.functions.iter_mut().filter(|f| f.name.as_str() == "caller") {
+            v.visit_expr_mut(&mut f.body);
+        }
+        assert_eq!(caller_set(ir), all, "{what}: the caller of an unknown callee is not charged every category");
+    }
+}
+
+/// purity.effect-classification: a call the classification cannot answer
+/// for is unknown and carries every category, never none — a fresh runtime
+/// symbol (its head names no module), a fresh fn of a classified module (no
+/// stdlib source declares it), a fresh module. The controls are a declared
+/// pure fn and a declared host fn, which carry what they declare.
+#[test]
+fn novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category() {
+    use almide_ir::effect::{runtime_symbol_effect, stdlib_call_effect, Effect};
+    let all = Effect::ALL.to_vec();
+    assert_eq!(runtime_symbol_effect(&novel::runtime_symbol()), all, "a fresh runtime symbol");
+    assert_eq!(runtime_symbol_effect(&format!("almide_{}", novel::ident("x"))), all, "a fresh `almide_` symbol");
+    for m in ["list", "fs", "testing", "http"] {
+        assert_eq!(stdlib_call_effect(m, &novel::ident("f")), all, "a fresh fn of `{m}`");
+    }
+    assert_eq!(stdlib_call_effect(&novel::module(), "f"), all, "a fresh module");
+    assert!(stdlib_call_effect("list", "map").is_empty(), "control: list.map is pure");
+    assert_eq!(stdlib_call_effect("fs", "write_text"), vec![Effect::FsWrite], "control: fs.write_text");
+    assert!(runtime_symbol_effect("almide_rt_list_map").is_empty(), "control: a pure runtime symbol");
+}

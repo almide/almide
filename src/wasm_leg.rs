@@ -798,7 +798,7 @@ fn link_self_host(
         // to — the probe that caught #1675's missed __err_at demand.
         if almide_base::env::flag("ALMIDE_DBG_LINK") {
             for n in &needed {
-                eprintln!("[link] demand {} -> {}", n, registry.get(n).map(|_| "registered").unwrap_or("UNREGISTERED"));
+                crate::err(&format!("[link] demand {} -> {}", n, registry.get(n).map(|_| "registered").unwrap_or("UNREGISTERED")));
             }
         }
         let mut grew = false;
@@ -974,7 +974,7 @@ fn link_self_host(
             if almide_base::env::flag("ALMIDE_DBG_LINK") {
                 let mut fns: Vec<&String> = keep.iter().collect();
                 fns.sort();
-                eprintln!("[link] {name} carries {fns:?}");
+                crate::err(&format!("[link] {name} carries {fns:?}"));
             }
             linked_fns.insert(src, keep);
             infer_module_capturing(

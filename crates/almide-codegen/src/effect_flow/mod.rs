@@ -24,6 +24,7 @@
 //! share (#4522). A stdlib or runtime
 //! call is assumed to run every fn argument it is given.
 
+mod callee;
 mod graph;
 mod index;
 mod paths;
@@ -51,9 +52,10 @@ fn solve_program(program: &IrProgram) -> Solved<'_> {
     let mut g = Graph::default();
     let ix = Index::build(program, &mut g);
     let pools = Pools::new(&mut g);
+    let callees = callee::Callees::build(program, &ix);
     let mut sh = Shared::default();
     for f in 0..ix.fns.len() {
-        scan_function(program, &ix, &pools, &mut sh, &mut g, f);
+        scan_function(program, &ix, &pools, &callees, &mut sh, &mut g, f);
     }
     wire_taken(&ix, &pools, &sh.taken, &mut g);
     pools.finish(&mut g);
@@ -121,12 +123,13 @@ pub fn infer(program: &IrProgram) -> EffectMap {
     map
 }
 
-fn scan_function(program: &IrProgram, ix: &Index<'_>, pools: &Pools, sh: &mut Shared, g: &mut Graph, f: FnIx) {
+fn scan_function(program: &IrProgram, ix: &Index<'_>, pools: &Pools, callees: &callee::Callees, sh: &mut Shared, g: &mut Graph, f: FnIx) {
     let info = &ix.fns[f];
     let mut scan = Scan {
         g,
         ix,
         pools,
+        callees,
         sh,
         table: info.table,
         scope: f,

@@ -1051,11 +1051,11 @@ pub fn permissions_project_for(entry: &str) -> Option<Project> {
 /// manifest on every route, not off `./almide.toml` alone.
 pub fn governing_manifest(path: &Path) -> Project {
     let proj = read_governing_manifest(path).unwrap_or_else(|e| {
-        eprintln!("error: {}", naming(path, e));
+        crate::err(&format!("error: {}", naming(path, e)));
         std::process::exit(1)
     });
     if let Err(e) = check_compiler_version(&proj) {
-        eprintln!("error: {e}");
+        crate::err(&format!("error: {e}"));
         std::process::exit(1)
     }
     proj

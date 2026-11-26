@@ -70,6 +70,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "miniz_oxide",
+ "proc-macro2",
  "proptest",
  "quote",
  "rcgen",

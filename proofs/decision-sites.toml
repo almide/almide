@@ -46,10 +46,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "81"
+# unstamped_ceiling     = "80"
 # unclassified_ceiling  = "0"
-# skipped_route_ceiling = "65"
-# failopen_ceiling      = "5"
+# skipped_route_ceiling = "64"
+# failopen_ceiling      = "1"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -250,6 +250,32 @@
 #               stock-p1 audit of the ops the module emits (wasm_route.rs stock_p1_unserved); the
 #               host-capability class keeps building as for a listed process fn. Novel test, control
 #               red; check --target wasm over 2040 corpus files: 0 newly refused. fail-open 6 -> 5.
+#   2026-11-26  fail-open-front (33rd engineer, ds-2): pure.e092-reach unknown -> refuse: every
+#               stdlib fn the classification charges nothing reaches no floor host op and no
+#               output builtin (the #4827 gate generalized, 63 offenders -> 0), and the testing
+#               assertions declare Abort + IO.stderr (#4951; test over every testing.assert_*,
+#               control_extra). fail-open 10 -> 9.
+#   2026-11-26  purity.effect-classification unknown -> refuse: a stdlib call no source
+#               declares, an unclassified module and a runtime symbol no @intrinsic declares and
+#               naming no module are every category; a runtime symbol is classified by its
+#               declaring @intrinsic (novel test + control red; the uncharged-reach gate is
+#               control_extra). fail-open 9 -> 8.
+#   2026-11-26  effect.flow-categories unknown -> refuse: each kind of callee the scan cannot
+#               resolve is classified (type-variable dispatch -> every conformer the program
+#               holds; a program fn spelled another way; constructor; derived helper; declared
+#               intrinsic); the rest is every category. Corpus 2458 files: 8495 unknown call
+#               sites -> 0, newly refused 0. fail-open 8 -> 7.
+#   2026-11-26  front.diagnostic-echo unknown -> refuse: one escaping output sink
+#               (almide_base::echo, src/lib.rs) every write of the binary leaves through, the
+#               LSP / MCP transports included, and a source gate refusing a raw print outside it
+#               (novel: a fresh path with hidden characters on 7 routes; probe on 14 columns,
+#               none prints raw; controls red). Its test cell was skipped (#4819): skipped
+#               route cells 70 -> 69. fail-open 7 -> 6. STAMPED (c1 declaration, c2 novel,
+#               c3 14 runs cells, c4 two controls red): 81 stamped, 80 not.
+#   2026-11-27  land-failopen: fail-open-verify + fail-open-front + native-walls-zero merged. Each
+#               branch counted from 10 fail-open / 70 skipped on its own; together: fail-open
+#               10 - 5 (verify) - 4 (front) = 1 (witness.native-verified-fallback, v0.71 known
+#               limit by owner ruling 2026-11-27); skipped 70 - 5 - 1 = 64.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -543,21 +569,26 @@ note = "Defense in depth behind perm.proc-allowlist-static; __os_* on wasm is an
 [[site]]
 id = "effect.flow-categories"
 at = "crates/almide-codegen/src/effect_flow/scan.rs::Scan::call"
-items = [
-  "crates/almide-codegen/src/effect_flow/scan.rs::Scan::call",
-]
+items = ["crates/almide-codegen/src/effect_flow/scan.rs::Scan::call", "crates/almide-codegen/src/effect_flow/callee.rs::Callees::conformers"]
 keys = []
-decides = "which categories a call charges: Module call -> stdlib_call_effect(module, fn) + body reach if bundled; Named unresolved -> builtin_call_effects + runtime_symbol_effect; RuntimeCall -> runtime_symbol_effect; Method unresolved -> nothing; Computed -> the value's set"
-from = "mixed:reach+name"
-unknown = "allow"
-unknown_note = "unknown module (not in STDLIB_MODULE_EFFECTS) and unknown fn of a module => empty set (effect.rs:309,317); unresolved Named that is no builtin/runtime symbol and unresolved Method => no category; gated only by every_stdlib_module_is_classified_once"
+decides = "which categories a call charges, by the KIND of callee: a scanned fn -> its body (a bundled stdlib module's also its declaration); a protocol requirement through a type variable (`T.__join`, `h.__self_read` on `h: H`) -> every conformer of a concrete type the program holds, resolved as monomorphisation does; a program fn spelled another way (another module's convention method, a derived helper named for a module's type) -> each fn it links to; an output/abort builtin -> its leaves; a declared @intrinsic / classified runtime symbol -> its declaration; a constructor (a declared variant case / the type's own name) -> nothing; a derived helper the self-host registry serves -> its bodies; a stdlib fn not held -> its declaration; anything else -> every category"
+from = "mixed:declaration+type+reach+name"
+unknown = "refuse"
+unknown_note = "a call no rule answers for is UNKNOWN and charged every category (Scan::perform_unknown, ⊤ as an @extern); a stdlib fn no source declares and an undeclared runtime symbol naming no module are ⊤ in the classification (purity.effect-classification). Corpus 2458 files (spec, examples, research/benchmark exercises + perf, stdlib, tools/almide-gates): unknown call sites 8495 on fail-open-zero -> 0, `almide check` newly refused 0. `check --effects` infers over the whole program when it has user modules (a call into one is judged by its body)"
 routes = { check = "runs", check_json = "skipped: #4815", check_effects = "runs (entry only #4815)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "n.a.", mcp = "skipped: #4815", emit = "runs" }
-tests = ["tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes", "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs", "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once", "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function", "crates/almide-ir/src/effect.rs::the_rows_3246_fixed"]
-control_note = "security-by-construction.md row 26 (rc2 controls for effect_value_laundering/permissions_routes)"
+tests = ["tests/effect_category_flow_test.rs::a_parameter_carries_the_set_of_the_closure_each_call_site_passes", "tests/effect_category_flow_test.rs::a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs", "crates/almide-ir/src/effect.rs::every_stdlib_module_is_classified_once", "crates/almide-ir/src/effect.rs::every_intrinsic_symbol_classifies_like_its_function", "crates/almide-ir/src/effect.rs::the_rows_3246_fixed", "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category", "tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer"]
+control_note = "proofs/decision-controls/effect.flow-categories.patch: an unknown call charges nothing again; .dispatch.patch: a type-variable dispatch charges no conformer again"
 issues = [4827, 4815]
 status = "UNSTAMPED"
-reasons = ["c1: runtime symbols by `almide_rt_<module>_` prefix (effect.rs:325-346); module rows by name", "c2: an unknown module or an undeclared fn is the empty set (effect.rs:308-318); prim host ops are Pure (effect.rs:231, #4827); an unresolved Method charges nothing"]
-note = "the_rows_3246_fixed asserts stdlib_call_effect(\"not_a_module\", f) is empty — fail-open by design, closed only by the classification test. #4815 closed: check --json / --effects run the gate over the whole program, so those cells are runs-candidates (VM). No evidence written (c1 / c2 need #4827)."
+reasons = ["c1: a stdlib callee's declaration falls back to its module's row (STDLIB_MODULE_EFFECTS, keyed by module name), and a program fn spelled another way is matched by its module-qualified spelling (the linker's)", "c3: no route-matrix probe; check_json / mcp cells still cite #4815 (closed)"]
+note = "the_rows_3246_fixed asserts an unknown module / undeclared fn is every category. #4815 closed: check --json / --effects run the gate over the whole program, so those cells are runs-candidates (VM). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse; each callee kind classified structurally (census over the corpus: 8495 unknown sites / 1447 files -> 0)."
+novel = "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category"
+control_test = "tests/decision_novel_test.rs::novel_an_unknown_callee_is_charged_every_category"
+control_patch = "proofs/decision-controls/effect.flow-categories.patch"
+control_extra = "proofs/decision-controls/effect.flow-categories.dispatch.patch"
+control_extra_test = "tests/decision_novel_test.rs::novel_a_dispatch_through_a_fresh_protocol_is_charged_with_its_conformer"
+control_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "effect.foreign-top"
@@ -702,19 +733,23 @@ items = [
 keys = ["crates/almide-frontend/src/check/pure_attr.rs::Checker::report_impure_argument::S1::E092"]
 decides = "a @pure fn is refused when anything it reaches (BFS over checker-resolved calls and fn values, cross-module) is an output/abort builtin, a stdlib fn with a category, or an @extern"
 from = "mixed:reach+name"
-unknown = "allow"
-unknown_note = "BFS over checker-resolved calls and fn values, cross-module (pure_attr.rs:178-198). A builtin is judged by the builtin table, which answers a bare call first (identity); an @extern or @inline_rust user fn is foreign (pure_attr.rs:212-218, #4824). A stdlib callee is judged by stdlib_call_effect: empty for a Pure-classified module and for an undeclared fn (effect.rs:308-318), so a Pure-module fn reaching a prim host op is pure (#4827). fn-typed params/locals are transparent (ADR-0026 D1, by design)"
+unknown = "refuse"
+unknown_note = "BFS over checker-resolved calls and fn values, cross-module (pure_attr.rs:178-198). A builtin is judged by the builtin table, which answers a bare call first (identity); an @extern or @inline_rust user fn is foreign (pure_attr.rs:212-218, #4824). A stdlib callee is judged by its declaration (effect.rs stdlib_call_effect): its own `@category`, else its module's row, and a fn no stdlib source declares is every category (fail-closed). A stdlib fn the classification charges nothing reaches no floor host op and no output builtin (effect.rs uncharged_fns_reaching_a_category, run over every bundled source at run time; novel test injects a fresh fn, control_extra of purity.effect-classification red): so a `Pure`-module fn reaching a prim host op is never pure (#4827 closed). The testing assertions declare `Abort` and `IO.stderr` (#4951: a @pure fn calling testing.assert_ok was admitted). fn-typed params/locals are transparent (ADR-0026 D1, by design)"
 routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
-tests = ["tests/diagnostics/e092-pure-calls-println", "tests/diagnostics/e092-pure-calls-categorised-stdlib", "tests/diagnostics/e092-pure-reaches-assert-via-helper", "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused", "tests/diagnostics/e092-pure-calls-inline-rust"]
+tests = ["tests/diagnostics/e092-pure-calls-println", "tests/diagnostics/e092-pure-calls-categorised-stdlib", "tests/diagnostics/e092-pure-reaches-assert-via-helper", "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused", "tests/diagnostics/e092-pure-calls-inline-rust", "tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951", "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"]
 control_note = "tests/diagnostics/e092-* broken.almd (refusal expected)"
-issues = [4824, 4827]
+issues = [4824, 4827, 4951]
 status = "UNSTAMPED"
-reasons = ["c2: a stdlib callee is judged by stdlib_call_effect; a plain fn of a Pure-classified module that reaches a prim host op is pure (effect.rs:231, 308-318; #4827)"]
-note = "#4824 closed (8deacf27c3). The bare-name builtin table (pure_attr.rs:83) is the builtin's identity, not a spelling; c1 then rests on the stdlib module table (#4827)."
+reasons = ["c1: a stdlib callee's categories come from the module table when the fn declares none (STDLIB_MODULE_EFFECTS is keyed by module name; owned by purity.effect-classification)"]
+note = "#4824 closed (8deacf27c3). The bare-name builtin table (pure_attr.rs:83) is the builtin's identity, not a spelling; c1 then rests on the stdlib module table (#4827). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse — the generalized host-reach gate (every fn charged nothing reaches no host op / output builtin) and #4951 (the testing assertions declare Abort + IO.stderr; test enumerates every public testing.assert_* and refuses each through a fresh @pure fn)."
 novel = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
 control_test = "tests/decision_batch1a_test.rs::novel_pure_reaching_a_fresh_template_through_a_fresh_module_is_refused"
 control_patch = "proofs/decision-controls/pure.e092-reach.patch"
 probe = "tests/decision-probes/pure.e092-reach"
+control_extra = "proofs/decision-controls/pure.e092-reach.testing-assert.patch"
+control_extra_test = "tests/decision_novel_test.rs::a_pure_fn_calling_a_testing_assertion_is_refused_4951"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "critical.profile-arming"
@@ -741,7 +776,7 @@ novel = "tests/decision_novel_test.rs::novel_a_fresh_profile_name_or_grant_is_re
 control_test = "tests/decision_novel_test.rs::novel_a_fresh_profile_name_or_grant_is_refused"
 control_patch = "proofs/decision-controls/critical.profile-arming.patch"
 probe = "tests/decision-probes/critical.profile-arming"
-control_seen = "e2769aa9dc 2026-11-24 ds-2: base green, patched red (control patch applied by hand, the failing assertion read in the test log); probe cells observed on e2769aa9dc, inside and outside the project (23rd engineer)"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh); re-derived on the sink's crate::err form"
 stamp = "e2769aa9dc 2026-11-24"
 
 [[site]]
@@ -3990,18 +4025,22 @@ items = [
 keys = []
 decides = "the effect categories a stdlib call or runtime symbol carries (feeds effect_flow, [permissions], @pure, --profile critical)"
 from = "mixed:name+declaration"
-unknown = "allow"
-unknown_note = "`prim` is Pure (effect.rs:231); a runtime symbol whose head names no table module => empty (effect.rs:334); a call to a name the module does not declare => empty (treated as a user module, 317); an undeclared symbol of a known module => the module default (fail-closed)"
+unknown = "refuse"
+unknown_note = "a stdlib call of a fn no stdlib source declares, a module the table does not classify, and a runtime symbol that is no declared `@intrinsic` and whose head names no classified module are UNKNOWN: every category (effect.rs unknown_call_effects), never the empty set; a runtime symbol is classified by the declaration whose `@intrinsic` names it, wherever its head points. Consumers ask only about a call they resolved to the stdlib (a user module sharing a stdlib module's name is judged by its body, #2223). Every fn the classification charges nothing — a `Pure` module's, a plain fn of an `EffectFns` module, an `@category()` — reaches no floor host op and no output builtin through any body serving it (uncharged_fns_reaching_a_category, every bundled source at run time); the one exception is an `effect fn` declaring `@category()` whose only reach is a dispatch on a protocol-bounded param (io.read/read_exact/read_to_end/write/close), charged at the conformer by effect.flow-categories. the three http value-equality intrinsics declare `@category` (runtime bodies read: a value comparison), the datetime / http builders reach nothing through the self-host bodies that serve them (the gate reads those), the testing assertions declare `Abort` + `IO.stderr` (#4951)"
 routes = { check = "runs", check_json = "skipped:#4815 (no permissions gate)", check_effects = "runs: entry file only #4815", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "unknown", mcp = "skipped:#4815", emit = "unknown" }
-tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs"]
-control_note = "crates/almide-ir/src/effect.rs tests (classification gate: row per module, Pure module with an unexplained effect fn refused)"
-issues = [4827, 4815]
+tests = ["tests/effect_category_flow_test.rs", "tests/effect_permissions_test.rs", "crates/almide-ir/src/effect.rs::classification_gate::a_fn_charged_no_category_reaches_no_category", "crates/almide-ir/src/effect.rs::classification_gate::a_fresh_uncharged_fn_reaching_an_output_is_refused", "crates/almide-ir/src/effect.rs::classification_gate::the_rows_3246_fixed", "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category", "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"]
+control_note = "proofs/decision-controls/purity.effect-classification.patch: an unknown call carries no category again; .uncharged-reach.patch: a fn charged nothing may reach a host op again"
+issues = [4827, 4815, 4951]
 status = "UNSTAMPED"
-reasons = [
-  "c1: module rows are keyed by module name (STDLIB_MODULE_EFFECTS, effect.rs:143-233) and a runtime symbol finds its module by the `almide_rt_<module>_` prefix (effect.rs:334-342)",
-  "c2 (re-read 2026-11-24, 23rd): #4827's hole is closed in the tree — `prim` Pure is backed by the gate a_pure_module_reaches_no_declared_host_op (host_reach over @prim_op(host), 2f3a490159) and an undeclared intrinsic fails closed to its module's default (effect.rs:348-353); still open: a symbol whose head names no module, and a fn its module does not declare, get the empty set (effect.rs:335, 343, 326)",
-]
-note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM)."
+reasons = ["c1: module rows are keyed by module name (STDLIB_MODULE_EFFECTS) and a runtime symbol that no `@intrinsic` declares finds its module by the `almide_rt_<module>_` prefix (fail-closed to the module's default)", "c3: no route-matrix probe (the registry is read by the consumers' rows; lsp / emit cells unknown)"]
+note = "The perm/effect sweep owns the consumers; this row is the registry. #4815 closed: check --json and the MCP check now run the consumers, so those cells are runs-candidates (VM). 2026-11-26 (fail-open-front, 33rd engineer): unknown -> refuse; the #4827 gate generalized to every fn charged nothing (63 offenders on fail-open-zero -> 0: datetime/http builders declared, testing assertions charged, a local spelled like a fn no longer read as a call of it, the io handle fns judged at the conformer)."
+novel = "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category"
+control_test = "tests/decision_novel_test.rs::novel_an_unknown_stdlib_call_or_runtime_symbol_is_every_category"
+control_patch = "proofs/decision-controls/purity.effect-classification.patch"
+control_extra = "proofs/decision-controls/purity.effect-classification.uncharged-reach.patch"
+control_extra_test = "tests/decision_novel_test.rs::novel_a_fresh_uncharged_stdlib_fn_reaching_a_category_is_refused"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "24d171630f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "purity.fan-par-pure-modules"
@@ -4127,25 +4166,28 @@ probe = "tests/decision-probes/front.e101-confusables"
 
 [[site]]
 id = "front.diagnostic-echo"
-at = "src/diagnostic_render.rs (source-line echo) / crates/almide-syntax/src/parser/diagnostics.rs::unknown_char_error"
-items = [
-  "crates/almide-syntax/src/parser/diagnostics.rs::Parser::unknown_char_error",
-]
+at = "src/lib.rs (the output sink: out / out_no_nl / err / err_no_nl / out_json_line / out_lsp_frame) / crates/almide-base/src/echo.rs::visible"
+items = ["crates/almide-syntax/src/parser/diagnostics.rs::Parser::unknown_char_error", "crates/almide-base/src/echo.rs::visible"]
 keys = []
 decides = "hidden characters reaching compiler output are escaped"
 from = "declaration"
-unknown = "allow"
-unknown_note = "#4819 escaped the terminal and JSON sinks: message, hint, notes, context and the echoed line (diagnostic_render.rs:25-29 and its callers), the JSON rows (json_escape, diagnostic_render.rs:259-283), the --json envelope (envelope.rs:61-80), MCP (mcp.rs:155-159), test names (test_report.rs:379, 805; test_output.rs:90). Each sink escapes on its own: a new sink is raw by default; the LSP escapes its diagnostics, code-action titles and hover since #4879"
-routes = { check = "partial #4819", check_json = "partial #4819", check_effects = "partial", run = "partial", build = "partial", test = "skipped for test names #4819", bench = "partial", native = "partial", wasm = "partial", wasi = "partial", component = "partial", lsp = "partial: the published diagnostics, the repair code-action titles and hover escape (#4879, tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw)", mcp = "partial", emit = "partial" }
-tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw"]
-control_note = "NONE"
+unknown = "refuse"
+unknown_note = "every write the `almide` binary makes to its own stdout / stderr leaves through the sink of src/lib.rs, and each sink fn writes almide_base::echo::visible of its text (JSON: echo::json_visible): a hidden character (C-418's set less TAB/LF/CR) no caller escaped is escaped there; a colour SGR sequence the renderer writes is the one structure kept. tests/echo_sink_test.rs refuses a print macro or a raw stdout()/stderr() handle anywhere else in src/ (syn, test code excepted; novel: a fresh output path written eight ways is refused). The LSP's transport writes each frame through the sink (out_lsp_frame), MCP each line (out_json_line). The one raw channel is relay_program_output: a user program's own bytes under `run --target wasm`. Per-sink escapes of #4819 / #4879 stay (defence in depth)"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+tests = ["src/diagnostic_render.rs::tests::hidden_characters_are_echoed_as_escapes", "tests/diagnostics/silent/bidi-control-written-as-escape.almd", "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw", "tests/hidden_char_output_test.rs::a_parse_error_shows_the_character_it_stopped_at_escaped", "tests/hidden_char_output_test.rs::a_test_name_with_a_hidden_character_is_reported_escaped", "tests/lsp_test.rs::lsp_diagnostics_never_quote_a_hidden_character_raw", "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink", "tests/echo_sink_test.rs::novel_a_fresh_output_path_outside_the_sink_is_refused", "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped", "crates/almide-base/src/echo.rs::tests::only_a_colour_sgr_sequence_stays_raw"]
+control_note = "proofs/decision-controls/front.diagnostic-echo.patch: the sink writes raw again; .raw-print.patch: a command writes its stderr past the sink"
 issues = [4819, 4879]
-status = "UNSTAMPED"
-reasons = ["c2: a new output sink is unescaped by default (each sink escapes on its own; no one constructor)", "c3: no probe (an expected substring cannot say `not raw`)"]
-note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879)."
-novel = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
-control_test = "tests/decision_batch1a_test.rs::novel_a_hidden_character_never_reaches_compiler_output_raw"
+status = "STAMPED"
+note = "#4819 closed (34c782c767, a5699adbd0); the LSP sink fixed on decision-sites (#4879). 2026-11-26 (fail-open-front, 33rd engineer): one escaping output sink (almide_base::echo + src/lib.rs), every raw print in src/ routed through it, LSP / MCP transports through it, a source gate for new paths; probe tests/decision-probes/front.diagnostic-echo (raw U+202E, U+200B, U+E0041 in an expression: every route refuses E101 and prints none raw, the matrix test's `forbid`)."
+novel = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
+control_test = "tests/echo_sink_test.rs::novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped"
 control_patch = "proofs/decision-controls/front.diagnostic-echo.patch"
+probe = "tests/decision-probes/front.diagnostic-echo"
+control_extra = "proofs/decision-controls/front.diagnostic-echo.raw-print.patch"
+control_extra_test = "tests/echo_sink_test.rs::the_binary_writes_its_output_only_through_the_escaping_sink"
+control_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+control_extra_seen = "f7a5901aca 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
+stamp = "24d171630f 2026-11-26 (fail-open-front, ds-2: probe refused raw-free on all 14 columns inside and outside the project; controls red)"
 
 [[site]]
 id = "front.nesting-budget"

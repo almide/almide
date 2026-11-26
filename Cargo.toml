@@ -145,6 +145,8 @@ almide-corpus = { path = "crates/almide-corpus" }
 # and the inspection fingerprint prints the wasm emitter arms it covers (tests/stdlib_inspection_test.rs).
 syn = { version = "3", default-features = false, features = ["full", "visit", "parsing", "printing", "clone-impls"] }
 quote = "1"
+# tests/echo_sink_test.rs walks a macro's tokens for a print hidden inside it.
+proc-macro2 = "1"
 # tests/support/git_host.rs: the dependency tests' git host mints a throwaway
 # CA and per-host leaves (ADR-0035: the fetch only speaks https). Same pin and
 # ring backend almide-rt-core's TLS tests use.

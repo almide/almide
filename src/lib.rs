@@ -102,7 +102,75 @@ pub const WASM_WALL_MARKER: &str = "wall: ";
 // these four named functions collapses that surface to just the four
 // functions below, and makes a future `--quiet` flag or output-capturing
 // test trivial to add (swap the bodies, nothing else changes).
-pub fn out(s: &str) { println!("{s}"); }
-pub fn out_no_nl(s: &str) { print!("{s}"); }
-pub fn err(s: &str) { eprintln!("{s}"); }
-pub fn err_no_nl(s: &str) { eprint!("{s}"); }
+//
+// They are also THE output sink of decision row front.diagnostic-echo
+// (#4819): each writes `almide_base::echo::visible` of its text, so a hidden
+// character no caller escaped is escaped here, and a new output path is
+// escaped by construction. tests/echo_sink_test.rs refuses a print macro or a
+// raw stdout / stderr handle anywhere else in this binary's sources; the one
+// raw channel is `relay_program_output`, below.
+pub fn out(s: &str) { println!("{}", sink_text(s)); }
+pub fn out_no_nl(s: &str) { print!("{}", sink_text(s)); }
+pub fn err(s: &str) { eprintln!("{}", sink_text(s)); }
+pub fn err_no_nl(s: &str) { eprint!("{}", sink_text(s)); }
+
+/// What the sink writes for `s`: `s` itself when it holds no hidden
+/// character; else, when `s` is one JSON document (`--emit-ast`, `--json`
+/// rows, an interface), each hidden character as its JSON escape `\uXXXX`,
+/// so the document still parses to what it said; else each as `\u{XXXX}`.
+fn sink_text(s: &str) -> std::borrow::Cow<'_, str> {
+    let escaped = almide_base::echo::visible(s);
+    if matches!(escaped, std::borrow::Cow::Borrowed(_)) {
+        return escaped;
+    }
+    if serde_json::from_str::<serde_json::Value>(s).is_ok() {
+        return almide_base::echo::json_visible(s);
+    }
+    escaped
+}
+
+/// One JSON document as a line on stdout (`--json`, MCP), every hidden
+/// character inside its strings written as its JSON `\uXXXX` escape
+/// (`echo::json_visible`), so the document still parses to what it said. An
+/// error writing it (the client closed the pipe) is returned, not a panic.
+pub fn out_json_line(json: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut o = std::io::stdout().lock();
+    writeln!(o, "{}", almide_base::echo::json_visible(json))?;
+    o.flush()
+}
+
+/// One LSP base-protocol frame on stdout: the header and the JSON body, the
+/// body passed through `echo::json_visible` before its length is taken.
+pub fn out_lsp_frame(json: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let body = almide_base::echo::json_visible(json);
+    let mut o = std::io::stdout().lock();
+    write!(o, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+    o.flush()
+}
+
+/// Flush the sink's stdout (a prompt written with [`out_no_nl`]).
+pub fn flush_out() {
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+}
+
+/// Is the sink's stderr a terminal (the renderer colours only then)?
+pub fn stderr_is_terminal() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stderr().is_terminal()
+}
+
+/// The byte-exact relay of what a USER PROGRAM wrote — `almide run --target
+/// wasm` replaying the embedded host's captured stdout and stderr. That is
+/// the program's output, which every target writes unchanged (the
+/// cross-target contracts compare it byte for byte), not text the compiler
+/// echoes; it is the one write that does not pass `echo::visible`.
+pub fn relay_program_output(stdout: &str, stderr: &str) {
+    use std::io::Write as _;
+    print!("{stdout}");
+    eprint!("{stderr}");
+    let _ = std::io::stdout().flush();
+}
