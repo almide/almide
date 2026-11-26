@@ -1,0 +1,72 @@
+name: Probe — the copy rule against the twelve replayed memory bugs
+# A one-off measurement on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/replay-copy-rule]
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    name: Copy rule on ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - 1786-closure-call-borrowed-arg.record-kept
+          - 2397-fused-fold-borrowed-result
+          - 2398-list-update-borrowed-result
+          - 3538-payload-copy-without-credit
+          - 4476-call-rebinds-global-read-earlier
+          - 2613-cell-occupant-stored-without-share.record-kept
+          - 2133-variant-case-payload-without-share
+          - 2395-value-keys-without-tag-test
+          - 2475-slice-rows-without-start-floor
+          - 2685-list-take-drop-insert-byte-product
+          - 1909-from-bytes-additive-fit-test
+          - 2474-copy-within-additive-fit-test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Replay and ask the kernel
+        env:
+          ONLY: ${{ matrix.variant }}
+        run: bash scripts/probe-replay-copy-rule.sh "$RUNNER_TEMP/copy"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: copy-rule-${{ matrix.variant }}
+          path: |
+            ${{ runner.temp }}/copy/summary.tsv
+            ${{ runner.temp }}/copy/coqc.log
+            ${{ runner.temp }}/copy/*.sides.tsv
+            ${{ runner.temp }}/copy/*.cut
+            ${{ runner.temp }}/copy/*.base/a.anchors.wasm
+            ${{ runner.temp }}/copy/*.bug/a.anchors.wasm
+            ${{ runner.temp }}/copy/*.goals/index.tsv
+            ${{ runner.temp }}/copy/*.goals/*.v
+            ${{ runner.temp }}/copy/*.goals/*.log
+            ${{ runner.temp }}/copy/*.goals/*.rc
