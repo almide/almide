@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "15"
+# failopen_ceiling      = "14"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -207,6 +207,9 @@
 #               unknown -> refuse (a bare opaque name two user records share, an alias
 #               with no recorded visibility and a crossing past the depth walk are refused;
 #               novel test, control red, probe on 14 columns). fail-open 16 -> 15.
+#   2026-11-26  toolchain.rustc-floor unknown -> refuse: the judged and the run rustc is the
+#               toolchain binary its sysroot names (a rustup proxy cannot select another
+#               toolchain where cargo runs; novel test, control red). fail-open 15 -> 14.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3126,21 +3129,19 @@ items = [
 keys = []
 decides = "a native build is refused when the rustc find_rustc locates, or $RUSTC, reports a version below MIN_RUSTC 1.97.0 or an unreadable version"
 from = "text"
-unknown = "allow"
-unknown_note = "a candidate that cannot be run is not judged; the rustc cargo actually runs via RUSTC_WRAPPER, CARGO_BUILD_RUSTC / CARGO_BUILD_RUSTC_WRAPPER, a cargo config `build.rustc`, or a rust-toolchain.toml override in the build dir is never judged (env not scrubbed)"
+unknown = "refuse"
+unknown_note = "every rustc a native build runs is the one judged: find_rustc and cargo_command (RUSTC set, CARGO_BUILD_RUSTC removed, every RUSTC_WRAPPER spelling off, #4839) name the toolchain's own binary, `<sysroot>/bin/rustc` (rustc_floor.rs toolchain_binary), so a rustup proxy cannot pick another toolchain where cargo runs (a rust-toolchain.toml in the generated crate's directory or a parent, a directory override). A rustc whose version cannot be read, or whose sysroot holds no rustc, is refused, never skipped"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "n.a.:no rustc", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "runs:children", emit = "n.a." }
-tests = [
-  "tests/rustc_floor_test.rs::a_rustc_below_the_floor_is_refused_and_the_floor_itself_builds",
-  "src/cli/rustc_floor.rs::tests::the_floor_holds_the_cve_fix_and_refuses_below_itself",
-]
+tests = ["tests/rustc_floor_test.rs::a_rustc_below_the_floor_is_refused_and_the_floor_itself_builds", "tests/rustc_floor_test.rs::every_spelling_of_the_build_rustc_is_judged", "tests/rustc_floor_test.rs::a_rustc_proxy_is_judged_by_the_toolchain_it_selects", "src/cli/rustc_floor.rs::tests::the_floor_holds_the_cve_fix_and_refuses_below_itself"]
 control_note = "row 23: require() ignoring judge -> rustc_floor_test exit 101 (2026-10-26, GCE sec-rows-5-23-24)"
 issues = [4839]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open",
-  "c2:no-novel-test",
-]
-note = "rustc_floor.rs:124-140 judges locate_rustc + $RUSTC only; crate_inputs.rs:295-296 only hashes RUSTC_WRAPPER/CARGO_BUILD_RUSTC into the cache key; no env_remove in cargo_build.rs. secaudit G5 — never filed. bugs-final: unchanged."
+reasons = ["c1: decides from the version text the toolchain prints (`rustc -vV`), an external spelling", "c3: no route-matrix probe (the decision needs a stub toolchain on PATH)"]
+note = "rustc_floor.rs require / cargo_command / toolchain_binary. #4839 (76017d9e3b) put RUSTC and the wrappers under the judged rustc; 2026-11-26 (fail-open-zero) the judged rustc is the toolchain binary its sysroot names, closing the proxy case (a toolchain selected per directory)."
+novel = "tests/rustc_floor_test.rs::a_rustc_proxy_is_judged_by_the_toolchain_it_selects"
+control_patch = "proofs/decision-controls/toolchain.rustc-floor.patch"
+control_test = "tests/rustc_floor_test.rs::a_rustc_proxy_is_judged_by_the_toolchain_it_selects"
+control_seen = "5c01d0d730 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "toolchain.selfupdate-attestation"
