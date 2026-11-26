@@ -39,6 +39,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+#[path = "support/verifier.rs"]
+mod support_verifier;
+
 const LEDGER: &str = "proofs/decision-sites.toml";
 
 const COLUMNS: [&str; 14] = [
@@ -237,8 +240,22 @@ fn drive(p: &Probe, col: &str, side: Side) -> Result<(), String> {
             for (k, v) in &p.env {
                 cmd.env(k, v);
             }
+            // `almide verify` delegates to almide-verify: the real one is
+            // always on PATH, so a verify cell is judged by the verifier's
+            // own refusal, never by a missing binary.
+            let probe_path = p.env.iter().find(|(k, _)| k == "PATH").map(|(_, v)| std::ffi::OsStr::new(v.as_str()));
+            cmd.env("PATH", support_verifier::path_with_verifier(probe_path));
             let o = cmd.output().map_err(|e| format!("spawn: {e}"))?;
             let mut t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+            // A missing verifier is neither a refusal nor an admission: the
+            // cell was not judged, and the test says so.
+            assert!(
+                !t.contains("error[verifier-missing]"),
+                "`almide {}` ran without almide-verify ({}), so its cell was never judged:\n{}",
+                args.join(" "),
+                support_verifier::verifier().display(),
+                tail(&t)
+            );
             if !p.exit_any && o.status.success() {
                 return Err(format!("`almide {}` exited 0:\n{}", args.join(" "), tail(&t)));
             }
