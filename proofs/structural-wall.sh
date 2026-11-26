@@ -346,10 +346,14 @@ bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE
 # function. A second decoder (check-shipped-slices.sh: the module's sections
 # and every instruction's length, no library) re-derives every proposal from
 # the artifact: the strings are the module's bytes, end to end, inside the one
-# function body named, cut where instructions start. Then the drill: dumps
+# function body named, cut where instructions start. It also holds each module
+# that has a proposal to ONE unshared 32-bit memory, which the three rules
+# take for granted and the kernel is never shown. Then the drill: dumps
 # with ONE proposal altered each (a start or a cut moved inside an
 # instruction, a byte changed, another function named, a module's block
-# removed) must every one be refused, for its own reason.
+# removed), and the untouched dumps beside ONE module altered (a second memory
+# added, its memory made shared; that forgery brings its own manifest), must
+# every one be refused, for its own reason.
 echo "== the byte strings the kernel judged are instruction runs of the functions they name (a second decoder) =="
 bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$OUT/window-dump" "$OUT/fresh-dump" "$OUT/loops-dump" | sed 's/^/  /'
 # A slice may hold no proposal of one kind to forge from; a full run must.
@@ -364,19 +368,22 @@ forged=0
 for d in "$OUT"/slices-forged/*/; do
   [ -f "$d/expect" ] || continue
   rc=0
-  bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$d/window-dump" "$d/fresh-dump" "$d/loops-dump" > "$d/out" 2>&1 || rc=$?
+  # A forged MODULE comes with the manifest that names it.
+  forged_manifest="$OUT/slice-manifest"
+  if [ -f "$d/manifest" ]; then forged_manifest="$d/manifest"; fi
+  bash "$ROOT/proofs/check-shipped-slices.sh" "$forged_manifest" "$d/window-dump" "$d/fresh-dump" "$d/loops-dump" > "$d/out" 2>&1 || rc=$?
   if [ "$rc" -ne 1 ] || ! grep -qF -- "$(cat "$d/expect")" "$d/out"; then
-    echo "STRUCTURAL WALL FAIL: the forged dump \`$(basename "$d")\` was not refused for its reason (exit $rc; want 1 and \`$(cat "$d/expect")\`):" >&2
+    echo "STRUCTURAL WALL FAIL: the forged input \`$(basename "$d")\` was not refused for its reason (exit $rc; want 1 and \`$(cat "$d/expect")\`):" >&2
     head -3 "$d/out" | sed 's/^/  /' >&2
     exit 1
   fi
   forged=$((forged + 1))
 done
 if [ "$forged" -eq 0 ]; then
-  echo "STRUCTURAL WALL FAIL: no forged dump was made — the drill on the byte strings would pass vacuously" >&2
+  echo "STRUCTURAL WALL FAIL: no forged input was made — the drill on the byte strings would pass vacuously" >&2
   exit 1
 fi
-echo "  ok: $forged forged dump(s), one proposal altered in each, every one refused for its reason ($(ls "$OUT/slices-forged" | tr '\n' ' ' | sed 's/ $//'))"
+echo "  ok: $forged forged input(s), one proposal or one module altered in each, every one refused for its reason ($(ls "$OUT/slices-forged" | tr '\n' ' ' | sed 's/ $//'))"
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"

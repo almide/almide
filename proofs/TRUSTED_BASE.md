@@ -605,6 +605,12 @@ time (a start or a cut moved inside an instruction, a byte changed, another
 function named, a module's block removed) and requires each forged dump to
 be refused for its own reason. Not a proof: two decoders agreeing. Trusted
 for it: that no instruction's length is wrong in both tables the same way.
+The same script holds each module that has a proposal to ONE memory, unshared
+and with 32-bit offsets, read from its import and memory sections: the three
+rules take a load or a store to be an access of the one linear memory no
+other thread writes, and the kernel is shown neither section. Two forged
+modules (a second memory added; the memory made shared) are refused on every
+run. This is this script's reading of two sections, not a proof.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI
