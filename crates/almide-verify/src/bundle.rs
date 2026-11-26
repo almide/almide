@@ -85,7 +85,7 @@ pub const MAGIC_V6: &str = "almide-certificate-bundle 6";
 /// The first line of a version-7 bundle (version 6 + nested branches).
 pub const MAGIC_V7: &str = "almide-certificate-bundle 7";
 /// The first line of a version-8 bundle (version 7 + the `coverage` record).
-pub const MAGIC_V8: &str = "almide-certificate-bundle 8";
+pub(crate) const MAGIC_V8: &str = "almide-certificate-bundle 8";
 
 /// Does an ownership line nest a `{…}` inside another (format v10)?
 pub fn nests_branches(witness: &[u8]) -> bool {

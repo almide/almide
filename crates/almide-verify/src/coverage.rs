@@ -49,7 +49,7 @@ pub(crate) fn position(line: &str) -> Option<Vec<String>> {
 
 /// The number of defined function bodies of a core wasm module, or `None`
 /// when `bytes` is not a well-framed core module.
-pub fn defined_bodies(bytes: &[u8]) -> Option<usize> {
+pub(crate) fn defined_bodies(bytes: &[u8]) -> Option<usize> {
     if bytes.get(..8)? != b"\0asm\x01\0\0\0" {
         return None;
     }

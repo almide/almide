@@ -193,14 +193,14 @@ pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Functio
 /// remapped offsets of the bodies rewritten after sealing, and the source
 /// function each named body is (`serial -> (pass, name)`).
 #[derive(Default)]
-pub struct Sealed {
-    pub sealed: HashMap<u64, u64>,
-    pub remaps: HashMap<u64, HashMap<usize, usize>>,
-    pub names: HashMap<u64, (usize, String)>,
+pub(crate) struct Sealed {
+    pub(crate) sealed: HashMap<u64, u64>,
+    pub(crate) remaps: HashMap<u64, HashMap<usize, usize>>,
+    pub(crate) names: HashMap<u64, (usize, String)>,
 }
 
 /// Drain the sink.
-pub fn take_all() -> Sealed {
+pub(crate) fn take_all() -> Sealed {
     state()
         .lock()
         .expect("anchor sink")
