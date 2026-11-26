@@ -1,0 +1,12 @@
+# Negative control of witness.call-modes-skip (proofs/decision-sites.toml): an out-of-program callee is admitted (no row) by its spelling, a `.` or a leading `__`
+# control_test: crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling
+diff --git a/crates/almide-mir/src/certificate_native_calls.rs b/crates/almide-mir/src/certificate_native_calls.rs
+--- a/crates/almide-mir/src/certificate_native_calls.rs
++++ b/crates/almide-mir/src/certificate_native_calls.rs
+@@ -208,4 +208,6 @@ pub fn render_served_callee(name: &str) -> bool {
+         || crate::native_list_ops::is_list_concat(name)
+         || crate::host_ops::host_op_for_call_name(name).is_some()
+         || crate::mir_ops::INJECTED_ACCESSORS.contains(&name)
++        || name.contains('.')
++        || name.starts_with("__")
+ }

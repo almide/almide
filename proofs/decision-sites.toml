@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "13"
+# failopen_ceiling      = "12"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -213,6 +213,9 @@
 #   2026-11-26  native.crate-inputs-backstop unknown -> refuse: the injection point refuses a
 #               fresh ungranted dependency itself (in-crate novel test, control red); the
 #               no-walk-up hole was closed by #4830. fail-open 14 -> 13.
+#   2026-11-26  witness.call-modes-skip unknown -> refuse: an out-of-program callee is admitted
+#               by served-set membership only (#4828 fixed the spelling rule); novel test of a
+#               fresh `__` helper and `module.fn`, control red. fail-open 13 -> 12.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3591,22 +3594,19 @@ items = [
 keys = []
 decides = "which call sites get a call-modes row the checker judges; an out-of-program callee is either 'borrows by the renderer contract' (no row) or the out-of-range index (rejected)"
 from = "text"
-unknown = "allow"
-unknown_note = "`n.contains('.') || n.starts_with(\"__\")` (pipeline_witnesses.rs:125; certificate_c.rs:115-118; certificate_native_calls.rs:74-80) gives any such callee no row"
+unknown = "refuse"
+unknown_note = "an out-of-program callee has no row only by membership in a set the render serves and whose convention is declared (certificate_native_calls.rs render_served_callee: the self-host registry call names, the native shims, the declared native floor, the list concat ops, the host-op rows, mir_ops::INJECTED_ACCESSORS; e26ca2188d / 3cdf2c3d3b, #4828); any other callee — whatever its spelling, a `.` or a leading `__` — gets the out-of-range index the checker rejects (novel test: a fresh `__` helper and a fresh `module.fn`)"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "skipped: #4828 native certs discarded", build = "skipped: #4828 same", test = "skipped: #4828", bench = "skipped: #4828", native = "skipped: #4828 proofs/native-wall.sh, verify --mir", wasm = "n.a.: the structural leg has its own call-modes", wasi = "n.a.", component = "n.a.", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "crates/almide-mir/src/certificate_p2.rs::tests::call_modes_witness_matches_the_coq_parser_format",
-]
-control_note = "NONE"
+tests = ["crates/almide-mir/src/certificate_p2.rs::tests::call_modes_witness_matches_the_coq_parser_format", "crates/almide-mir/src/certificate_p2.rs::an_unserved_callee_is_rejected_whatever_its_spelling", "crates/almide-mir/tests/call_modes_served_membership.rs", "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"]
+control_note = "proofs/decision-controls/witness.call-modes-skip.patch: a callee spelled with a `.` or a leading `__` is admitted again"
 issues = [4828]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-spelling",
-  "c2:fail-open",
-  "c3:no CLI route",
-  "c4:no-control",
-]
-note = "#4828 names the fix (membership in the served sets) and the unit case."
+reasons = ["c1: decides by membership in served sets, some of them hand lists (render_native_shims, mir_ops::INJECTED_ACCESSORS)", "c3: the route cells still name #4828 (native certificates are judged by build / run since d55d1d3c75; not re-observed)"]
+note = "#4828 fixed the spelling rule (e26ca2188d, 3cdf2c3d3b); 2026-11-26 (fail-open-zero): its novel test and control."
+novel = "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
+control_patch = "proofs/decision-controls/witness.call-modes-skip.patch"
+control_test = "crates/almide-mir/src/certificate_p2.rs::novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling"
+control_seen = "071f8e828e 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh, unit-test leg)"
 
 [[site]]
 id = "witness.native-verified-fallback"
