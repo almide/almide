@@ -893,6 +893,9 @@ jobs:
           ALMIDE_EXPECT_TOOLS: "1"
           ALMIDE_CERTIFY_OWNERSHIP: fail
           SHAPE_MATRIX_SLICE: "0/4"
+          # #4006: every verified native render wall of a program these tests
+          # build lands here, for the step after this one.
+          ALMIDE_NATIVE_WALL_LOG: ${{ runner.temp }}/native-walls.log
         # The script enumerates every workspace test target from cargo's own
         # JSON (root package AND member crates — a bare `cargo test` at the root
         # tests only the root, and the members' suites silently never ran in CI
@@ -901,6 +904,14 @@ jobs:
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
         run: SHARD_LABEL="shard ${{ matrix.shard }}/6" bash scripts/ci-test-shard.sh --run-rows "$(dirname "$TEST_ARCHIVE_FILE")/rows.tsv" "$TEST_ARCHIVE_FILE"
+
+      # #4006: the native walls gate over the programs the CLI test files
+      # build, which the corpus gate (checks job) never sees: the walled
+      # programs this shard's tests met (ALMIDE_NATIVE_WALL_LOG above) may not
+      # exceed the shrink-only `cli-walls` ceiling of proofs/native-walls.txt.
+      - name: Native walls of the CLI test programs
+        if: env.DOCS_ONLY != 'true' && !cancelled()
+        run: bash scripts/check-native-walls.sh --cli-log "$RUNNER_TEMP/native-walls.log"
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each
