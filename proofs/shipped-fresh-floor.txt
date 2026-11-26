@@ -1,0 +1,14 @@
+# The least number of accesses into a block just allocated that the Rocq
+# kernel must prove inside that block from the shipped bytes alone
+# (proofs/GuardFresh.v), per corpus leg of proofs/structural-wall.sh.
+# proofs/check-shipped-fresh.sh fails a run that proves fewer: a change that
+# takes a store out of the shape (the pointer copied to another local first,
+# the size computed instead of constant, a branch between the allocation and
+# the store) is lost evidence, and shows here instead of passing unseen.
+#
+# Raise a row whenever a run proves more. Lower one only in its own commit,
+# with the reason in the message.
+#
+# leg       accesses
+fixtures    17716
+tests       11601

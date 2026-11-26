@@ -43,3 +43,6 @@ RoutineBoundsCert.v
 RoutineProcs.v
 RoutineProcsCert.v
 AnchorCore.v
+GuardWindow.v
+GuardFresh.v
+GuardLoop.v

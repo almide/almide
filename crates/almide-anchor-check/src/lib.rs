@@ -61,8 +61,26 @@
 //! release and the free routine) are held, instruction for instruction, to
 //! the lists the proof script transcribes.
 //!
+//! WINDOWS (window.rs): apart from the verdict above, every load and store
+//! of the module is swept for a straight-line window (a compare, its
+//! aborting arm, the access) and the windows found are printed as bytes for
+//! the Rocq kernel to judge with `proofs/GuardWindow.v`. No witness is read.
+//!
+//! FRESH BLOCKS (fresh.rs): likewise apart from the verdict, every access
+//! whose address is a local plus a constant, the local last assigned the
+//! allocator's result for a constant size, is printed as three byte strings
+//! for the kernel to judge with `proofs/GuardFresh.v`. No bound is tested
+//! here: a store past its block is a proposal the kernel refuses.
+//!
+//! LOOPS (loops.rs): likewise, every access that follows a loop's exit test
+//! in one straight-line run, addressed by the block whose count was captured
+//! before the loop and by the tested counter, is printed as byte strings for
+//! the kernel to judge with `proofs/GuardLoop.v`. No bound, stride, offset
+//! or width is tested here.
+//!
 //! TRUSTED: the representation R (init); the rest of operands.rs's,
-//! routines.rs's and proved.rs's TRUSTED lists.
+//! routines.rs's, proved.rs's, window.rs's, fresh.rs's and loops.rs's TRUSTED
+//! lists.
 
 
 use wasmparser::Operator as Op;
@@ -78,6 +96,9 @@ mod operands;
 mod proved;
 pub mod rc;
 mod routines;
+pub mod window;
+pub mod fresh;
+pub mod loops;
 pub use anchors::{fields_anchors, parse_anchors, parse_anchors_held, prims_anchors, Anchors, AnchorsHeld, RcLines};
 pub use bounds::{check_bounds, check_bounds_alloc, check_bounds_held, Sites};
 pub use census::{census, census_with, Census, Tally};

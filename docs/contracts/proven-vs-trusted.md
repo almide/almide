@@ -46,7 +46,37 @@ it is not linked into `almide` or `almide-verify`, so a user's build is not
 anchor-checked, #4849) — the bounds, init and fields events located
 one by one (#4011 (d)), the ownership witness's RC events matched one to one
 to the rc_inc and release calls on the values they name, every matched
-release its local's last read (#4277). What it still trusts there: that the
+release its local's last read (#4277). That check is unverified code. For
+one shape the Rocq kernel judges the shipped bytes itself, with no witness:
+where a compare, its aborting arm and the access lie in one straight-line
+run of instructions, `proofs/GuardWindow.v` decodes that window's bytes and
+its theorem `window_sound` puts the access inside the block's payload in
+every run, under the machine's own wrap-around
+(`proofs/check-shipped-windows.sh`, every load and store swept, the proven
+count held to a floor; what it trusts is in
+[proofs/TRUSTED_BASE.md](../../proofs/TRUSTED_BASE.md)). For a second shape
+likewise: where a function allocates a constant size into a local, leaves
+the local alone and then reads or writes at that local plus a constant,
+`proofs/GuardFresh.v` reads the three byte strings and its theorem
+`fresh_sound` puts the access inside the block's header and requested
+payload in every run (`proofs/check-shipped-fresh.sh`: every such access is
+proposed with no bound tested, so a store past its block is refused by the
+kernel; the proven count is held to a floor). For a third shape too: a
+`for` reads its count once, before the loop, and tests its counter against
+it on every turn; `proofs/GuardLoop.v` reads the capture, the test and the
+access, and every instruction in between, and its theorem `loop_sound` puts
+the access inside the looped block's payload in every run of the test and
+the access from locals in which the count's local holds the captured count
+(`proofs/check-shipped-loops.sh`: the kernel also computes whether the loop
+leaves memory alone, holds its own share of the block or reads the block's
+local nowhere else; a read with none of the three is counted against a
+ceiling, and so is a read the kernel cannot place inside the block). That
+the byte strings these three gates judge are instruction runs of the function
+they name is re-derived from each artifact by a second decoder, with forged
+dumps refused on every run (`proofs/check-shipped-slices.sh`: two decoders
+agreeing, not a proof). What
+the anchor
+check still trusts there: that the
 anchor file names the right runtime routines (`$alloc`, the rc_inc and
 release routines, the copy-on-write judges), a read of a released block
 through another local or a slot that holds it without its own credit, and

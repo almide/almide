@@ -79,6 +79,89 @@ fn main() {
         }
         return;
     }
+    // `--fresh <artifact.wasm> <anchors>`: the accesses into a block just
+    // allocated with a constant size (fresh.rs), three strings of decimal
+    // bytes each: the input of the proof script's `fresh_ok`, whose verdict is
+    // the kernel's. The anchor file is read for ONE number, the allocator's
+    // function index; no event is. A module that names no allocator has no
+    // proposal and says so.
+    if args.first().map(String::as_str) == Some("--fresh") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        let alloc = match almide_anchor_check::parse_anchors_held(&a) {
+            Ok((alloc, ..)) => alloc,
+            Err(e) => {
+                println!("FRESH UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        };
+        let bytes = |v: &[u8]| v.iter().map(|b| format!(" {b}")).collect::<String>();
+        match almide_anchor_check::fresh::shipped(&w, alloc) {
+            Ok(found) => {
+                for x in &found {
+                    println!("FRESH {} {} {alloc} |{} |{} |{}", x.func, x.access, bytes(&x.pre), bytes(&x.mid), bytes(&x.tail));
+                }
+                println!("ALLOCATOR {alloc}");
+            }
+            Err(e) => {
+                println!("FRESH UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    // `--loops <artifact.wasm> <anchors>`: the reads a loop's exit test guards
+    // against a count captured before the loop (loops.rs), five strings of
+    // decimal bytes each: the input of the proof script's `loop_core` and
+    // `loop_class`, whose verdicts are the kernel's. The anchor file is read
+    // for ONE number, the increment routine's function index; no event is.
+    if args.first().map(String::as_str) == Some("--loops") {
+        let (Some(w), Some(a)) = (args.get(1), args.get(2)) else { std::process::exit(2) };
+        let (w, a) = (std::fs::read(w).unwrap_or_default(), std::fs::read_to_string(a).unwrap_or_default());
+        let inc = match almide_anchor_check::parse_anchors_held(&a) {
+            Ok((_, _, _, _, _, rc)) => rc.and_then(|r| r.0),
+            Err(e) => {
+                println!("LOOPS UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        };
+        let bytes = |v: &[u8]| v.iter().map(|b| format!(" {b}")).collect::<String>();
+        match almide_anchor_check::loops::shipped(&w, inc) {
+            Ok(found) => {
+                let named = inc.map_or_else(|| "-".to_string(), |f| f.to_string());
+                for x in &found {
+                    println!("LOOP {} {} {} |{} |{} |{} |{} |{}", x.func, x.access, inc.unwrap_or(u32::MAX), bytes(&x.hold), bytes(&x.pre), bytes(&x.mid), bytes(&x.ht), bytes(&x.rest));
+                }
+                println!("INCREMENT {named}");
+            }
+            Err(e) => {
+                println!("LOOPS UNREADABLE: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    // `--windows <artifact.wasm>`: the guarded-access windows the cutter
+    // proposes over every load and store of the module (window.rs), one line
+    // of decimal bytes each: the input of the proof script's `window_ok`,
+    // whose verdict is the kernel's. No witness and no anchor file is read.
+    if args.first().map(String::as_str) == Some("--windows") {
+        let Some(w) = args.get(1) else { std::process::exit(2) };
+        let w = std::fs::read(w).unwrap_or_default();
+        match almide_anchor_check::window::shipped(&w) {
+            Ok((accesses, windows)) => {
+                for x in &windows {
+                    println!("WINDOW {} {}{}", x.func, x.access, x.bytes.iter().map(|b| format!(" {b}")).collect::<String>());
+                }
+                println!("ACCESSES {accesses}");
+            }
+            Err(e) => {
+                println!("WINDOWS REJECT: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let [wasm, bundle, anchors] = args.as_slice() else {
         let _ = writeln!(
             std::io::stderr(),
