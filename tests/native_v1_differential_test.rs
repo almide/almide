@@ -377,14 +377,14 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        // A C export outside the rows the native adapters cover (a Region
-        // parameter) still walls (the scalar and Handle rows render:
-        // tests/export_c_abi_test.rs).
-        ("c_export", "import ffi\n\n@export(c, \"size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\nfn main() -> Unit = println(\"x\")\n"),
+        // A foreign C Region return (`@region(len, release)`): its storage
+        // is the C library's, which no native form holds (the scalar, Handle
+        // and Region-parameter rows render: tests/export_c_abi_test.rs).
+        ("c_region_return", "import ffi\n\n@extern(c, \"c\", \"malloc\")\n@region(len = n, release = \"free\")\nfn c_malloc(n: Int) -> Region = _\nfn main() -> Unit = println(\"${ffi.len(c_malloc(8))}\")\n"),
     ];
     for (name, src) in walls {
         let refusal = almide_mir::pipeline::try_render_rust_source(src)
-            .expect_err(&format!("`{name}` should refuse the unsupported export wrapper"));
-        assert!(refusal.to_string().contains("is outside the scalar C rows"), "{name}: {refusal}");
+            .expect_err(&format!("`{name}` should refuse the unsupported foreign Region"));
+        assert!(refusal.to_string().contains("foreign Region needs its loan/release adapter"), "{name}: {refusal}");
     }
 }

@@ -55,7 +55,11 @@ fn region_operation(name: &str, arity: usize) -> Option<RegionOp> {
 
 pub(crate) fn expand(ir: &mut IrProgram) -> Result<(), LowerError> {
     let gate = Gate::over(ir);
-    if !gate.mint { return Ok(()); }
+    // An `@export(c)` Region parameter is minted by its adapter, outside the
+    // program's own calls.
+    let lent_in = ir.functions.iter().any(|f| crate::native_foreign::is_c_export(f)
+        && f.params.iter().any(|p| almide_lang::types::extern_abi::is_region(&p.ty)));
+    if !gate.mint && !lent_in { return Ok(()); }
     let reach = AddressReach::new(&ir.type_decls);
     let form = if closed(ir, &gate, &reach) { Form::Closed }
         else if lent(ir, &gate, &reach) { Form::Lent }
@@ -103,15 +107,18 @@ fn closed(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
         && !ir.functions.iter().any(|f| is_boundary(f) && signature_carries(f, reach))
 }
 /// The domain is lent when every boundary that can carry an address is an
-/// `@extern(rust)` fn taking a Region directly as a by-value parameter (its
+/// `@extern(rust)` / `@extern(c)` fn or an `@export(c)` fn taking a Region directly as a by-value parameter (its
 /// `(ptr, len)` pair, the shape v0 and wasm hand their hosts), and no host
 /// call takes or makes an address itself. Nothing returns a Region, holds one
 /// inside another value, or reaches one through a callback or a type
 /// parameter, so foreign code sees the block only for the call.
 fn lent(ir: &IrProgram, gate: &Gate, reach: &AddressReach) -> bool {
     use almide_lang::types::extern_abi::{is_region, NativeExtern};
-    let lends = |f: &IrFunction| !crate::native_foreign::is_c_export(f)
-        && matches!(crate::native_foreign::selected(f), Some((NativeExtern::Rust, _)))
+    // An `@export(c)` fn is lent its Region parameters by its C caller: the
+    // adapter builds each over a block of the caller's bytes
+    // (native_foreign_exports.rs), the same shared block an import is lent.
+    let lends = |f: &IrFunction| (crate::native_foreign::is_c_export(f)
+            || matches!(crate::native_foreign::selected(f), Some((NativeExtern::Rust | NativeExtern::C, _))))
         && !reach.carries(&f.ret_ty)
         && f.params.iter().all(|p| !reach.carries(&p.ty) || (is_region(&p.ty) && !p.is_mut));
     !gate.foreign && !almide_ir::meter_plan::program_has_regions(ir)

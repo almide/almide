@@ -20,7 +20,9 @@ pub fn almide_rt_ffi_load(base: *mut u8, off: i64, n: i64) -> AlmideList<u8> {
     if base.is_null() || n <= 0 || off < 0 { return AlmideList::new(); }
     // SAFETY: `ffi.read` checked `off + n <= len` for the Region `base` came
     // from, and the Region keeps its owner (or its foreign release guard)
-    // alive while it is borrowed here (ADR-0031 D2).
+    // alive while it is borrowed here (ADR-0031 D2). From
+    // `almide_rt_ffi_block_lend`, `base` and `n` are an `@export(c)` C
+    // caller's buffer and its length, lent for the call (C-452).
     AlmideList::from(unsafe { std::slice::from_raw_parts(base.add(off as usize), n as usize) })
 }
 
@@ -28,7 +30,9 @@ pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &AlmideList<u8>) {
     if base.is_null() || b.is_empty() || off < 0 { return; }
     // SAFETY: `ffi.write` checked the Region is writable (it came from
     // `ffi.alloc`, whose buffer no Almide value aliases, or from a foreign
-    // `@region` declaration) and that `off + len(b) <= len`.
+    // `@region` declaration) and that `off + len(b) <= len`. From
+    // `almide_rt_ffi_block_lent_end`, `base` is the `@region(out = p)` C
+    // caller's writable buffer and `b` the block lent over it, of its length.
     unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), base.add(off as usize), b.len()); }
 }
 
@@ -42,6 +46,14 @@ pub fn almide_rt_ffi_store(base: *mut u8, off: i64, b: &AlmideList<u8>) {
 // foreign call does.
 #[derive(Clone)]
 pub struct AlmideFfiBlock(std::rc::Rc<[std::cell::Cell<u8>]>);
+
+// The empty block: what a slot holds once its Region was taken out of it
+// (a top-level `var` the render moves through), never a Region's memory.
+impl Default for AlmideFfiBlock {
+    fn default() -> Self {
+        AlmideFfiBlock(std::rc::Rc::from(Vec::new()))
+    }
+}
 
 // A block holding a copy of b: `ffi.region` views b read-only and `ffi.alloc`
 // hands a fresh zeroed buffer, so a copy observes the same bytes.
@@ -115,5 +127,30 @@ pub fn almide_rt_ffi_lent_end(keep: &std::rc::Rc<dyn Fn() -> ()>, symbol: &str, 
     if std::rc::Rc::strong_count(keep) > 1 {
         eprintln!("ffi: the Region `{param}` lent to @export(c) fn `{symbol}` is still held after the call returned; a lent Region lives only for its call");
         std::process::abort();
+    }
+}
+
+// The block a Region parameter of an `@export(c)` fn is lent as on the
+// verified native render (ADR-0031 amendment A2, C-452): a copy of the C
+// caller's `len` bytes at `p` (none for a null `p`), so every Almide access
+// is the block's checked one. The bytes come through `almide_rt_ffi_load`:
+// the caller's buffer is valid for `len` bytes for the call, the C caller's
+// promise, as it is v0's and wasm's.
+pub fn almide_rt_ffi_block_lend(p: *const u8, len: usize) -> AlmideFfiBlock {
+    almide_rt_ffi_block(&almide_rt_ffi_load(p as *mut u8, 0, i64::try_from(len).unwrap_or(i64::MAX)))
+}
+
+// The end of that lend: a copy of the Region still held when the call
+// returned stops the process, as `almide_rt_ffi_lent_end` does; otherwise a
+// writable (`@region(out = p)`) parameter's bytes go back to the caller's
+// buffer, through `almide_rt_ffi_store`, before the caller regains control.
+pub fn almide_rt_ffi_block_lent_end(block: &AlmideFfiBlock, p: *mut u8, writable: bool, symbol: &str, param: &str) {
+    if std::rc::Rc::strong_count(&block.0) > 1 {
+        eprintln!("ffi: the Region `{param}` lent to @export(c) fn `{symbol}` is still held after the call returned; a lent Region lives only for its call");
+        std::process::abort();
+    }
+    if writable {
+        let bytes: AlmideList<u8> = block.0.iter().map(std::cell::Cell::get).collect();
+        almide_rt_ffi_store(p, 0, &bytes);
     }
 }

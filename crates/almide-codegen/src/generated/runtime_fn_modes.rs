@@ -211,6 +211,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fan_settle" => &[false],
         "almide_rt_ffi_address" => &[false],
         "almide_rt_ffi_block" => &[false],
+        "almide_rt_ffi_block_lend" => &[false, false],
+        "almide_rt_ffi_block_lent_end" => &[false, false, false, false, false],
         "almide_rt_ffi_block_load" => &[false, false, false],
         "almide_rt_ffi_block_ptr" => &[false, false],
         "almide_rt_ffi_block_store" => &[false, false, false],

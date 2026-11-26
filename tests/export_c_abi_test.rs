@@ -346,13 +346,20 @@ fn the_v1_native_render_adapts_the_scalar_rows_and_walls_every_other() {
     let handle = format!("fn wide(v: Int) -> Int = v + 1\n\n@export(c, \"keep\")\nfn keep(h: Handle) -> Handle = h\n\n{main}");
     let rust = almide_mir::pipeline::try_render_rust_source(&handle).expect("the v1 render walled a Handle @export(c) row");
     assert!(rust.contains("pub extern \"C\" fn __c_almd_keep(a0: *mut u8) -> *mut u8 {"), "{rust}");
-    let walls = [
-        ("effect fn size(buf: Region) -> Int = ffi.len(buf)", "@export(c) fn `size`: parameter `buf: Region` is outside the scalar C rows"),
-    ];
-    for (decl, reason) in walls {
-        let src = format!("import ffi\n\nfn wide(v: Int) -> Int = v + 1\n\n@export(c, \"other\")\n{decl}\n\n{main}");
-        let wall = almide_mir::pipeline::try_render_rust_source(&src).expect_err("the v1 render accepted an @export(c) row it has no adapter for");
-        assert!(wall.to_string().contains(reason), "{decl}: {wall}");
+    // A Region parameter is adapted (C-452, ADR-0031 A2): the caller's
+    // `(uint8_t*, size_t)` is lent as a block of its bytes, held to the
+    // still-held check after the call, and a `@region(out = p)` one is
+    // copied back.
+    let region = format!("import ffi\n\nfn wide(v: Int) -> Int = v + 1\n\n@export(c, \"size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\n\n@export(c, \"fill\")\n@region(out = out)\neffect fn fill(out: Region) -> Int = {{\n  ffi.write(out, 0, bytes.from_list([7]))!\n  1\n}}\n\n{main}");
+    let rust = almide_mir::pipeline::try_render_rust_source(&region).expect("the v1 render walled a Region @export(c) row");
+    for want in [
+        "pub extern \"C\" fn __c_almd_size(a0: *const u8, a0_len: usize) -> i64 {",
+        "pub extern \"C\" fn __c_almd_fill(a0: *mut u8, a0_len: usize) -> i64 {",
+        "let __almide_lent0 = almide_rt_ffi_block_lend(a0 as *const u8, a0_len);",
+        "almide_rt_ffi_block_lent_end(&__almide_lent0, a0 as *mut u8, false, \"size\", \"buf\");",
+        "almide_rt_ffi_block_lent_end(&__almide_lent0, a0 as *mut u8, true, \"fill\", \"out\");",
+    ] {
+        assert!(rust.contains(want), "no `{want}` in the v1 render:\n{rust}");
     }
     // A String or a record has no C form at all (E090): no render either.
     for decl in ["fn name(s: String) -> Int = string.len(s)", "fn pair(n: Int) -> (Int, Int) = (n, n)"] {

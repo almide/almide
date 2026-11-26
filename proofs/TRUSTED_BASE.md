@@ -565,8 +565,9 @@ strings and Bytes/Matrix handles. Neither proves properties of host code.
 Fallible mutable and nominal adapters, and every other foreign address,
 still refuse the v1 route.
 
-**A Region lent to an `@extern(rust)` call on native.** When a program
-passes an `ffi` Region to an `@extern(rust)` fn, the native v1 render keeps
+**A Region lent to an `@extern(rust)` or `@extern(c)` call, or by the C
+caller of an `@export(c)` fn, on native.** When a program
+passes an `ffi` Region to an `@extern(rust)` or `@extern(c)` fn, the native v1 render keeps
 the Region's memory in the runtime's `AlmideFfiBlock`: one fixed-size `Rc`
 allocation of `Cell<u8>` that every copy of the Region shares
 (`native_region.rs`; `runtime/rs/src/ffi.rs`). The call passes
@@ -577,10 +578,20 @@ foreign code may read and write `[ptr, ptr + len)`; the block is fixed-size,
 kept alive by the Region argument, and neither moved nor freed during the
 call; the host stays inside that range and keeps no pointer after it
 returns. Almide's own reads and writes of the block are bounds-checked safe
-code. The ownership witness sees the block as an ordinary counted value. A C
-binding, an export, a Region inside another value, a returned, written-back
-or callback Region, and a host call that takes the address itself are
-refused, so this is the one place a block's address leaves Almide. Target-priority tests use deliberately different fallback bodies so
+code. The ownership witness sees the block as an ordinary counted value. An
+`@export(c)` fn's Region parameter (ADR-0031 amendment A2, C-452) is the same
+block in the other direction: its crate-root adapter copies the C caller's
+`len` bytes at `ptr` into a fresh block (`almide_rt_ffi_block_lend`), lends
+the fn a Region over it, and after the call stops the process if a copy of
+the Region is still held, else copies a `@region(out = p)` parameter's bytes
+back to `ptr` (`almide_rt_ffi_block_lent_end`). TRUSTED there: the caller's
+`[ptr, ptr + len)` is valid (and, for an out parameter, writable) for the
+call, and the caller does not read or write it while the fn runs (the fn sees
+the bytes as they were at the call; its writes reach the caller when it
+returns). A C Region return (`@region(len, release)`), a Region inside
+another value, a returned, written-back or callback Region, and a host call
+that takes the address itself are refused, so these are the places a block's
+address or bytes cross the boundary. Target-priority tests use deliberately different fallback bodies so
 an inliner cannot silently substitute them for the selected foreign call.
 
 **Native test harness.** Checked test bodies and their reachable helpers enter
