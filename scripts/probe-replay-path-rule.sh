@@ -106,19 +106,22 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
   # The acquire rule (proofs/GuardAcquire.v): per frame of the anchor file's
   # `rc` line, every named acquire (`a<local>`) has its own call of the rc_inc
   # routine (`rcfns`, first index) that is handed the value that local holds.
-  # The cutter proposes the calls; the kernel evaluates `acquire_ok`.
+  # The cutter proposes the calls; the kernel evaluates `acquire_ok`. Where
+  # an acquire has no call and the body holds fewer rc_inc calls than the
+  # frame has named acquires, the kernel is asked to count them itself
+  # (`acquire_short`).
   A="$OUT/$name.acquire"
   mkdir -p "$A"
   python3 -I "$TOOLS/cut_acquires.py" "$OUT/$name.base/a.anchors.wasm" "$OUT/$name.base/a.anchors" > "$A/base.cut" || { echo "   the acquire cutter failed on the unpatched module"; continue; }
   python3 -I "$TOOLS/cut_acquires.py" "$OUT/$name.bug/a.anchors.wasm" "$OUT/$name.bug/a.anchors" > "$A/bug.cut" || { echo "   the acquire cutter failed on the defect module"; continue; }
   python3 -I "$TOOLS/acquire_goals.py" "$A" "unpatched=$A/base.cut" "defect=$A/bug.cut" | sed 's/^/   /'
-  find "$A" -maxdepth 1 -name 'A_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
+  find "$A" -maxdepth 1 -name '[AS]_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
   python3 -I "$TOOLS/acquire_verdicts.py" "$A" "$OUT/$name.frames.tsv" --replay "$name" \
     "unpatched=$(sha256sum < "$OUT/$name.base/a.anchors.wasm" | cut -c1-12)" \
     "defect=$(sha256sum < "$OUT/$name.bug/a.anchors.wasm" | cut -c1-12)" \
     "$OUT/acquire-summary.tsv" | sed 's/^/   /'
 done
-echo "== acquire rule summary (replay, module, sha, frames with a named acquire, acquires, accepted, refused, with an acquire not placed, out of time)"
+echo "== acquire rule summary (replay, module, sha, frames with a named acquire, acquires, accepted, too few calls by the kernel's count, refused, with an acquire not placed, out of time)"
 cat "$OUT/acquire-summary.tsv" 2>/dev/null
 echo "== summary (replay, module, sha, ranges, proved, proved but not carried, not proved, no guess, header words, out of time, accesses with no path)"
 cat "$OUT/summary.tsv"

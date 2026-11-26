@@ -153,7 +153,25 @@ Qed.
 (* `n` bytes of `bs` from byte `a`. *)
 Definition sub (bs : list Z) (a n : nat) : list Z := firstn n (skipn a bs).
 
-(* Byte `a` of `bs` is where an instruction starts (`step1` walks to it). *)
+(* One instruction off the front, for a walk over a whole body: `step1`,
+   and the two tail calls it does not know (`return_call` 0x12 with a
+   function index, `return_call_indirect` 0x13 with a type and a table). *)
+Definition step1x (bs : list Z) : option (list Z) :=
+  match bs with
+  | [] => None
+  | op :: r =>
+      if op =? 18 then
+        match uleb 5 r with Some (_, r') => Some r' | None => None end
+      else if op =? 19 then
+        match uleb 5 r with
+        | Some (_, r1) => match uleb 5 r1 with Some (_, r2) => Some r2 | None => None end
+        | None => None
+        end
+      else
+        match step1 bs with Some (_, r') => Some r' | None => None end
+  end.
+
+(* Byte `a` of `bs` is where an instruction starts (`step1x` walks to it). *)
 Fixpoint starts (fuel : nat) (bs : list Z) (a : nat) : bool :=
   match a with
   | O => true
@@ -161,8 +179,8 @@ Fixpoint starts (fuel : nat) (bs : list Z) (a : nat) : bool :=
       match fuel with
       | O => false
       | S f =>
-          match step1 bs with
-          | Some (_, r) =>
+          match step1x bs with
+          | Some r =>
               let used := (length bs - length r)%nat in
               if (used <=? a)%nat && (0 <? used)%nat then starts f r (a - used) else false
           | None => false
@@ -219,6 +237,43 @@ Qed.
 
 Print Assumptions acquire_sound.
 
+(* ── the other answer: too few calls ── *)
+
+(* How many instructions of `bs` are a call of function `f`, a tail call
+   counted too (every instruction is walked; `None` when one is not read). *)
+Fixpoint count_calls (fuel : nat) (f : Z) (bs : list Z) (acc : nat) : option nat :=
+  match fuel with
+  | O => None
+  | S k =>
+      match bs with
+      | [] => Some acc
+      | op :: r =>
+          match step1x bs with
+          | None => None
+          | Some rest =>
+              let hit :=
+                if (op =? 16) || (op =? 18) then
+                  match uleb 5 r with
+                  | Some (x, _) => x =? f
+                  | None => false
+                  end
+                else false in
+              count_calls k f rest (if hit then S acc else acc)
+          end
+      end
+  end.
+
+(* The body holds fewer calls of the rc_inc routine than the frame records
+   named acquires: whatever windows are proposed, some acquire has no call
+   of its own. Computed, with no theorem of its own tying it to
+   `acquire_ok` (a window's call is one of the calls counted here: both
+   read the body's instructions the same way). *)
+Definition acquire_short (inc : Z) (body : list Z) (acquires : nat) : bool :=
+  match count_calls (S (length body)) inc body O with
+  | Some c => (c <? acquires)%nat
+  | None => false
+  end.
+
 (* ── `local.get 3 ; local.set 10 ; local.get 10 ; call 10`: the value local 3
      holds is handed to the rc_inc routine (index 10), through local 10 ── *)
 Example acquire_through_a_copy :
@@ -243,4 +298,14 @@ Proof. vm_compute. reflexivity. Qed.
 
 Example refuses_another_callee :
   acquire_ok 7 11 [ 65; 0; 26; 32; 3; 33; 10; 32; 10; 16; 10; 32; 10; 26 ] [ (HLocal 3, 3%nat, 8%nat) ] = false.
+Proof. vm_compute. reflexivity. Qed.
+
+(* The same body has one call of the rc_inc routine: too few for two
+   acquires, enough for one. *)
+Example one_call_is_short_of_two_acquires :
+  acquire_short 10 [ 65; 0; 26; 32; 3; 33; 10; 32; 10; 16; 10; 32; 10; 26 ] 2 = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example one_call_is_not_short_of_one_acquire :
+  acquire_short 10 [ 65; 0; 26; 32; 3; 33; 10; 32; 10; 16; 10; 32; 10; 26 ] 1 = false.
 Proof. vm_compute. reflexivity. Qed.

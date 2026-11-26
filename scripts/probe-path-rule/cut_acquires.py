@@ -15,9 +15,10 @@ calls, one call each (a maximum matching).
 
 Prints, per frame that has a named acquire,
 
-  FRAME <position> <function> <allocator> <rc_inc> <placed>/<acquires> | <certificates> | <not placed> | <body bytes>
+  FRAME <position> <function> <allocator> <rc_inc> <placed>/<acquires> <calls> | <certificates> | <not placed> | <body bytes>
 
-a certificate being `L<local>:<start>:<length>`, `C<local>:<start>:<length>` (a cell's
+<calls> being how many calls of the rc_inc routine the body holds (4294967295 stands for a
+module with no rc_inc routine: no call is one of it), and a certificate being `L<local>:<start>:<length>`, `C<local>:<start>:<length>` (a cell's
 occupant) or `G<global>:<start>:<length>`: the window's first byte and length in the body.
 """
 import os
@@ -153,8 +154,9 @@ def main():
             else:
                 left.append(str(n))
         body = m.bytes[base:ins[-1].end]
-        print(f"FRAME {pos} {pos + m.nimp} {alloc} {inc} {len(certs)}/{len(names)} | {' '.join(certs) or '-'} | "
-              f"{' '.join(left) or '-'} | {' '.join(str(b) for b in body)}")
+        ncalls = sum(1 for x in ins if x.op == 0x10 and x.imm == inc and inc is not None)
+        print(f"FRAME {pos} {pos + m.nimp} {alloc} {CP.NONE if inc is None else inc} {len(certs)}/{len(names)} {ncalls} | "
+              f"{' '.join(certs) or '-'} | {' '.join(left) or '-'} | {' '.join(str(b) for b in body)}")
 
 
 if __name__ == "__main__":
