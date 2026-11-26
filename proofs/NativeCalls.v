@@ -38,11 +38,12 @@
             `<callee block index> <actual modes…>` (CallModes' site rows).
      marks  one line index per argument the sites move (space-separated):
             the line of the caller's object that argument is.
-     hosts  one id per call the function makes to a NATIVE FS HOST CALL
-            (#4006 class E): the index of the runtime function it calls in
-            `native_host_calls` below — the named sets of the trusted
-            base's "Native fs host calls" and "Native unix host calls" rows
-            (proofs/TRUSTED_BASE.md), laid end to end. A
+     hosts  one id per call the function makes to a NATIVE HOST CALL
+            (#4006 class E; every host op of every capability module): the
+            index of the runtime function it calls in `native_host_calls`
+            below — the named sets of the trusted base's "Native fs host
+            calls", "Native unix host calls" and "Native row host calls"
+            rows (proofs/TRUSTED_BASE.md), laid end to end. A
             call outside the set carries an out-of-range id.
      lines  the function's ownership lines in the alphabet and delimiters of
             `check_xc`, one per heap parameter first (parameter order), then
@@ -225,9 +226,81 @@ Definition native_unix_host_calls : list string :=
    "almide_rt_unix___os_shm_write";
    "almide_rt_unix___os_shm_read"].
 
+(* The NATIVE ROW HOST CALLS (decision row verify.native-calls-hosts): every
+   other capability module's host ops — `host_ops::native_row_host_calls`
+   derives them from the host-op table (per module of `CAP_MODULES` with no
+   class above, the runtime symbol of each row in table order, once), and a
+   call is recorded by its row's id, so no host call of those modules goes
+   unjudged for want of a class. *)
+Definition native_row_host_calls : list string :=
+  ["almide_rt_datetime_now";
+   "almide_rt_datetime_monotonic_ns";
+   "almide_rt_datetime_now_ms";
+   "almide_rt_env_args";
+   "almide_rt_env_get";
+   "almide_rt_env___set";
+   "almide_rt_env___environ";
+   "almide_rt_env_cwd";
+   "almide_rt_env_sleep_ms";
+   "almide_http_get";
+   "almide_http_request";
+   "almide_http_get_response";
+   "almide_http_request_response";
+   "almide_rt_http___call_start";
+   "almide_http_call_poll";
+   "almide_http_call_read_new";
+   "almide_http_call_wait";
+   "almide_http_call_cancel";
+   "almide_rt_http_serve";
+   "almide_rt_io_print";
+   "almide_rt_io_eprint";
+   "almide_rt_io___write_stdout";
+   "almide_rt_io___write_stderr";
+   "almide_rt_io_read_line";
+   "almide_rt_io_read_all";
+   "almide_rt_io___read_stdin_bytes";
+   "almide_rt_net___os_tcp_connect";
+   "almide_rt_net___os_tcp_read";
+   "almide_rt_net___os_tcp_write";
+   "almide_rt_net___os_tcp_close";
+   "almide_rt_net___os_tcp_is_open";
+   "almide_rt_net___os_tcp_read_timeout";
+   "almide_rt_net___os_tcp_set_timeout";
+   "almide_rt_net___os_tcp_available";
+   "almide_rt_net___os_tcp_listen";
+   "almide_rt_net___os_tcp_local_port";
+   "almide_rt_net___os_tcp_accept";
+   "almide_rt_net___os_tcp_close_listener";
+   "almide_rt_net___os_udp_bind";
+   "almide_rt_net___os_udp_local_port";
+   "almide_rt_net___os_udp_send_to";
+   "almide_rt_net___os_udp_recv_from";
+   "almide_rt_net___os_udp_close";
+   "almide_rt_net___os_lookup_host";
+   "almide_rt_process_exec";
+   "almide_rt_process_kill";
+   "almide_rt_process___os_output";
+   "almide_rt_process___os_run";
+   "almide_rt_process___os_start";
+   "almide_rt_process___os_poll";
+   "almide_rt_process___os_wait";
+   "almide_rt_process___os_stop";
+   "almide_rt_process___os_read_new";
+   "almide_rt_process___os_child_pid";
+   "almide_rt_process_pid";
+   "almide_rt_random_int";
+   "almide_rt_random_float";
+   "almide_rt_random_choice";
+   "almide_rt_random_shuffle";
+   "almide_rt_random_bytes";
+   "almide_rt_test_abort_site_run";
+   "almide_rt_test_abort_site_selected";
+   "almide_rt_uuid___v7_stamp"].
+
 (* Every named host call, by witness id: the fs set, then the unix set
-   (`host_ops::NATIVE_HOST_CLASSES`). *)
-Definition native_host_calls : list string := native_fs_host_calls ++ native_unix_host_calls.
+   (`host_ops::NATIVE_HOST_CLASSES`), then the row calls. *)
+Definition native_host_calls : list string :=
+  native_fs_host_calls ++ native_unix_host_calls ++ native_row_host_calls.
 
 Definition hosts_ok (b : block) : bool :=
   forallb (fun h => Nat.ltb h (List.length native_host_calls)) (b_hosts b).
@@ -456,10 +529,17 @@ Example nc_host_unix_calls_accept :
 id" = true.
 Proof. reflexivity. Qed.
 
+(* The row calls' ids follow the unix set's: 50 (`almide_rt_datetime_now`)
+   through 112 (`almide_rt_uuid___v7_stamp`) — ACCEPTED. *)
+Example nc_host_row_calls_accept :
+  check_native_calls_cert "||| 50 76 112
+id" = true.
+Proof. reflexivity. Qed.
+
 (* A host call to a runtime function OUTSIDE the named sets (the out-of-range
-   id the producer writes for it: the sets' total length, 50) — REJECTED. *)
+   id the producer writes for it: the sets' total length, 113) — REJECTED. *)
 Example nc_host_outside_set_rejects :
-  check_native_calls_cert "||| 50
+  check_native_calls_cert "||| 113
 id" = false.
 Proof. reflexivity. Qed.
 

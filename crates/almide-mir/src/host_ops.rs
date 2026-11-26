@@ -377,13 +377,52 @@ pub const NATIVE_UNIX_HOST_CALLS: &[&str] = &[
 pub const NATIVE_HOST_CLASSES: &[(&str, &[&str])] =
     &[("fs", NATIVE_FS_HOST_CALLS), ("unix", NATIVE_UNIX_HOST_CALLS)];
 
-/// How many host calls the classes name: the first out-of-range witness id.
+/// The NATIVE ROW HOST CALLS (decision row verify.native-calls-hosts): every
+/// other capability module's host ops, as the render serves them from the
+/// runtime floor — derived from [`HOST_OPS`], never listed by hand: per module
+/// of [`CAP_MODULES`] that has no class above, in that order, the runtime
+/// symbol of each of its rows in table order (once). Their ids follow the
+/// classes' (`proofs/NativeCalls.v` `native_row_host_calls`, almide-verify's
+/// copy; `tests/native_fs_host_calls_test.rs` holds the copies to this
+/// derivation). A call to one is recorded by its ROW's id — a routed twin or a
+/// refusal twin is the same operation, as a Send-free twin is for fs — so
+/// every host op of these modules is judged, none skipped for want of a class.
+pub fn native_row_host_calls() -> &'static [&'static str] {
+    static ROWS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    ROWS.get_or_init(|| {
+        let mut out: Vec<&'static str> = Vec::new();
+        for m in CAP_MODULES.iter().filter(|m| native_host_class(m).is_none()) {
+            for row in HOST_OPS.iter().filter(|o| o.module == *m) {
+                if !out.contains(&row.symbol) {
+                    out.push(row.symbol);
+                }
+            }
+        }
+        out
+    })
+}
+
+/// How many host calls the classes and the row calls name: the first
+/// out-of-range witness id.
 pub fn native_host_call_count() -> usize {
-    NATIVE_HOST_CLASSES.iter().map(|(_, calls)| calls.len()).sum()
+    NATIVE_HOST_CLASSES.iter().map(|(_, calls)| calls.len()).sum::<usize>() + native_row_host_calls().len()
+}
+
+/// The witness id of a native host call to `row` whose render calls the
+/// runtime `symbol` (`None`: the floor declares no body for the call). A
+/// class module's call is named by the symbol the render calls (an unnamed
+/// one, or none, gets the out-of-range id the checker rejects); any other
+/// module's by its row's own symbol in [`native_row_host_calls`].
+pub fn native_host_id_of_call(row: &HostOp, symbol: Option<&str>) -> usize {
+    let id = match native_host_class(row.module) {
+        Some(_) => symbol.and_then(native_host_id),
+        None => native_host_id(row.symbol),
+    };
+    id.unwrap_or_else(native_host_call_count)
 }
 
 /// The named calls of the native host class served by runtime `module`.
-pub(crate) fn native_host_class(module: &str) -> Option<&'static [&'static str]> {
+pub fn native_host_class(module: &str) -> Option<&'static [&'static str]> {
     NATIVE_HOST_CLASSES.iter().find(|(m, _)| *m == module).map(|(_, calls)| *calls)
 }
 
@@ -399,10 +438,11 @@ pub fn native_fs_host_id(symbol: &str) -> Option<usize> {
 }
 
 /// The witness id of the native host call `symbol`, of any class: its index
-/// in the classes' lists laid end to end ([`NATIVE_HOST_CLASSES`]).
+/// in the classes' lists laid end to end ([`NATIVE_HOST_CLASSES`]), then the
+/// row calls ([`native_row_host_calls`]).
 pub fn native_host_id(symbol: &str) -> Option<usize> {
     let mut base = 0;
-    for (_, calls) in NATIVE_HOST_CLASSES {
+    for calls in NATIVE_HOST_CLASSES.iter().map(|(_, c)| *c).chain([native_row_host_calls()]) {
         if let Some(i) = calls.iter().position(|s| *s == symbol) {
             return Some(base + i);
         }

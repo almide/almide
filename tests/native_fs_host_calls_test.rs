@@ -55,7 +55,43 @@ fn the_four_copies_of_the_unix_set_agree() {
     for (i, sym) in almide_mir::host_ops::NATIVE_UNIX_HOST_CALLS.iter().enumerate() {
         assert_eq!(almide_mir::host_ops::native_host_id(sym), Some(fs + i));
     }
-    assert_eq!(almide_mir::host_ops::native_host_call_count(), fs + mir.len());
+    let rows = almide_mir::host_ops::native_row_host_calls().len();
+    assert_eq!(almide_mir::host_ops::native_host_call_count(), fs + mir.len() + rows);
+}
+
+/// The row calls (decision row verify.native-calls-hosts) are DERIVED from the
+/// host-op table — every capability module without a class, in `CAP_MODULES`
+/// order, each row's runtime symbol once — and written twice more: the proven
+/// checker's `NativeCalls.native_row_host_calls` and almide-verify's. This
+/// holds the copies to the derivation, so a row added to the table turns the
+/// copies red until the checker names it.
+#[test]
+fn the_row_calls_are_the_host_op_table_s_and_their_copies_agree() {
+    use almide_mir::host_ops::{native_host_class, native_host_id, native_row_host_calls, CAP_MODULES, HOST_OPS};
+    let mut derived: Vec<String> = Vec::new();
+    for m in CAP_MODULES.iter().filter(|m| native_host_class(m).is_none()) {
+        for row in HOST_OPS.iter().filter(|o| o.module == *m) {
+            if !derived.iter().any(|s| s == row.symbol) {
+                derived.push(row.symbol.to_string());
+            }
+        }
+    }
+    let mir: Vec<String> = native_row_host_calls().iter().map(|s| s.to_string()).collect();
+    assert_eq!(mir, derived, "host_ops::native_row_host_calls is not the table's derivation");
+    for module in ["process", "http", "net", "env"] {
+        assert!(HOST_OPS.iter().any(|o| o.module == module && derived.iter().any(|s| s == o.symbol)), "{module}: no row call");
+    }
+    assert_eq!(coq_list("native_row_host_calls"), mir, "NativeCalls.v's native_row_host_calls differs from the derivation");
+    let verify: Vec<String> = almide_verify::NATIVE_ROW_HOST_CALLS.iter().map(|s| s.to_string()).collect();
+    assert_eq!(verify, mir, "almide-verify's NATIVE_ROW_HOST_CALLS differs from the derivation");
+    let base = almide_mir::host_ops::NATIVE_FS_HOST_CALLS.len() + almide_mir::host_ops::NATIVE_UNIX_HOST_CALLS.len();
+    for (i, sym) in native_row_host_calls().iter().enumerate() {
+        assert_eq!(native_host_id(sym), Some(base + i));
+    }
+    // Every host op row is in a class or among the row calls.
+    for o in HOST_OPS {
+        assert!(native_host_class(o.module).is_some() || mir.iter().any(|s| s == o.symbol), "{}.{}: no host id", o.module, o.func);
+    }
 }
 
 /// Every unix host op is named, and every named one is served on the floor.
@@ -105,8 +141,8 @@ fn named_host_boundary_accepts_optional_bytes_and_rejects_unknown_ids() {
     let id = NATIVE_FS_HOST_CALLS.iter()
         .position(|name| *name == "almide_rt_fs_read_bytes_if_exists").unwrap();
     assert!(check(Property::NativeCalls, format!("||| {id}\nid").as_bytes()));
-    let named = NATIVE_FS_HOST_CALLS.len() + NATIVE_UNIX_HOST_CALLS.len();
-    // The last unix id is named; the first id past both sets is not.
+    let named = NATIVE_FS_HOST_CALLS.len() + NATIVE_UNIX_HOST_CALLS.len() + almide_verify::NATIVE_ROW_HOST_CALLS.len();
+    // The last row id is named; the first id past every set is not.
     assert!(check(Property::NativeCalls, format!("||| {}\nid", named - 1).as_bytes()));
     for unknown in [named, usize::MAX] {
         assert!(!check(Property::NativeCalls, format!("||| {unknown}\nid").as_bytes()));

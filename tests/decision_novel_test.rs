@@ -503,6 +503,58 @@ fn novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling() {
     }
 }
 
+/// verify.native-calls-hosts: every host op the table admits — of ANY
+/// capability module, enumerated from `host_ops::HOST_OPS` at run time, so a
+/// row added later is covered — is recorded as a host call in the native-calls
+/// witness the native build judges, and its id is one the verifier names; a
+/// call the named sets do not name (a fresh runtime symbol, in a class module
+/// or a fresh one) gets the out-of-range id, which the verifier rejects.
+#[test]
+fn novel_every_native_host_call_is_judged_and_a_fresh_one_rejected() {
+    use almide_mir::host_ops::{native_host_call_count, native_host_id_of_call, HostOp, HOST_OPS};
+    use almide_mir::{MirFunction, Op};
+    let verify = |id: usize| almide_verify::check(almide_verify::Property::NativeCalls, format!("||| {id}\nid").as_bytes());
+    let mut judged = 0;
+    for row in HOST_OPS {
+        let call = format!("{}.{}", row.module, row.func);
+        let main = MirFunction {
+            name: "main".into(),
+            ops: vec![Op::CallFn { dst: None, name: call.clone(), args: Vec::new(), result: None }],
+            ..Default::default()
+        };
+        let w = almide_mir::certificate::native_calls_witness(&[main]);
+        let header = w.lines().next().unwrap_or_default();
+        let hosts = header.rsplit('|').next().unwrap_or_default();
+        let classed = almide_mir::host_ops::native_host_class(row.module).is_some();
+        if hosts.trim().is_empty() && classed {
+            // A class call served through the runtime body its declaration
+            // names (a walker's typed twin) is recorded at that site, by the
+            // symbol it calls, not under this name.
+            continue;
+        }
+        assert!(!hosts.trim().is_empty(), "`{call}`: a host call with no host id is not judged (witness header `{header}`)");
+        let id: usize = hosts.trim().parse().unwrap_or_else(|_| panic!("`{call}`: one host id, got `{hosts}`"));
+        if id < native_host_call_count() {
+            assert!(verify(id), "`{call}`: its host id {id} is not one the verifier names");
+            judged += 1;
+        } else {
+            // Only a class call the floor does not serve may go unnamed (the
+            // render refuses it before any witness); a row call never does.
+            assert!(classed && !almide_mir::native_floor::has_native_host_route(&call), "`{call}`: a served host call got the out-of-range id {id}");
+            assert!(!verify(id));
+        }
+    }
+    assert!(judged > 0);
+    for module in ["fs".to_string(), "process".to_string(), novel::module()] {
+        let symbol: &'static str = Box::leak(novel::runtime_symbol().into_boxed_str());
+        let m: &'static str = Box::leak(module.into_boxed_str());
+        let fresh = HostOp { module: m, func: "f", intrinsic_fn: "f", symbol, caps: &[], by_value: &[], routed: false, returns_result: false, subsumed: &[] };
+        let id = native_host_id_of_call(&fresh, Some(symbol));
+        assert_eq!(id, native_host_call_count(), "a fresh host symbol `{symbol}` in `{m}` was named");
+        assert!(!verify(id), "the verifier admitted the out-of-range host id {id}");
+    }
+}
+
 /// witness.subset-gate: a NOVEL compiler arm — one the gate's arm table has
 /// never seen, taking a literal callback with neither a loop activation nor a
 /// closure value (`almide_wasm::test_novel_callback_arm`) — is refused by the

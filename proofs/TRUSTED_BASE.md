@@ -884,6 +884,24 @@ TRUSTED: the runtime unix code itself (descriptor bookkeeping, `sendmsg` /
 `spec/embedded_cross/net_unix_*.almd` and `net_huge_read_lengths.almd`
 fixtures, not proven.
 
+**Native row host calls.** (Decision row verify.native-calls-hosts, 2026-11-26.)
+Every other capability module's host ops (`process`, `http`, `net`, `env`,
+`io`, `datetime`, `random`, `testing`, `uuid`) are called by a program on the
+certified native render as the runtime functions their host-op rows name —
+the code the standard native build compiles, carried as ordinary floor
+bodies. NEWLY TRUSTED is nothing the project did not already trust: these
+are the same runtime bodies, and their capabilities are counted at the call
+as before. What changes is that each such call is now RECORDED: the set is
+DERIVED from the host-op table (`host_ops::native_row_host_calls`: per module
+of `CAP_MODULES` with no class above, in that order, each row's runtime
+symbol once), a call is recorded by its row's id after the fs and unix sets'
+ids, and `NativeCalls.hosts_ok` accepts an id below the length of
+`native_host_calls` (fs, unix, then this set). A host call no set names gets
+the out-of-range id and is refused. `tests/native_fs_host_calls_test.rs`
+holds `NativeCalls.native_row_host_calls` and almide-verify's copy to the
+derivation. TRUSTED: the runtime code of those modules (tested on both legs
+by the cross-target corpus, not proven).
+
 ## FFI: an `@extern`'s declared purity is the author's claim
 
 An `@extern(wasm, ..)` import is code outside the program, and the
