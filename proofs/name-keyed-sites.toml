@@ -1238,6 +1238,12 @@ names = 12
 why = "The independent checker's copy of the trusted-base unix named set (NativeCalls.native_unix_host_calls): almide-verify shares no code with the producer, so it holds its own list; tests/native_fs_host_calls_test.rs holds the copies to one list in one order."
 
 [[site]]
+id = "crates/almide-verify/src/native_calls.rs::NATIVE_ROW_HOST_CALLS::table"
+class = "justified"
+names = 63
+why = "The independent checker's copy of the row host-call set (NativeCalls.native_row_host_calls, decision row verify.native-calls-hosts): the producer DERIVES it from the host-op table (host_ops::native_row_host_calls), and almide-verify, which shares no code with the producer, holds its own copy; tests/native_fs_host_calls_test.rs holds the copy to the derivation in one order."
+
+[[site]]
 id = "crates/almide-mir/src/native_floor_sig.rs::file_stat_decl_agrees::table"
 class = "justified"
 names = 2
