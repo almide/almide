@@ -1133,6 +1133,17 @@ fn keyword(s: &str) -> Option<TokenType> {
     KEYWORDS.iter().find(|(k, _)| *k == s).map(|(_, t)| *t)
 }
 
+/// The token `s` lexes as when it is a keyword spelling (None for a name).
+/// A printer that writes a name spelled like this must backtick it (#4948).
+pub fn keyword_token(s: &str) -> Option<TokenType> {
+    keyword(s)
+}
+
+/// Every keyword spelling, in table order — the set a name printer escapes.
+pub fn keyword_spellings() -> impl Iterator<Item = &'static str> {
+    KEYWORDS.iter().map(|(k, _)| *k)
+}
+
 // ── Operator / delimiter lexing ─────────────────────────────────
 
 /// The operator/delimiter table — longest pattern first, so a plain top-down

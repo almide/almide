@@ -850,3 +850,52 @@ mod issue_3393_tests {
         );
     }
 }
+
+/// #4948 — a name spelled like a keyword keeps its backticks.
+///
+/// `` fn `let`(x: Int) `` came back as `fn let(`, which no longer parses.
+/// Every spelling in the lexer's own keyword table (`keyword_spellings`, not
+/// a list of ours) is used as a name in every position a backticked name can
+/// take — fn, parameter, local, lambda parameter, named argument, record type
+/// and literal field, member, assignment, pattern binder; capitalized
+/// spellings lex as type names, so they name a type and its case — and
+/// fmt → parse → fmt must print the same text with the backticks kept.
+#[cfg(test)]
+mod keyword_name_tests {
+    use super::*;
+    use almide_lang::lexer::{keyword_spellings, Lexer};
+    use almide_lang::parser::Parser;
+
+    fn fmt_source(src: &str) -> String {
+        let mut parser = Parser::new(Lexer::tokenize(src));
+        let program = parser.parse().unwrap_or_else(|e| panic!("parse failed: {e}\n{src}"));
+        assert!(parser.errors.is_empty(), "parse errors {:?} in:\n{src}", parser.errors);
+        format_program(&program)
+    }
+
+    fn program_naming(k: &str) -> String {
+        if k.starts_with(char::is_uppercase) {
+            format!(
+                "type `{k}` =\n  | `{k}`(Int)\n  | Other\n\nfn pick(v: `{k}`) -> Int = match v {{\n  `{k}`(n) => n,\n  Other => 0,\n}}\n\nfn make() -> `{k}` = `{k}`(1)\n"
+            )
+        } else {
+            format!(
+                "type Box = {{ `{k}`: Int }}\n\nfn `{k}`(`{k}`: Int, b: Box) -> Int = {{\n  var x = `{k}`\n  x = x + b.`{k}`\n  let r = Box {{ `{k}`: x }}\n  let f = (`{k}`) => `{k}` + 1\n  let g = match some(x) {{\n    some(`{k}`) => `{k}`,\n    none => 0,\n  }}\n  f(r.`{k}`) + g\n}}\n\nfn call() -> Int = `{k}`(`{k}`: 1, b: Box {{ `{k}`: 2 }})\n"
+            )
+        }
+    }
+
+    #[test]
+    fn every_keyword_spelled_name_round_trips_with_its_backticks() {
+        let mut n = 0;
+        for k in keyword_spellings() {
+            let src = program_naming(k);
+            let once = fmt_source(&src);
+            assert!(once.contains(&format!("`{k}`")), "fmt dropped the backticks of `{k}`:\n{once}");
+            let twice = fmt_source(&once);
+            assert_eq!(once, twice, "fmt -> parse -> fmt differs for `{k}`");
+            n += 1;
+        }
+        assert!(n >= 30, "the keyword table read {n} spellings");
+    }
+}

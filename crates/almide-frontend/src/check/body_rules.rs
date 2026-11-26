@@ -117,14 +117,14 @@ fn media_refusal(value: &str, table: &[String], granted: &[String]) -> Option<St
         return Some(format!("`{essence}` runs script in a browser and is owned by `{module}`: build the body with the `{module}` builders, whose type serves it"));
     }
     if media_owners::script_capable().iter().any(|p| media_owners::matches(&t, p)) {
-        if granted.iter().any(|g| *g == t) {
+        if granted.contains(&t) {
             return None;
         }
         return Some(format!(
             "`{essence}` runs script in a browser, so it is served only by a type that owns it (a package's safe type) or when the application names this exact type in almide.toml: `[trust] media = {{ \"self\" = [\"{t}\"] }}` (ADR-0032 D7)"
         ));
     }
-    if table.iter().any(|x| *x == t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
+    if table.contains(&t) || granted.iter().any(|g| media_owners::matches(&t, g)) {
         return None;
     }
     Some(format!(

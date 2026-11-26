@@ -343,7 +343,7 @@ impl Parser {
     /// `is_soft_keyword_name`, `is_name_token`, and the `peek_named_record`
     /// lookahead all consult it, so adding a soft keyword in one place keeps
     /// every name position in sync.
-    pub(crate) fn is_soft_keyword_token(tt: &TokenType) -> bool {
+    pub fn is_soft_keyword_token(tt: &TokenType) -> bool {
         matches!(
             tt,
             TokenType::Ok | TokenType::Err | TokenType::Some | TokenType::None | TokenType::Todo

@@ -484,7 +484,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) 
         if target == CheckTarget::NativeRoute {
             let rows = super::native_extern_gate::refusals(whole.as_ref().unwrap_or(&ir), file);
             for (code, text) in &rows {
-                out(&format!("{}", crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, *code, text, "--target native"))));
+                out(&crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target native")));
             }
             clean &= rows.is_empty();
         }

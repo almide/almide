@@ -162,16 +162,15 @@ fn inexact_sets(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
     let inexact = |t: &Ty| -> Option<Ty> {
         let mut found = None;
         t.any_node(&mut |n| {
-            if let Ty::Applied(TypeConstructorId::Set, a) = n {
-                if a.len() == 1
-                    && !matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64)
-                    && holds_float(&a[0], &decls, &mut Vec::new())
-                    && !keyed(&a[0], &decls, &mut Vec::new())
-                    && !float_carrier(&a[0])
-                {
-                    found = Some(n.clone());
-                    return true;
-                }
+            if let Ty::Applied(TypeConstructorId::Set, a) = n
+                && a.len() == 1
+                && !matches!(a[0], Ty::Float | Ty::Float32 | Ty::Float64)
+                && holds_float(&a[0], &decls, &mut Vec::new())
+                && !keyed(&a[0], &decls, &mut Vec::new())
+                && !float_carrier(&a[0])
+            {
+                found = Some(n.clone());
+                return true;
             }
             false
         });
@@ -191,7 +190,7 @@ fn inexact_sets(ir: &IrProgram) -> Vec<(String, String, Option<usize>)> {
     reachable_fns(ir)
         .into_iter()
         .filter_map(|(name, f, line)| {
-            let sig = f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)).find_map(|t| inexact(t));
+            let sig = f.params.iter().map(|p| &p.ty).chain(std::iter::once(&f.ret_ty)).find_map(&inexact);
             let ty = sig.or_else(|| {
                 let mut v = Types(&inexact, None);
                 v.visit_expr(&f.body);
