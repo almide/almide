@@ -32,11 +32,6 @@ pub mod affine_shape;
 pub mod alias_safety;
 pub(crate) mod borrow_join;
 pub mod certificate;
-// The decision-site ledger's novel-item generators (tests/support/novel.rs),
-// for the in-crate novel tests (decision row witness.call-modes-skip).
-#[cfg(test)]
-#[path = "../../../tests/support/novel.rs"]
-pub(crate) mod novel;
 pub mod charge_probe;
 pub mod coown_names;
 pub mod host_ops;

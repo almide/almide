@@ -477,3 +477,28 @@ fn novel_every_floor_host_op_without_a_row_is_an_uncounted_host_call() {
     let user = format!("{}.{}", novel::module(), novel::ident("f"));
     assert!(!almide_mir::host_ops::is_uncounted_host_call(&user), "{user}: a user module's call has no stdlib body");
 }
+
+/// witness.call-modes-skip: a callee outside the program under a FRESH name —
+/// a fresh `__` helper, a fresh `module.fn` — is in no set the render serves,
+/// so it gets the out-of-range row the checker rejects, whatever its
+/// spelling (almide_mir::certificate::render_served_callee, #4828).
+#[test]
+fn novel_a_fresh_out_of_program_callee_is_rejected_whatever_its_spelling() {
+    use almide_mir::{CallArg, Init, MirFunction, Op, Repr, ValueId};
+    let site = |callee: &str| {
+        let main = MirFunction {
+            name: "main".into(),
+            ops: vec![
+                Op::Alloc { dst: ValueId(0), repr: Repr::Ptr { layout: almide_mir::PLACEHOLDER_LAYOUT }, init: Init::Opaque },
+                Op::CallFn { dst: None, name: callee.into(), args: vec![CallArg::Handle(ValueId(0))], result: None },
+                Op::Drop { v: ValueId(0) },
+            ],
+            ..Default::default()
+        };
+        let program: std::collections::BTreeMap<String, MirFunction> = [(main.name.clone(), main)].into_iter().collect();
+        almide_mir::certificate::call_modes_witness(&program, &almide_mir::certificate::render_served_callee)
+    };
+    for callee in [format!("__{}", novel::ident("helper")), format!("{}.{}", novel::module(), novel::ident("f"))] {
+        assert_eq!(site(&callee), "|1 0", "a fresh out-of-program callee `{callee}` was admitted with no row");
+    }
+}
