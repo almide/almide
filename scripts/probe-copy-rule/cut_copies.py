@@ -5,7 +5,7 @@ decodes the bytes again and proves or does not prove each statement).
 
   cut_copies.py <module.wasm> <allocator index>
 
-The allocator index is the anchor file's `alloc` line (4294967295 for none): a window may
+The allocator index is the anchor file's `alloc` line (`-` or 4294967295 for none): a window may
 call that function and no other. Prints, per copy,
 
   COPY <function> <instruction> <allocator> | <written> | <read> | <bytes>
@@ -182,7 +182,7 @@ def guesses(addr, env, seen, reads, version):
 
 def main():
     m = W.Module(sys.argv[1])
-    alloc = int(sys.argv[2])
+    alloc = NONE if sys.argv[2] == "-" else int(sys.argv[2])
     for k in range(len(m.bodies)):
         try:
             ins = W.instructions(m, k)

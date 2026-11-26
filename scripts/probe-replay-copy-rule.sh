@@ -91,8 +91,8 @@ for p in proofs/fixtures/heap-check/reinject/*.patch proofs/fixtures/history-rep
   abase="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.base/a.anchors")"
   abug="$(awk '$1 == "alloc" { print $2 }' "$OUT/$name.bug/a.anchors")"
   echo "   allocator index: unpatched ${abase:-none}, defect ${abug:-none}"
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.base/a.anchors.wasm" "${abase:-4294967295}" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
-  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.bug/a.anchors.wasm" "${abug:-4294967295}" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
+  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.base/a.anchors.wasm" "${abase:--}" > "$OUT/$name.base.cut" || { echo "   the cutter failed on the unpatched module"; continue; }
+  python3 -I "$TOOLS/cut_copies.py" "$OUT/$name.bug/a.anchors.wasm" "${abug:--}" > "$OUT/$name.bug.cut" || { echo "   the cutter failed on the defect module"; continue; }
   python3 -I "$TOOLS/copy_goals.py" "$G" "unpatched=$OUT/$name.base.cut" "defect=$OUT/$name.bug.cut" | sed 's/^/   /'
   t1=$(date +%s)
   find "$G" -maxdepth 1 -name 'C_*.v' | sort | xargs -P "${JOBS:-4}" -I{} bash -c 'one "$1"' _ {}
