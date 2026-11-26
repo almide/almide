@@ -477,6 +477,24 @@ impl WitnessRecorder {
         self.held_ops(local, "d")
     }
 
+    /// The loop-back of a loop-converted self tail call (tco.rs) ends this
+    /// activation's credit of the carried owner `local` (witness_hooks.rs
+    /// `witness_loop_back`): the ownership line records its release (`d`).
+    /// The bytes release that block later — at the local's next rebind or an
+    /// early exit, the site's dec-old — so the RC event is `D`, which the
+    /// byte check holds to such a release (anchor-check matching.rs
+    /// `loop_backs`), never to a release of its own.
+    pub fn loop_back_release(&mut self, local: u32) -> bool {
+        if !self.bound.contains_key(&local) {
+            return false;
+        }
+        if !self.branches.dead() {
+            crate::witness::rc::event('D', Some(local));
+            self.log.push(Ev::LOp(local, 'd'));
+        }
+        true
+    }
+
     /// A frame-ending edge (a `return_call`) finished its releases: nothing
     /// emitted after it on this path executes (#2756: inside an arm, only
     /// that arm is over).

@@ -238,7 +238,7 @@ pub(crate) fn build_helper_body(
         recorded = em.witness.take();
     }
     f.instructions().end();
-    crate::witness::helper::finish(hw, recorded, footprint, &f);
+    crate::witness::helper::finish(hw, recorded, footprint, &f, anchor_serial);
     crate::witness::anchor::seal(anchor_serial, &f);
     Ok((f, calls))
 }

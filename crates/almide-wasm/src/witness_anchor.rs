@@ -116,6 +116,12 @@ fn encoded(f: &wasm_encoder::Function) -> Vec<u8> {
     v.split_off(skip)
 }
 
+/// The offset of an encoded body's first instruction (after its locals).
+fn first_offset(raw: &[u8]) -> Option<usize> {
+    let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(raw, 0));
+    Some(body.get_operators_reader().ok()?.original_position() as usize)
+}
+
 /// The end offset of each instruction of an encoded body (locals skipped).
 fn ends(raw: &[u8]) -> Option<Vec<usize>> {
     let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(raw, 0));
@@ -144,6 +150,13 @@ pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Functio
     }
     let (Some(eo), Some(en)) = (ends(&ro), ends(&rn)) else { return };
     let mut map = HashMap::new();
+    // The body's first offset (after its locals) is no instruction's end,
+    // yet a window opened before the first instruction starts there (a
+    // `match list.get(..)` scrutinee's arm at the top of the body): it maps
+    // to the rewritten body's own start, the `loop` the rewrite put first.
+    if let (Some(so), Some(sn)) = (first_offset(&ro), first_offset(&rn)) {
+        map.insert(so, sn);
+    }
     for (n, &o) in origin.iter().enumerate() {
         if let (Some(&from), Some(&to)) = (eo.get(o as usize), en.get(n)) {
             map.insert(from, to);

@@ -78,15 +78,20 @@ fn a_named_index_with_no_body_is_refused() {
     }
 }
 
+/// A bundle that hands over its three program records (empty) and
+/// certifies no function: the whole check requires them (decision row
+/// anchor.check).
+const BUNDLE: &[u8] = b"bundle\nwitness init 0 (program)\n\nwitness bounds 0 (program)\n\nwitness fields 0 (program)\n\n";
+
 #[test]
 fn the_whole_check_refuses_a_named_allocator_that_is_not_the_proofs_list() {
-    let e = check(&module(), b"bundle\n", &anchors("1", "")).map(|_| ()).unwrap_err();
+    let e = check(&module(), BUNDLE, &anchors("1", "")).map(|_| ()).unwrap_err();
     assert!(e.contains("proved: `$alloc` is not the proof's `alloc_bytes`"), "refused for another reason: {e}");
 }
 
 #[test]
 fn the_whole_check_holds_no_routine_when_the_file_names_none() -> Result<(), String> {
-    let report = check(&module(), b"bundle\n", &anchors("-", ""))?;
+    let report = check(&module(), BUNDLE, &anchors("-", ""))?;
     assert_eq!(report.proved, Vec::<(&'static str, Differences)>::new());
     Ok(())
 }

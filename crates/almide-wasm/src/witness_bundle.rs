@@ -174,6 +174,10 @@ fn records_inner(
             };
             format!("proved {} {}\n", ship(crate::F_DEC_FLAT), ship(crate::F_FREE))
         }
+        // Per certified function, where its RC frame ships (`-`: its body
+        // did not ship): the anchor check refuses a certified function with
+        // no entry, or one whose position carries no `rc` frame.
+        + &format!("rcnames {}\n", rc_names(&locate, &rc_frames, &records))
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -203,6 +207,30 @@ fn records_inner(
     }
     records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
     Ok(((records, uncertified), anchor_file))
+}
+
+/// The `rcnames` tokens: each `ownership` record's function, at the shipped
+/// position of its rc frame (`-` when that body did not ship). A certified
+/// function the rc sink recorded no frame for gets no token, which the anchor
+/// check refuses.
+fn rc_names(locate: &Locator, frames: &[(u64, String, String)], records: &[Record]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    records
+        .iter()
+        .filter(|r| r.property == "ownership" && seen.insert(r.function.as_str()))
+        .filter_map(|r| {
+            let mine: Vec<u64> = frames.iter().filter(|(_, n, _)| *n == r.function).map(|(k, _, _)| *k).collect();
+            if mine.is_empty() {
+                return None;
+            }
+            let name = one_line(&r.function);
+            Some(match mine.iter().find_map(|k| locate.position(*k)) {
+                Some(j) => format!("{j}:{name}"),
+                None => format!("-:{name}"),
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The rc sink's frames that the shipped pass certified.
@@ -315,14 +343,12 @@ fn rc_lines(
                 })
                 .collect();
             // A body the self-tail-call loop conversion rewrote after sealing
-            // records each carried local's release at the loop-back, where
-            // the bytes hold none (witness_hooks.rs `witness_loop_back`):
-            // the rc translation check has no rule for that yet, so its
-            // frame is left out, as it was before the body's anchors were
-            // retargeted.
-            if locate.rewritten(*k) {
-                return None;
-            }
+            // (tco.rs) ships like any other: its anchors and windows were
+            // retargeted to the rewritten body (witness_anchor.rs
+            // `retarget`), and the loop-back's release of a carried local is
+            // the release its next rebind or an exit performs — the
+            // iteration-end rule of a `for` body (witness_paths.rs
+            // `end_iteration`), which the RC check already holds.
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
@@ -464,12 +490,9 @@ impl Locator {
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
     /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
     /// `None` for a body that did not ship or an empty window.
-    /// Only rc reads windows, and a rewritten body's rc frame is left out
-    /// (`rc_lines`), so its windows are too.
+    /// A body rewritten after sealing (tco.rs) reads its windows through
+    /// the retarget map.
     fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
-        if self.rewritten(serial) {
-            return None;
-        }
         let (from, to) = (self.remap(serial, from)?, self.remap(serial, to)?);
         let &i = self.pos.get(&serial)?;
         let j = self.ships_at[i]?;
@@ -505,11 +528,6 @@ impl Locator {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    /// Was body `serial` rewritten after sealing (tco.rs)?
-    fn rewritten(&self, serial: u64) -> bool {
-        self.remaps.contains_key(&serial)
     }
 
     /// The shipped position of body `serial`, when it shipped.

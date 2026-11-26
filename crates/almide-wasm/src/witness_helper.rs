@@ -114,11 +114,14 @@ fn audited(w: &WitnessRecorder, fp: &Footprint, f: &wasm_encoder::Function) -> b
 }
 
 /// The helper's certificate, or its withdrawal when the bytes hold an RC
-/// call the recorder did not hear.
-pub(crate) fn finish(hw: Option<HelperWitness>, w: Option<WitnessRecorder>, fp: Option<Footprint>, f: &wasm_encoder::Function) {
+/// call the recorder did not hear. A certified helper's RC events are its
+/// own frame (`anchor_serial`'s), which the bundle ships for the anchor
+/// check to hold to the helper's bytes like any other certified function's.
+pub(crate) fn finish(hw: Option<HelperWitness>, w: Option<WitnessRecorder>, fp: Option<Footprint>, f: &wasm_encoder::Function, anchor_serial: u64) {
     let (Some(hw), Some(w), Some(fp)) = (hw, w, fp) else { return };
     if audited(&w, &fp, f) {
         push_recorded(&hw.name, &w);
+        crate::witness::rc::frame(anchor_serial, &hw.name);
     } else {
         push_decline(&hw.name, &format!("{}:rc-unrecorded", hw.kind));
     }

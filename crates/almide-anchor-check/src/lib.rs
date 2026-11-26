@@ -84,7 +84,7 @@ pub use census::{census, census_with, Census, Tally};
 pub use rc::{check_rc, RcFns, RcReport};
 pub use proved::{shipped_routines, Differences, Shipped};
 pub use routines::check_named_routines;
-use anchors::{helper_sigs, proved_anchors};
+use anchors::{helper_sigs, proved_anchors, rc_names};
 use proved::check_proved_routines;
 pub use decode::{branch_target, decode, function_imports, store_width, Body};
 pub use fields::check_fields;
@@ -140,6 +140,9 @@ pub struct Report {
     /// The runtime routines held to the proof script's lists, each with
     /// where it is not its list byte for byte (proved.rs).
     pub proved: Vec<(&'static str, Differences)>,
+    /// Certified functions whose body did not ship (`rcnames` `-`): no
+    /// bytes, so no RC frame to hold.
+    pub rc_unshipped: usize,
 }
 
 struct Ctx<'b, 'a> {
@@ -264,16 +267,60 @@ pub fn bundle_records(bundle: &[u8], property: &str) -> Result<Vec<(String, Stri
     Ok(out)
 }
 
+/// The `(program)` witness of `property`, which the bundle MUST carry: the
+/// producer writes the init, bounds and fields records for every program
+/// (empty when nothing was recorded), so an absent one is a bundle whose
+/// events were not handed over — refused, never judged as none
+/// (decision row anchor.check).
+fn required_witness(bundle: &[u8], property: &str) -> Result<String, String> {
+    if bundle_records(bundle, property)?.iter().any(|(f, _)| f == "(program)") {
+        bundle_witness(bundle, property)
+    } else {
+        Err(format!("bundle: no `{property}` record — an absent witness is not an empty one"))
+    }
+}
+
+/// The RC frames cover the certified functions (decision row anchor.check):
+/// every function the bundle carries an `ownership` record for is named once
+/// on the anchor file's `rcnames` line, and one named at a position has an
+/// `rc` frame there; a frame the producer leaves out is refused, never judged
+/// as fewer functions. A name the bundle does not certify is refused too.
+/// Returns how many certified functions did not ship (`-`: no bytes).
+fn rc_frames_cover(bundle: &[u8], anchors: &str, frames: Option<&[(usize, String)]>) -> Result<usize, String> {
+    let certified: Vec<String> = bundle_records(bundle, "ownership")?.into_iter().map(|(f, _)| f).collect();
+    if certified.is_empty() {
+        return Ok(0);
+    }
+    let frames = frames.ok_or("anchors: the bundle certifies functions and the anchor file has no `rc` lines")?;
+    let names = rc_names(anchors)?.ok_or("anchors: the bundle certifies functions and the anchor file has no `rcnames` line")?;
+    let mut seen = std::collections::HashSet::new();
+    for (pos, name) in &names {
+        if !certified.contains(name) {
+            return Err(format!("anchors: `rcnames` names `{name}`, which the bundle does not certify"));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(format!("anchors: `rcnames` names `{name}` twice"));
+        }
+        if let Some(p) = pos.filter(|p| !frames.iter().any(|(q, _)| q == p)) {
+            return Err(format!("anchors: `{name}` ships at position {p} and has no `rc` frame there"));
+        }
+    }
+    if let Some(missing) = certified.iter().find(|f| !seen.contains(f.as_str())) {
+        return Err(format!("anchors: the certified function `{missing}` has no `rcnames` entry (its RC frame is missing)"));
+    }
+    Ok(names.iter().filter(|(p, _)| p.is_none()).count())
+}
+
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
     let bodies = decode(wasm)?;
     let (alloc, ia, ba, judges, holds, rc_lines) = parse_anchors_held(anchors)?;
-    let mut rep = Report::default();
+    let mut rep = Report { rc_unshipped: rc_frames_cover(bundle, anchors, rc_lines.as_ref().map(|l| l.2.as_slice()))?, ..Report::default() };
     check_init(
         &bodies,
         alloc,
-        &bundle_witness(bundle, "init")?,
+        &required_witness(bundle, "init")?,
         &ia,
         &mut rep,
     )?;
@@ -296,8 +343,8 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         rc_lines.as_ref().and_then(|l| l.0),
         proved_line.unwrap_or((None, None)),
     )?;
-    check_bounds_alloc(&bodies, &bundle_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds, imports: function_imports(wasm) }, alloc, &mut rep)?;
-    check_fields(&bodies, function_imports(wasm), alloc, &bundle_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
+    check_bounds_alloc(&bodies, &required_witness(bundle, "bounds")?, &ba, Sites { judges: &judges, holds: &holds, imports: function_imports(wasm) }, alloc, &mut rep)?;
+    check_fields(&bodies, function_imports(wasm), alloc, &required_witness(bundle, "fields")?, &fields_anchors(anchors), &mut rep)?;
     if let Some((inc, decs, frames, arms, routines, helpers)) = rc_lines {
         let mut r = RcReport::default();
         let sigs = helper_sigs(bundle, function_imports(wasm), &frames, &helpers)?;

@@ -57,11 +57,15 @@ impl Frame<'_, '_> {
         let mut m = self.preference();
         self.match_events(&mut m);
         self.absorb(&mut m);
+        let shared = self.loop_backs(&mut m.owner);
         // Who holds a node can change along an augmenting path; read the
         // final matching.
         let mut got = vec![false; self.ev.evs.len()];
         for o in m.owner.iter().flatten() {
             got[*o] = true;
+        }
+        for e in shared {
+            got[e] = true;
         }
         let mut co: Vec<Vec<usize>> = vec![Vec::new(); self.nc];
         self.share(&mut m.owner, &m.by_pref, &mut got, &mut co);
@@ -82,7 +86,7 @@ impl Frame<'_, '_> {
         let (evs, nc) = (&self.ev.evs, self.nc);
         let order: Vec<usize> = (0..evs.len())
             .filter(|&e| evs[e].0 == 'o')
-            .chain((0..evs.len()).filter(|&e| evs[e].0 != 'o' && !is_move(evs[e].0)))
+            .chain((0..evs.len()).filter(|&e| evs[e].0 != 'o' && evs[e].0 != 'D' && !is_move(evs[e].0)))
             .chain((0..evs.len()).filter(|&e| is_move(evs[e].0)))
             .collect();
         // A call inside an arm or routine window is tried after those
@@ -162,6 +166,56 @@ impl Frame<'_, '_> {
                 }
             }
         }
+    }
+
+    /// The LOOP-BACK rule (decision row anchor.check). A self tail call the
+    /// loop conversion rewrote (almide-wasm tco.rs) ends the activation at
+    /// its `br`, carrying an owner local into the next iteration with the
+    /// block it holds: the recorder ends the credit there (`D<local>`), and
+    /// the bytes release that block where the local is next released as a
+    /// rebind's old occupant or by an early exit — a release the recorder
+    /// logs as that site's `o<local>` (the dec-old), in the activation that
+    /// holds nothing yet. So a `D` takes a live release on its local that
+    /// an `o` on that local holds; the displaced `o` is then a rebind with no
+    /// instruction of its own (counted). It never takes a call no event
+    /// holds, nor one a release (`d`), a share or a move holds: the calls the
+    /// frame accounts are the same with or without it, so it cannot hide a
+    /// release the bytes dropped or one they added; a `D` left with no such
+    /// call is refused. A loop-back ends its activation's path, so the `D`s
+    /// of one local at different loop-backs lie on paths no run passes two
+    /// of — a `D` on a path EXCLUSIVE of every `D` already holding a call
+    /// (two arms of one recorder site) shares that call, as the moves of
+    /// one credit do (`absorb_moves`); one that is not takes a call of its
+    /// own. Returns the `D`s that share.
+    fn loop_backs(&self, owner: &mut [Option<usize>]) -> Vec<usize> {
+        let evs = &self.ev.evs;
+        let exclusive = |a: usize, b: usize| {
+            self.ev.evpath[a].iter().any(|(s, x)| self.ev.evpath[b].iter().any(|(t, y)| s == t && x != y))
+        };
+        // Per call a D holds, the D events that share it.
+        let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+        let mut shared = Vec::new();
+        for (e, &(kind, local)) in evs.iter().enumerate() {
+            let ('D', Some(l)) = (kind, local) else { continue };
+            if let Some(g) = groups
+                .iter_mut()
+                .find(|(i, members)| evs[members[0]].1 == Some(l) && owner[*i] == Some(members[0]) && members.iter().all(|&m| exclusive(m, e)))
+            {
+                g.1.push(e);
+                shared.push(e);
+                continue;
+            }
+            let rebind_held = |i: usize| {
+                matches!(self.calls[i].1, 'd' | 'j')
+                    && super::through(&self.calls[i].2, l)
+                    && owner[i].is_some_and(|o| evs[o] == ('o', Some(l)))
+            };
+            if let Some(i) = (0..self.live).find(|&i| rebind_held(i)) {
+                owner[i] = Some(e);
+                groups.push((i, vec![e]));
+            }
+        }
+        shared
     }
 
     /// A move's credit is released by the arm on some of its paths: one

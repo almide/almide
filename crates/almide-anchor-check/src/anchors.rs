@@ -91,7 +91,7 @@ pub fn parse_anchors_held(text: &str) -> Result<AnchorsHeld, String> {
     // `proved_anchors`.
     let mut rest: Vec<&str> = lines
         .filter(|l| {
-            !["fields", "prims", "selfhost", "proved"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
+            !["fields", "prims", "selfhost", "proved", "rcnames"].iter().any(|k| *l == *k || l.strip_prefix(k).is_some_and(|r| r.starts_with(' ')))
         })
         .collect();
     let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
@@ -214,4 +214,27 @@ pub(crate) fn proved_anchors(text: &str) -> Result<Option<(Option<u32>, Option<u
         (Some(dec), Some(free), None) => Ok(Some((dec?, free?))),
         _ => Err("anchors: the `proved` line names the flat release and the free routine".into()),
     }
+}
+
+/// The anchor file's `rcnames` line: per function the bundle certifies
+/// (an `ownership` record), `<position>:<name>` where its body ships, `-:<name>`
+/// where it did not ship (no bytes to hold). `None` when the file has none.
+pub(crate) fn rc_names(text: &str) -> Result<Option<Vec<(Option<usize>, String)>>, String> {
+    let Some(rest) = text.lines().find_map(|l| if l == "rcnames" { Some("") } else { l.strip_prefix("rcnames ") }) else {
+        return Ok(None);
+    };
+    rest.split_whitespace()
+        .map(|t| {
+            let (p, n) = t.split_once(':').ok_or_else(|| format!("anchors: bad rcnames token `{t}`"))?;
+            let p = match p {
+                "-" => None,
+                x => Some(x.parse().map_err(|_| format!("anchors: bad rcnames position `{t}`"))?),
+            };
+            if n.is_empty() {
+                return Err(format!("anchors: rcnames token `{t}` names no function"));
+            }
+            Ok((p, n.to_string()))
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map(Some)
 }

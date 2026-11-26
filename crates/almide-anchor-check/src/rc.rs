@@ -678,6 +678,9 @@ impl<'x, 'a> Frame<'x, 'a> {
         let (at, k, names_of) = (self.calls[i].0, self.calls[i].1, &self.calls[i].2);
         match self.ev.evs[e] {
             ('o', Some(l)) => matches!(k, 'd' | 'j') && names_of.contains(&l),
+            // A loop-back release takes its call only by the loop-back rule
+            // (matching.rs `loop_backs`), never by the ordinary matching.
+            ('D', _) => false,
             // The arm or routine the credit moved into, or one enclosing
             // it (a callback's move released by the fold that called it).
             // A hold's move (`h`) takes only a release read straight out of
@@ -720,6 +723,6 @@ impl<'x, 'a> Frame<'x, 'a> {
 
 /// A call's argument names `l`: read through it, or (a C-319 cell's local)
 /// loaded out of the block the cell holds.
-fn through(names_of: &[u32], l: u32) -> bool {
+pub(super) fn through(names_of: &[u32], l: u32) -> bool {
     names_of.contains(&l) || (l < GLOBAL_HOLDER.min(CELL_HOLDER) && names_of.contains(&(CELL_HOLDER | l)))
 }

@@ -516,7 +516,7 @@ impl Emitter<'_> {
     pub(crate) fn witness_loop_back(&mut self, carried: &[u32]) {
         let Some(w) = self.witness.as_mut() else { return };
         for &idx in carried {
-            if !w.dec_local(idx) {
+            if !w.loop_back_release(idx) {
                 w.poison();
             }
         }
