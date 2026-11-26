@@ -1,0 +1,7 @@
+import http
+
+test "probe" {
+  let name = string.to_lower("CONTENT-TYPE")
+  let r = http.set_header(http.response(200, "x"), name, "text/html")
+  assert_eq(http.body(r), "x")
+}

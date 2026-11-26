@@ -117,6 +117,7 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
+    crate::incomplete::print_report();
     let _ = std::fs::remove_dir_all(&ctx.dir);
     if !all_pass {
         std::process::exit(1);
@@ -181,7 +182,7 @@ fn alloc(ctx: &Ctx, n: u64) -> String {
         let mut cmd = Command::new(&ctx.almide);
         cmd.arg("run")
             .arg(&file)
-            .args(["--target", "wasm", "--"])
+            .args(["--target", "wasm", crate::incomplete::FLAG, "--"])
             .args(sandbox::ARGS)
             .env("ALMIDE_WASM_ALLOC_COUNT", "1");
         world.enter(&mut cmd);
@@ -229,7 +230,7 @@ fn diamond(ctx: &Ctx) -> String {
             let mut c = Command::new(&ctx.almide);
             c.arg("run").arg(&entry);
             if wasm {
-                c.args(["--target", "wasm"]);
+                c.args(["--target", "wasm", crate::incomplete::FLAG]);
             }
             c.arg("--").args(sandbox::ARGS);
             world.enter(&mut c);
@@ -433,7 +434,7 @@ fn one_program(ctx: &Ctx, src: &str, i: u64, stock: bool, findings: &Path) -> Ou
             Command::new(&bin)
         } else {
             let mut c = Command::new(&ctx.almide);
-            c.arg("run").arg(&file).args(["--target", "wasm", "--"]);
+            c.arg("run").arg(&file).args(["--target", "wasm", crate::incomplete::FLAG, "--"]);
             c
         };
         c.args(sandbox::ARGS);
@@ -515,9 +516,13 @@ fn one_program(ctx: &Ctx, src: &str, i: u64, stock: bool, findings: &Path) -> Ou
     match Command::new(&ctx.almide)
         .arg("build")
         .arg(&file)
-        .args(["--target", "wasm", "-o"])
+        .args(["--target", "wasm", crate::incomplete::FLAG, "-o"])
         .arg(&wasm)
         .output()
+        .map(|mut o| {
+            crate::incomplete::take(&mut o.stderr);
+            o
+        })
     {
         Ok(o) if o.status.success() => {}
         Ok(o) => {

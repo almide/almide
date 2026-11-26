@@ -198,3 +198,48 @@ fn novel_fan_arms_reaching_ordered_through_a_minted_symbol_run_in_order() {
         "expected exactly the reading-only fan threaded; {threaded} fans open a thread group (an arm reaching an @ordered fn through a minted symbol was threaded, or the control fan was not):\n{module}\n{main}"
     );
 }
+
+/// witness.native-route-refusals (C-461, C-464): the native build route
+/// refuses, before any render, what a native binary has no verified form for,
+/// read from the program's declarations and types, never from a name. Each
+/// subject is fresh: an `@extern` fn bound only for another target (a fresh
+/// host module and fn, reached from `main`) is E081; a fresh `@extern(rust)`
+/// fn returning a Region is E090; a fresh record type whose field holds a
+/// Float two containers deep, held in a Set, is E081 (the refusal names the
+/// type it read, not the fresh name). `check --target native`
+/// reports the verdict and `build` refuses before rustc runs. The control: the
+/// same fresh fn given an Almide body checks clean on the native target.
+#[test]
+fn novel_native_route_refuses_what_no_native_form_exists_for() {
+    let (host, hook, maker, key) = (novel::ident("host"), novel::ident("hook"), novel::ident("make"), novel::ident("Key"));
+    let cases = [
+        (
+            format!("@extern(wasm, \"{host}\", \"{hook}\")\nfn {hook}(msg: String) -> Unit\n\neffect fn main() -> Unit = {hook}(\"hi\")\n"),
+            "E081",
+            format!("`{hook}` has no implementation on the native target"),
+        ),
+        (
+            format!("import ffi\n\n@extern(rust, \"crate::{host}\", \"{maker}\")\nfn {maker}(n: Int) -> Region\n\neffect fn main() -> Unit = println(int.to_string(ffi.len({maker}(4))))\n"),
+            "E090",
+            format!("`{maker}` returns a Region"),
+        ),
+        (
+            format!("type {key} = {{ xs: List[List[Float]] }}\n\neffect fn main() -> Unit = {{\n  let s: Set[{key}] = set.from_list([{{ xs: [[1.5]] }}])\n  println(int.to_string(set.len(s)))\n}}\n"),
+            "E081",
+            "holds a `Set[{ xs: List[List[Float]] }]`".to_string(),
+        ),
+    ];
+    for (prog, code, says) in &cases {
+        let (_t, proj) = project("", &[("src/main.almd", prog.clone())]);
+        for args in [&["check", "src/main.almd", "--target", "native"][..], &["build", "src/main.almd", "-o", "out"][..]] {
+            let o = run(&proj, args);
+            let t = text(&o);
+            assert_ne!(o.status.code(), Some(0), "`almide {}` admitted a program with no native form:\n{prog}\n{t}", args.join(" "));
+            assert!(t.contains(&format!("error[{code}]")) && t.contains(says.as_str()), "`almide {}`: no {code} naming the fresh item:\n{prog}\n{t}", args.join(" "));
+        }
+    }
+    let bodied = format!("effect fn {hook}(msg: String) -> Unit = println(msg)\n\neffect fn main() -> Unit = {hook}(\"hi\")!\n");
+    let (_t, proj) = project("", &[("src/main.almd", bodied.clone())]);
+    let o = run(&proj, &["check", "src/main.almd", "--target", "native"]);
+    assert!(o.status.success(), "control: a fresh fn with an Almide body checks clean on the native target:\n{bodied}\n{}", text(&o));
+}

@@ -378,6 +378,9 @@ impl Emitter<'_> {
                 let move_in = self.take_move_in(args, save.is_none(), tail && Some(index) != self.self_index);
                 let mut moved_in = Vec::new();
                 let site = crate::witness::modes::site_begin();
+                // #1961: only THIS site's own arguments park the window's
+                // temporary; a call nested in them is not the window site.
+                let region_prev = std::mem::replace(&mut self.region_site, save.is_some().then_some(depth));
                 if append_window_ok {
                     self.note_tail_reuse_args(args, true);
                 }
@@ -423,6 +426,7 @@ impl Emitter<'_> {
                         self.detach_global_mut_arg(a, i)?;
                     }
                 }
+                self.region_site = region_prev;
                 if append_window_ok {
                     self.note_tail_reuse_args(args, false);
                 }
@@ -433,8 +437,8 @@ impl Emitter<'_> {
                 self.calls.insert(i);
                 if let Some(blk) = save {
                     self.f.instructions().call(index);
-                    self.forget_window_temps(depth);
-                    self.emit_region_restore(blk);
+                    let reclaimed = self.forget_window_temps(depth);
+                    self.emit_region_restore(blk, reclaimed);
                     return Ok(ret);
                 }
                 // Tail position with a matching return type → return_call:

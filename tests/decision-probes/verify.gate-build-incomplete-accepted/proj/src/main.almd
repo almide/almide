@@ -1,0 +1,5 @@
+fn try_first(xs: List[Int]) -> Int? = list.first(xs)?
+
+effect fn main() -> Unit = {
+  println("${try_first([1, 2]) ?? 0}")
+}

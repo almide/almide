@@ -7,12 +7,15 @@
 // runtime map.rs) and registers the key types at the start of `main`, so the
 // runtime indexes them like an Int or String key.
 //
-// A type qualifies only when its `==` is the derived field-by-field one over
-// exact source equality (`eq_safe`, no hand-written `eq_fields` impl) and
-// every field's own type qualifies — so two equal values always write equal
-// bytes. Anything else (a Float field, a closure, a Map or Set field, a region
-// twin, a Value) keeps the linear scan: the decision is the type's, never a
-// name's, and an unknown type is never hashed.
+// A type qualifies when its `==` is the derived field-by-field one over
+// exact source equality (`eq_safe`) and every field's own type qualifies — so
+// two equal values always write equal bytes — or when it compares its Float
+// fields per field (`eq_fields`, #4687): those fields write their canonical
+// bits (every NaN one value, -0.0 as 0.0), so the bytes are one-to-one under
+// the collection key equality (ALS-C11), and the type registers as a Float
+// key, compared by its bytes where `==` says no. Anything else (a closure, a
+// Map or Set field, a region twin, a Value) keeps the linear scan: the
+// decision is the type's, never a name's, and an unknown type is never hashed.
 
 /// The marker line in `main` that becomes the key-type registration call
 /// (or nothing) once every generated type is known.
@@ -55,13 +58,60 @@ fn key_type_ok(i: u16, seen: &mut std::collections::BTreeSet<u16>) -> bool {
     if let Some(e) = d.list_of {
         return key_field_ok(e, seen);
     }
-    d.eq_safe
-        && d.eq_fields.is_none()
-        && !is_region(i)
-        && match &d.cases {
-            Some(cases) => cases.iter().all(|(_, fs)| fs.iter().all(|f| key_field_ok(*f, seen))),
-            None => d.fields.iter().all(|f| key_field_ok(*f, seen)),
-        }
+    if is_region(i) {
+        return false;
+    }
+    let kinds: Vec<&[NTy]> = match &d.cases {
+        Some(cases) => cases.iter().map(|(_, fs)| fs.as_slice()).collect(),
+        None => vec![d.fields.as_slice()],
+    };
+    match &d.eq_fields {
+        // A Float lane encodes canonically; every other field qualifies itself.
+        Some(eqs) => kinds.iter().zip(eqs).all(|(ks, es)| {
+            ks.iter().zip(es).all(|(k, e)| *e != FieldEq::Exact || matches!(k, NTy::F64 | NTy::F32) || key_field_ok(*k, seen))
+        }),
+        None => d.eq_safe && kinds.iter().all(|ks| ks.iter().all(|f| key_field_ok(*f, seen))),
+    }
+}
+
+/// Whether generated type `i`'s key bytes encode a Float (ALS-C11): its own
+/// per-field Float comparison, or a field type's.
+fn key_type_floaty(i: u16, seen: &mut std::collections::BTreeSet<u16>) -> bool {
+    if !seen.insert(i) {
+        return false;
+    }
+    let d = RECS.with(|r| r.borrow()[i as usize].clone());
+    if d.eq_fields.as_ref().is_some_and(|eqs| eqs.iter().flatten().any(|e| *e != FieldEq::Exact)) {
+        return true;
+    }
+    let mut fields: Vec<NTy> = d.fields.clone();
+    if let Some(cases) = &d.cases {
+        fields.extend(cases.iter().flat_map(|(_, fs)| fs.iter().copied()));
+    }
+    fields.extend(d.option_of);
+    fields.extend(d.list_of);
+    if let Some((o, e)) = d.result_of {
+        fields.extend([o, e]);
+    }
+    // A real `f64` / `f32` field (the runtime's canonical impl) is a Float too.
+    fields.into_iter().any(|f| matches!(f, NTy::F64 | NTy::F32) || matches!(f, NTy::Rec(j) if key_type_floaty(j, seen)))
+}
+
+/// One field's key encoding: an exact field writes its own bytes, a Float
+/// lane its canonical bits (ALS-C11). `x` is the field place, `deref` turns a
+/// bound reference into the lane value.
+fn key_field_encode(e: FieldEq, x: &str, deref: &str) -> String {
+    match e {
+        FieldEq::Exact => format!("{x}.almide_key_encode(out);"),
+        FieldEq::F64Bits => format!("almide_key_f64_bits(f64::from_bits({deref}{x} as u64)).almide_key_encode(out);"),
+        FieldEq::F32Bits => format!("almide_key_f32_bits(f32::from_bits({deref}{x} as u32)).almide_key_encode(out);"),
+        FieldEq::VecF64Bits => format!(
+            "out.extend_from_slice(&({x}.len() as u64).to_le_bytes()); for y in {x}.iter() {{ almide_key_f64_bits(f64::from_bits(*y as u64)).almide_key_encode(out); }}"
+        ),
+        FieldEq::VecF32Bits => format!(
+            "out.extend_from_slice(&({x}.len() as u64).to_le_bytes()); for y in {x}.iter() {{ almide_key_f32_bits(f32::from_bits(*y as u32)).almide_key_encode(out); }}"
+        ),
+    }
 }
 
 /// The struct and enum types that need an `AlmideKeyEncode` impl: every key
@@ -129,8 +179,9 @@ pub(crate) fn key_encode_defs() -> String {
                     } else {
                         let binds: Vec<String> = (0..fs.len()).map(|k| format!("x{k}")).collect();
                         out.push_str(&format!("            {n}::C{t}({}) => {{\n                out.extend_from_slice(&{t}u32.to_le_bytes());\n", binds.join(", ")));
-                        for b in &binds {
-                            out.push_str(&format!("                {b}.almide_key_encode(out);\n"));
+                        let eqs = case_field_eqs(&d, cases, *t, binds.len());
+                        for (b, e) in binds.iter().zip(eqs) {
+                            out.push_str(&format!("                {}\n", key_field_encode(e, b, "*")));
                         }
                         out.push_str("            }\n");
                     }
@@ -138,8 +189,9 @@ pub(crate) fn key_encode_defs() -> String {
                 out.push_str("        }\n");
             }
             None => {
-                for k in 0..d.fields.len() {
-                    out.push_str(&format!("        self.f{k}.almide_key_encode(out);\n"));
+                let eqs: Vec<FieldEq> = d.eq_fields.as_ref().map(|e| e[0].clone()).unwrap_or_else(|| vec![FieldEq::Exact; d.fields.len()]);
+                for (k, e) in eqs.into_iter().enumerate() {
+                    out.push_str(&format!("        {}\n", key_field_encode(e, &format!("self.f{k}"), "")));
                 }
             }
         }
@@ -147,7 +199,9 @@ pub(crate) fn key_encode_defs() -> String {
     }
     out.push_str("fn almide_register_key_types() {\n");
     for i in &roots {
-        out.push_str(&format!("    almide_map_register_key::<{}>();\n", struct_name(*i)));
+        // A Float-holding key compares by its canonical bytes (ALS-C11).
+        let register = if key_type_floaty(*i, &mut Default::default()) { "almide_map_register_float_key" } else { "almide_map_register_key" };
+        out.push_str(&format!("    {register}::<{}>();\n", struct_name(*i)));
     }
     out.push_str("}\n\n");
     out
@@ -158,4 +212,14 @@ pub(crate) fn key_encode_defs() -> String {
 pub(crate) fn place_key_registration(bodies: &str, defs: &str) -> String {
     let call = if defs.is_empty() { "" } else { "    almide_register_key_types();\n" };
     bodies.replacen(KEY_TYPES_MARKER, call, 1)
+}
+
+/// The per-field comparison kinds of enum case `tag` (all exact when the type
+/// derives its equality).
+fn case_field_eqs(d: &RecDecl, cases: &[(u32, Vec<NTy>)], tag: u32, n: usize) -> Vec<FieldEq> {
+    let pos = cases.iter().position(|(t, _)| *t == tag);
+    match (&d.eq_fields, pos) {
+        (Some(eqs), Some(p)) => eqs[p].clone(),
+        _ => vec![FieldEq::Exact; n],
+    }
 }

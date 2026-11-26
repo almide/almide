@@ -1,0 +1,7 @@
+import http
+import self.server
+
+effect fn main() -> Unit = {
+  let greeting = "hello"
+  server.serve_on(8080, (req) => http.response(200, greeting))!
+}

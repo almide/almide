@@ -18,6 +18,7 @@ From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import String Ascii.
+From Stdlib Require Import Lia Wf_nat.
 Open Scope Z_scope.
 
 (* The MIR ownership ops on a single reference-counted object — certificate
@@ -83,7 +84,19 @@ Inductive Op : Type :=
      (this guard) and the dynamic count (the shipped test) together give
      exclusivity — `UniqueTake.probe_exclusive`; neither alone does. After a
      Probe the line may only probe again or end in one release (`drained`). *)
-  | Probe : Op.
+  | Probe : Op
+  (* Reclaim = −1 on its line (the `w` byte, certificate format v9): the
+     holder's credit is discharged by a REGION RESTORE, not by a release
+     call. A `consume(produce(scalars))` region window (#1961) parks the
+     producer's result for the consumer's borrowed parameter and never
+     releases it block by block: `RegionRestore` rewinds the bump pointer and
+     the class heads past every block the window took (RuntimeModel.v
+     `region_restore_reclaims`). It folds exactly like Dec — a reclaim of a
+     line holding no credit FAULTS — so, like Alias / MoveOut, it costs the
+     balance theorems nothing; the distinct constructor is the ground fact
+     the RC byte check holds to the shipped restore (almide-anchor-check
+     rc.rs, `w-@<window>`), where a `d` is held to a release call. *)
+  | Reclaim : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -116,6 +129,7 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   | ShareOut :: rest => exec rest rc
   | Take :: rest => exec rest (rc + 1)
   | Probe :: rest => if rc <=? 0 then None else exec rest rc
+  | Reclaim :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -212,6 +226,7 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "s"%char) (Ascii.eqb a "S"%char) then Some ShareOut
   else if orb (Ascii.eqb a "k"%char) (Ascii.eqb a "K"%char) then Some Take
   else if orb (Ascii.eqb a "u"%char) (Ascii.eqb a "U"%char) then Some Probe
+  else if orb (Ascii.eqb a "w"%char) (Ascii.eqb a "W"%char) then Some Reclaim
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -291,6 +306,7 @@ Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
   | ShareOut :: rest => reuses_unique rest rc
   | Take :: rest => reuses_unique rest (rc + 1)
   | Probe :: rest => if rc <=? 0 then true else reuses_unique rest rc
+  | Reclaim :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
   end.
 
 (* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
@@ -310,6 +326,7 @@ Proof.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + apply IH. exact H.
     + apply IH. exact H.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
     + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
 Qed.
 
@@ -386,6 +403,47 @@ Proof. reflexivity. Qed.
    focused alphabet; this is the production port over the full Inc/Alias/Dec/
    MoveOut/Reuse alphabet so the extracted checker accepts loop certs.) *)
 
+(* ─── NESTED BRANCHES (certificate format v10) ───
+   A one-shot branch whose arms may themselves contain one-shot branches: a
+   sequence of ops (`NOp1`) and binary branches (`NBr`, its two arms and
+   the rest of the arm it sits in). The producer writes
+   one when the paths of a frame reach a point in the SAME holder state with
+   different histories (a select whose two arms leave different holders that
+   reconverge only later): the line is then `C{u|v}…` with `u`, `v` carrying
+   branches of their own, instead of one whole path per history. Its fold
+   `nexec` is CBranch's, recursively: both arms of every branch run
+   fault-free from the count at the branch and AGREE, and the run continues
+   at the agreed count. Kept out of CertItem itself so every other item stays
+   flat; an arm here holds no loop, no exit and no abort (the parser poisons
+   a marker or a loop inside a nested arm). One plain inductive, so every
+   function over it is structural. *)
+Inductive NOps : Type :=
+  | NEnd : NOps
+  | NOp1 : Op -> NOps -> NOps
+  (* a branch: its two arms, then the rest of the arm it sits in *)
+  | NBr : NOps -> NOps -> NOps -> NOps.
+
+Fixpoint nexec (n : NOps) (rc : Z) : option Z :=
+  match n with
+  | NEnd => Some rc
+  | NOp1 o rest =>
+      match exec [o] rc with Some r => nexec rest r | None => None end
+  | NBr t e rest =>
+      match nexec t rc, nexec e rc with
+      | Some a, Some b => if Z.eqb a b then nexec rest a else None
+      | _, _ => None
+      end
+  end.
+
+(* CONCRETE unrolling of a nested arm: every branch resolved to the ONE arm
+   the runtime takes. *)
+Inductive NUnrolls : NOps -> list Op -> Prop :=
+  | NU_end : NUnrolls NEnd []
+  | NU_op : forall o a b, NUnrolls a b -> NUnrolls (NOp1 o a) (o :: b)
+  | NU_br : forall t e a ft b (choice : bool),
+      NUnrolls (if choice then t else e) ft -> NUnrolls a b ->
+      NUnrolls (NBr t e a) (ft ++ b).
+
 Inductive CertItem : Type :=
   | COp : Op -> CertItem            (* a plain op *)
   | CLoop : list Op -> CertItem     (* a loop body run any number of times *)
@@ -432,6 +490,11 @@ Inductive CertItem : Type :=
        DISCHARGED, not leaked. The line continues from the SURVIVING arm's
        result alone (CBranchRet's shape), so every non-aborting path still
        balances exactly. *)
+  | CNest : NOps -> NOps -> CertItem
+    (* a one-shot branch whose arms may contain branches (format v10, the
+       NOps sequence above): accepted iff `nexec` runs both arms from the
+       entry count to the SAME result; the line continues at that count —
+       CBranch's rule, applied at every depth. *)
   | CPoison : CertItem.
     (* an always-rejecting parse residue (format v5): a malformed exit marker
        (`x` not arm-terminal, both arms exiting, or `x` outside a `{…|…}`
@@ -490,6 +553,11 @@ Fixpoint exec_line (cs : list CertItem) (rc : Z) : option Z :=
       | Some rt, Some re => if abthen then exec_line rest re else exec_line rest rt
       | _, _ => None
       end
+  | CNest thenb elseb :: rest =>
+      match nexec thenb rc, nexec elseb rc with
+      | Some rt, Some re => if Z.eqb rt re then exec_line rest rt else None
+      | _, _ => None
+      end
   | CPoison :: _ => None
   end.
 
@@ -514,6 +582,7 @@ Proof.
     + apply IH.
     + apply IH.
     + destruct (rc <=? 0). reflexivity. apply IH.
+    + destruct (rc <=? 0). reflexivity. apply IH.
 Qed.
 
 (* exec over a cons = single-op step then the rest. *)
@@ -522,6 +591,27 @@ Lemma exec_cons :
     exec (o :: b) rc =
       match exec [o] rc with Some rc' => exec b rc' | None => None end.
 Proof. intros o b rc. change (o :: b) with ([o] ++ b). apply exec_app. Qed.
+
+(* SOUNDNESS CORE of a nested arm: an accepted nested arm executes EVERY
+   unrolling (each branch at every depth resolved to one arm) to its own
+   result. *)
+Lemma nexec_unroll :
+  forall ns f, NUnrolls ns f -> forall rc r, nexec ns rc = Some r -> exec f rc = Some r.
+Proof.
+  intros ns f HU. induction HU as [| o a b HU IH | t e a ft b choice HT IHT HU IH];
+    intros rc r Hx.
+  - exact Hx.
+  - cbn [nexec] in Hx. rewrite exec_cons.
+    destruct (exec [o] rc) as [r1 |]; [| discriminate]. exact (IH r1 r Hx).
+  - cbn [nexec] in Hx.
+    destruct (nexec t rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (nexec e rc) as [re |] eqn:Ee; [| discriminate].
+    destruct (Z.eqb rt re) eqn:Eq; [| discriminate].
+    apply Z.eqb_eq in Eq. subst re.
+    rewrite exec_app. destruct choice.
+    + rewrite (IHT rc rt Et). exact (IH rt r Hx).
+    + rewrite (IHT rc rt Ee). exact (IH rt r Hx).
+Qed.
 
 (* A flat body that PRESERVES rc, repeated n times, still preserves rc. *)
 Lemma exec_repeat_preserve :
@@ -593,7 +683,12 @@ Inductive UnrollsL : list CertItem -> list Op -> Prop :=
   | UL_branchabort_cont : forall abthen thenb elseb a b,
       UnrollsL a b ->
       UnrollsL (CBranchAbort abthen thenb elseb :: a)
-               ((if abthen then elseb else thenb) ++ b).
+               ((if abthen then elseb else thenb) ++ b)
+  (* a nested branch (format v10): the run takes ONE arm, and inside it one
+     arm of every branch it reaches. *)
+  | UL_nest : forall thenb elseb a ft b (choice : bool)
+      (Hnest : NUnrolls (if choice then thenb else elseb) ft), UnrollsL a b ->
+      UnrollsL (CNest thenb elseb :: a) (ft ++ b).
 
 (* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling either
    to the line's own result — or, on a path that EXITS through a returning
@@ -618,6 +713,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + apply IHHU; exact Hexec.
     + apply IHHU; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
     + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
@@ -672,6 +768,16 @@ Proof.
     rewrite exec_app. destruct abthen.
     + rewrite Ee. apply IHHU. exact Hexec.
     + rewrite Et. apply IHHU. exact Hexec.
+  - (* CNest — the run takes one arm; nexec_unroll runs it to the agreed
+       count, and the line continues there. *)
+    simpl in *.
+    destruct (nexec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (nexec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    destruct (Z.eqb rt re) eqn:Eq; [| discriminate].
+    apply Z.eqb_eq in Eq. subst re.
+    rewrite exec_app. destruct choice.
+    + rewrite (nexec_unroll _ _ Hnest rc rt Et). apply IHHU. exact Hexec.
+    + rewrite (nexec_unroll _ _ Hnest rc rt Ee). apply IHHU. exact Hexec.
 Qed.
 
 (* The headline: an ACCEPTED loop cert line guarantees EVERY concrete unrolling is
@@ -715,6 +821,9 @@ Inductive AbortsL : list CertItem -> list Op -> Prop :=
       AbortsL a b ->
       AbortsL (CBranchAbort abthen thenb elseb :: a)
               ((if abthen then elseb else thenb) ++ b)
+  | AL_nest : forall thenb elseb a ft b (choice : bool)
+      (Hnest : NUnrolls (if choice then thenb else elseb) ft), AbortsL a b ->
+      AbortsL (CNest thenb elseb :: a) (ft ++ b)
   (* the abort itself: the aborting arm runs, and the run ENDS. *)
   | AL_abort : forall abthen thenb elseb a,
       AbortsL (CBranchAbort abthen thenb elseb :: a)
@@ -737,6 +846,7 @@ Proof.
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + eapply IHHA; exact Hexec.
     + eapply IHHA; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
     + destruct (rc <=? 0); [discriminate | eapply IHHA; exact Hexec].
   - (* CLoop body *) simpl in *.
     destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
@@ -774,6 +884,14 @@ Proof.
     rewrite exec_app. destruct abthen.
     + rewrite Ee. eapply IHHA. exact Hexec.
     + rewrite Et. eapply IHHA. exact Hexec.
+  - (* CNest *) simpl in *.
+    destruct (nexec thenb rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (nexec elseb rc) as [re |] eqn:Ee; [| discriminate].
+    destruct (Z.eqb rt re) eqn:Eq; [| discriminate].
+    apply Z.eqb_eq in Eq. subst re.
+    rewrite exec_app. destruct choice.
+    + rewrite (nexec_unroll _ _ Hnest rc rt Et). eapply IHHA. exact Hexec.
+    + rewrite (nexec_unroll _ _ Hnest rc rt Ee). eapply IHHA. exact Hexec.
   - (* the abort: the aborting arm ran fault-free (exec_line's guard). *)
     simpl in *.
     destruct (exec thenb rc) as [rt |] eqn:Et; [| discriminate].
@@ -1167,21 +1285,66 @@ Definition is_tmark (b : ascii) : bool :=
 
 (* in-progress branch state with the exit and abort markers:
    (in_else, then_exited, else_exited, then_aborted, else_aborted, malformed,
-    then-acc-rev, else-acc-rev). *)
-Definition brxst : Type := (bool * bool * bool * bool * bool * bool * list Op * list Op)%type.
+    then-acc-rev, else-acc-rev, open nested branches). Format v10: an arm
+   collects NODES — an op, or a nested branch already closed — and a `{`
+   inside an arm opens a nested branch; the stack holds each open one,
+   innermost first, as (in_else, then-acc-rev, else-acc-rev). *)
+Inductive NNode : Type :=
+  | NNAt : Op -> NNode
+  | NNBr : NOps -> NOps -> NNode.
+
+Fixpoint nseq (l : list NNode) : NOps :=
+  match l with
+  | [] => NEnd
+  | NNAt o :: r => NOp1 o (nseq r)
+  | NNBr t e :: r => NBr t e (nseq r)
+  end.
+
+Definition nfrm : Type := (bool * list NNode * list NNode)%type.
+Definition brxst : Type :=
+  (bool * bool * bool * bool * bool * bool * list NNode * list NNode * list nfrm)%type.
+
+(* Add a node to the innermost open arm: the top nested branch's current
+   arm, else the branch's own. In the branch's own arm a node after that
+   arm's terminal marker is malformed (`x` / `t` must be arm-terminal). *)
+Definition brx_add (x : NNode) (st : brxst) : brxst :=
+  match st with
+  | (ie, tx, ex, ta, ea, bad, th, el, (fe, ft, fl) :: stk) =>
+      (ie, tx, ex, ta, ea, bad, th, el,
+       (if fe then (fe, ft, x :: fl) else (fe, x :: ft, fl)) :: stk)
+  | (ie, tx, ex, ta, ea, bad, th, el, []) =>
+      if ie then (ie, tx, ex, ta, ea, orb bad (orb ex ea), th, x :: el, [])
+      else (ie, tx, ex, ta, ea, orb bad (orb tx ta), x :: th, el, [])
+  end.
+
+(* An arm that is all ops, as those ops (`None` once it holds a branch). *)
+Fixpoint nflat (l : list NNode) : option (list Op) :=
+  match l with
+  | [] => Some []
+  | NNAt o :: rest => match nflat rest with Some r => Some (o :: r) | None => None end
+  | NNBr _ _ :: _ => None
+  end.
 
 (* Close a `{…|…}` region: malformed or both arms terminal → poison; one
    exit-marked arm → CBranchRet; one abort-marked arm → CBranchAbort (flag =
-   which side); no marker → the ordinary CBranch. *)
+   which side); no marker → the ordinary CBranch. An arm holding a nested
+   branch (format v10) makes the region a CNest — with no marker: an exit or
+   abort arm is flat, so a marker there poisons. *)
 Definition close_brx (st : brxst) : CertItem :=
   match st with
-  | (_, tx, ex, ta, ea, bad, th, el) =>
-      if orb bad (andb (orb tx ta) (orb ex ea)) then CPoison
-      else if tx then CBranchRet true (rev th) (rev el)
-      else if ex then CBranchRet false (rev th) (rev el)
-      else if ta then CBranchAbort true (rev th) (rev el)
-      else if ea then CBranchAbort false (rev th) (rev el)
-      else CBranch (rev th) (rev el)
+  | (_, tx, ex, ta, ea, bad, nth, nel, _) =>
+      match nflat (rev nth), nflat (rev nel) with
+      | Some th, Some el =>
+          if orb bad (andb (orb tx ta) (orb ex ea)) then CPoison
+          else if tx then CBranchRet true th el
+          else if ex then CBranchRet false th el
+          else if ta then CBranchAbort true th el
+          else if ea then CBranchAbort false th el
+          else CBranch th el
+      | _, _ =>
+          if orb bad (orb (orb tx ex) (orb ta ea)) then CPoison
+          else CNest (nseq (rev nth)) (nseq (rev nel))
+      end
   end.
 
 (* STRICT STRUCTURE (#4631): a line is a sequence of ops, `(…)` loops,
@@ -1216,36 +1379,61 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
   | String b rest =>
       if Ascii.eqb b newline then finish_line_x cur lp cp bp :: parse_xc rest [] None None None
       else match bp with
-      | Some (in_else, tx, ex, ta, ea, bad, th, el) =>
-          (* inside `{ … | … }` — collect ops / the terminal marker per arm *)
+      | Some ((in_else, tx, ex, ta, ea, bad, th, el, stk) as st) =>
+          (* inside `{ … | … }` — collect nodes / the terminal marker per arm;
+             a `{` opens a nested branch (format v10). *)
           if Ascii.eqb b bar then
-            if in_else then parse_xc rest (CPoison :: cur) lp cp None
-            else parse_xc rest cur lp cp (Some (true, tx, ex, ta, ea, bad, th, el))
+            match stk with
+            | (fe, ft, fl) :: stk' =>
+                if fe then parse_xc rest (CPoison :: cur) lp cp None
+                else parse_xc rest cur lp cp (Some (in_else, tx, ex, ta, ea, bad, th, el, (true, ft, fl) :: stk'))
+            | [] =>
+                if in_else then parse_xc rest (CPoison :: cur) lp cp None
+                else parse_xc rest cur lp cp (Some (true, tx, ex, ta, ea, bad, th, el, []))
+            end
           else if Ascii.eqb b rbrace then
-            if in_else
-            then parse_xc rest (close_brx (in_else, tx, ex, ta, ea, bad, th, el) :: cur) lp cp None
-            else parse_xc rest (CPoison :: cur) lp cp None
+            match stk with
+            | (fe, ft, fl) :: stk' =>
+                if fe
+                then parse_xc rest cur lp cp
+                       (Some (brx_add (NNBr (nseq (rev ft)) (nseq (rev fl))) (in_else, tx, ex, ta, ea, bad, th, el, stk')))
+                else parse_xc rest (CPoison :: cur) lp cp None
+            | [] =>
+                if in_else
+                then parse_xc rest (close_brx st :: cur) lp cp None
+                else parse_xc rest (CPoison :: cur) lp cp None
+            end
+          else if Ascii.eqb b lbrace then
+            (* a nested branch opens in the innermost arm; opened in the
+               branch's own arm after its terminal marker, it is malformed. *)
+            let bad' := match stk with
+                        | [] => orb bad (if in_else then orb ex ea else orb tx ta)
+                        | _ => bad
+                        end in
+            parse_xc rest cur lp cp (Some (in_else, tx, ex, ta, ea, bad', th, el, (false, [], []) :: stk))
           else if is_struct b then parse_xc rest (CPoison :: cur) lp cp None
-          else if is_xmark b then
-            (* mark the CURRENT arm exited; a second terminal mark on the same
-               arm is malformed. *)
-            if in_else
-            then parse_xc rest cur lp cp (Some (true, tx, true, ta, ea, orb bad (orb ex ea), th, el))
-            else parse_xc rest cur lp cp (Some (false, true, ex, ta, ea, orb bad (orb tx ta), th, el))
-          else if is_tmark b then
-            (* v6: mark the CURRENT arm aborting; a second terminal mark on the
-               same arm is malformed. *)
-            if in_else
-            then parse_xc rest cur lp cp (Some (true, tx, ex, ta, true, orb bad (orb ex ea), th, el))
-            else parse_xc rest cur lp cp (Some (false, tx, ex, true, ea, orb bad (orb tx ta), th, el))
+          else if orb (is_xmark b) (is_tmark b) then
+            match stk with
+            | _ :: _ =>
+                (* a terminal marker inside a nested arm: exit and abort arms
+                   are flat — malformed. *)
+                parse_xc rest (CPoison :: cur) lp cp None
+            | [] =>
+                if is_xmark b then
+                  (* mark the CURRENT arm exited; a second terminal mark on the
+                     same arm is malformed. *)
+                  if in_else
+                  then parse_xc rest cur lp cp (Some (true, tx, true, ta, ea, orb bad (orb ex ea), th, el, []))
+                  else parse_xc rest cur lp cp (Some (false, true, ex, ta, ea, orb bad (orb tx ta), th, el, []))
+                else
+                  (* v6: mark the CURRENT arm aborting; a second terminal mark
+                     on the same arm is malformed. *)
+                  if in_else
+                  then parse_xc rest cur lp cp (Some (true, tx, ex, ta, true, orb bad (orb ex ea), th, el, []))
+                  else parse_xc rest cur lp cp (Some (false, tx, ex, true, ea, orb bad (orb tx ta), th, el, []))
+            end
           else match parse_byte b with
-               | Some op =>
-                   (* an op AFTER the current arm's terminal marker: `x` / `t`
-                      must be arm-terminal (nothing runs after an exit or an
-                      abort) — malformed. *)
-                   if in_else
-                   then parse_xc rest cur lp cp (Some (true, tx, ex, ta, ea, orb bad (orb ex ea), th, op :: el))
-                   else parse_xc rest cur lp cp (Some (false, tx, ex, ta, ea, orb bad (orb tx ta), op :: th, el))
+               | Some op => parse_xc rest cur lp cp (Some (brx_add (NNAt op) st))
                | None => parse_xc rest cur lp cp bp
                end
       | None =>
@@ -1270,7 +1458,7 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
                    | None => parse_xc rest cur lp cp None
                    end
           | None =>
-              if Ascii.eqb b lbrace then parse_xc rest cur lp None (Some (false, false, false, false, false, false, [], []))
+              if Ascii.eqb b lbrace then parse_xc rest cur lp None (Some (false, false, false, false, false, false, [], [], []))
               else if Ascii.eqb b lbracket then parse_xc rest cur lp (Some (false, [], [])) None
               else if Ascii.eqb b lparen then
                 match lp with
@@ -1330,6 +1518,18 @@ Definition guard_op (o : Op) : list Op :=
 
 Definition guard_ops (ops : list Op) : list Op := flat_map guard_op ops.
 
+(* ops in front of a nested arm *)
+Fixpoint napp (l : list Op) (n : NOps) : NOps :=
+  match l with [] => n | o :: r => NOp1 o (napp r n) end.
+
+(* the probes inside a nested arm, at every depth *)
+Fixpoint nguard (n : NOps) : NOps :=
+  match n with
+  | NEnd => NEnd
+  | NOp1 o rest => napp (guard_op o) (nguard rest)
+  | NBr t e rest => NBr (nguard t) (nguard e) (nguard rest)
+  end.
+
 Definition guard_item (c : CertItem) : list CertItem :=
   match c with
   | COp o => map COp (guard_op o)
@@ -1338,6 +1538,7 @@ Definition guard_item (c : CertItem) : list CertItem :=
   | CBranch thenb elseb => [CBranch (guard_ops thenb) (guard_ops elseb)]
   | CBranchRet f thenb elseb => [CBranchRet f (guard_ops thenb) (guard_ops elseb)]
   | CBranchAbort f thenb elseb => [CBranchAbort f (guard_ops thenb) (guard_ops elseb)]
+  | CNest thenb elseb => [CNest (nguard thenb) (nguard elseb)]
   | CPoison => [CPoison]
   end.
 
@@ -1367,6 +1568,30 @@ Proof.
     rewrite (exec_guard_op o rc r1 E1). exact (IH r1 r H).
 Qed.
 
+Lemma nexec_napp :
+  forall l n rc,
+    nexec (napp l n) rc = match exec l rc with Some r => nexec n r | None => None end.
+Proof.
+  induction l as [| o l IH]; intros n rc; [reflexivity |].
+  cbn [napp nexec]. change (o :: l) with ([o] ++ l). rewrite exec_app.
+  destruct (exec [o] rc) as [r1 |]; [apply IH | reflexivity].
+Qed.
+
+Lemma nexec_guard :
+  forall n rc r, nexec (nguard n) rc = Some r -> nexec n rc = Some r.
+Proof.
+  induction n as [| o rest IH | t IHt e IHe rest IH]; intros rc r H.
+  - exact H.
+  - cbn [nguard] in H. rewrite nexec_napp in H. cbn [nexec].
+    destruct (exec (guard_op o) rc) as [r1 |] eqn:E1; [| discriminate].
+    rewrite (exec_guard_op o rc r1 E1). exact (IH r1 r H).
+  - cbn [nguard nexec] in H |- *.
+    destruct (nexec (nguard t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (nexec (nguard e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (IHt rc rt Et), (IHe rc re Ee).
+    destruct (Z.eqb rt re); [exact (IH rt r H) | discriminate].
+Qed.
+
 (* exec_line is a left fold over the items, like exec over the ops. *)
 Lemma exec_line_app :
   forall a b rc,
@@ -1374,7 +1599,7 @@ Lemma exec_line_app :
       match exec_line a rc with Some r => exec_line b r | None => None end.
 Proof.
   induction a as [| c a IH]; intros b rc; [reflexivity |].
-  destruct c as [o | body | t e | t e | f t e | f t e |]; cbn [app exec_line].
+  destruct c as [o | body | t e | t e | f t e | f t e | t e |]; cbn [app exec_line].
   - destruct (exec [o] rc); [apply IH | reflexivity].
   - destruct (exec body rc) as [r |]; [| reflexivity].
     destruct (Z.eqb r rc); [apply IH | reflexivity].
@@ -1387,6 +1612,8 @@ Proof.
       first [apply IH | reflexivity].
   - destruct (exec t rc) as [rt |]; destruct (exec e rc) as [re |]; try reflexivity.
     destruct f; apply IH.
+  - destruct (nexec t rc) as [rt |]; destruct (nexec e rc) as [re |]; try reflexivity.
+    destruct (Z.eqb rt re); [apply IH | reflexivity].
   - reflexivity.
 Qed.
 
@@ -1394,7 +1621,7 @@ Lemma exec_line_guard_item :
   forall c rc r, exec_line (guard_item c) rc = Some r -> exec_line [c] rc = Some r.
 Proof.
   intros c rc r H.
-  destruct c as [o | body | t e | t e | f t e | f t e |]; cbn [guard_item] in H.
+  destruct c as [o | body | t e | t e | f t e | f t e | t e |]; cbn [guard_item] in H.
   - destruct o; simpl in *; try exact H;
       destruct (rc <=? 0); try discriminate; exact H.
   - cbn [exec_line] in H |- *.
@@ -1416,6 +1643,10 @@ Proof.
     destruct (exec (guard_ops t) rc) as [rt |] eqn:Et; [| discriminate].
     destruct (exec (guard_ops e) rc) as [re |] eqn:Ee; [| discriminate].
     rewrite (exec_guard_ops t rc rt Et), (exec_guard_ops e rc re Ee). exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (nexec (nguard t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (nexec (nguard e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (nexec_guard t rc rt Et), (nexec_guard e rc re Ee). exact H.
   - discriminate.
 Qed.
 
@@ -1437,7 +1668,7 @@ Lemma check_line_guard_weaken :
   forall cs, check_line (guard_line cs) = true -> check_line cs = true.
 Proof.
   intros cs H. destruct cs as [| c cs]; [exact H |].
-  destruct c as [o | | | | | |]; try exact H. destruct o; try exact H.
+  destruct c as [o | | | | | | |]; try exact H. destruct o; try exact H.
   unfold check_line in *. cbn [guard_line exec_line] in H |- *.
   destruct (exec [Inc] 0) as [r0 |]; [| exact H].
   destruct (exec_line (flat_map guard_item cs) r0) as [z |] eqn:E; [| discriminate].
@@ -1475,6 +1706,25 @@ Proof.
   cbn [map app]. apply UL_op. apply IH. exact H.
 Qed.
 
+Lemma nunrolls_napp :
+  forall l a b, NUnrolls a b -> NUnrolls (napp l a) (l ++ b).
+Proof.
+  induction l as [| o l IH]; intros a b H; [exact H |].
+  cbn [napp app]. apply NU_op. apply IH. exact H.
+Qed.
+
+Lemma nunrolls_guard :
+  forall ns f, NUnrolls ns f -> NUnrolls (nguard ns) (guard_ops f).
+Proof.
+  intros ns f HU. induction HU as [| o a b HU IH | t e a ft b choice HT IHT HU IH];
+    cbn [nguard].
+  - constructor.
+  - unfold guard_ops at 1. cbn [flat_map]. apply nunrolls_napp. exact IH.
+  - rewrite guard_ops_app. destruct choice.
+    + exact (NU_br (nguard t) (nguard e) _ _ _ true IHT IH).
+    + exact (NU_br (nguard t) (nguard e) _ _ _ false IHT IH).
+Qed.
+
 Lemma unrolls_guard :
   forall cs fops, UnrollsL cs fops ->
     UnrollsL (flat_map guard_item cs) (guard_ops fops).
@@ -1496,6 +1746,9 @@ Proof.
   - rewrite guard_ops_app. destruct abthen.
     + exact (UL_branchabort_cont true (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
     + exact (UL_branchabort_cont false (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
+  - rewrite guard_ops_app. apply nunrolls_guard in Hnest. destruct choice.
+    + exact (UL_nest (nguard thenb) (nguard elseb) _ _ _ true Hnest IHHU).
+    + exact (UL_nest (nguard thenb) (nguard elseb) _ _ _ false Hnest IHHU).
 Qed.
 
 (* ─── THE DRAIN RULE (ADR-0034 D2, format v8) ───
@@ -1517,12 +1770,20 @@ Definition all_probes (ops : list Op) : bool := forallb is_probe ops.
 Definition is_release_op (o : Op) : bool :=
   match o with Dec | MoveOut => true | _ => false end.
 
+Fixpoint nprobe_free (n : NOps) : bool :=
+  match n with
+  | NEnd => true
+  | NOp1 o rest => andb (negb (is_probe o)) (nprobe_free rest)
+  | NBr t e rest => andb (andb (nprobe_free t) (nprobe_free e)) (nprobe_free rest)
+  end.
+
 Definition item_probe_free (c : CertItem) : bool :=
   match c with
   | COp o => negb (is_probe o)
   | CLoop b => probe_free b
   | CCondLoop t e | CBranch t e => andb (probe_free t) (probe_free e)
   | CBranchRet _ t e | CBranchAbort _ t e => andb (probe_free t) (probe_free e)
+  | CNest t e => andb (nprobe_free t) (nprobe_free e)
   | CPoison => true
   end.
 
@@ -1626,6 +1887,19 @@ Lemma probe_free_if :
     probe_free (if c then t else e) = true.
 Proof. intros c t e Ht He. destruct c; assumption. Qed.
 
+Lemma nprobe_free_unroll :
+  forall ns f, NUnrolls ns f -> nprobe_free ns = true -> probe_free f = true.
+Proof.
+  intros ns f HU. induction HU as [| o a b HU IH | t e a ft b choice HT IHT HU IH];
+    intros H; cbn [nprobe_free] in H.
+  - reflexivity.
+  - apply andb_prop in H. destruct H as [Ho Hr].
+    unfold probe_free in *. cbn [forallb]. rewrite Ho. exact (IH Hr).
+  - apply andb_prop in H. destruct H as [Hte Hr]. apply andb_prop in Hte. destruct Hte as [Ht He].
+    unfold probe_free in *. rewrite forallb_app. rewrite (IH Hr).
+    destruct choice; rewrite (IHT ltac:(assumption)); reflexivity.
+Qed.
+
 (* The post-probe half: a line accepted by `drained_post` unrolls only to
    runs `ops_post` accepts. *)
 Lemma drained_post_unroll :
@@ -1642,6 +1916,7 @@ Proof.
   - apply andb_prop in H. destruct H as [Hb Hr].
     rewrite ops_post_probes_app; [apply IHHU; exact Hr |].
     apply all_probes_concat_repeat. exact Hb.
+  - discriminate.
   - discriminate.
   - discriminate.
   - discriminate.
@@ -1686,6 +1961,9 @@ Proof.
   - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
     rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
     apply probe_free_if; assumption.
+  - apply andb_prop in H. destruct H as [Hf Hr]. apply andb_prop in Hf. destruct Hf as [Ht He].
+    rewrite ops_drained_probe_free_app; [apply IHHU; exact Hr |].
+    apply (nprobe_free_unroll _ _ Hnest). destruct choice; assumption.
 Qed.
 
 (* The full exit-aware checker over raw certificate bytes (format v6), with
@@ -1858,6 +2136,40 @@ Proof. reflexivity. Qed.
 Example cert_xc_abort_double_mark_rejects : check_xc "i{tx|}d"%string = false.
 Proof. reflexivity. Qed.
 
+(* FORMAT v10 — NESTED BRANCHES. A branch arm holding a branch of its own:
+   every branch, at every depth, runs both arms fault-free from its entry
+   count and they AGREE. *)
+Example cert_xc_nested_accepts : check_xc "i{a{d|m}|}d"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_nested_two_levels_accepts : check_xc "i{{a{d|m}|}|b}d"%string = true.
+Proof. reflexivity. Qed.
+(* a nested arm that releases twice faults at its own entry count. *)
+Example cert_xc_nested_double_release_rejects : check_xc "i{{dd|}|}d"%string = false.
+Proof. reflexivity. Qed.
+(* nested arms whose nets differ never agree: refused at that depth. *)
+Example cert_xc_nested_unequal_nets_rejects : check_xc "i{{a|}|}d"%string = false.
+Proof. reflexivity. Qed.
+(* the nested branch moved before the share it releases (arms reordered):
+   the probe before the share meets a dead owned object — refused. *)
+Example cert_xc_nested_reordered_rejects : check_xc "i{{d|m}a|}d"%string = false.
+Proof. reflexivity. Qed.
+(* an arm swapped across the levels (the share that the nested branch
+   releases moved into the other top-level arm): the arms no longer agree —
+   refused. *)
+Example cert_xc_nested_swapped_arm_rejects : check_xc "i{{d|m}|a}d"%string = false.
+Proof. reflexivity. Qed.
+(* exit and abort arms are flat: a marker in a nested arm, a marker beside a
+   nested branch, a loop in a nested arm and an unclosed nested branch
+   poison the line. *)
+Example cert_xc_nested_exit_rejects : check_xc "i{{dx|}|}d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_nested_beside_exit_rejects : check_xc "i{{d|d}x|}d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_nested_loop_rejects : check_xc "i{{(d)|}|}d"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_nested_unclosed_rejects : check_xc "i{{d|}|d"%string = false.
+Proof. reflexivity. Qed.
+
 (* #3229 — OWNED-LINE RESURRECTION. The witness the MIR lowering emitted for
    `drain(mut u)` with the copy-on-write in a modeled `while` frame: the copy
    is born, freed at frame end, then aliased (the write-back `Dup`) and moved
@@ -1924,6 +2236,7 @@ Proof.
     rewrite E. replace (rc + 1 - 1) with rc by lia. apply IH. exact Hrc.
   - apply IH. lia.
   - destruct (rc <=? 0); [reflexivity | apply IH; exact Hrc].
+  - destruct (rc <=? 0) eqn:E; [reflexivity |]. apply Z.leb_gt in E. apply IH. lia.
 Qed.
 
 Theorem check_expand : forall ops, check (expand ops) = check ops.
@@ -1988,6 +2301,9 @@ Proof.
     + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
+    + destruct (r1 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 - 1 + r2 + k) by lia. apply IHHI; auto; lia.
   - destruct o; simpl in Eb, Nb |- *.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
     + replace (r1 + r2 + k + 1) with (r1 + (r2 + 1) + k) by lia. apply IHHI; auto; lia.
@@ -2006,6 +2322,9 @@ Proof.
     + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
       assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
       apply IHHI; auto.
+    + destruct (r2 <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      assert (E2 : (r1 + r2 + k <=? 0) = false) by (apply Z.leb_gt; lia). rewrite E2.
+      replace (r1 + r2 + k - 1) with (r1 + (r2 - 1) + k) by lia. apply IHHI; auto; lia.
 Qed.
 
 Theorem share_handover_sound :

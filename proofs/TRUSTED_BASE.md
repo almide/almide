@@ -332,6 +332,28 @@ no certificate carries a trace yet, so the theorem the definition is for — `K(
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
 
+**Region purity (#1961).** A region window (`consume(produce(scalars))` on
+the structural leg) parks its temporary and rewinds the allocator at its
+`RegionRestore` instead of releasing each block; the ownership witness
+records that temporary as `iw` (the reclaim `w`, certificate format v9).
+What is proven: a `w` folds like a release (`OwnershipChecker.v` `Reclaim`;
+`RuntimeModel.v` `reclaim_steps_like_dec`), and a restore over a window that
+frees only blocks allocated after its save returns every block the window
+handed out (`RuntimeModel.v` `region_restore_reclaims`, given the premise
+`frees_above`). What is checked: each `w` names a shipped restore in its own
+window, the heads copied back, the bump pointer reloaded from the save block
+and the save block freed by a call that is no RC call of the frame
+(`crates/almide-anchor-check/src/rc.rs` `reclaim_holds`). What is trusted:
+the premise itself, that the window IS pure. It rests on the emitter's
+classification, `crates/almide-wasm/src/region.rs` `region_pure_fns` (the
+pure set, a greatest fixpoint over the pure vocabulary) and
+`region_window_opens` (the consumer in the pure set with a scalar result,
+exactly one heap argument, a call to a pure producer over scalar arguments,
+and every other argument scalar; a declared `scoped` entry is held to the
+same set by `scoped_entry_window`). No checker re-derives it: a wrong
+classification would let the restore reclaim a block the outer program still
+holds, a use after free.
+
 **Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
 read and written at a CONSTANT offset with no check, so it is in bounds and
 initialized exactly when its block was built with the layout the access

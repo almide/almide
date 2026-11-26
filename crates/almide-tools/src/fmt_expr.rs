@@ -131,7 +131,7 @@ fn fmt_expr_leaf(out: &mut String, expr: &Expr) -> bool {
         ExprKind::EmptyMap => out.push_str("[:]"),
         ExprKind::Break => out.push_str("break"),
         ExprKind::Continue => out.push_str("continue"),
-        ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(name),
+        ExprKind::Ident { name, .. } | ExprKind::TypeName { name, .. } => out.push_str(&crate::fmt::name(name)),
         ExprKind::Todo { message, .. } => fmt_expr_todo(out, message),
         _ => return false,
     }
@@ -175,12 +175,17 @@ fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
             fmt_expr(out, operand, depth);
         }
         ExprKind::Member { object, field, .. } => {
-            fmt_expr(out, object, depth);
+            // `fan.map(…)`: the parser reads this keyword as the identifier
+            // itself when a `.` follows, so it stays bare there (#4948).
+            match &object.kind {
+                ExprKind::Ident { name, .. } if almide_lang::parser::keyword_reads_as_member_head(name) => out.push_str(name),
+                _ => fmt_expr(out, object, depth),
+            }
             // `obj // note` then `.method()` on the next line (#1326).
             if has_continuation_comments(object.id) {
                 fmt_continuation_break(out, object.id, depth);
             }
-            w!(out, ".{field}");
+            w!(out, ".{}", crate::fmt::field_name(field));
         }
         ExprKind::TupleIndex { object, index, .. } => {
             fmt_expr(out, object, depth);
@@ -342,8 +347,9 @@ fn push_escaped_char(out: &mut String, chars: &[char], i: usize, quote: char, us
 
 fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Record { name, fields, .. } = &expr.kind else { unreachable!() };
-    if let Some(n) = name { w!(out, "{n} "); }
-    let members: Vec<_> = fields.iter().map(|f| (Some(f.name.as_str()), &f.value)).collect();
+    if let Some(n) = name { w!(out, "{} ", crate::fmt::name(n)); }
+    let names: Vec<String> = fields.iter().map(|f| crate::fmt::field_name(&f.name).into_owned()).collect();
+    let members: Vec<_> = fields.iter().zip(&names).map(|(f, n)| (Some(n.as_str()), &f.value)).collect();
     if members.iter().any(|(_, e)| has_own_line_leading_comments(e.id) || has_continuation_comments(e.id)) {
         out.push('{');
         fmt_commented_members(out, &members, '}', depth);
@@ -351,7 +357,7 @@ fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
     }
     if fields.is_empty() { out.push_str("{}"); return; }
     let mut one = String::from("{ ");
-    comma_sep(&mut one, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); });
+    comma_sep(&mut one, &members, |out, (n, e)| { w!(out, "{}: ", n.unwrap_or_default()); fmt_expr(out, e, depth); });
     one.push_str(" }");
     if stack_members(out, expr.span, &members, &one) {
         out.push('{');
@@ -363,15 +369,16 @@ fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::SpreadRecord { base, fields, .. } = &expr.kind else { unreachable!() };
+    let names: Vec<String> = fields.iter().map(|f| crate::fmt::field_name(&f.name).into_owned()).collect();
     let members: Vec<_> = std::iter::once((Some("..."), base.as_ref()))
-        .chain(fields.iter().map(|f| (Some(f.name.as_str()), &f.value))).collect();
+        .chain(fields.iter().zip(&names).map(|(f, n)| (Some(n.as_str()), &f.value))).collect();
     if members.iter().any(|(_, e)| has_own_line_leading_comments(e.id) || has_continuation_comments(e.id)) {
         out.push('{');
         fmt_commented_members(out, &members, '}', depth);
         return;
     }
     out.push_str("{ ..."); fmt_expr(out, base, depth);
-    for f in fields { w!(out, ", {}: ", f.name); fmt_expr(out, &f.value, depth); }
+    for (f, n) in fields.iter().zip(&names) { w!(out, ", {n}: "); fmt_expr(out, &f.value, depth); }
     out.push_str(" }");
 }
 
@@ -446,15 +453,16 @@ fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     fmt_expr(out, callee, depth);
     if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
     out.push('(');
+    let names: Vec<String> = named_args.iter().map(|(n, _)| crate::fmt::name(n).into_owned()).collect();
     let members: Vec<_> = args.iter().map(|e| (None, e))
-        .chain(named_args.iter().map(|(n, e)| (Some(n.as_str()), e))).collect();
+        .chain(named_args.iter().zip(&names).map(|((_, e), n)| (Some(n.as_str()), e))).collect();
     if fmt_commented_members(out, &members, ')', depth) { return; }
     let mut one = String::new();
     comma_sep(&mut one, args, |out, a| fmt_expr(out, a, depth));
     if !named_args.is_empty() {
         if !args.is_empty() { one.push_str(", "); }
-        comma_sep(&mut one, named_args, |out, (name, expr)| {
-            w!(out, "{name}: ");
+        comma_sep(&mut one, &members[args.len()..], |out, (name, expr)| {
+            w!(out, "{}: ", name.unwrap_or_default());
             fmt_expr(out, expr, depth);
         });
     }
@@ -559,7 +567,7 @@ fn fmt_expr_fan(out: &mut String, expr: &Expr, depth: usize) {
         out.push_str(&ind(depth + 1));
         // The record form (#1388): one `name: expr` field per line.
         if let Some(name) = names.get(i) {
-            w!(out, "{}: ", name.as_str());
+            w!(out, "{}: ", crate::fmt::field_name(name.as_str()));
         }
         fmt_expr(out, e, depth + 1); out.push('\n');
     }
@@ -668,7 +676,7 @@ fn fmt_expr_lambda(out: &mut String, expr: &Expr, depth: usize) {
     }
     out.push('(');
     comma_sep(out, params, |out, p| {
-        if let Some(n) = &p.tuple_names { w!(out, "({})", join_syms(n, ", ")); } else { out.push_str(&p.name); }
+        if let Some(n) = &p.tuple_names { w!(out, "({})", n.iter().map(|s| crate::fmt::name(s).into_owned()).collect::<Vec<_>>().join(", ")); } else { out.push_str(&crate::fmt::name(&p.name)); }
         if let Some(ref ty) = p.ty { out.push_str(": "); fmt_type(out, ty, depth); }
     });
     out.push_str(") => "); fmt_expr(out, body, depth);
@@ -921,19 +929,19 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
     let i = ind(depth);
     match stmt {
         Stmt::Let { name, ty, value, .. } => {
-            w!(out, "{i}let {name}");
+            w!(out, "{i}let {}", crate::fmt::name(name));
             if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
         Stmt::LetDestructure { pattern, value, mutable, .. } => { out.push_str(&i); out.push_str(if *mutable { "var " } else { "let " }); fmt_dpat(out, pattern); out.push_str(" = "); fmt_expr(out, value, depth); }
         Stmt::Var { name, ty, value, .. } => {
-            w!(out, "{i}var {name}");
+            w!(out, "{i}var {}", crate::fmt::name(name));
             if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
-        Stmt::Assign { name, value, .. } => { w!(out, "{i}{name} = "); fmt_expr(out, value, depth); }
-        Stmt::IndexAssign { target, path, index, value, .. } => { w!(out, "{i}{target}{}[", fmt_place_path(path)); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
-        Stmt::FieldAssign { target, path, field, value, .. } => { w!(out, "{i}{target}{}.{field} = ", fmt_place_path(path)); fmt_expr(out, value, depth); }
+        Stmt::Assign { name, value, .. } => { w!(out, "{i}{} = ", crate::fmt::name(name)); fmt_expr(out, value, depth); }
+        Stmt::IndexAssign { target, path, index, value, .. } => { w!(out, "{i}{}{}[", crate::fmt::name(target), fmt_place_path(path)); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
+        Stmt::FieldAssign { target, path, field, value, .. } => { w!(out, "{i}{}{}.{} = ", crate::fmt::name(target), fmt_place_path(path), crate::fmt::field_name(field)); fmt_expr(out, value, depth); }
         Stmt::Guard { cond, else_, .. } => { out.push_str(&i); out.push_str("guard "); fmt_expr(out, cond, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
         Stmt::GuardLet { name, scrutinee, else_, mutable, shorthand, fail, .. } => {
             // #4543: `guard var`, the `guard let x else` shorthand, and the
@@ -994,15 +1002,15 @@ fn fmt_test_where_bare(out: &mut String, wc: &TestWhere, depth: usize) {
 fn fmt_pattern(out: &mut String, pat: &Pattern) {
     match pat {
         Pattern::Wildcard => out.push('_'),
-        Pattern::Ident { name } => out.push_str(name),
+        Pattern::Ident { name } => out.push_str(&crate::fmt::name(name)),
         Pattern::Literal { value } => fmt_expr(out, value, 0),
         Pattern::Constructor { name, args } => {
-            out.push_str(name);
+            out.push_str(&crate::fmt::name(name));
             if !args.is_empty() { out.push('('); comma_sep(out, args, |out, a| fmt_pattern(out, a)); out.push(')'); }
         }
         Pattern::RecordPattern { name, fields, rest } => {
-            w!(out, "{name} {{ ");
-            comma_sep(out, fields, |out, f| { out.push_str(&f.name); if let Some(ref p) = f.pattern { out.push_str(": "); fmt_pattern(out, p); } });
+            w!(out, "{} {{ ", crate::fmt::name(name));
+            comma_sep(out, fields, |out, f| { out.push_str(&crate::fmt::field_name(&f.name)); if let Some(ref p) = f.pattern { out.push_str(": "); fmt_pattern(out, p); } });
             if *rest { if !fields.is_empty() { out.push_str(", "); } out.push_str(".."); }
             out.push_str(" }");
         }
@@ -1014,7 +1022,7 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
         }
         Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(')'); }
         Pattern::As { name, inner } => {
-            out.push_str(name.as_str());
+            out.push_str(&crate::fmt::name(name.as_str()));
             out.push_str(" @ ");
             fmt_pattern(out, inner);
         }
@@ -1027,7 +1035,7 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
                 }
                 out.push_str("..");
                 if let Some(name) = r {
-                    out.push_str(name.as_str());
+                    out.push_str(&crate::fmt::name(name.as_str()));
                 }
             }
             out.push(']');
@@ -1042,8 +1050,8 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
 fn fmt_dpat(out: &mut String, pat: &Pattern) {
     match pat {
         Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_dpat(out, e)); out.push(')'); }
-        Pattern::RecordPattern { fields, .. } => { out.push_str("{ "); comma_sep(out, fields, |out, f| out.push_str(&f.name)); out.push_str(" }"); }
-        Pattern::Ident { name } => out.push_str(name),
+        Pattern::RecordPattern { fields, .. } => { out.push_str("{ "); comma_sep(out, fields, |out, f| out.push_str(&crate::fmt::name(&f.name))); out.push_str(" }"); }
+        Pattern::Ident { name } => out.push_str(&crate::fmt::name(name)),
         _ => fmt_pattern(out, pat),
     }
 }
@@ -1051,5 +1059,5 @@ fn fmt_dpat(out: &mut String, pat: &Pattern) {
 /// The field chain between an assignment's root and its last step (#3064):
 /// `.inner` for `o.inner.xs = v`, empty for a one-level target.
 fn fmt_place_path(path: &[almide_base::intern::Sym]) -> String {
-    path.iter().map(|p| format!(".{p}")).collect()
+    path.iter().map(|p| format!(".{}", crate::fmt::field_name(p))).collect()
 }

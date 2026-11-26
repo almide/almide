@@ -40,6 +40,7 @@ Fixpoint fuel_exec (fuel : nat) (ops : list Op) (rc : Z) : option (option Z) :=
           | ShareOut => fuel_exec f rest rc
           | Take => fuel_exec f rest (rc + 1)
           | Probe => if rc <=? 0 then Some None else fuel_exec f rest rc
+          | Reclaim => if rc <=? 0 then Some None else fuel_exec f rest (rc - 1)
           end
       end
   end.
@@ -61,6 +62,7 @@ Proof.
     + apply IH.
     + apply IH.
     + destruct (rc <=? 0); [ discriminate | apply IH ].
+    + destruct (rc <=? 0); [ discriminate | apply IH ].
 Qed.
 
 (* And the fueled interpreter AGREES with `exec` when it halts: termination does
@@ -79,6 +81,7 @@ Proof.
     + destruct (rc <=? 0); [ reflexivity | apply IH ].
     + apply IH.
     + apply IH.
+    + destruct (rc <=? 0); [ reflexivity | apply IH ].
     + destruct (rc <=? 0); [ reflexivity | apply IH ].
 Qed.
 

@@ -413,7 +413,8 @@ pub fn drive(
         ));
     };
     let wall = start.elapsed();
-    let output = collect(&mut child, status, out_t, err_t);
+    let mut output = collect(&mut child, status, out_t, err_t);
+    crate::incomplete::take(&mut output.stderr);
     if host == Host::Socket {
         let _ = writeln!(transcript, "exit {}", exit_text(&output.status));
     }

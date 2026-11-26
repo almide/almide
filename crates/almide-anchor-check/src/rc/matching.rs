@@ -37,6 +37,9 @@
 use super::{is_move, Frame, RcReport, EXPLAIN};
 use crate::operands::{pl, T, FUEL};
 
+/// How deep a select tree [`Frame::select_leaves`] follows nested `if`s.
+const SELECT_DEPTH: u32 = 8;
+
 /// The matching's order and state: the events in matching order, the
 /// nodes (the RC calls, then the consuming arguments) in preference order,
 /// which calls a move could take, and per node the event holding it.
@@ -237,7 +240,12 @@ impl Frame<'_, '_> {
     /// arms chose: one event in each arm, each naming its own arm's value
     /// (arm i of the recorder's site is the shipped arm i — the anchor
     /// holds it, never trusted), logged at the site's own level (on every
-    /// path through that arm).
+    /// path through that arm). An arm whose value is itself an anchored `if`
+    /// (a NESTED select, `if a then (if b then x else y) else z`) takes, in
+    /// place of its one event, one per arm of a recorder site anchored to
+    /// that inner `if` and opened directly inside it — recursively, so the
+    /// call is one event's on every leaf path of the select tree, each event
+    /// naming its own leaf's shipped value.
     ///
     /// A call such a pair could take may already be held by a temporary's
     /// unnamed event (`a-` / `d-`), which fits any call of its kind in its
@@ -258,35 +266,88 @@ impl Frame<'_, '_> {
                 owner[free] = Some(e);
                 owner[c] = None;
             }
-            let Some((e0, e1)) = self.arm_pair(c, got) else { continue };
+            let Some(leaves) = self.arm_pair(c, got).or_else(|| self.free_leaves(c, owner, got, co)) else { continue };
+            let Some((&e0, rest)) = leaves.split_first() else { continue };
             owner[c] = Some(e0);
-            co[c].push(e1);
-            got[e0] = true;
-            got[e1] = true;
+            co[c].extend_from_slice(rest);
+            for &e in &leaves {
+                got[e] = true;
+            }
         }
     }
 
-    /// The two unmatched events, one per arm, that call `c` past an
-    /// anchored `if` is.
-    fn arm_pair(&self, c: usize, got: &[bool]) -> Option<(usize, usize)> {
-        let evs = &self.ev.evs;
+    /// The leaves of call `c`'s select tree when some already hold another
+    /// call each: every such call is handed to an event still unmatched that
+    /// fits it (one each, none of the leaves), and the leaves are freed for
+    /// `c` — an augmenting step, so no event or call ends up matched twice
+    /// and none that was matched is left over. `None` (nothing changed) when
+    /// a held call has no such event, or a leaf holds a shared or second call.
+    fn free_leaves(&self, c: usize, owner: &mut [Option<usize>], got: &mut [bool], co: &[Vec<usize>]) -> Option<Vec<usize>> {
+        let leaves = self.arm_pair(c, &vec![false; got.len()])?;
+        let mut plan: Vec<(usize, usize, usize)> = Vec::new();
+        for &x in leaves.iter().filter(|&&x| got[x]) {
+            let held: Vec<usize> = (0..owner.len()).filter(|&k| owner[k] == Some(x)).collect();
+            let [k] = held.as_slice() else { return None };
+            if *k >= self.nc || !co[*k].is_empty() || co.iter().any(|v| v.contains(&x)) {
+                return None;
+            }
+            let e = (0..got.len()).find(|&e| !got[e] && !leaves.contains(&e) && !plan.iter().any(|p| p.2 == e) && self.fits(e, *k))?;
+            plan.push((x, *k, e));
+        }
+        for (x, k, e) in plan {
+            owner[k] = Some(e);
+            got[e] = true;
+            got[x] = false;
+        }
+        self.arm_pair(c, got)
+    }
+
+    /// The unmatched events, one per leaf path of the anchored select tree,
+    /// that call `c` past its outer `if` is.
+    fn arm_pair(&self, c: usize, got: &[bool]) -> Option<Vec<usize>> {
         let arg = self.fl.arg(self.calls[c].0, 0, FUEL);
         let T::Opaque(p) = pl(&arg) else { return None };
-        let (s, e, vals) = self.fl.if_arms(*p, FUEL)?;
-        let arm_names: Vec<Vec<u32>> = vals.iter().map(|v| self.names_of(v)).collect();
-        // Every recorder site anchored to this `if` (the arms' own site
-        // and a select site recorded over it later) is a candidate.
-        let pick = |site: usize, arm: usize| {
-            (0..evs.len()).find(|&x| {
-                !got[x]
-                    && evs[x].0 == self.calls[c].1
-                    && self.ev.evpath[x].last() == Some(&(site, arm))
-                    && evs[x].1.is_some_and(|l| arm_names[arm].contains(&l))
-            })
-        };
+        self.select_leaves(*p, &[], self.calls[c].1, got, SELECT_DEPTH)
+    }
+
+    /// The events of the select whose `if` closes at `end`, reached through
+    /// the recorder arms `outer` (outermost first; empty at the top): for
+    /// each arm, the event naming its shipped value in the recorder arm
+    /// `outer ++ [(site, arm)]` (the event's own innermost arms), or that
+    /// arm's own nested select's events. Every recorder site anchored to
+    /// this `if` (the arms' own site and a select site recorded over it
+    /// later) is a candidate; the first that pairs every leaf is taken.
+    fn select_leaves(&self, end: usize, outer: &[(usize, usize)], kind: char, got: &[bool], depth: u32) -> Option<Vec<usize>> {
+        let depth = depth.checked_sub(1)?;
+        let evs = &self.ev.evs;
+        let (s, e, vals) = self.fl.if_arms(end, FUEL)?;
         let mut sites: Vec<usize> = self.ev.site_at.iter().filter(|(_, &at)| at == (s, e)).map(|(&k, _)| k).collect();
         sites.sort_unstable();
-        sites.iter().find_map(|&site| Some((pick(site, 0)?, pick(site, 1)?)))
+        sites.iter().find_map(|&site| {
+            let mut leaves: Vec<usize> = Vec::new();
+            for (arm, val) in vals.iter().enumerate() {
+                let path: Vec<(usize, usize)> = outer.iter().copied().chain([(site, arm)]).collect();
+                let names = self.names_of(val);
+                if !names.is_empty() {
+                    let x = (0..evs.len()).find(|&x| {
+                        !got[x]
+                            && !leaves.contains(&x)
+                            && evs[x].0 == kind
+                            && self.ev.evpath[x].ends_with(&path)
+                            && evs[x].1.is_some_and(|l| names.contains(&l))
+                    })?;
+                    leaves.push(x);
+                } else {
+                    let T::Opaque(q) = pl(val) else { return None };
+                    let inner = self.select_leaves(*q, &path, kind, got, depth)?;
+                    if inner.iter().any(|x| leaves.contains(x)) {
+                        return None;
+                    }
+                    leaves.extend(inner);
+                }
+            }
+            Some(leaves)
+        })
     }
 
     /// The counts, and the refusal of an event or a call left over.
@@ -301,6 +362,9 @@ impl Frame<'_, '_> {
             match (kind, local) {
                 ('o', _) => rep.rebind_unmatched += 1,
                 (c, _) if is_move(c) => {}
+                // #1961: a region reclaim takes no call; it is held to its
+                // restore (rc.rs `reclaim_holds`), refused otherwise.
+                ('w', None) if self.reclaim_holds(e) => {}
                 // A window's callee that holds the variable but declares no
                 // consuming signature for that parameter (#4278 B1).
                 (k @ ('a' | 'd'), Some(l)) if (0..self.takers.len()).any(|t| self.holds(l, t)) => {
@@ -414,7 +478,6 @@ fn share_path(
         if seen[c] || !fits(e, c) {
             continue;
         }
-        seen[c] = true;
         if owner[c].is_some_and(|o| twin(e, o)) && co[c].iter().all(|&o| twin(e, o)) {
             co[c].push(e);
             return true;
@@ -423,6 +486,10 @@ fn share_path(
         if !co[c].is_empty() || !movable(o) || owner.iter().enumerate().any(|(x, h)| x != c && *h == Some(o)) {
             continue;
         }
+        // Only a call whose holder is displaced is closed to the rest of
+        // this path: one merely tried as a share stays open to a later
+        // event of the path (a displaced holder may still share it).
+        seen[c] = true;
         if share_path(o, prefs, (fits, twin, movable), seen, owner, co) {
             owner[c] = Some(e);
             return true;

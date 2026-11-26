@@ -313,7 +313,8 @@ fn value_eq_a(a: &Value, b: &Value) -> Option<bool> {
         (Map(a), Map(b)) => {
             a.len() == b.len()
                 && a.iter().all(|(k, v)| {
-                    b.iter().any(|(k2, v2)| k == k2 && v == v2)
+                    // ALS-C11: keys agree under the key equality, values under `==`.
+                    b.iter().any(|(k2, v2)| key_eq(k, k2) && v == v2)
                 })
         }
         _ => return None,
@@ -328,7 +329,8 @@ fn value_eq_b(a: &Value, b: &Value) -> Option<bool> {
     Some(match (a, b) {
         (Set(a), Set(b)) => {
             a.len() == b.len()
-                && a.iter().all(|x| b.iter().any(|y| x == y))
+                // ALS-C11: membership is the key equality.
+                && a.iter().all(|x| b.iter().any(|y| key_eq(x, y)))
         }
         (
             Record { name: n1, fields: f1 },
@@ -351,6 +353,42 @@ fn value_eq_b(a: &Value, b: &Value) -> Option<bool> {
         (Closure(_), Closure(_)) => false,
         _ => return None,
     })
+}
+
+/// The collection key equality (ALS-C11, ADR-0039): `==` except that two NaN
+/// Floats are equal, applied through every component of a List, tuple,
+/// record, variant, Option, Result, Set and Map. Set membership and Map key
+/// lookup use it; `==` and the list equality family stay IEEE (`PartialEq`).
+pub fn key_eq(a: &Value, b: &Value) -> bool {
+    use Value::*;
+    fn all(x: &[Value], y: &[Value]) -> bool {
+        x.len() == y.len() && x.iter().zip(y).all(|(p, q)| key_eq(p, q))
+    }
+    fn fields(x: &[(Sym, Value)], y: &[(Sym, Value)]) -> bool {
+        x.len() == y.len() && x.iter().zip(y).all(|((n, p), (m, q))| n == m && key_eq(p, q))
+    }
+    match (a, b) {
+        (Float(x), Float(y)) => x == y || (x.is_nan() && y.is_nan()),
+        (List(x), List(y)) | (Tuple(x), Tuple(y)) => all(x, y),
+        (Set(x), Set(y)) => x.len() == y.len() && x.iter().all(|p| y.iter().any(|q| key_eq(p, q))),
+        (Map(x), Map(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.iter().any(|(k2, v2)| key_eq(k, k2) && v == v2))
+        }
+        (Record { name: n1, fields: f1 }, Record { name: n2, fields: f2 }) => n1 == n2 && fields(f1, f2),
+        (Variant { ty: t1, ctor: c1, payload: p1 }, Variant { ty: t2, ctor: c2, payload: p2 }) => {
+            t1 == t2
+                && c1 == c2
+                && match (p1, p2) {
+                    (VariantPayload::Unit, VariantPayload::Unit) => true,
+                    (VariantPayload::Tuple(x), VariantPayload::Tuple(y)) => all(x, y),
+                    (VariantPayload::Record(x), VariantPayload::Record(y)) => fields(x, y),
+                    _ => false,
+                }
+        }
+        (Option(Some(x)), Option(Some(y))) => key_eq(x, y),
+        (Result(Ok(x)), Result(Ok(y))) | (Result(Err(x)), Result(Err(y))) => key_eq(x, y),
+        _ => a == b,
+    }
 }
 
 // ── Ordering (for <, >, <=, >= and sort) ────────────────────────

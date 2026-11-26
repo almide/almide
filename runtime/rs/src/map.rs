@@ -192,6 +192,81 @@ impl AlmideMapKey for str {
     }
 }
 
+/// The collection key equality (ALS-C11, ADR-0039): Set membership and Map
+/// key lookup compare with it, `==` stays IEEE. It is `==` except that two
+/// NaN Floats are one key; IEEE `==` already makes -0.0 the key 0.0. A key
+/// type holding a Float below its top level is registered with
+/// [`almide_map_register_float_key`], and its keys agree when their canonical
+/// bytes do (every NaN one value, -0.0 as 0.0).
+pub trait AlmideKeySame: PartialEq {
+    fn almide_key_same(&self, other: &Self) -> bool;
+}
+impl<T: PartialEq + 'static> AlmideKeySame for T {
+    #[inline]
+    fn almide_key_same(&self, other: &Self) -> bool {
+        self == other || almide_map_key_nan_pair(self, other)
+    }
+}
+impl AlmideKeySame for str {
+    #[inline]
+    fn almide_key_same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+impl<T: PartialEq + 'static> AlmideKeySame for [T] {
+    #[inline]
+    fn almide_key_same(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().zip(other).all(|(a, b)| a.almide_key_same(b))
+    }
+}
+
+/// Whether two keys that are not `==` are still one key: both NaN, or a
+/// registered Float-holding type with equal canonical bytes. The type tests
+/// fold per monomorphization; the registry is read only once a Float-holding
+/// type has been registered.
+#[inline]
+fn almide_map_key_nan_pair<T: 'static>(a: &T, b: &T) -> bool {
+    use std::any::{Any, TypeId};
+    let (a, b) = (a as &dyn Any, b as &dyn Any);
+    if TypeId::of::<T>() == TypeId::of::<f64>() {
+        return a.downcast_ref::<f64>().is_some_and(|x| x.is_nan()) && b.downcast_ref::<f64>().is_some_and(|x| x.is_nan());
+    }
+    if TypeId::of::<T>() == TypeId::of::<f32>() {
+        return a.downcast_ref::<f32>().is_some_and(|x| x.is_nan()) && b.downcast_ref::<f32>().is_some_and(|x| x.is_nan());
+    }
+    // The runtime's own Float containers (the standard codegen's `List[Float]`
+    // and `Option[Float]` keys): element by element.
+    if TypeId::of::<T>() == TypeId::of::<AlmideList<f64>>() {
+        return matches!((a.downcast_ref::<AlmideList<f64>>(), b.downcast_ref::<AlmideList<f64>>()), (Some(x), Some(y)) if x.as_slice().almide_key_same(y.as_slice()));
+    }
+    if TypeId::of::<T>() == TypeId::of::<AlmideList<f32>>() {
+        return matches!((a.downcast_ref::<AlmideList<f32>>(), b.downcast_ref::<AlmideList<f32>>()), (Some(x), Some(y)) if x.as_slice().almide_key_same(y.as_slice()));
+    }
+    if TypeId::of::<T>() == TypeId::of::<Option<f64>>() {
+        return matches!((a.downcast_ref::<Option<f64>>(), b.downcast_ref::<Option<f64>>()), (Some(Some(x)), Some(Some(y))) if x.is_nan() && y.is_nan());
+    }
+    if TypeId::of::<T>() == TypeId::of::<Option<f32>>() {
+        return matches!((a.downcast_ref::<Option<f32>>(), b.downcast_ref::<Option<f32>>()), (Some(Some(x)), Some(Some(y))) if x.is_nan() && y.is_nan());
+    }
+    if !ALMIDE_FLOAT_KEYS.load(std::sync::atomic::Ordering::Relaxed) || !almide_map_key_floaty(TypeId::of::<T>()) {
+        return false;
+    }
+    matches!((almide_map_key_registered(a), almide_map_key_registered(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// The canonical bits of a Float key component (ALS-C11): every NaN is the
+/// quiet NaN, -0.0 is 0.0.
+#[inline]
+pub fn almide_key_f64_bits(x: f64) -> u64 {
+    if x.is_nan() { 0x7FF8_0000_0000_0000 } else if x == 0.0 { 0 } else { x.to_bits() }
+}
+
+/// [`almide_key_f64_bits`] at 32 bits.
+#[inline]
+pub fn almide_key_f32_bits(x: f32) -> u32 {
+    if x.is_nan() { 0x7FC0_0000 } else if x == 0.0 { 0 } else { x.to_bits() }
+}
+
 // Borrow-inferred List parameters are slices (#4597). Their hash and ordered
 // key must agree with the owned Vec, including empty lists. Unsupported element
 // types keep the same linear lookup as their owned counterpart; no unsafe cast.
@@ -283,6 +358,10 @@ impl AlmideKeyEncode for u32 { fn almide_key_encode(&self, out: &mut std::vec::V
 impl AlmideKeyEncode for u16 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&self.to_le_bytes()); } }
 impl AlmideKeyEncode for u8 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.push(*self); } }
 impl AlmideKeyEncode for bool { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.push(*self as u8); } }
+// A Float component encodes canonically (ALS-C11), so the bytes are one-to-one
+// under the key equality: every NaN one value, -0.0 as 0.0.
+impl AlmideKeyEncode for f64 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&almide_key_f64_bits(*self).to_le_bytes()); } }
+impl AlmideKeyEncode for f32 { fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) { out.extend_from_slice(&almide_key_f32_bits(*self).to_le_bytes()); } }
 impl AlmideKeyEncode for AlmideString {
     fn almide_key_encode(&self, out: &mut std::vec::Vec<u8>) {
         out.extend_from_slice(&(self.len() as u64).to_le_bytes());
@@ -347,6 +426,30 @@ pub fn almide_map_register_key<T: AlmideKeyEncode + 'static>() {
     if !reg.iter().any(|(t, _)| *t == id) {
         reg.push((id, almide_map_key_encode_as::<T>));
     }
+}
+
+/// The registered key types that hold a Float below their top level (ALS-C11):
+/// their keys agree by canonical bytes, not by `==`.
+static ALMIDE_FLOAT_KEY_TYPES: std::sync::RwLock<std::vec::Vec<std::any::TypeId>> = std::sync::RwLock::new(std::vec::Vec::new());
+
+/// Set once any Float-holding key type is registered, so a program without
+/// one never reads [`ALMIDE_FLOAT_KEY_TYPES`].
+static ALMIDE_FLOAT_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Registers `T`, a key type holding a Float below its top level, as a
+/// hashable key type compared by its canonical bytes (ALS-C11). Idempotent.
+pub fn almide_map_register_float_key<T: AlmideKeyEncode + 'static>() {
+    almide_map_register_key::<T>();
+    let id = std::any::TypeId::of::<T>();
+    let mut reg = ALMIDE_FLOAT_KEY_TYPES.write().unwrap_or_else(|e| e.into_inner());
+    if !reg.contains(&id) {
+        reg.push(id);
+    }
+    ALMIDE_FLOAT_KEYS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn almide_map_key_floaty(id: std::any::TypeId) -> bool {
+    ALMIDE_FLOAT_KEY_TYPES.read().unwrap_or_else(|e| e.into_inner()).contains(&id)
 }
 
 /// The canonical bytes of a key of a registered type, else `None`.
@@ -637,9 +740,9 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     /// `Q` is the borrowed form of the key (`str` for a `String` key), so a
     /// read never has to own a key it only compares.
     #[inline]
-    fn position_with<Q: ?Sized + PartialEq>(&self, k: &Q, h: Option<u64>) -> Option<usize>
+    fn position_with<Q: ?Sized + AlmideKeySame>(&self, k: &Q, h: Option<u64>) -> Option<usize>
     where K: std::borrow::Borrow<Q> {
-        let is_k = |e: &Option<(K, V)>| matches!(e, Some((ek, _)) if ek.borrow() == k);
+        let is_k = |e: &Option<(K, V)>| matches!(e, Some((ek, _)) if ek.borrow().almide_key_same(k));
         match (&self.lookup, h) {
             (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| is_k(&self.entries[p])),
             _ => self.entries.iter().position(is_k),
@@ -647,7 +750,7 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     }
 
     #[inline]
-    fn position<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> Option<usize>
+    fn position<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&self, k: &Q) -> Option<usize>
     where K: std::borrow::Borrow<Q> {
         if let Some(found) = self.lookup.ordered_position(k) {
             return found;
@@ -691,28 +794,28 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         }
     }
 
-    pub fn get<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> Option<&V>
+    pub fn get<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&self, k: &Q) -> Option<&V>
     where K: std::borrow::Borrow<Q> {
         let i = self.position(k)?;
         self.entries[i].as_ref().map(|(_, v)| v)
     }
-    pub fn get_mut<Q: ?Sized + PartialEq + AlmideMapKey>(&mut self, k: &Q) -> Option<&mut V>
+    pub fn get_mut<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&mut self, k: &Q) -> Option<&mut V>
     where K: std::borrow::Borrow<Q> {
         let i = self.position(k)?;
         self.entries[i].as_mut().map(|(_, v)| v)
     }
-    pub fn contains_key<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> bool
+    pub fn contains_key<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&self, k: &Q) -> bool
     where K: std::borrow::Borrow<Q> {
         self.position(k).is_some()
     }
     /// `insert` with a borrowed key, copied only when appended: the probe
     /// `get_mut` makes, then a new key appends without a second one.
     #[inline]
-    pub fn insert_borrowed<Q: ?Sized + PartialEq + AlmideMapKey>(&mut self, k: &Q, v: V, own: impl FnOnce(&Q) -> K)
+    pub fn insert_borrowed<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&mut self, k: &Q, v: V, own: impl FnOnce(&Q) -> K)
     where K: std::borrow::Borrow<Q> {
         let linear = matches!(self.lookup, AlmideKeyLookup::Linear);
         let found = if linear {
-            self.entries.iter().position(|e| matches!(e, Some((ek, _)) if ek.borrow() == k))
+            self.entries.iter().position(|e| matches!(e, Some((ek, _)) if ek.borrow().almide_key_same(k)))
         } else {
             self.position(k)
         };
@@ -889,7 +992,7 @@ pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() 
 // `map.get(counts, w)` no longer clones `w` at the call site — the
 // clone was one third of the word-count loop's map cost (#2157). `Q` is the
 // borrowed key form: `&String`/`&str` for a String key, `&i64` for Int.
-pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>
+pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + AlmideKeySame + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>
 where K: std::borrow::Borrow<Q> { m.get(k).cloned() }
 // Consuming (@consume(m) in stdlib/map.almd): a caller whose map is dead at
 // the call moves it in and this is one hash insert; a caller that still uses
@@ -988,7 +1091,7 @@ pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &Almide
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in
 // place instead of cloned.
 pub fn almide_rt_map_remove_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { m.remove(&k); m }
-pub fn almide_rt_map_contains<K: PartialEq + 'static, V, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> bool
+pub fn almide_rt_map_contains<K: PartialEq + 'static, V, Q: ?Sized + AlmideKeySame + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> bool
 where K: std::borrow::Borrow<Q> { m.contains_key(k) }
 pub fn almide_rt_map_keys<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> AlmideList<K> { m.keys().cloned().collect() }
 pub fn almide_rt_map_values<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> AlmideList<V> { m.values().cloned().collect() }

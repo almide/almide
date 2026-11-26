@@ -19,21 +19,39 @@ pub(crate) fn record(events: &mut String, first: &mut Option<char>, c: char) {
     events.push(c);
 }
 
-/// The net count a path's top-level events leave (a folded `{…|}` item's
-/// arms are not the path's own: its surviving side is empty).
+/// The net count a path's top-level events leave. A folded `{…|}` exit item's
+/// arms are not the path's own (its surviving side is empty); a JOIN item
+/// `{a|b}` (witness_paths_join.rs) leaves what either arm leaves — the arms
+/// agree, so its then-arm is read.
 pub(crate) fn net(events: &str) -> i64 {
-    let mut depth = 0;
-    let mut n = 0;
-    for c in events.chars() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            'i' | 'a' if depth == 0 => n += 1,
-            'd' | 'm' | 'r' if depth == 0 => n -= 1,
-            _ => {}
-        }
-    }
-    n
+    items(events)
+        .into_iter()
+        .map(|it| match it.strip_prefix('{') {
+            Some(_) if fold_arm(it).is_some() => 0,
+            Some(_) => net(group_arms(it).0),
+            None => ops_net(it),
+        })
+        .sum()
+}
+
+/// The net count of flat ops.
+fn ops_net(ops: &str) -> i64 {
+    ops.chars()
+        .map(|c| match c {
+            'i' | 'a' => 1,
+            'd' | 'm' | 'r' | 'w' => -1,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// A folded exit item `{<e><m>|}` (`m` = `x` or `t`) as its arm `<e><m>`;
+/// `None` for any other item — a JOIN item `{a|b}` is not one (its then-arm
+/// carries no marker, and it is never written with an empty else-arm after a
+/// non-empty then-arm: witness_paths_join.rs puts the empty arm first).
+pub(crate) fn fold_arm(item: &str) -> Option<&str> {
+    let arm = item.strip_prefix('{')?.strip_suffix("|}")?;
+    arm.ends_with(['x', 't']).then_some(arm)
 }
 
 /// The items of a line: a folded `{…}` group or one event byte.
@@ -70,7 +88,7 @@ pub(crate) fn flat_exits(events: &str, aborted: bool) -> Vec<(String, bool)> {
     let mut prefix = String::new();
     let mut out = Vec::new();
     for it in items(events) {
-        match it.strip_prefix('{').and_then(|x| x.strip_suffix("|}")) {
+        match fold_arm(it) {
             Some(arm) => {
                 let (body, mark) = arm.split_at(arm.len() - 1);
                 out.push((format!("{prefix}{body}"), mark == "t"));
@@ -91,10 +109,26 @@ pub(crate) fn hoist(events: &str) -> (Vec<String>, String) {
     let mut flat = String::new();
     let mut hoisted = Vec::new();
     for it in items(events) {
-        match it.strip_prefix('{').and_then(|x| x.strip_suffix("|}")) {
+        match fold_arm(it) {
             Some(arm) => hoisted.push(format!("{{{flat}{arm}|}}")),
             None => flat.push_str(it),
         }
     }
     (hoisted, flat)
+}
+
+/// A `{a|b}` group's two arms, split at its own `|` (an arm may hold groups
+/// of its own, certificate format v10).
+pub(crate) fn group_arms(group: &str) -> (&str, &str) {
+    let inner = group.strip_prefix('{').and_then(|g| g.strip_suffix('}')).unwrap_or("");
+    let mut depth = 0;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            '|' if depth == 0 => return (&inner[..i], &inner[i + 1..]),
+            _ => {}
+        }
+    }
+    (inner, "")
 }

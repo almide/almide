@@ -202,6 +202,8 @@ pub fn cmd_inspect(args: &[String]) {
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
+    // C-462: the programs whose wasm legs ran only under the flag, never hidden.
+    crate::incomplete::print_report();
     let _ = std::fs::remove_dir_all(&ctx.dir);
     if !all_pass {
         std::process::exit(1);
@@ -323,12 +325,21 @@ fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
         .nth(1)
         .and_then(|c| c.split_whitespace().next()?.parse::<u64>().ok())
         .unwrap_or(0);
-    let verdict = if findings.starts_with('0') && clean > 0 {
+    // C-462: the campaign's wasm legs ran under the flag; its count of the
+    // programs judged INCOMPLETE is part of the verdict, and a campaign that
+    // did not print one is not read as clean.
+    let incomplete = err.lines().find_map(|l| {
+        l.trim()
+            .strip_prefix("INCOMPLETE")
+            .map(|r| r.trim_start_matches([' ', '=']).trim().to_string())
+    });
+    let verdict = if findings.starts_with('0') && clean > 0 && incomplete.is_some() {
         "PASS"
     } else {
         "FAIL"
     };
-    format!("{verdict}: seed {seed}, {count} programs; {focus}; unique findings {findings}")
+    let incomplete = incomplete.unwrap_or_else(|| "not reported by the campaign".into());
+    format!("{verdict}: seed {seed}, {count} programs; {focus}; unique findings {findings}; INCOMPLETE {incomplete}")
 }
 
 /// A rebind step that multiplies the value (`flat_map`, `intersperse`)
@@ -599,12 +610,13 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     let mut c = Command::new(&ctx.almide);
     c.arg("build").arg(&file).arg("-o").arg(&art);
     if matches!(leg, Leg::Wasm) {
-        c.args(["--target", "wasm"]);
+        c.args(["--target", "wasm", crate::incomplete::FLAG]);
     }
     if canonical {
         c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
     }
-    let out = c.output().map_err(|e| e.to_string())?;
+    let mut out = c.output().map_err(|e| e.to_string())?;
+    crate::incomplete::take(&mut out.stderr);
     if !out.status.success() {
         return Err(format!("build failed: {}", first_error(&out.stderr)));
     }
@@ -647,7 +659,7 @@ fn is_embedded(art: &Path) -> bool {
 /// the counted judge's difference cancels it.
 fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
     let mut c = Command::new(&ctx.almide);
-    c.arg("run").arg(art).args(["--target", "wasm", "--"]);
+    c.arg("run").arg(art).args(["--target", "wasm", crate::incomplete::FLAG, "--"]);
     if art.to_string_lossy().ends_with(".canonical.embedded.almd") {
         c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
     }
@@ -761,9 +773,10 @@ fn wait_capped(
     let stdout = out_t
         .join()
         .map_err(|_| "stdout reader panicked".to_string())?;
-    let stderr = err_t
+    let mut stderr = err_t
         .join()
         .map_err(|_| "stderr reader panicked".to_string())?;
+    crate::incomplete::take(&mut stderr);
     Ok((
         std::process::Output {
             status,
@@ -860,14 +873,15 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
         let mut cmd = Command::new(&ctx.almide);
         cmd.arg("run")
             .arg(&file)
-            .args(["--target", "wasm", "--"])
+            .args(["--target", "wasm", crate::incomplete::FLAG, "--"])
             .args(sandbox::ARGS)
             .env("ALMIDE_WASM_ALLOC_COUNT", "1");
         world.enter(&mut cmd);
         let out = cmd.output();
-        let Ok(out) = out else {
+        let Ok(mut out) = out else {
             return "SKIP: could not run almide".into();
         };
+        crate::incomplete::take(&mut out.stderr);
         let (pass, part) = alloc_part_exiting(label, &out, t.expected_exit());
         ok &= pass;
         parts.push(part);
@@ -958,11 +972,13 @@ fn run_diamond(
     let mut c = Command::new(&ctx.almide);
     c.arg("run").arg(entry);
     if wasm {
-        c.args(["--target", "wasm"]);
+        c.args(["--target", "wasm", crate::incomplete::FLAG]);
     }
     c.arg("--").args(sandbox::ARGS);
     world.enter(&mut c);
-    c.current_dir(root.join("app")).output()
+    let mut out = c.current_dir(root.join("app")).output()?;
+    crate::incomplete::take(&mut out.stderr);
+    Ok(out)
 }
 
 /// Paths run one project each, read as one run: their outputs in order,

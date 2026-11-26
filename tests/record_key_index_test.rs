@@ -36,8 +36,9 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// A Float field: its `==` is IEEE (0.0 == -0.0), so it has no canonical
-/// bytes and its set stays on the linear scan, on every route.
+/// A Float field: a Set compares it with the collection key equality
+/// (ALS-C11, 0.0 and -0.0 one key), so the native render writes its canonical
+/// bits as the key bytes and every leg answers 20.
 const FLOAT_SOURCE: &str = r#"type Reading = { at: Int, value: Float }
 
 effect fn main() -> Unit = {

@@ -983,8 +983,10 @@ cases = [(mode, gen()) for mode, gen in GENS for _ in range(PER_MODE)]
 want = []
 with tempfile.TemporaryDirectory() as d:
     one = os.path.join(d, "w")
-    # Version 3: the ownership alphabet with the arm share-out `s` (#4278).
-    bundle = bytearray(b"almide-certificate-bundle 3\nproducer proofs/gate.sh random differential\n")
+    # The current version (7, format v10): every ownership byte the extracted
+    # checker reads, the nested branch included — an older version refuses a
+    # nested brace at parse time, which would leave every witness unjudged.
+    bundle = bytearray(b"almide-certificate-bundle 7\nproducer proofs/gate.sh random differential\n")
     for i, (mode, w) in enumerate(cases):
         with open(one, "w") as f:
             f.write(w)

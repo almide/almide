@@ -64,6 +64,18 @@ fn mentions_beyond_scalar(a: &IrExpr, var: VarId, lends: &dyn Fn(&CallTarget, &[
                 IrExprKind::IndexAccess { object, index } if is_var(object) => self.visit_expr(index),
                 IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } if is_var(object) => {}
                 IrExprKind::Var { id } if *id == self.var => self.other = true,
+                // A block of immutable scalar `let`s and a tail — what an inlined
+                // scalar callee becomes — is read like its parts (#4944).
+                IrExprKind::Block { stmts, expr: Some(tail) }
+                    if stmts.iter().all(|s| matches!(&s.kind, IrStmtKind::Bind { mutability: almide_ir::Mutability::Let, ty, .. } if scalar_ty(ty))) =>
+                {
+                    for s in stmts {
+                        if let IrStmtKind::Bind { value, .. } = &s.kind {
+                            self.visit_expr(value);
+                        }
+                    }
+                    self.visit_expr(tail);
+                }
                 IrExprKind::Block { .. } | IrExprKind::Lambda { .. } => self.other |= crate::rc_ownership::rc_mentions_var(e, self.var),
                 IrExprKind::Call { target, args, .. } if scalar_ty(&e.ty) && args.iter().any(|x| is_var(x)) => {
                     if !(self.lends)(target, args) {
@@ -413,6 +425,10 @@ impl Emitter<'_> {
     /// A C-319 cell lends nothing: a closure shares it.
     fn other_arg_holds(&self, args: &[IrExpr], k: usize, var: VarId) -> bool {
         let lends = |target: &CallTarget, cargs: &[IrExpr]| -> bool {
+            // A byte buffer's scalar read (#4944) writes nothing and keeps nothing.
+            if let CallTarget::Module { module, func, .. } = target {
+                return crate::bytes_rw::is_scalar_buffer_read(module.as_str(), func.as_str());
+            }
             let CallTarget::Named { name } = target else { return false };
             let Some(ci) = self.resolve_named_fn(name.as_str()).filter(|_| !self.cells.contains(&var)) else {
                 return false;

@@ -64,13 +64,16 @@ pub(super) fn record_decls(
     work: &FnWork,
     stubs: &[imports::Declared],
     creators: &Creators<'_>,
-    bytes: &[u8],
+    (pre_declare, bytes): (&[u8], &[u8]),
 ) {
     use crate::witness::decls::{DeclFn, Declared, PassDecls};
     if !crate::witness::decls::collecting() {
         return;
     }
     let stub_declared = stubs.iter().map(|d| if d.effect { Declared::Effect } else { Declared::Pure }).collect();
+    // The module before the stubs became imports, kept only when some did:
+    // the anchors' bodies are located in it (witness_bundle.rs).
+    let pre_declare = if stubs.is_empty() { Vec::new() } else { pre_declare.to_vec() };
     let stubs = stubs.iter().map(|d| d.index).collect();
     // #3041: a fn synthesized from an effect fn's body keeps its origin's
     // declaration (`IrFunction::declares_effect`).
@@ -105,6 +108,6 @@ pub(super) fn record_decls(
         }
     }
     let creations = creators.creations(work, main_index);
-    crate::witness::decls::record(PassDecls { fns, stubs, stub_declared, creations, bytes: bytes.to_vec() });
+    crate::witness::decls::record(PassDecls { fns, stubs, stub_declared, creations, bytes: bytes.to_vec(), pre_declare });
 }
 

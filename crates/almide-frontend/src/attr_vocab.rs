@@ -67,6 +67,12 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "prim_op",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
+    // A concurrent parameter whose argument is INSTANCE-CLOSED: it runs in
+    // several instances (one per worker, one per request on a wasi:http
+    // host), so it may read no local of the fn passing it (E095, the app of
+    // `http.serve`; crates/almide-frontend concurrent_reach.rs
+    // `stdlib_closed_slots`). Read from the bundled stdlib only
+    "instance_closed",
     // A stdlib fn whose effect on process-local state a sibling fan arm could
     // read (ADR-0024 D3): a fan reaching one runs its arms sequentially
     "ordered",
@@ -113,6 +119,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // stdlib needs the application's `[trust] media` grant, D7)
     "header_write",
     "literal_media",
+    // The closed media-type table of a body type's media fn: the only types
+    // a `@literal_media` builder of that type takes without the
+    // application's own `[trust] media` grant (E117)
+    "media_table",
     "media_owns",
     "script_capable",
     // Scheduling and placement

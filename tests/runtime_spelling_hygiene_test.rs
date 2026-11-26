@@ -195,21 +195,23 @@ fn a_literal_spelled_like_a_metered_prim_does_not_fail_the_native_test_harness()
 /// literal twin above takes the plain fallback. A region that is itself
 /// outside the v1 subset is still refused, never run unmetered.
 ///
-/// The whole-program wall is the `Handle`-returning extern: the plain
-/// `@extern` renders natively now, a raw-pointer one does not yet (#4641).
+/// The whole-program wall is an `@export(c)` fn over a `Region` parameter:
+/// the plain and the `Handle` `@extern` both render natively now (#4641,
+/// #4006).
 #[test]
 fn a_real_metered_prim_takes_the_metered_route_on_the_native_fallback() {
     const SPLICE_NOTE: &str = "its regions rendered by the trust spine";
-    let program = r#"@extern(rs, "std::cmp", "max")
+    let program = r#"import ffi
+
+@extern(rs, "std::cmp", "max")
 fn my_max(a: Int, b: Int) -> Int
 
-@extern(rust, "std::ptr", "null_mut")
-fn no_handle() -> Handle = _
+@export(c, "hygiene_size")
+effect fn size(buf: Region) -> Int = ffi.len(buf)
 
 fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)
 
 effect fn main() -> Unit = {
-  let _ = no_handle()
   println(int.to_string(my_max(1, 2)))
   let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1
   println(int.to_string(r))

@@ -627,6 +627,12 @@ m["key"]                   // index read (returns Option[V])
 m["key"] = value           // index write (var only)
 ```
 
+Set members and Map keys compare with the collection key equality: every NaN
+is one key and `-0.0` is the key `0.0`, also inside List / tuple / record /
+variant / Option components (`set.from_list([nan, nan, 0.0, -0.0])` has 2
+members; the first-stored member stays). `==` stays IEEE (`nan == nan` is
+false), and so do `list.contains` / `index_of` / `unique` / `dedup`.
+
 ### String interpolation
 ```
 "hello ${name}, result=${1 + 1}"
@@ -1284,8 +1290,14 @@ takes a `Body`: a String is `text/plain; charset=utf-8`, Bytes
 `text/html`. Build HTML with `html.escape` (text),
 `html.attr` / `html.url_attr` (attributes) and `html.script_json` (data in
 `<script>`), and `html.raw(s)` only for trusted markup. Any other media type is
-`http.typed("text/csv", bytes)` with the type written as a literal (E117 for a
-computed one, or for HTML / XML / SVG: SVG comes from a package such as
+`http.typed("text/csv", bytes)` with the type written as a literal from its
+closed table of standard non-script types (text/plain, text/csv, text/css,
+application/json, application/octet-stream, image/png, image/jpeg, image/gif,
+image/webp, and similar); any other type is E117 unless the application grants
+it to itself in `almide.toml`, `[trust] media = { "self" = ["application/vnd.acme"] }`.
+E117 also refuses a computed type, and HTML / XHTML whatever the grant. A script-capable type (JavaScript, SVG, XML) is
+served by `http.typed` only when the `"self"` grant names that exact type (`"self" = ["text/javascript"]`; a pattern such as
+`"*/*+xml"` is E118), and every `http.serve` response carries `X-Content-Type-Options: nosniff`, which a handler cannot replace. SVG also comes from a package such as
 almide/svg, which the application grants in `almide.toml` with `[trust]
 media = { "github.com/almide/svg" = ["image/svg+xml"] }`, E118 otherwise). Content-Type is never written by name:
 `set_header` / `with_headers` refuse it (E116), and `set_body` /

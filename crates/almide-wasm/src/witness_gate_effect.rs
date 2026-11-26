@@ -20,13 +20,16 @@ use super::{scalar_ty, straightline_subset};
 ///   `v` (through block tails) is a scalar, certainly fresh, or a call's
 ///   handed-over credit; a borrowed Var in a RAW tail position takes its
 ///   share at the node (data.rs `lower_err_raise`, the carrier's share-out on
-///   the Var's line). Any other `ok(v)` declines as
+///   the Var's line). Any other raw `ok(v)` declines as
 ///   `effect:carrier:ok-borrowed`.
+/// - An `ok(v)` anywhere else (`some(ok(s))`) is a real construction
+///   (data.rs `lower_sum`): its block is fresh and its payload store is
+///   `witness_store`'s (a borrowed Var shares and moves in), judged by the
+///   ordinary value rules.
 pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     // The `ok(v)` nodes in the body's RAW tail positions (through block tails
     // and branch arms): the only ones `lower_err_raise` lowers transparently,
-    // and so the only ones whose borrowed Var it shares. An `ok(v)` anywhere
-    // else (`some(ok(s))`) is a real construction this rule does not widen.
+    // and so the only ones this rule judges.
     fn raw_oks(e: &IrExpr, out: &mut Vec<*const IrExpr>) {
         match &e.kind {
             IrExprKind::Block { expr: Some(t), .. } => raw_oks(t, out),
@@ -50,6 +53,7 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
             // with the body below.
             let raw = self.1.contains(&(e as *const IrExpr));
             if let IrExprKind::ResultOk { expr } = &e.kind
+                && raw
                 && !scalar_ty(&expr.ty)
                 && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(expr).kind)
                 && !matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Call { .. })

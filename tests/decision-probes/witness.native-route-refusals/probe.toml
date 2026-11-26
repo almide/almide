@@ -1,0 +1,9 @@
+# The probe of witness.native-route-refusals (C-461): `main` calls a JS-host
+# hook declared only for the wasm target, with no Almide body. Every native
+# route refuses it with E081 before any render; `check --json --target native`
+# and `check --target native` report that verdict (the native column).
+expect = "E081"
+
+[argv]
+check_json = ["check", "--json", "--target", "native", "{main}"]
+native = ["check", "--target", "native", "{main}"]

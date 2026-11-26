@@ -1,0 +1,5 @@
+# The probe of media.e117-literal-media (owner ruling 2026-11-24, closed
+# table): the application grants itself one unlisted type, and serves another
+# one that neither the stdlib's table nor its grant names. Every route that
+# checks the program refuses it with E117.
+expect = "is not one of the non-script media types"

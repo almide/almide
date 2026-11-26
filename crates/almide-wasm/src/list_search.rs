@@ -130,6 +130,17 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.hof_elem_into(elem, bh, ch, ih, hx);
+        // One activation per element (as an inlined callback's): the element
+        // hold is a VIEW of the list's slot; a droppable element that is not
+        // a handle takes no share below, so the callee's release of its param
+        // would be unrecorded — declined.
+        self.witness_loop_open();
+        let shares = self.rc_droppable(elem) && self.elem_is_handle(elem);
+        if shares {
+            self.witness_view_local(hx, elem);
+        } else if self.rc_droppable(elem) {
+            self.witness_decline("list-map:closure-flat-elem");
+        }
         {
             let mut i = self.f.instructions();
             i.local_get(rh).local_get(ih).i32_const(u.slot_size() as i32).i32_mul().i32_add();
@@ -139,15 +150,26 @@ impl Emitter<'_> {
         // Closure convention (calls.rs): the callee OWNS its args and its
         // epilogue decs every droppable param, so the element — a borrowed
         // read the list still holds — takes the RC-3 +1 here, exactly as
-        // the fs walkers' per-line call does.
+        // the fs walkers' per-line call does. The share moves into the callee.
         self.share_handle_top(elem);
+        if shares {
+            self.witness_walk_share(Some(hx), None);
+        }
         self.f.instructions().local_get(henv).i32_load(slot_memarg(0));
         let ti = self.work.itype(
             vec![ValType::I32, elem.val_type()],
             Some(u.val_type()),
         );
         self.f.instructions().call_indirect(0, ti);
+        // The callee hands back its result's one credit (the closure
+        // convention, #1986): born here, it moves into the result's slot.
         self.store_ty_slot(u, 0);
+        if self.rc_droppable(u)
+            && let Some(w) = self.witness.as_mut()
+        {
+            w.temp_move();
+        }
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
         self.release_i32();
@@ -180,7 +202,14 @@ impl Emitter<'_> {
         // keep the scan family, so a Float key's `-0.0 == 0.0` and
         // `NaN != NaN` answers are unchanged.
         let indexed = crate::map_index::index_key(kt).is_some();
-        let scan = if indexed { self.keyed_find(kt)? } else { self.scan_helper(kt)? };
+        // A Float key keeps `==` (C-053, ALS-C11 leaves the list family IEEE).
+        let scan = if indexed {
+            self.keyed_find(kt)?
+        } else if kt == FLOAT {
+            self.work.helper(crate::work::Helper::ScanF64)
+        } else {
+            self.scan_helper(kt)?
+        };
         let (append, forget) = if indexed { (self.keyed_append(kt), self.keyed_remove(kt)) } else { (None, None) };
         let reserve = self.work.helper(crate::work::Helper::MapReserve);
         let kstride = kt.slot_size() as i32;

@@ -267,7 +267,10 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        // A predicate activation as `list.filter`'s: both sides store COPIES
+        // of the element's handle and take their credits after the loop
+        // (`emit_inc_elems`, as filter's spine does).
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         for (side, w) in [(hy, hwy), (hn, hwn)] {
             self.f

@@ -1,6 +1,6 @@
 # ALS — コレクション（Collections）
 
-> Last updated: 2026-10-27
+> Last updated: 2026-11-24
 
 コレクション型（List / Map / Set / タプル / レコード）の観測規範。参照方法は
 [strings.md](strings.md) 冒頭と同じ（契約台帳の `spec` キーから参照される）。
@@ -23,7 +23,8 @@ Contracts: C-014。
 `==`/`!=` は**構造的深い等価**である: リスト・タプル・レコード・Map・Set・
 Option/Result・ネストした複合値は、要素ごとに再帰的に比較される。参照
 （ポインタ）比較は不適合。Float 成分は IEEE-754 ビット比較でなく数値比較
-（NaN != NaN）。
+（NaN != NaN）。Set・Map の `==` の要素・キーの一致は ALS-C11 のキー等価で
+決まる（同じ要素数で互いに要素であること。Map の値は `==`）。
 `Secret[String]` と `Secret[Bytes]` の `==` は中身を定数時間で比べる（ALS-T31）。
 それ以外の `Secret[A]`、Secret を含む variant・Map・Set の `==` は検査時のエラー
 E103 で拒否する（`spec/wasm_cross/secret_eq_and_decode.almd`）。
@@ -80,7 +81,13 @@ Contracts: C-038。
 +qNaN 0x7FF8000000000000 として +inf の後の最大、-0 < +0）で比較し、
 NaN 混入でも決定的に完走する（パニック・未定義順は不適合）。String キーの `sort_by` は要素が heap でも安定順序で
 全域（結果は各要素を co-own する）。
-Contracts: C-053, C-055, C-276。
+順序をプロトコルの `compare` 要件で定める宣言型（`BigInt: Integer`）は、型引数の
+束縛を経て到達した自然順序の操作 — `list.sort` / `list.min` / `list.max`、
+`list.sort_by` のキー順、およびそれらに帰着する `set.sort` / `set.min` /
+`set.max` / `deque.sort` / `list.min_by` / `list.max_by` — でも、その `compare`
+で比較する（`<` と同じ順序）。フィールド配置による構造順（`{ neg, limbs }` なら
+負数がすべて正数の後に来る）は不適合（almide#4788）。
+Contracts: C-053, C-055, C-276, C-456。
 
 ## ALS-C10 空コレクションの型要件（静的規範）
 
@@ -89,3 +96,30 @@ Contracts: C-053, C-055, C-276。
 **蓄積子の型**と単一化される(要素型とは独立 — `list.fold([1,2,3], "", …)`
 は適合し "123" を返す)。空コレクションは要素型の注釈を要する。
 Contracts: C-052, C-058。
+
+## ALS-C11 コレクションのキー等価
+
+Set の要素と Map のキーは**キー等価** `~` で比べる。Float（Float32 は自分の幅で
+同じ規則）は、両方が NaN なら符号ビット・ペイロード・生成元（`0.0 / 0.0`、
+`inf - inf`、符号反転）によらず `~`、どちらも NaN でなければ `==` のとき `~`
+（`0.0 ~ -0.0`）。ほかのスカラーは `==` のときに限り `~`。List・タプル・
+レコード・variant・Option は同じ形で成分が対ごとに `~` のとき `~` で、要素や
+キーのどの深さにある Float にも同じ規則が及ぶ。
+
+この等価は `set.from_list`・`insert`・`remove`・`contains`・`union`・
+`intersection`・`difference`・`symmetric_difference`・`is_subset`・
+`is_disjoint` の要素判定と、`map.from_list`・`get`・`set`・`contains`・
+`remove`・添字の読み書きのキー判定のすべてを決める:
+`set.from_list([nan, -0.0, -nan, 0.0, inf - inf, 1.0])` の要素数は 3、
+`set.contains(s, -nan)` は true。すでにある要素・キーは最初に入れた値のまま
+残る（`-0.0` を持つ Set に `0.0` を入れても `-0.0` のまま、`map.set` は値だけ
+置き換えて既存のキーを同じ位置に残す）。Set・Map が NaN を含んでも自分自身と
+`==` である（ALS-C3）。
+
+`==`/`!=` は Float でも List・タプル・レコード・variant・Option でも IEEE の
+まま（`nan == nan` と `[nan] == [nan]` は false、`0.0 == -0.0` は true）、
+`list.contains`・`index_of`・`unique`・`dedup` は `==` のまま
+（`list.unique([nan, nan])` は 2 要素、C-289）、順序は IEEE-754 totalOrder の
+まま（ALS-C9）。結果は native・wasm・参照評価器でバイト一致する。
+テスト: `spec/wasm_cross/collection_key_total_equality.almd`。
+Contracts: C-466。

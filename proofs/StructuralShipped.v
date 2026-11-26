@@ -200,8 +200,14 @@ Fixpoint sdecode_go (fuel : nat) (nm : naming) (bs : list Z)
           (* i32.const 1; call x; unreachable — the trap as it ships *)
           sdecode_go f nm r stk (STrap :: acc)
             (mkRoles (r_floor ro) (r_free ro) (x :: r_exit ro))
-      | 65 :: b :: r => (* i32.const, single-byte SLEB *)
-          sdecode_go f nm r (EC (sleb1 b) :: stk) acc ro
+      | 65 :: b :: r =>
+          (* i32.const, single-byte SLEB. A byte of 128 or more has the
+             continuation bit set: in the binary format the constant goes on
+             into the next byte, so this is not a one-byte constant and is
+             not read as one with the bit dropped (`tokens` above takes the
+             next byte for the constant; the two readings must agree). *)
+          if b <? 128 then sdecode_go f nm r (EC (sleb1 b) :: stk) acc ro
+          else None
       | 69 :: r => (* i32.eqz *)
           match stk with
           | a :: stk' => sdecode_go f nm r (EEqz a :: stk') acc ro
@@ -851,4 +857,45 @@ Theorem a_call_without_the_block_does_not_decode :
      32;0;32;1;54;2;0;
      32;1;69;4;64;32;1;16;33;11;
      11] = None.
+Proof. reflexivity. Qed.
+
+(* A constant byte of 128 or more is the first byte of a longer LEB128
+   number, never the one-byte constant it would read as with the bit dropped:
+   `65;129;106` is `i32.const` of a number that takes the 106 for itself, not
+   `i32.const 1 ; i32.add`. A control that changed each byte of one shipped
+   module's four routines in every way that adds one, subtracts one or flips
+   a bit found the decoder reading the first as the second: 9 of 6,903
+   variants, each of this one shape, were still read as the proven trees.
+   They are the shipped `$inc` and `$dec_flat` of that module with the bit
+   set on their `1`. *)
+Example inc_with_a_continued_constant_does_not_decode :
+  sdecode_bytes inc_naming
+    [32;0;35;3;73;4;64;15;11; 32;0;32;0;40;2;0;65;129;106;54;2;0; 11] = None.
+Proof. reflexivity. Qed.
+
+Example dec_with_a_continued_constant_has_no_verdict :
+  dec_verdict 12 1
+    [32;0;35;3;73;4;64;15;11;
+     32;0;40;2;0;65;129;107;33;1;
+     32;1;65;127;70;4;64;65;1;16;1;0;11;
+     32;0;32;1;54;2;0;
+     32;1;69;4;64;32;0;16;12;11;
+     11] = None.
+Proof. reflexivity. Qed.
+
+(* The same two routines as they ship, untouched, are read. *)
+Example the_untouched_shipped_inc_decodes :
+  option_map fst (sdecode_bytes inc_naming
+    [32;0;35;3;73;4;64;15;11; 32;0;32;0;40;2;0;65;1;106;54;2;0; 11])
+  = Some inc_body.
+Proof. reflexivity. Qed.
+
+Example the_untouched_shipped_dec_has_its_verdict :
+  dec_verdict 12 1
+    [32;0;35;3;73;4;64;15;11;
+     32;0;40;2;0;65;1;107;33;1;
+     32;1;65;127;70;4;64;65;1;16;1;0;11;
+     32;0;32;1;54;2;0;
+     32;1;69;4;64;32;0;16;12;11;
+     11] = Some (dec_body, [3], true).
 Proof. reflexivity. Qed.

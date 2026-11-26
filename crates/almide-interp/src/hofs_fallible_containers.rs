@@ -120,7 +120,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         let mut out = (*entries).clone();
-        match out.iter_mut().find(|(k, _)| *k == key) {
+        match out.iter_mut().find(|(k, _)| crate::value::key_eq(k, &key)) {
             Some(pair) => {
                 pair.1 = match self.try_step(&clo, vec![pair.1.clone()]) {
                     Ok(v) => v,
@@ -150,7 +150,7 @@ impl<'a> Interpreter<'a> {
                         Value::List(xs) => {
                             let mut out: Vec<Value> = Vec::new();
                             for x in xs.iter() {
-                                if !out.contains(x) {
+                                if !out.iter().any(|m| crate::value::key_eq(m, x)) {
                                     out.push(x.clone());
                                 }
                             }

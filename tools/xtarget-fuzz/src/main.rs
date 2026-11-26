@@ -21,6 +21,7 @@
 mod availability;
 mod findings;
 mod generator;
+mod incomplete;
 mod inspect;
 mod metamorph;
 mod minimize;
@@ -988,6 +989,8 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
     );
     let walls = stats.walled.load(Ordering::Relaxed);
     eprintln!("  walls (subset)   = {walls}");
+    // C-462: never hidden — the programs the wasm legs ran only under the flag.
+    eprintln!("  INCOMPLETE       = {}", incomplete::report());
     let slow = sink.slow_count();
     if slow > 0 {
         eprintln!(

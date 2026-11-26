@@ -328,7 +328,26 @@ marshalling. `app.js` is a dependency-free ES module:
   of `spec/wasm_host_js/extern_js.almd` is the ratchet row that makes a
   route change visible; `almide run --target wasm` refuses such a program by
   name (it has no host for the import) and points at `--host js`.
-- Every `pub fn` gets a wrapper: `Int` ↔ `number` (a `RangeError` outside
+- Every `pub fn` gets a wrapper, exported under the fn's own name (#4943).
+  The wrapper is the glue binding `$<name>` with parameters `$0`, `$1`, ...
+  (an Almide identifier never contains `$`: the lexer's
+  `is_ident_start_char` / `is_ident_continue_char`), and one
+  `export { $name as name, ... }` line exports them, so no source name is a
+  binding in the glue's scope: a `pub fn process`, `fetch`, `view` or
+  `memory` cannot shadow a global or redeclare a helper the glue reads, and a
+  name JS reserves (`delete`, a `default` parameter, a backticked `let`) is
+  still a valid export. The `.d.ts` declares a reserved name through the same
+  `$` binding and a reserved parameter as `name$`. The glue's own exports
+  (`init`, `AlmideExit`, and per build `run`, `memoryBytes`, `AlmideError`,
+  `regionRelease`, `files`) are reserved: a `pub fn` with one of those names
+  is a build-time refusal that names it and lists the glue's exports for that
+  build (read off the generated glue, not a fixed list); write `local fn`
+  to keep it off the JS surface. So is a `pub fn` named like an export the
+  toolchain writes into the module itself (`memory`, `_start`, the `__`
+  space — `host_exports::is_reserved_export`, #3490): the module does not
+  export it, so no wrapper could call it; `@export(wasm, "<name>")` exports
+  it under a name of its own.
+- Each wrapper marshals `Int` ↔ `number` (a `RangeError` outside
   ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
   wider value exact), `Float`, `Bool`, `String`, `Unit`, and (#3354) the block
   shapes, as params and returns: `Bytes` ↔ `Uint8Array` (a copy), `List[T]` ↔

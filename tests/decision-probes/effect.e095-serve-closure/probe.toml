@@ -1,0 +1,3 @@
+# The probe of effect.e095-serve-closure: the app passed to http.serve, through
+# a wrapper fn of another module, reads a local of the fn that passes it.
+expect = "E095"

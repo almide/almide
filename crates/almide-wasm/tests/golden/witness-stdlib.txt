@@ -1022,6 +1022,7 @@ bytes.enumerate
 bytes.f16_be_at
 bytes.filter
 bytes.find
+bytes.find_index
 bytes.first
 bytes.fits
 bytes.get_bool
@@ -1089,6 +1090,7 @@ bytes.next_u16_le
 bytes.next_u32_be
 bytes.next_u32_le
 bytes.next_u8
+bytes.partition
 bytes.pick_with
 bytes.pop
 bytes.product
@@ -1597,6 +1599,7 @@ string.dedup
 string.drop_while
 string.enumerate
 string.filter
+string.find_index
 string.from_codepoint
 string.from_list
 string.from_utf16
@@ -1609,6 +1612,7 @@ string.merge_with
 string.min
 string.min_with
 string.new
+string.partition
 string.pick_with
 string.pop
 string.reduce

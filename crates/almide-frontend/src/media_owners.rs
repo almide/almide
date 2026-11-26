@@ -80,6 +80,24 @@ pub fn script_capable() -> &'static [String] {
     })
 }
 
+/// The media types the application grants itself (`[trust] media =
+/// { "self" = [...] }`, ADR-0032 D7), for the program whose entry is `file`:
+/// the driver registers the reader once (it owns the manifest); with none
+/// registered, or no file, there are none.
+pub fn self_grants(file: Option<&str>) -> Vec<String> {
+    match (SELF_GRANTS.get(), file) {
+        (Some(read), Some(f)) => read(f).into_iter().map(|m| m.to_ascii_lowercase()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Register the reader of [`self_grants`] (the driver, once).
+pub fn set_self_grants_reader(read: fn(&str) -> Vec<String>) {
+    let _ = SELF_GRANTS.set(read);
+}
+
+static SELF_GRANTS: std::sync::OnceLock<fn(&str) -> Vec<String>> = std::sync::OnceLock::new();
+
 /// Can a browser run script in some media type `pattern` matches?
 pub fn is_script_capable(pattern: &str) -> bool {
     script_capable().iter().any(|a| overlap(pattern, a))
@@ -142,7 +160,7 @@ mod tests {
 
     #[test]
     fn the_script_capable_set_is_read_from_html() {
-        for t in ["text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "application/atom+xml"] {
+        for t in ["text/html", "application/xhtml+xml", "image/svg+xml", "application/xml", "application/atom+xml", "text/javascript"] {
             assert!(is_script_capable(t), "{t}");
         }
         assert!(!is_script_capable("text/csv"));

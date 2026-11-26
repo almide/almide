@@ -15,11 +15,17 @@ BIN="${ALMIDE_BIN:-almide}"
 
 # FALLBACK_TEST_LOG=<file> keeps the run's full output (with the per-file wall
 # reasons) for a reader that wants them.
-if [ -n "${FALLBACK_TEST_LOG:-}" ]; then
-  observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 ALMIDE_WALL_REASON=1 "$BIN" test 2>&1 | tee "$FALLBACK_TEST_LOG" | sed -n 's/^FALLBACK //p' | sort)
-else
-  observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 "$BIN" test 2>&1 | sed -n 's/^FALLBACK //p' | sort)
-fi
+# The run is a whole-directory test run, so it carries
+# --allow-incomplete-verification (C-462) and its log is held to the
+# INCOMPLETE ledger: a warning from a program the ledger does not list for
+# `test` fails, exactly as the default refusal would
+# (scripts/lib/incomplete-verification.sh).
+log="${FALLBACK_TEST_LOG:-$(mktemp)}"
+rc=0
+(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 ALMIDE_WALL_REASON=1 "$BIN" test --allow-incomplete-verification > "$log" 2>&1) || rc=$?
+if [ "$rc" -ne 0 ]; then tail -20 "$log" >&2; echo "::error::almide test exited $rc" >&2; exit 1; fi
+observed=$(sed -n 's/^FALLBACK //p' "$log" | sort)
+bash "$ROOT/scripts/check-incomplete-verification.sh" test "$log"
 listed=$(grep -v '^#' "$BASELINE" | awk -F' :: ' 'NF>=2 {print $1}' | sort)
 
 new=$(comm -23 <(echo "$observed") <(echo "$listed") | sed '/^$/d' || true)

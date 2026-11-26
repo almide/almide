@@ -60,6 +60,8 @@ Proof.
       exfalso. destruct (Hinc Take (or_introl eq_refl)) as [H | H]; discriminate.
     + (* Probe — excluded by hypothesis *)
       exfalso. destruct (Hinc Probe (or_introl eq_refl)) as [H | H]; discriminate.
+    + (* Reclaim — excluded by hypothesis *)
+      exfalso. destruct (Hinc Reclaim (or_introl eq_refl)) as [H | H]; discriminate.
 Qed.
 
 (* THE CURRENT ARTIFACT REFINES THE SAFETY CORE. The eager-copy renderer emits an

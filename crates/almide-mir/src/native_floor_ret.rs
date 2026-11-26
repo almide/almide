@@ -163,6 +163,16 @@ fn set_matrix_ret_of(r: FloorRet, call: String, cx: &CallCx, dst_map: Option<u16
             NTy::Bool => (format!("({call}).into_iter().map(|x| x as i64).collect::<AlmideList<_>>()"), Some(NTy::Vec)),
             NTy::I64 => (call, Some(NTy::Vec)),
             NTy::Str => (call, Some(NTy::VecStr)),
+            // A real-float list / option element (ALS-C11) leaves as the
+            // program's lane-bits carrier.
+            NTy::Rec(i) if crate::render_native_rec::list_elem(i).is_some_and(|e| matches!(e, NTy::F64 | NTy::F32)) => (
+                format!("({call}).into_iter().map(|l| l.iter().map(|x| x.to_bits() as i64).collect::<AlmideList<i64>>()).collect::<AlmideList<AlmideList<i64>>>()"),
+                Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::Vec))),
+            ),
+            NTy::Rec(i) if crate::render_native_rec::option_payload(i).is_some_and(|e| matches!(e, NTy::F64 | NTy::F32)) => (
+                format!("({call}).into_iter().map(|o| o.map(|x| x.to_bits() as i64)).collect::<AlmideList<Option<i64>>>()"),
+                Some(NTy::Rec(crate::render_native_rec::list_type_of(NTy::Opt))),
+            ),
             e if crate::render_native_rec::native_set_element_kind(e) => (call, Some(NTy::Rec(crate::render_native_rec::list_type_of(e)))),
             _ => return Err(mismatch()),
         },

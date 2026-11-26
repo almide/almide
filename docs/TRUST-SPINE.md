@@ -62,8 +62,8 @@ not a present fact. See [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md)
 for the explicit ledger and the generated checker-size count below. The stage-by-stage boundary — which rows are proven, which are trusted, and what every gate does and does not claim — is **[proven-vs-trusted.md](contracts/proven-vs-trusted.md)**.
 
 <!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **5449 lines** (+ 994
-> `.mli`); Rocq spine = **733 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **5614 lines** (+ 1024
+> `.mli`); Rocq spine = **744 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
 > Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
 <!-- tcb:generated:end -->
 

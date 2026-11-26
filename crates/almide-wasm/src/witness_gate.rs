@@ -9,7 +9,7 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 /// The inlined-callback rules (split for the file budget).
 #[path = "witness_gate_callbacks.rs"]
 mod callbacks;
-use callbacks::{inline_callback_subset, is_self_hosted_hof};
+use callbacks::inline_callback_subset;
 /// The built-value rules (split for the file budget).
 #[path = "witness_gate_built.rs"]
 mod built;
@@ -244,12 +244,15 @@ fn expr_tag(e: &IrExpr) -> String {
     }
 }
 
-/// Is the value a scalar (no block, no RC site of its own)?
+/// Is the value a scalar (no block, no RC site of its own)? A `Never` value
+/// is none at all: control does not come back from it (diverge.rs), so a
+/// reader of it reads nothing — its own sites are the call's.
 fn scalar_ty(t: &almide_types::types::Ty) -> bool {
     use almide_types::types::Ty;
     matches!(
         t,
-        Ty::Int
+        Ty::Never
+            | Ty::Int
             | Ty::Float
             | Ty::Int8
             | Ty::Int16
@@ -330,6 +333,10 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             stmts_subset(stmts).map(Why::Deep).or_else(|| value_subset(tail))
         }
+        // A block with no tail is the same shape with a Unit tail (no block,
+        // no site): its statements are the frame's, judged as any body's
+        // (an inlined callback's `(line) => { count = count + 1 }`).
+        IrExprKind::Block { stmts, expr: None } => stmts_subset(stmts).map(Why::Deep),
         // #2756: a value-position branch — one site, each arm hands the
         // join one credit (`witness_arm_value`); the condition runs first.
         IrExprKind::If { cond, then, else_ } => value_subset(cond)
@@ -414,6 +421,17 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         // `witness_unwrap_or_arm`). The carrier must be a bound local
         // (arg_temps.rs names a produced one), the fallback runs on its arm.
         IrExprKind::UnwrapOr { expr, fallback } => {
+            // #4315: `x = f(x, …) ?? fb`, the fold step arg_temps.rs leaves
+            // unbound (`fold_step_call`): a Result carrier that is a CALL takes
+            // the owned-carrier route (data.rs `lower_unwrap_or_owned_result`)
+            // — born at the site, released on both arms (`d`), its payload's
+            // credit the join's. Any other route over an unbound carrier
+            // declines at emission (`unwrap-or:unowned-carrier`).
+            if matches!(expr.kind, IrExprKind::Call { .. }) && result_ty(&expr.ty) {
+                return call_subset(expr)
+                    .map(|w| w.inside("unwrap-or-carrier"))
+                    .or_else(|| value_subset(fallback).map(|w| w.inside("fallback")));
+            }
             // #2755: a slot of a bound block (`r.f ?? x`) is a carrier view
             // like a local's; a literal `none` is the NULL address (no block,
             // the payload arm never runs).
@@ -532,15 +550,10 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
     };
     match target {
         almide_ir::CallTarget::Named { name } => {
-            // The http_framed host-op leaves (calls.rs) intercept before
-            // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_")
-                || name.as_str().starts_with("__http_call_")
-                || name.as_str().starts_with("__http_serve_")
-                || name.as_str().starts_with("__proc_")
-            {
-                return Some(Why::Deep("call:host-splice".into()));
-            }
+            // A bodyless host-op leaf (http_call.rs `lower_host_leaf`) is
+            // audited like a module arm: its operands enter through
+            // `lower_arg` and the frame declines when one did not. Its
+            // arguments are judged below like any call's.
             // `__is_null` reads the Value tag of its lowered argument: no
             // argument hook fires, so only an RC-free argument is honest.
             // `panic` concatenates its message into a line and aborts: an
@@ -555,9 +568,7 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
         // any other declines by arm name. A Fn value that arrives as a value
         // (a Var, a call result) is an ordinary argument everywhere.
         almide_ir::CallTarget::Module { module, func, .. } => {
-            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. }))
-                && !is_self_hosted_hof(module.as_str(), func.as_str())
-            {
+            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
                 return inline_callback_subset(module.as_str(), func.as_str(), args);
             }
         }
@@ -635,8 +646,8 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 
 /// A match's subject and arm heads (#2756): the subject is evaluated once,
 /// before the site; a pattern binds VIEWS of it (patterns.rs, no share, no
-/// release) — except a named list rest, a fresh block only an unguarded arm
-/// releases (#2971, `pattern_has_named_rest`). A guard runs between two arms' tests (patterns.rs
+/// release) — except a named list rest, a fresh block its arm releases
+/// (#2971, `pattern_has_named_rest`). A guard runs between two arms' tests (patterns.rs
 /// `lower_arm_chain`) and is recorded on its own arm's path, where the
 /// state before it is the one every path through it starts from. Its value
 /// is a scalar Bool, so each credit it takes inside is settled inside it (a
@@ -682,7 +693,12 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         return Some("match-subject:fresh".into());
     }
     for a in arms {
-        if pattern_has_named_rest(&a.pattern, a.guard.is_none()) {
+        // A guarded arm's rests are released by its false guard's edge and
+        // after its body (arm_rests.rs `settle_guard_rests`), recorded on the
+        // arm's own path; a guard that BINDS a local splits the arm into a
+        // verdict and a select site (witness_guard.rs), whose product pairs
+        // a true guard with the fall-through, where the rest is still held.
+        if pattern_has_named_rest(&a.pattern, a.guard.as_ref().is_none_or(|g| !binds_a_local(g))) {
             return Some("pattern:list-rest".into());
         }
         if let Some(w) = a.guard.as_ref().filter(|g| !rc_free(g)).and_then(value_subset) {
@@ -713,11 +729,10 @@ pub(crate) fn binds_a_local(e: &IrExpr) -> bool {
     v.0
 }
 
-/// A named list rest no route releases. `arm_releases`: an UNGUARDED match
-/// arm releases each `..t` binder after its body, and every exit or loop
-/// jump out of the arm on its own edge (arm_rests.rs, #3377). A guarded
-/// arm's false guard falls through with the rest
-/// built, and a `let [h, ..t] = xs` never releases it.
+/// A named list rest no route releases. `arm_releases`: a match arm
+/// releases each `..t` binder after its body, and every exit or loop jump
+/// out of the arm on its own edge (arm_rests.rs, #3377), a guarded arm's
+/// false guard on that edge (#2971); a `let` destructure never releases it.
 fn pattern_has_named_rest(p: &almide_ir::IrPattern, arm_releases: bool) -> bool {
     use almide_ir::IrPattern as P;
     let any = |ps: &[P]| ps.iter().any(|q| pattern_has_named_rest(q, arm_releases));
@@ -753,6 +768,12 @@ fn ends_in_loop_ctl(e: &IrExpr) -> bool {
 fn carrier_ty(t: &almide_types::types::Ty) -> bool {
     use almide_types::types::constructor::TypeConstructorId as C;
     matches!(t, almide_types::types::Ty::Applied(C::Result | C::Option, _))
+}
+
+/// Is `t` a Result carrier type?
+fn result_ty(t: &almide_types::types::Ty) -> bool {
+    use almide_types::types::constructor::TypeConstructorId as C;
+    matches!(t, almide_types::types::Ty::Applied(C::Result, _))
 }
 
 /// #2758: a top-let initializer lowered inline in `main`'s prologue: an

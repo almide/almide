@@ -157,8 +157,16 @@ impl Emitter<'_> {
                 let acc_obj = if herr.is_some() { self.witness.as_mut().map(|w| w.temp_born()) } else { None };
                 self.hof_elem_into(elem, bh, ch, ih, param);
                 self.witness_callback_open(cb, None);
-                if closure.is_some() {
-                    self.witness_decline("fan:closure-route");
+                // The closure route's element hold is a VIEW of the list's
+                // slot, like an inlined callback's param; the call below shares
+                // it into the callee (the closure convention). A droppable
+                // element the share does not cover (not a handle) declines.
+                if closure.is_some() && self.rc_droppable(elem) {
+                    if self.elem_is_handle(elem) {
+                        self.witness_view_local(param, elem);
+                    } else {
+                        self.witness_decline("fan:closure-route");
+                    }
                 }
                 let got = match (closure, body) {
                     (Some((hcl, ti, _, ret)), _) => {
@@ -168,6 +176,9 @@ impl Emitter<'_> {
                         // epilogue decs its params).
                         self.f.instructions().local_get(hcl).local_get(param);
                         self.share_handle_top(elem);
+                        if self.rc_droppable(elem) && self.elem_is_handle(elem) {
+                            self.witness_walk_share(Some(param), None);
+                        }
                         self.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
                         self.f.instructions().call_indirect(0, ti);
                         ret
@@ -342,6 +353,9 @@ impl Emitter<'_> {
         for (k, arm) in exprs.iter().enumerate() {
             let got = match &overlap {
                 Some(calls) => {
+                    // The arm's call is the overlap's (its hook ran in phase A):
+                    // the node is the arm's argument, never lowered.
+                    self.witness_prefetch_open(arm);
                     self.f.instructions().local_get(slots[k]);
                     self.fan_take(&calls[k])?
                 }

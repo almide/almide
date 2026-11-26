@@ -47,7 +47,9 @@ Record naming := mkNaming {
   n_set : Z -> option (expr -> stmt)
 }.
 
-(* Single-byte SLEB128 constant: 0..63 verbatim, 64..127 = negative. *)
+(* Single-byte SLEB128 constant: 0..63 verbatim, 64..127 = negative. Only for
+   a byte below 128: with the continuation bit the constant is longer, and
+   every caller tests that first. *)
 Definition sleb1 (b : Z) : Z := if b <? 64 then b else b - 128.
 
 (* Multi-byte SLEB128 (up to 3 bytes — the largest immediate here). *)
@@ -223,8 +225,11 @@ Fixpoint decode_go (fuel : nat) (nm : naming) (bs : list Z)
               decode_go f nm r stk' (SStore (fold_off a off) v :: acc)
           | _ => None
           end
-      | 65 :: b :: r => (* i32.const, single-byte SLEB *)
-          decode_go f nm r (EC (sleb1 b) :: stk) acc
+      | 65 :: b :: r =>
+          (* i32.const, single-byte SLEB; a byte with the continuation bit
+             (128 or more) is not one, and is not read with the bit dropped *)
+          if b <? 128 then decode_go f nm r (EC (sleb1 b) :: stk) acc
+          else None
       | 69 :: r => (* i32.eqz *)
           match stk with
           | a :: stk' => decode_go f nm r (EEqz a :: stk') acc

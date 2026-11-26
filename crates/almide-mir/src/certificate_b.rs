@@ -19,18 +19,36 @@ fn frame_has(fr: &BranchFrame, o: ValueId) -> bool {
     fr.else_ev.contains_key(&o)
 }
 
-/// order. Net-zero, divergence-marker-free arms flatten.
+/// order. Net-zero, divergence-marker-free arms flatten. The net is the
+/// arm's STRUCTURAL one ([`structured_net`]): an arm that holds an
+/// already-flushed inner region (an inner branch, a loop) counts that region
+/// once, as the checker executes it, never both of its arms (#4930).
 fn flat_concat_ok(t: &str, e: &str) -> bool {
-    if seg_net(t) != 0 {
+    if structured_net(t) != Some(0) {
         return false;
     }
-    if seg_net(e) != 0 {
+    if structured_net(e) != Some(0) {
         return false;
     }
-    if t.contains(['x', 't']) {
-        return false;
+    // A marker inside an already-flushed inner branch is that branch's own
+    // (its bracket names the exiting side); only an arm's own top-level
+    // marker keeps the bracket.
+    !exits_at_top(t) && !exits_at_top(e)
+}
+
+/// `seg` holds a divergence marker `x` / `t` outside every bracket: the arm
+/// itself exits or aborts.
+fn exits_at_top(seg: &str) -> bool {
+    let mut depth = 0i32;
+    for c in seg.chars() {
+        match c {
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => depth -= 1,
+            'x' | 't' if depth == 0 => return true,
+            _ => {}
+        }
     }
-    !e.contains(['x', 't'])
+    false
 }
 
 /// Either arm still carries a structural delimiter — the poisoned-flush
@@ -55,6 +73,8 @@ struct Streams {
     /// skip its equality (#1146; the kernel-proven checker still rejects the
     /// poisoned cert itself, which is the poison's whole job).
     poisoned: bool,
+    /// Inside a top-level loop group (`CertScan::depth > 0`).
+    in_loop: bool,
 }
 
 fn seg_net(seg: &str) -> i64 {
@@ -69,6 +89,88 @@ fn seg_net(seg: &str) -> i64 {
         .sum()
 }
 
+/// `seg` without its event-free loop groups `()` and `[|]`. The checker
+/// executes an empty loop body as the identity (`exec_line`: a loop must
+/// preserve the count, and no event changes it or faults), so dropping one
+/// changes no verdict. A slot stream opens `(` on every top-level loop, so a
+/// loop in one arm of a branch left an empty group on the line of a slot the
+/// loop never touches, and that arm, holding a delimiter, could only be
+/// written as the rejecting poison (the `!` early exit's error slot, read by
+/// a fold in the ok arm).
+fn without_empty_regions(seg: &str) -> String {
+    let mut s = seg.to_string();
+    loop {
+        let next = s.replace("()", "").replace("[|]", "");
+        if next == s {
+            return s;
+        }
+        s = next;
+    }
+}
+
+/// The net count change of an event segment as the checker executes it
+/// (`exec_line`, crates/almide-verify/src/ownership.rs): a loop `(...)` or a
+/// conditional loop `[...|...]` preserves the count, so it adds 0 when its
+/// bodies are net 0; a one-shot branch `{t|e}` adds its arms' common net.
+/// `None` when the segment is not of that shape (a loop body that does not
+/// preserve the count, branch arms that disagree, a nested or unbalanced
+/// delimiter): such a segment never flattens. Without delimiters it equals
+/// [`seg_net`].
+fn structured_net(seg: &str) -> Option<i64> {
+    let mut net = 0i64;
+    let mut chars = seg.chars();
+    while let Some(c) = chars.next() {
+        let close = match c {
+            '(' => ')',
+            '{' => '}',
+            '[' => ']',
+            ')' | '}' | ']' | '|' => return None,
+            c => {
+                net += seg_net(c.encode_utf8(&mut [0u8; 4]));
+                continue;
+            }
+        };
+        // The checker's grouped items hold flat events only — except a
+        // one-shot branch inside a loop group (#4934): the checker closes it
+        // as its own item while the loop body stays open (`step_plain`), so
+        // it counts as a branch at this level and the body keeps its ops.
+        let mut arms: Vec<String> = vec![String::new()];
+        loop {
+            match chars.next()? {
+                x if x == close => break,
+                '|' if close != ')' && arms.len() == 1 => arms.push(String::new()),
+                '{' if close == ')' => {
+                    let mut inner = String::from("{");
+                    loop {
+                        match chars.next()? {
+                            '}' => break,
+                            '(' | ')' | '{' | '[' | ']' => return None,
+                            x => inner.push(x),
+                        }
+                    }
+                    inner.push('}');
+                    net += structured_net(&inner)?;
+                }
+                '(' | ')' | '{' | '}' | '[' | ']' | '|' => return None,
+                x => arms.last_mut()?.push(x),
+            }
+        }
+        let nets: Vec<i64> = arms.iter().map(|a| seg_net(a)).collect();
+        // An exiting (`x`) or aborting (`t`) arm leaves the line; the line
+        // continues from the other arm alone (`BranchRet` / `BranchAbort`).
+        let marked: Vec<bool> = arms.iter().map(|a| a.contains(['x', 't'])).collect();
+        match close {
+            ')' if nets == [0] && marked == [false] => {}
+            ']' if nets == [0, 0] && marked == [false, false] => {}
+            '}' if marked == [true, false] => net += nets[1],
+            '}' if marked == [false, true] => net += nets[0],
+            '}' if nets.len() == 2 && marked == [false, false] && nets[0] == nets[1] => net += nets[0],
+            _ => return None,
+        }
+    }
+    Some(net)
+}
+
 impl Streams {
     fn new() -> Self {
         Streams {
@@ -77,6 +179,7 @@ impl Streams {
             stream: BTreeMap::new(),
             frames: Vec::new(),
             poisoned: false,
+            in_loop: false,
         }
     }
     /// Append an event segment to `o` — into the innermost open branch arm when
@@ -127,13 +230,18 @@ impl Streams {
             None => return, // EndIf without IfThen — malformed MIR, nothing buffered
         };
         for o in fr.order {
-            let t = fr.then_ev.get(&o).cloned().unwrap_or_default();
-            let e = fr.else_ev.get(&o).cloned().unwrap_or_default();
+            let t = without_empty_regions(&fr.then_ev.get(&o).cloned().unwrap_or_default());
+            let e = without_empty_regions(&fr.else_ev.get(&o).cloned().unwrap_or_default());
             // An arm carrying a divergence marker `x` or `t` NEVER flattens (even at
             // net 0): the bracket is what tells the checker WHICH side exited
             // the frame, so the flat concat would erase the exit obligation.
             let seg = if flat_concat_ok(&t, &e) {
                 format!("{t}{e}")
+            } else if self.in_loop && t == e && !either_has_delimiter(&t, &e) && !t.contains(['x', 'X', 't', 'T']) {
+                // #4934: inside a loop group, two identical arms are written
+                // as the one path they both are (`{i|i}` is `i`): the checker
+                // reads a region there as an item ahead of the loop.
+                t
             } else if either_has_delimiter(&t, &e) {
                 self.poisoned = true;
                 "{i|}".to_string()
@@ -351,6 +459,15 @@ struct CertScan {
     slot_chain: BTreeMap<ValueId, ValueId>,
     /// Per open region: the slot its merge credits, when it is in `slot_chain`.
     merge_credit: Vec<Option<ValueId>>,
+    /// #4934: the released merge destination of each open `IfThen`, credited
+    /// at its `EndIf` — where the arms' values have joined — not at the
+    /// `IfThen`: an arm that leaves the fn (`!`, a guard) never forms the
+    /// merge, so a credit before the region left that exit holding it.
+    merge_pending: Vec<Option<ValueId>>,
+    /// #4934: the heap params the CALLER owns (neither owned nor in-out). Their
+    /// blocks outlive the call, so rebinding a slot that aliased one (`var out
+    /// = raw; out = f(out)`) ends no view of that block.
+    borrowed_params: BTreeSet<ValueId>,
     /// Straight-line slots whose pending rebind is a bare credit (no `(`
     /// opened): their `SetLocal` closes nothing.
     unfolded: BTreeSet<ValueId>,
@@ -527,6 +644,12 @@ impl CertScan {
             self.s.else_branch();
         }
         self.leave_arm(is_end);
+        if is_end {
+            if let Some(d) = self.merge_pending.pop().flatten() {
+                self.s.of.insert(d, d);
+                self.s.event(d, 'i');
+            }
+        }
     }
 
     /// Route `dst`'s event into its loop-carried SLOT stream when it FEEDS one.
@@ -554,7 +677,10 @@ impl CertScan {
         if !self.line_slots.contains(&slot) {
             return false;
         }
-        self.s.frames.is_empty()
+        // #4934: inside a loop the slot's line is already one loop group
+        // (`slot_delimiters_open`); a second `(` would nest groups, which the
+        // format has no reading for.
+        self.s.frames.is_empty() && self.depth == 0
     }
 
     /// A feeder's event routes to its slot stream; anything else opens its OWN
@@ -624,7 +750,21 @@ impl CertScan {
 
     /// Open `(` on every slot stream, remembering which streams were opened.
     fn slot_delimiters_open(&mut self) {
-        let opened: Vec<ValueId> = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+        // One group per OBJECT (#4934): two slots that share one object (two
+        // folds seeded by the same `init`) would otherwise nest `((…))`.
+        let mut opened: Vec<ValueId> = self.slots.iter().map(|slot| self.s.object_of(*slot)).collect();
+        let mut seen = BTreeSet::new();
+        opened.retain(|o| seen.insert(*o));
+        // A slot not yet born at the loop's entry (its value is made inside
+        // the loop: a `var` declared in an outer loop's body) is fresh every
+        // round, so its events are one round's, flat — a group would read an
+        // exit branch inside it ahead of the birth (#4934, the checker closes
+        // a branch as its own item while the loop body stays open).
+        opened.retain(|o| {
+            let born = |seg: &str| seg.chars().any(|c| !matches!(c, '(' | ')' | '{' | '}' | '[' | ']' | '|'));
+            self.s.stream.get(o).is_some_and(|l| born(l))
+                || self.s.frames.iter().any(|f| (if f.in_else { &f.else_ev } else { &f.then_ev }).get(o).is_some_and(|l| born(l)))
+        });
         for &so in &opened {
             self.s.event(so, '(');
         }
@@ -672,7 +812,7 @@ impl CertScan {
                 // call (`M`), so the rebind is the bare credit.
                 self.s.of.insert(dst, so);
                 self.s.event(so, 'i');
-                if self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+                if self.straight_line_slot(slot) {
                     self.unfolded.insert(slot);
                 }
                 return;
@@ -703,31 +843,20 @@ impl CertScan {
         if let (Some(d), Some(slot)) = (dst, chained) {
             let so = self.s.object_of(slot);
             self.s.of.insert(d, so);
-            if self.feeder_to_slot.contains_key(&d) && self.line_slots.contains(&slot) && self.s.frames.is_empty() {
+            if self.feeder_to_slot.contains_key(&d) && self.straight_line_slot(slot) {
                 self.s.event(so, '(');
             }
+            self.merge_pending.push(None);
             self.s.open_branch();
             self.enter_branch_scope();
             return;
         }
-        if let Some(d) = dst {
-            self.credit_merge_dst(d);
-        }
+        // A slot-fed merge keeps its credit at the region (`try_feed`); a
+        // released merge destination is credited at the join (`close_arm`).
+        let pending = dst.filter(|d| !self.try_feed(*d, 'i') && self.released_merge_dsts.contains(d));
+        self.merge_pending.push(pending);
         self.s.open_branch();
         self.enter_branch_scope();
-    }
-
-    /// The merge dst's pre-region `i`. try_feed EMITS on success — the early
-    /// return keeps the &&'s exact short-circuit (feed first, fall through
-    /// only on false).
-    fn credit_merge_dst(&mut self, d: ValueId) {
-        if self.try_feed(d, 'i') {
-            return;
-        }
-        if self.released_merge_dsts.contains(&d) {
-            self.s.of.insert(d, d);
-            self.s.event(d, 'i');
-        }
     }
 
     /// A LIVE USE (Borrow / MakeUnique) on an object whose stream HOLDS
@@ -749,11 +878,13 @@ impl CertScan {
             self.slot_delimiters_open();
         }
         self.depth += 1;
+        self.s.in_loop = true;
     }
 
     /// Top-level loop exit: close `)` on every slot stream.
     fn exit_loop(&mut self) {
         self.depth = self.depth.saturating_sub(1);
+        self.s.in_loop = self.depth > 0;
         if self.depth == 0 {
             self.slot_delimiters_close();
         }
@@ -763,3 +894,57 @@ impl CertScan {
 
 include!("certificate_b_merge.rs");
 include!("certificate_b_tail.rs");
+
+#[cfg(test)]
+mod structured_net_tests {
+    use super::{flat_concat_ok, structured_net};
+
+    /// #4930: an arm holding a flushed loop and inner branch counts each
+    /// once, as the checker executes it. `onebrc.almd`'s `generate` (its
+    /// error slot, born in the else arm of the first `!`) was poisoned to
+    /// `{i|}` because both arms of `{m|d}` were summed.
+    #[test]
+    fn an_inner_region_counts_once() {
+        assert_eq!(structured_net("i(id){m|d}"), Some(0));
+        assert!(flat_concat_ok("", "i(id){m|d}"));
+        assert_eq!(structured_net("ii{d|d}"), Some(1));
+        assert_eq!(structured_net("i[id|b]d"), Some(0));
+        assert_eq!(structured_net("ibd"), Some(0));
+    }
+
+    /// A shape the checker would not execute as written never flattens.
+    #[test]
+    fn a_malformed_or_disagreeing_region_never_flattens() {
+        assert_eq!(structured_net("i{d|}"), None); // arms disagree
+        assert_eq!(structured_net("(i)"), None); // a loop that grows
+        assert_eq!(structured_net("i{(d)|d}"), None); // nested
+        assert_eq!(structured_net("i{d|d"), None); // unclosed
+        assert_eq!(structured_net("d}"), None); // stray close
+        assert!(!flat_concat_ok("", "i{d|}"));
+    }
+
+    /// An inner branch one arm of which exits (`x`) or aborts (`t`) counts
+    /// its surviving arm; the outer arm holding it flattens when that is net
+    /// 0, its marker staying inside the inner bracket. A marker an arm holds
+    /// at its own top level, or one inside a loop, never flattens.
+    #[test]
+    fn an_inner_exit_branch_counts_its_surviving_arm() {
+        assert_eq!(structured_net("b{dx|}"), Some(0));
+        assert_eq!(structured_net("{m|dt}"), Some(-1));
+        assert!(flat_concat_ok("b{dx|}", ""));
+        assert!(!flat_concat_ok("dx", ""));
+        assert_eq!(structured_net("{dx|dx}"), None);
+        assert_eq!(structured_net("(dx)"), None);
+    }
+
+    /// An event-free loop group is the identity the checker executes, so it
+    /// is dropped from an arm; a group holding an event stays.
+    #[test]
+    fn an_empty_loop_group_leaves_the_arm() {
+        use super::without_empty_regions;
+        assert_eq!(without_empty_regions("()d"), "d");
+        assert_eq!(without_empty_regions("(())[|]m"), "m");
+        assert_eq!(without_empty_regions("(b)d"), "(b)d");
+        assert_eq!(without_empty_regions("[b|]"), "[b|]");
+    }
+}

@@ -1,0 +1,16 @@
+# Negative control of witness.native-route-refusals (proofs/decision-sites.toml): the native route's refusals are dropped, so a fresh wasm-only hook, a fresh Rust Region return and a fresh Set of a nested-Float record reach the render
+# control_test: tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for
+diff --git a/src/cli/native_extern_gate.rs b/src/cli/native_extern_gate.rs
+index f95c87990f..cbb073dc3d 100644
+--- a/src/cli/native_extern_gate.rs
++++ b/src/cli/native_extern_gate.rs
+@@ -230,7 +230,8 @@ pub(crate) fn refusals(ir: &IrProgram, file: &str) -> Vec<(&'static str, String)
+             at(line)
+         ))
+     });
+-    unbound.chain(regions).chain(sets).collect()
++    let _ = unbound.chain(regions).chain(sets);
++    Vec::new()
+ }
+ 
+ /// Print `ir`'s native refusals; `Err` when there was one.

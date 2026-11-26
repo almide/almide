@@ -1,6 +1,6 @@
 # ALS — 実装不変量（Implementation Invariants）
 
-> Last updated: 2026-10-27
+> Last updated: 2026-11-24
 
 観測（stdout/stderr/exit）に直接は現れないが、メモリ安全・資源・決定性を
 支える実装規範。契約台帳から `spec` キーで参照される。
@@ -69,3 +69,25 @@ playground）を処理する。入力に比例して仕事が増えるフェー�
 `tests/diagnostics/e111-type-doubling-through-a-generic/`,
 `tests/diagnostics/e113-bool-matrix-too-complex/`, `tests/compile_budget_test.rs`。
 Contracts: C-440。
+
+## ALS-I5 不完全な証明書のビルドは既定で拒否される
+
+wasm のモジュールを作るコマンド（`almide build --target wasm`、`build --component`
+が包む core モジュール、`almide run --target wasm`、`almide test --target wasm`、
+`almide bench --target wasm`）は、書き出す前・走らせる前に、そのビルド自身の
+証明書を検査器で判定する。判定は 3 つある。
+
+- **CERTIFIED**（すべての witness が受理され、証明できなかった関数がない）: 通る。
+- **REJECTED**（受理されない witness がある、witness がない、または成果物の
+  ハッシュが合わない）: 拒否する。フラグの有無に関係しない。
+- **INCOMPLETE**（すべての witness が受理されたが、生成側が証明できなかった関数を
+  1 つ以上申告した）: **既定で拒否する**。終了コードは 1 で、成果物は書かれず、
+  プログラムは走らない。stderr は証明できなかった関数ごとに、その名前と生成側の
+  理由を出し、`--allow-incomplete-verification` を名指す。
+
+そのコマンドに `--allow-incomplete-verification` を付けたときだけ、INCOMPLETE は
+通る。そのとき stderr は `warning[verification-incomplete]` の行と、証明できなかった
+関数ごとの行を出し、`almide build` はこの通過を `Built` の行に書く。
+
+テスト: `tests/verify_incomplete_refused_test.rs`。
+Contracts: C-462。
