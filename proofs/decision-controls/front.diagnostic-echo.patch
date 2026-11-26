@@ -3,18 +3,12 @@
 diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -109,10 +109,10 @@ pub const WASM_WALL_MARKER: &str = "wall: ";
- // escaped by construction. tests/echo_sink_test.rs refuses a print macro or a
- // raw stdout / stderr handle anywhere else in this binary's sources; the one
- // raw channel is `relay_program_output`, below.
--pub fn out(s: &str) { println!("{}", almide_base::echo::visible(s)); }
--pub fn out_no_nl(s: &str) { print!("{}", almide_base::echo::visible(s)); }
--pub fn err(s: &str) { eprintln!("{}", almide_base::echo::visible(s)); }
--pub fn err_no_nl(s: &str) { eprint!("{}", almide_base::echo::visible(s)); }
-+pub fn out(s: &str) { println!("{s}"); }
-+pub fn out_no_nl(s: &str) { print!("{s}"); }
-+pub fn err(s: &str) { eprintln!("{s}"); }
-+pub fn err_no_nl(s: &str) { eprint!("{s}"); }
- 
- /// One JSON document as a line on stdout (`--json`, MCP), every hidden
- /// character inside its strings written as its JSON `\uXXXX` escape
+@@ -119,7 +119,7 @@ pub fn err_no_nl(s: &str) { eprint!("{}", sink_text(s)); }
+ /// rows, an interface), each hidden character as its JSON escape `\uXXXX`,
+ /// so the document still parses to what it said; else each as `\u{XXXX}`.
+ fn sink_text(s: &str) -> std::borrow::Cow<'_, str> {
+-    let escaped = almide_base::echo::visible(s);
++    let escaped = std::borrow::Cow::Borrowed(s);
+     if matches!(escaped, std::borrow::Cow::Borrowed(_)) {
+         return escaped;
+     }

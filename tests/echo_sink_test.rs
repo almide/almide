@@ -310,3 +310,20 @@ fn novel_a_fresh_path_with_a_hidden_character_is_echoed_escaped() {
     let t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(!o.status.success() && t.contains(&plain), "control: a missing plain file is named as written:\n{t}");
 }
+
+/// A JSON document through the sink stays one: a string literal holding a
+/// hidden character (written as its escape in the source) reaches
+/// `--emit-ast` as a JSON string, written `\uXXXX` — parseable, no raw
+/// character — and decodes back to the character.
+#[test]
+fn a_json_document_through_the_sink_still_parses_to_what_it_said() {
+    let work = tempfile::TempDir::new().unwrap();
+    let f = format!("{}.almd", novel::ident("j"));
+    std::fs::write(work.path().join(&f), "effect fn main() -> Unit = println(\"a\\u{202E}b\")\n").unwrap();
+    let o = almide(work.path(), &["emit", &f, "--emit-ast"]);
+    let t = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(!t.contains('\u{202E}'), "printed raw:\n{}", t.escape_debug());
+    let v: serde_json::Value = serde_json::from_str(&t).expect("still JSON");
+    assert!(v.to_string().contains('\u{202E}'), "the string no longer decodes to its character");
+}
