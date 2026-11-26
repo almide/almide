@@ -1,0 +1,14 @@
+# Negative control of witness.subset-gate (proofs/decision-sites.toml): the module-call audit no longer refuses an arm that fired no hook for an argument, so a novel callback arm with no activation is certified
+# control_test: tests/decision_novel_test.rs::novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit
+diff --git a/crates/almide-wasm/src/witness_hooks.rs b/crates/almide-wasm/src/witness_hooks.rs
+--- a/crates/almide-wasm/src/witness_hooks.rs
++++ b/crates/almide-wasm/src/witness_hooks.rs
+@@ -450,7 +450,7 @@ impl Emitter<'_> {
+             };
+             root.is_some_and(|id| w.hooked_since(hooks_before, witness_mut::var_key(id)))
+         };
+-        if !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a)) || rebound(a)) {
++        if false && !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a)) || rebound(a)) {
+             self.witness_decline(&format!("module-arm:unaudited:{name}"));
+         }
+         // #2755: a droppable `View` result is a block the frame does not

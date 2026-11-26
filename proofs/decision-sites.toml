@@ -49,7 +49,7 @@
 # unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "9"
+# failopen_ceiling      = "8"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -228,6 +228,11 @@
 #               refused; loop-converted and helper bodies ship their frames, a loop-back
 #               release held to the rebind that performs it; novel test, two controls red).
 #               fail-open 10 -> 9.
+#   2026-11-26  fail-open-verify: witness.subset-gate unknown -> refuse by evidence: a novel
+#               callback arm (taking its callback with neither an activation nor a closure
+#               value) is refused by the module-call audit over every list predicate HOF the
+#               stdlib declares; the same frame certifies under the ordinary arm; control red.
+#               fail-open 9 -> 8.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -3584,23 +3589,19 @@ items = [
 keys = []
 decides = "which function bodies the structural recorder certifies; anything out of subset declines with `!decline:<reason>` (=> uncertified line)"
 from = "mixed:type+name"
-unknown = "allow"
-unknown_note = "the host-leaf name-prefix decline is gone (27th engineer, 81ac837f6c): a bodyless host leaf (http_call.rs host_leaf) is audited like a module arm (every operand through lower_arg, witness_module_result, the arm window), so a leaf that lowered an operand any other way declines as module-arm:unaudited; what is still keyed by name is inline_callback_subset's arm table (witness_gate_callbacks.rs), whose fallback is the audited ordinary argument rule; a novel callback arm the table does not list is admitted only through that audit — not yet shown by a novel test with a control"
+unknown = "refuse"
+unknown_note = "the host-leaf name-prefix decline is gone (27th engineer, 81ac837f6c): a bodyless host leaf (http_call.rs host_leaf) is audited like a module arm. What is still keyed by name is inline_callback_subset's arm table (witness_gate_callbacks.rs); a call it does not list — and a listed one — is held by the module-call audit (witness_hooks.rs `witness_module_result`): every droppable or untyped argument node must have fired a hook (lower_arg, a loop activation, a closure value), else the frame declines `module-arm:unaudited`. An arm the gate has never seen that takes a literal callback with neither an activation nor a closure value is therefore refused whatever its name: the novel test drives such an arm (almide_wasm::test_novel_callback_arm) over every list predicate HOF the stdlib declares, and the same frame certifies under the ordinary arm"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
-tests = [
-  "crates/almide-wasm/tests/witness_*.rs",
-  "crates/almide-wasm/tests/golden/witness-declines.txt",
-]
-control_note = "NONE"
+tests = ["crates/almide-wasm/tests/witness_*.rs", "crates/almide-wasm/tests/golden/witness-declines.txt", "tests/decision_novel_test.rs::novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit"]
+control_note = "proofs/decision-controls/witness.subset-gate.patch: the module-call audit no longer declines an arm that fired no hook for an argument"
 issues = [4836]
 status = "UNSTAMPED"
-reasons = [
-  "c1:name-keyed callback arm table (inline_callback_subset); the host-leaf prefix list is deleted",
-  "c2:fail-open until a novel callback arm is shown refused by the audit (test + control)",
-  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
-  "c4:no-control",
-]
-note = "Resolved suspect (27th): fs_call_two lowers both operands through lower_arg(Borrow), and the leaves now run under the module-call audit, so the prefix decline was removed rather than extended; measured on ds-2: host-splice declines 125 -> 0 across the root suite, REJECT 0."
+reasons = ["c1:name-keyed callback arm table (inline_callback_subset); the host-leaf prefix list is deleted", "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)"]
+note = "Resolved suspect (27th): fs_call_two lowers both operands through lower_arg(Borrow), and the leaves now run under the module-call audit, so the prefix decline was removed rather than extended; measured on ds-2: host-splice declines 125 -> 0 across the root suite, REJECT 0. 2026-11-26 (fail-open-verify, 34th engineer): fail-open closed by evidence, not by a new rule — the novel item is a compiler ARM, so the test installs one (a test-only hook in calls_modules.rs that lowers a named call by taking its literal callback with neither an activation nor a closure value) and sees the audit decline the frame; the control removes the audit and the frame certifies."
+novel = "tests/decision_novel_test.rs::novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit"
+control_patch = "proofs/decision-controls/witness.subset-gate.patch"
+control_test = "tests/decision_novel_test.rs::novel_a_callback_arm_with_no_activation_is_refused_by_the_module_call_audit"
+control_seen = "4dfb67fd4f 2026-11-26 ds-2: base green, patched red (scripts/run-decision-controls.sh)"
 
 [[site]]
 id = "witness.call-modes-skip"
