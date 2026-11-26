@@ -113,10 +113,12 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
     // passed by value (`Scalar`). The ABI of each comes from the DECLARED param type.
     let mut args: Vec<crate::CallArg> = Vec::new();
     let mut abi: Vec<crate::WasmAbi> = Vec::new();
+    // Native carries Unit and a `Handle` (its exposed address) in a scalar
+    // MIR slot; the typed adapter reconstructs `()` / the `*mut u8`. Wasm's
+    // external ABI remains unchanged.
+    let native_lane = |t: &Ty| matches!(target, crate::ImportTarget::Native { .. }) && matches!(t, Ty::Unit | Ty::RawPtr);
     for (p, ip) in params.iter().zip(func.params.iter()) {
-        let value_abi = if matches!(target, crate::ImportTarget::Native { .. }) && ip.ty == Ty::Unit {
-            // Native carries Unit in a scalar MIR slot; the typed adapter
-            // reconstructs (). Wasm's external ABI remains unchanged.
+        let value_abi = if native_lane(&ip.ty) {
             Some(crate::WasmAbi::I64)
         } else { extern_wasm_abi(&ip.ty) };
         let a = value_abi.ok_or_else(|| {
@@ -138,7 +140,7 @@ fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, Lower
     let (dst, result, result_abi, ret) = if matches!(func.ret_ty, Ty::Unit) {
         (None, None, None, None)
     } else {
-        let rabi = extern_wasm_abi(&func.ret_ty).ok_or_else(|| {
+        let rabi = native_lane(&func.ret_ty).then_some(crate::WasmAbi::I64).or_else(|| extern_wasm_abi(&func.ret_ty)).ok_or_else(|| {
             LowerError::Unsupported(format!(
                 "@extern(wasm) return type {:?} has no flat wasm valtype (not lowered to an import)",
                 func.ret_ty

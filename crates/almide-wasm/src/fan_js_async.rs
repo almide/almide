@@ -245,8 +245,13 @@ impl Emitter<'_> {
     /// The block form's phase A: one slot hold per arm (in arm order), every
     /// hook started, one wait. The caller takes in arm order and releases
     /// the holds after its own.
+    ///
+    /// Witness: phase A makes no RC call — a slot is a host handle in an
+    /// `i32` hold, not a block, and each argument is a value the element
+    /// already has, lowered borrowed — so it records nothing; each arm's
+    /// taken value is the arm's call result, which `fan_block_arm` settles as
+    /// the sequential lowering's (`lower_fan_block` notes the arm nodes).
     pub(crate) fn fan_overlap_block_start(&mut self, calls: &[HookCall<'_>]) -> Result<Vec<u32>, EmitError> {
-        self.witness_decline("fan:js-overlap");
         let mut slots = Vec::new();
         for call in calls {
             let h = self.hold_i32()?;
@@ -317,12 +322,21 @@ impl Emitter<'_> {
     /// `fan.map(xs, (x) => hook(…))` overlapped: start every element, wait
     /// once, take in list order — the first err is the result and the slots
     /// after it are not taken (their hooks already ran, D1).
+    ///
+    /// Witness (as the prefetch map's, fan.rs): the callback node is the
+    /// arm's argument; the slot buffer is a block born in phase A and
+    /// released after phase B; the accumulator leaves in the ok result or is
+    /// released with an err; each taken carrier is born at its take and
+    /// either LEAVES as the result, ending the walk (`m`, then the break), or
+    /// has its payload's credit moved into the accumulator and its shell
+    /// released (`d`).
     pub(crate) fn lower_fan_map_overlap(&mut self, xs: &IrExpr, cb: &IrExpr, call: &HookCall<'_>) -> Result<SliceTy, EmitError> {
-        self.witness_decline("fan:js-overlap");
+        self.witness_prefetch_open(cb);
         let (b, _) = self.elem_types(call)?;
         let lp = self.hof_loop_open(xs)?;
         let (_, _, ch, ih) = lp;
         let hs = self.fan_overlap_phase_a(call, cb, lp)?;
+        let slots_obj = self.witness.as_mut().map(|w| w.temp_born());
         let hr = self.hold_i32()?;
         let hacc = self.hold_i32()?;
         let hv = self.hold_val(b)?;
@@ -332,10 +346,15 @@ impl Emitter<'_> {
             i.i32_const(0).call(F_ALLOC).local_set(hacc);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
+        let acc_obj = self.witness.as_mut().map(|w| w.temp_born());
+        self.witness_loop_open();
         self.fan_overlap_take_at(call, hs, ch, ih)?;
         if call.wrap_ok {
             self.f.instructions().local_set(hv);
             self.fan_overlap_push(hacc, hv, b);
+            // An infallible hook's value is taken owned: its credit moves
+            // into the accumulator.
+            self.witness_overlap_moved(b);
         } else {
             let hp = self.hold_i32()?;
             {
@@ -349,14 +368,18 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(hp);
             }
+            let c = self.witness_overlap_carrier();
             self.load_ty_slot(b, almide_layout::SUM_FIELD);
             self.f.instructions().local_set(hv);
             self.fan_overlap_push(hacc, hv, b);
             // the payload's credit moved into the list; the shell goes.
             self.f.instructions().local_get(hp).call(F_DEC_FLAT);
+            self.witness_overlap_moved(b);
+            self.witness_temp_ops(c, "d");
             self.release_i32();
         }
         self.hof_step(ih);
+        self.witness_loop_close();
         let acc_dec = self.dec_fn_of(SliceTy::List(self.types.intern(b)));
         {
             let mut i = self.f.instructions();
@@ -368,6 +391,16 @@ impl Emitter<'_> {
             i.local_get(hacc).call(acc_dec);
             i.end();
             i.local_get(hr);
+        }
+        self.witness_temp_ops(slots_obj, "d");
+        // ok(acc) takes the accumulator (`m`); an err releases it (`d`).
+        if let (Some(o), Some(w)) = (acc_obj, self.witness.as_mut()) {
+            w.branch_open();
+            w.branch_arm();
+            w.temp_ops(o, "m");
+            w.branch_arm();
+            w.temp_ops(o, "d");
+            w.branch_close();
         }
         self.release_val(b);
         // hacc, hr, hs, then the loop's ih, ch, bh.
@@ -382,18 +415,24 @@ impl Emitter<'_> {
     /// once, take in list order until the first ok — an err skips its
     /// element; all-fail is the C-004 ledger Err. Untaken slots were
     /// awaited by `wait` and are dropped by the glue.
+    ///
+    /// Witness: as [`Self::lower_fan_map_overlap`]'s, with no accumulator —
+    /// the winner LEAVES as the result, ending the walk; a losing err is
+    /// released (`d`).
     pub(crate) fn lower_fan_any_overlap(&mut self, xs: &IrExpr, cb: &IrExpr, call: &HookCall<'_>) -> Result<SliceTy, EmitError> {
-        self.witness_decline("fan:js-overlap");
+        self.witness_prefetch_open(cb);
         let (b, res) = self.elem_types(call)?;
         let lp = self.hof_loop_open(xs)?;
         let (_, _, ch, ih) = lp;
         let hs = self.fan_overlap_phase_a(call, cb, lp)?;
+        let slots_obj = self.witness.as_mut().map(|w| w.temp_born());
         let hr = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
             i.i32_const(0).local_set(hr);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
+        self.witness_loop_open();
         self.fan_overlap_take_at(call, hs, ch, ih)?;
         if call.wrap_ok {
             // an infallible hook's value wins: ok(value).
@@ -402,22 +441,30 @@ impl Emitter<'_> {
             self.f.instructions().i32_const(16).call(F_ALLOC).local_tee(hr).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
             self.f.instructions().local_get(hr).local_get(hv);
             self.store_ty_slot(b, almide_layout::SUM_FIELD);
+            // The value's credit moves into the result block, which leaves.
+            self.witness_overlap_moved(b);
             self.f.instructions().br(1);
+            self.witness_loop_jump();
             self.release_val(b);
         } else {
             let res_dec = self.dec_fn_of(res);
             let hp = self.hold_i32()?;
-            let mut i = self.f.instructions();
-            i.local_set(hp);
-            i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
-            i.if_(BlockType::Empty);
-            i.local_get(hp).local_set(hr).br(2);
-            i.end();
-            // a losing err is released with its message.
-            i.local_get(hp).call(res_dec);
+            {
+                let mut i = self.f.instructions();
+                i.local_set(hp);
+                i.local_get(hp).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+                i.if_(BlockType::Empty);
+                i.local_get(hp).local_set(hr).br(2);
+                i.end();
+                // a losing err is released with its message.
+                i.local_get(hp).call(res_dec);
+            }
+            let c = self.witness_overlap_carrier();
+            self.witness_temp_ops(c, "d");
             self.release_i32();
         }
         self.hof_step(ih);
+        self.witness_loop_close();
         let msg = self.pool.intern("fan.any: all candidates failed");
         {
             let mut i = self.f.instructions();
@@ -428,10 +475,42 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hr);
         }
+        self.witness_temp_ops(slots_obj, "d");
         // hr, hs, then the loop's ih, ch, bh.
         for _ in 0..5 {
             self.release_i32();
         }
         Ok(res)
+    }
+
+    /// A carrier taken from its slot (born at the take): its first arm
+    /// keeps it as the walk's result and BREAKS out of the walk (`m`, then
+    /// the jump); the code after the `if` is the other arm's.
+    fn witness_overlap_carrier(&mut self) -> Option<u32> {
+        let w = self.witness.as_mut()?;
+        let c = w.temp_born();
+        w.branch_open();
+        w.branch_arm();
+        w.temp_ops(c, "m");
+        w.loop_jump();
+        w.branch_arm();
+        w.branch_close();
+        Some(c)
+    }
+
+    /// A taken value's credit moved on (into the accumulator or the result
+    /// block): a fresh value moved (`im`), when it is droppable.
+    fn witness_overlap_moved(&mut self, b: SliceTy) {
+        if self.rc_droppable(b)
+            && let Some(w) = self.witness.as_mut()
+        {
+            w.temp_move();
+        }
+    }
+
+    fn witness_temp_ops(&mut self, o: Option<u32>, ops: &str) {
+        if let (Some(o), Some(w)) = (o, self.witness.as_mut()) {
+            w.temp_ops(o, ops);
+        }
     }
 }

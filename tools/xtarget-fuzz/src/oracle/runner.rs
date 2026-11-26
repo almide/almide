@@ -192,6 +192,7 @@ impl Toolchain {
             &file.to_string_lossy(),
             "--target",
             "wasm",
+            crate::incomplete::FLAG,
             "-o",
             &out.to_string_lossy(),
         ])
@@ -329,7 +330,7 @@ impl Toolchain {
         let file = absolute(file);
         self.run_sandboxed(|_, _| {
             let mut cmd = Command::new(&self.almide);
-            cmd.args(["run", &file.to_string_lossy(), "--target", "wasm", "--"]);
+            cmd.args(["run", &file.to_string_lossy(), "--target", "wasm", crate::incomplete::FLAG, "--"]);
             cmd.args(super::sandbox::ARGS);
             cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
             cmd
@@ -348,7 +349,7 @@ impl Toolchain {
             let almide = absolute(&self.almide);
             return self.run_sandboxed(|_, _| {
                 let mut cmd = Command::new(&almide);
-                cmd.args(["run", &src, "--target", "wasm", "--"]);
+                cmd.args(["run", &src, "--target", "wasm", crate::incomplete::FLAG, "--"]);
                 cmd.args(super::sandbox::ARGS);
                 cmd
             });
@@ -494,7 +495,8 @@ impl Toolchain {
         // Join the readers (they finish once the child's pipe ends close,
         // which the kill above guarantees).
         let stdout = out_handle.and_then(|h| h.join().ok()).unwrap_or_default();
-        let stderr = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        let mut stderr = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        crate::incomplete::take(&mut stderr);
         let status = child.wait().ok();
         let exit_code = status.and_then(|s| s.code());
         #[cfg(unix)]

@@ -35,8 +35,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// What this render does with one op of a slice view.
 #[derive(Clone, Debug, PartialEq)]
 enum Step {
-    /// The call, through its slicing twin (its name, its items).
-    Call { twin: String, pair: bool, items: Vec<&'static str> },
+    /// The call, through its slicing twin (its name, its items), of the
+    /// runtime body `body` the call's declaration names.
+    Call { twin: String, pair: bool, items: Vec<&'static str>, body: &'static str },
     /// An address into a view or a release of one: nothing to render.
     Nothing,
     /// The tag word of the Option.
@@ -46,22 +47,22 @@ enum Step {
     /// Field `k` of the pair.
     Field { of: ValueId, k: u32 },
     /// A string result bound as a slice of its argument, through the body's
-    /// viewing twin (its name, its items).
-    View { twin: String, items: Vec<&'static str> },
+    /// viewing twin (its name, its items), of the runtime body `body`.
+    View { twin: String, items: Vec<&'static str>, body: &'static str },
 }
 
 thread_local! {
-    /// The steps of the function being rendered, by op index, and the slice
-    /// reads that stay slices.
-    static PLAN: std::cell::RefCell<(BTreeMap<usize, Step>, BTreeSet<ValueId>)> =
-        const { std::cell::RefCell::new((BTreeMap::new(), BTreeSet::new())) };
+    /// The steps of the function being rendered, by op index, the slice
+    /// reads that stay slices, and the function's name.
+    static PLAN: std::cell::RefCell<(BTreeMap<usize, Step>, BTreeSet<ValueId>, String)> =
+        const { std::cell::RefCell::new((BTreeMap::new(), BTreeSet::new(), String::new())) };
 }
 
 /// Plan the slice views of `func` (`param_tys`: its params' kinds).
 pub(crate) fn begin(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) {
     let steps = plan(func, param_tys);
     let reads = if steps.is_empty() { BTreeSet::new() } else { crate::render_native_borrow_read::borrow_reads(func) };
-    PLAN.with(|p| *p.borrow_mut() = (steps, reads));
+    PLAN.with(|p| *p.borrow_mut() = (steps, reads, func.name.clone()));
 }
 
 fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usize, Step> {
@@ -101,7 +102,7 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
         };
         if let Some((twin, from, items)) = crate::native_floor::view_twin(symbol) {
             if let Some(releases) = read_while_sources_live(func, i, *o, args, &from, &fixed) {
-                steps.insert(i, Step::View { twin, items });
+                steps.insert(i, Step::View { twin, items, body: symbol });
                 // A slice owns nothing: its release renders to nothing.
                 steps.extend(releases.into_iter().map(|j| (j, Step::Nothing)));
             }
@@ -114,7 +115,7 @@ fn plan(func: &MirFunction, param_tys: &BTreeMap<ValueId, NTy>) -> BTreeMap<usiz
             continue;
         }
         if let Some(view) = view_steps(func, i, *o, pair, &consts, &fixed) {
-            steps.insert(i, Step::Call { twin, pair, items });
+            steps.insert(i, Step::Call { twin, pair, items, body: symbol });
             steps.extend(view);
         }
     }
@@ -230,6 +231,13 @@ fn view_steps(
     Some(out)
 }
 
+/// The call at op `i` of the function being rendered was served by a twin of
+/// the runtime body `body`: its certificate binds the site to that body
+/// (#4930), not to the linked fn the render did not call.
+fn served(i: usize, body: &str) {
+    PLAN.with(|p| crate::native_hof::record_served(&p.borrow().2, i, body));
+}
+
 fn emit(out: &mut String, indent: usize, line: &str) {
     for _ in 0..indent {
         out.push_str("    ");
@@ -252,7 +260,7 @@ pub(crate) fn render(
     let dst = crate::mir_ops::defined_value(op);
     match (step, dst) {
         (Step::Nothing, _) => {}
-        (Step::Call { twin, pair, items }, Some(o)) => {
+        (Step::Call { twin, pair, items, body }, Some(o)) => {
             let Op::CallFn { args, .. } = op else { return Err(wall("native: a slice view's call is not a call")) };
             let mut codes = Vec::with_capacity(args.len());
             for a in args {
@@ -268,8 +276,9 @@ pub(crate) fn render(
             used_shims.extend(items);
             let ty = if pair { "Option<(&str, &str)>" } else { "Option<&str>" };
             emit(out, indent, &format!("let {}: {ty} = {twin}({});", var(o), codes.join(", ")));
+            served(i, body);
         }
-        (Step::View { twin, items }, Some(o)) => {
+        (Step::View { twin, items, body }, Some(o)) => {
             let Op::CallFn { args, .. } = op else { return Err(wall("native: a string view's call is not a call")) };
             let mut codes = Vec::with_capacity(args.len());
             for a in args {
@@ -285,6 +294,7 @@ pub(crate) fn render(
             used_shims.extend(items);
             tys.insert(o, NTy::StrRef);
             emit(out, indent, &format!("let {}: &str = {twin}({});", var(o), codes.join(", ")));
+            served(i, body);
         }
         (Step::Tag(o), Some(d)) => {
             tys.insert(d, NTy::I64);

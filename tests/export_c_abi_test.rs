@@ -341,8 +341,12 @@ fn the_v1_native_render_adapts_the_scalar_rows_and_walls_every_other() {
     }
     assert_eq!(rust.matches("#[export_name").count(), 2, "one C adapter per export");
 
+    // A `Handle` is adapted (#4006): its address rides the i64 lane and the
+    // same pointer comes back.
+    let handle = format!("fn wide(v: Int) -> Int = v + 1\n\n@export(c, \"keep\")\nfn keep(h: Handle) -> Handle = h\n\n{main}");
+    let rust = almide_mir::pipeline::try_render_rust_source(&handle).expect("the v1 render walled a Handle @export(c) row");
+    assert!(rust.contains("pub extern \"C\" fn __c_almd_keep(a0: *mut u8) -> *mut u8 {"), "{rust}");
     let walls = [
-        ("fn keep(h: Handle) -> Handle = h", "@export(c) fn `keep`: parameter `h: Handle` is outside the scalar C rows"),
         ("effect fn size(buf: Region) -> Int = ffi.len(buf)", "@export(c) fn `size`: parameter `buf: Region` is outside the scalar C rows"),
     ];
     for (decl, reason) in walls {
@@ -360,8 +364,8 @@ fn the_v1_native_render_adapts_the_scalar_rows_and_walls_every_other() {
 /// The scalar matrix runs on the certified native route — no wall, the
 /// ownership certificate enforced — and answers what the standard codegen's
 /// wrapper answers for the same program and the same hand-written C host.
-/// With the `Handle` exports the same run walls, naming the row, and still
-/// answers through the standard codegen.
+/// With the `Handle` exports it runs on the certified route as well, the
+/// same pointer coming back (#4006).
 #[test]
 #[cfg(unix)]
 fn the_scalar_matrix_runs_on_the_certified_native_route_as_on_the_standard_codegen() {
@@ -378,8 +382,7 @@ fn the_scalar_matrix_runs_on_the_certified_native_route_as_on_the_standard_codeg
     let (almd, host, expected) = matrix_of(true);
     let (code, stdout, stderr) = run_package_env("handle_v1", &almd, &host, &["run"], &[], &certified);
     assert_eq!(code, Some(0), "--- stderr ---\n{stderr}");
-    assert!(stderr.contains("verified native render walled"), "a Handle export did not wall:\n{stderr}");
-    assert!(stderr.contains("parameter `v: Handle` is outside the scalar C rows"), "{stderr}");
+    assert!(!stderr.contains("verified native render walled"), "the Handle exports walled:\n{stderr}");
     assert_eq!(stdout, expected, "--- stderr ---\n{stderr}");
 }
 

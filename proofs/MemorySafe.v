@@ -424,6 +424,7 @@ Proof.
   - apply IH.
   - apply IH.
   - destruct (r <=? 0); [reflexivity | apply IH].
+  - destruct (r <=? 0); [reflexivity | apply IH].
 Qed.
 
 (* OwnershipChecker's count never goes below 0 from a count at or above it. *)
@@ -443,6 +444,8 @@ Proof.
     + apply (IH r); [exact Hr | exact Hx].
     + apply (IH (r + 1)); [lia | exact Hx].
     + destruct (r <=? 0); [discriminate | apply (IH r); [exact Hr | exact Hx]].
+    + destruct (r <=? 0) eqn:E; [discriminate |]. apply Z.leb_gt in E.
+      apply (IH (r - 1)); [lia | exact Hx].
 Qed.
 
 Lemma rc_of_set_same : forall h b x, rc_of (set h b x) b = rc x.

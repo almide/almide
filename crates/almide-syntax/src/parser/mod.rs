@@ -16,7 +16,7 @@ mod fn_decls;
 mod guard_let;
 mod expressions;
 mod fan;
-pub use fan::renamed_fan_head_text;
+pub use fan::{keyword_reads_as_member_head, renamed_fan_head_text};
 pub mod grouping;
 pub mod regroup;
 pub mod hints;

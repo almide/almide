@@ -54,6 +54,7 @@ impl Parser {
         // fan { ... } = fan block; fan.map/fan.race = module-like call
         if self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
             // Treat `fan` as an identifier for member access
+            // (`keyword_reads_as_member_head` names this rule for printers).
             let span = Some(self.current_span());
             self.advance();
             return Ok(Expr::new(self.next_id(), span, ExprKind::Ident { name: sym("fan") }));
@@ -437,4 +438,12 @@ pub fn renamed_fan_head_text(head: &str) -> (&'static str, &'static str) {
              `?` turns an element's Err into none, so that element is skipped.",
         ),
     }
+}
+
+/// A keyword the parser reads as a plain identifier when a `.` follows it
+/// (`fan.map(…)` parses to a member of the identifier `fan`, in
+/// `parse_fan_primary`). A printer writes such an identifier bare in that
+/// position; anywhere else a name spelled like a keyword needs backticks.
+pub fn keyword_reads_as_member_head(name: &str) -> bool {
+    crate::lexer::keyword_token(name) == Some(TokenType::Fan)
 }

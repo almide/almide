@@ -689,6 +689,9 @@ impl<'b, 'a> Flow<'b, 'a> {
                 cands.push((None, a));
             }
         }
+        if let Some(a) = self.same_loaded_block(x, y) {
+            cands.push((None, a));
+        }
         let mut last = format!("the check counts {x:?}, the access addresses {y:?}");
         for (src, from) in cands {
             match self.count_kept(x, src, from, count_at, acc) {
@@ -697,6 +700,38 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
         }
         Err(last)
+    }
+
+    /// #4949 (a TRUSTED rule of this byte check, proofs/gate-verification.toml):
+    /// two loads are one value — the same block read twice out of one word,
+    /// e.g. a list held in a closure's cell — when they load the same width
+    /// at the same static offset from the same address (`same`: one local
+    /// unchanged between its reads, or an identical computed base), the first
+    /// dominates the second, and nothing that may run between them (`window`:
+    /// aborting arms never reach the second) stores to memory, fills, copies
+    /// or initialises it, or calls. Returns the first load's site, from which
+    /// `count_kept` then holds the block's count to the access.
+    fn same_loaded_block(&self, x: &T, y: &T) -> Option<usize> {
+        let (T::Load { name: n1, off: o1, addr: a1, site: s1 }, T::Load { name: n2, off: o2, addr: a2, site: s2 }) =
+            (pl(x), pl(y))
+        else {
+            return None;
+        };
+        if n1 != n2 || o1 != o2 || s1 == s2 || !self.same(a1, a2) {
+            return None;
+        }
+        let (a, b) = (*s1.min(s2), *s1.max(s2));
+        if !self.dominates(a, b) {
+            return None;
+        }
+        let clobbered = self.window(a, b).into_iter().any(|k| {
+            store_width(&self.b.ops[k]).is_some()
+                || matches!(
+                    self.b.ops[k],
+                    Op::Call { .. } | Op::CallIndirect { .. } | Op::MemoryFill { .. } | Op::MemoryCopy { .. } | Op::MemoryInit { .. }
+                )
+        });
+        (!clobbered).then_some(a)
     }
 
     /// The block `x` (read through `src`, first at `from`) keeps its count

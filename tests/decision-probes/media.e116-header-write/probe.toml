@@ -1,0 +1,4 @@
+# The probe of media.e116-header-write (owner ruling 2026-11-24): the header
+# name is computed, so the check-time E116 (literal names) cannot see it; the
+# response's header writer refuses the owned name whatever its source (C-275).
+expect = "is written from the body's type, never by name"

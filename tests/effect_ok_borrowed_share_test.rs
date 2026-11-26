@@ -3,8 +3,9 @@
 //! Over a BORROWED `x` (a parameter, a local still read after) the node takes
 //! the share a construction would (data.rs `lower_err_raise`); without it the
 //! callee's epilogue released the parameter the caller received, and the
-//! wasm leg trapped (`unreachable`) once the block was reused (#4936). The
-//! share is recorded as the carrier's share-out.
+//! wasm leg trapped (`unreachable`) once the block was reused (#4936). The node is
+//! certified: the share is the carrier's share-out, so the program runs
+//! without `--allow-incomplete-verification`.
 
 use std::process::Command;
 
@@ -44,7 +45,7 @@ effect fn main() -> Unit = {
 "#;
 
 #[test]
-fn a_borrowed_ok_payload_is_shared_on_wasm() {
+fn a_borrowed_ok_payload_is_shared_and_certified_on_wasm() {
     let dir = std::env::temp_dir().join(format!("almide-ok-borrowed-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("main.almd");
@@ -54,6 +55,7 @@ fn a_borrowed_ok_payload_is_shared_on_wasm() {
         let (ok, stdout, stderr) = run(&src, target);
         assert!(ok, "{target:?} failed:\n{stderr}");
         assert_eq!(stdout, want, "{target:?}:\n{stderr}");
+        assert!(!stderr.contains("INCOMPLETE") && !stderr.contains("UNCERTIFIED"), "{target:?}:\n{stderr}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

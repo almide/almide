@@ -1,0 +1,10 @@
+// The element wrapped in a record: its List[List[Float]] field is a field of
+// a generated type, and the native render keys it (ALS-C11).
+type Key = { xs: List[List[Float]] }
+
+fn has(s: List[Key], x: Float) -> Bool = list.contains(s, Key { xs: [[x]] })
+
+effect fn main() -> Unit = {
+  let s = [Key { xs: [[1.5]] }, Key { xs: [[2.5]] }]
+  println("${list.len(s)} ${has(s, 1.5)}")
+}

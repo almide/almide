@@ -118,6 +118,15 @@ fn dispatch_check(args: CheckCmd) {
         refuse_build_switches_under_critical();
     }
     let check_target = check_target_route(target.as_deref());
+    // C-463 (#4006, owner ruling 2026-11-24 W3): the critical profile admits
+    // only routes a certificate covers. The rustc `--target wasi` route ships
+    // the standard codegen's Rust, a declared unverified route.
+    if critical.is_some() && check_target == cli::CheckTarget::Wasi {
+        eprintln!(
+            "error: --profile critical refuses --target wasi: the rustc wasm32-wasip1 route is an unverified route, it ships the standard codegen's Rust, which no certificate covers (#4006)\n  hint: judge the verified routes instead, `--target wasm` or `--target native`"
+        );
+        std::process::exit(1);
+    }
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
     // same entries in the same order (#2253): every row already names its
@@ -201,14 +210,16 @@ fn refuse_build_switches_under_critical() {
 }
 
 /// `almide check --target`: `wasm` adds the wasm build route's verdicts,
-/// `wasi` the rustc wasm32-wasip1 route's (#4913); nothing else is accepted.
+/// `wasi` the rustc wasm32-wasip1 route's (#4913), `native` the native build
+/// route's (C-461); nothing else is accepted.
 fn check_target_route(target: Option<&str>) -> cli::CheckTarget {
     match target {
         None => cli::CheckTarget::Native,
         Some("wasm") => cli::CheckTarget::Wasm,
         Some("wasi") => cli::CheckTarget::Wasi,
+        Some("native") => cli::CheckTarget::NativeRoute,
         Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm` or `wasi` (got `{other}`) — the native target is what `almide check` already judges");
+            eprintln!("error: `almide check --target` accepts only `wasm`, `wasi` or `native` (got `{other}`)");
             std::process::exit(1);
         }
     }
@@ -970,6 +981,9 @@ fn arm_budgets(cli: &crate::cli_args::Cli) {
 }
 
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
+    // E117 reads the application's own `[trust] media` grant ("self") off
+    // the manifest of the program being checked, on every route.
+    crate::media_owners::set_self_grants_reader(crate::media_grant::self_grants_for);
     // #4590: a retired spelling is an error naming the new one, whatever
     // else the command line says; a bare `almide` prints the grouped help.
     match &cli.command {
@@ -1042,15 +1056,18 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
     }
     match command {
         Commands::Init { json: _ } => cli::cmd_init(),
-        Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, profile, allow, program_args } => {
+        Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, allow_incomplete_verification, profile, allow, program_args } => {
             refuse_check_profile_on_run(profile.as_deref(), &allow);
+            cli::set_allow_incomplete(allow_incomplete_verification);
             dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args })
         }
-        Commands::Bench { file, runs, target, program_args, json: _, locked: _ } => {
+        Commands::Bench { file, runs, target, program_args, json: _, locked: _, allow_incomplete_verification } => {
+            cli::set_allow_incomplete(allow_incomplete_verification);
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, locked: _, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug, json: _ } => {
+        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, locked: _, repr_c, cdylib, emit_unverified, allow_incomplete_verification, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug, json: _ } => {
+            cli::set_allow_incomplete(allow_incomplete_verification);
             // `--print-release-rustflags` builds nothing, so it needs no source file.
             let file = if print_release_rustflags { file.unwrap_or_default() } else { resolve_file(file) };
             warn_no_verified_deprecated(no_verified);
@@ -1076,7 +1093,8 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
                 debug,
                 });
         }
-        Commands::Test { file, run, no_check, locked: _, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
+        Commands::Test { file, run, no_check, locked: _, json, target, update_snapshots, ci, allow_no_tests, show_output, allow_incomplete_verification } => {
+            cli::set_allow_incomplete(allow_incomplete_verification);
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
         Commands::Check { file, deny_warnings, json, explain: _, effects, timings, stamp, profile, allow, target, locked: _ } => {

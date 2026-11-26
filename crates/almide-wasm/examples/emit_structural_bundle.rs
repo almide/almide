@@ -34,6 +34,15 @@
 //! `--artifact`, the stock-WASI bytes the route produced are written beside
 //! it as `<file>.wasm` (the anchor drill, scripts/witness-reinject.sh).
 //!
+//! `--host-js` (anywhere) emits as `almide build --target wasm --host js`
+//! does (#2265: the JS host's module, `host_exports::JsHostGuard`), so the
+//! `--artifact` such a build wrote can be pinned and judged like any other:
+//! the module the JS glue loads is the same stock-WASI core module. Whether
+//! that module carries the String ABI's two exports is decided by the CLI
+//! from the host surface (#2276); here both are rendered when an artifact
+//! is named and the one equal to its bytes is taken — the pin below still
+//! refuses any other bytes.
+//!
 //! `--only` prints one witness's bytes instead (the gate.sh feeder). Exit 2
 //! when the program does not build or the witness is absent.
 //!
@@ -63,6 +72,8 @@ fn main() {
     if tests {
         args.remove(0);
     }
+    let host_js = args.iter().position(|a| a == "--host-js").map(|at| args.remove(at)).is_some();
+    let _host_js = host_js.then(almide_wasm::host_exports::JsHostGuard::set);
     // Absolute before the chdir below, so the paths name the files the
     // caller meant.
     let abs = |a: &String| std::path::absolute(a).unwrap_or_else(|e| fail(&format!("{a}: {e}")));
@@ -85,7 +96,14 @@ fn main() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap_or_else(|e| fail(&format!("cd {}: {e}", root.display())));
     let text = std::fs::read_to_string(&rel).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
-    let (records, uncertified, shipped, anchor_file) = produce(&rel, &text, tests);
+    let mut produced = produce(&rel, &text, tests);
+    if host_js && !tests && let Some(path) = &artifact
+        && std::fs::read(path).is_ok_and(|file| file != produced.2)
+    {
+        almide_wasm::host_exports::set_string_abi(true);
+        produced = produce(&rel, &text, tests);
+    }
+    let (records, uncertified, shipped, anchor_file) = produced;
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {

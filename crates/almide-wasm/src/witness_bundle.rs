@@ -127,12 +127,21 @@ fn records_inner(
     let anchor_file = match fmap {
         None => String::new(),
         Some(fmap) => {
-    let locate = Locator::new(emitted, shipped, seals, remaps, fmap)?;
+    // The anchors name the bodies as the emitter wrote them: before the
+    // declare post-pass re-encoded every call (#2275), when it ran.
+    let (anchored, anchored_map) = if decls.stubs.is_empty() {
+        (emitted, fmap.to_vec())
+    } else {
+        let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
+        (decls.pre_declare.as_slice(), pre_declare_map(&decls.pre_declare, &decls.stubs, ei, fmap)?)
+    };
+    let locate = Locator::new(anchored, shipped, seals, remaps, &anchored_map)?;
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
-            let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
+            let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
+            let d = (post_declare(crate::F_ALLOC, &decls.stubs, ei) - ei) as usize;
             match fmap.get(d).copied().flatten() {
                 Some(j) => (j + cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?).to_string(),
                 None => "-".to_string(),
@@ -143,7 +152,7 @@ fn records_inner(
         locate.text(&pick(fields_anchors))?,
         locate.text(&pick(judge_anchors))?,
         locate.text(&pick(hold_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers })?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, RcRecords { arms: &rc_arms, routines: &rc_routines, window_ids: &rc_window_ids, helpers: &rc_helpers, stubs: &decls.stubs })?
         // #4005 A4: every self-host prim access the pass emitted, located.
         + &format!("prims {}\n", locate.text(&pick(prim_anchors))?)
         // #4005 A4: each self-host body's heap-typed parameters, by its
@@ -158,7 +167,8 @@ fn records_inner(
                 cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
             );
             let ship = |f: u32| {
-                f.checked_sub(ei)
+                post_declare(f, &decls.stubs, ei)
+                    .checked_sub(ei)
                     .and_then(|d| fmap.get(d as usize).copied().flatten())
                     .map_or("-".to_string(), |j| (j + si).to_string())
             };
@@ -226,6 +236,36 @@ struct RcRecords<'w> {
     routines: &'w [(u64, usize, usize)],
     window_ids: &'w std::collections::HashMap<u64, (u64, usize, usize)>,
     helpers: &'w [(u32, String, String)],
+    /// The pre-declare indices of the stubs that became imports.
+    stubs: &'w [u32],
+}
+
+/// The function map of the module BEFORE the declare post-pass: its
+/// defined body `i` is the post-declare body [`post_declare`] names (a stub
+/// became an import: no body, `None`), then through `fmap` as it ships.
+fn pre_declare_map(pre: &[u8], stubs: &[u32], ei: u32, fmap: &[Option<u32>]) -> Result<Vec<Option<u32>>, String> {
+    use crate::cert_project as cp;
+    let base = cp::function_imports(pre).map_err(|e| format!("imports: {e}"))?;
+    let n = bodies(pre)?.len() as u32;
+    Ok((0..n)
+        .map(|i| {
+            let f = base + i;
+            if stubs.contains(&f) {
+                return None;
+            }
+            fmap.get((post_declare(f, stubs, ei) - ei) as usize).copied().flatten()
+        })
+        .collect())
+}
+
+/// Where a function the emitter numbered BEFORE the `imports::declare`
+/// post-pass (#2275) is in the finished module `emitted` (`ei` function
+/// imports): an `@extern(wasm, …)` hook's stub and a JS-host fan protocol
+/// helper become imports, so every defined function moves. The runtime
+/// routines (`F_ALLOC`, `F_INC`, the releases, a helper body) are named by
+/// their emit-time index; with no stub the map is the identity.
+fn post_declare(f: u32, stubs: &[u32], ei: u32) -> u32 {
+    crate::imports::remap_index(f, stubs, ei.saturating_sub(stubs.len() as u32))
 }
 
 fn rc_lines(
@@ -237,13 +277,13 @@ fn rc_lines(
     releases: &std::collections::BTreeSet<u32>,
     records: RcRecords<'_>,
 ) -> Result<String, String> {
-    let RcRecords { arms, routines, window_ids, helpers } = records;
+    let RcRecords { arms, routines, window_ids, helpers, stubs } = records;
     use crate::cert_project as cp;
     let (ei, si) = (
         cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
         cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
     );
-    let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
+    let ship = |f: u32| post_declare(f, stubs, ei).checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
     let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
     let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
     let mut rc: Vec<String> = frames
@@ -262,6 +302,12 @@ fn rc_lines(
                             // An `if` site whose anchor did not ship stays a
                             // plain site mark (its arms are then not paired).
                             (None, "(" | "|") => Some(m.to_string()),
+                            // #1961: a region reclaim is held to the restore
+                            // its window names; a window that did not ship
+                            // leaves it nothing to be held to — kept, with
+                            // `?` for its window, so the RC check refuses it
+                            // instead of never seeing it.
+                            (None, m) if m.starts_with('w') => Some(format!("{m}@?")),
                             (None, _) => None,
                         }
                     }
@@ -510,7 +556,10 @@ fn one_line(s: &str) -> String {
 /// the witnesses describe: present, the bundle is version 2 and
 /// almide-verify recomputes the digest from that file and rejects a
 /// mismatch; absent, version 1. A bundle whose ownership witness carries an
-/// arm share-out `s` (#4278) is version 3 either way.
+/// arm share-out `s` (#4278) is version 3 either way; one whose ownership
+/// (or helper) lines carry a region reclaim `w` (#1961, certificate format
+/// v9) is version 6; one whose lines nest a branch inside a branch arm
+/// (certificate format v10) is version 7.
 pub fn render(
     producer: &str,
     source: &str,
@@ -523,12 +572,30 @@ pub fn render(
     let share_out = records.iter().any(|r| r.property == "ownership" && r.bytes.contains(['s', 'S']));
     // Version 4 (#4278, B1): a runtime helper's own certificate (`rc-sig`).
     let helper_sig = records.iter().any(|r| r.property == "rc-sig");
+    // Version 6 (#1961): an ownership (or helper) line carries a region
+    // reclaim `w`, a byte every reader before version 6 skipped as noise.
+    let reclaim = records
+        .iter()
+        .any(|r| (r.property == "ownership" || r.property == "rc-sig") && r.bytes.contains(['w', 'W']));
+    // Version 7 (format v10): an ownership (or helper) line nests a branch
+    // inside a branch arm, which every reader before version 7 poisoned.
+    let nested = records
+        .iter()
+        .any(|r| (r.property == "ownership" || r.property == "rc-sig") && nests_branches(&r.bytes));
+    let late = if nested { Some(7) } else if reclaim { Some(6) } else { None };
     let mut out = match (artifact, share_out, helper_sig) {
-        (None, false, false) => format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source)),
-        (None, _, sig) => format!("almide-certificate-bundle {}\nproducer {}\nsource {}\n", if sig { 4 } else { 3 }, one_line(producer), one_line(source)),
+        (None, false, false) if late.is_none() => {
+            format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source))
+        }
+        (None, _, sig) => format!(
+            "almide-certificate-bundle {}\nproducer {}\nsource {}\n",
+            late.unwrap_or(if sig { 4 } else { 3 }),
+            one_line(producer),
+            one_line(source)
+        ),
         (Some((hex, path)), _, _) => format!(
             "almide-certificate-bundle {}\nproducer {}\nsource {}\nartifact sha256 {hex} {}\n",
-            if helper_sig { 4 } else if share_out { 3 } else { 2 },
+            late.unwrap_or(if helper_sig { 4 } else if share_out { 3 } else { 2 }),
             one_line(producer),
             one_line(source),
             one_line(path)
@@ -541,4 +608,18 @@ pub fn render(
         out.push_str(&format!("uncertified {} {}\n", one_line(f), one_line(reason)));
     }
     out
+}
+
+/// Does a certificate nest a `{…}` inside another on one line (format v10)?
+fn nests_branches(witness: &str) -> bool {
+    let mut depth = 0u32;
+    witness.chars().any(|c| {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            '\n' => depth = 0,
+            _ => {}
+        }
+        depth > 1
+    })
 }

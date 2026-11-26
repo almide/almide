@@ -69,6 +69,11 @@ pub(crate) use split_match::{AT as SPLIT_AT, HEAD as SPLIT_HEAD, TAIL as SPLIT_T
 
 /// The in-place `bytes.get(b, i) ?? d` read (item 6): `(b, i, d)`, an Int.
 pub(crate) const BYTES_GET_OR: &str = "get#or";
+/// The room test of a byte window, `(b, pos, w)` with `w` a literal: a Bool,
+/// `pos >= 0 and pos <= bytes.len(b) - w` evaluated without a branch (the
+/// operands are total and pure). A checked reader's guard becomes it when
+/// the reader inlines (inline_calls/readers.rs, #4944).
+pub(crate) const BYTES_ROOM: &str = "room#";
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};

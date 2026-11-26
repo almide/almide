@@ -124,14 +124,13 @@ pub(crate) fn leaf_op(name: &str) -> Option<i32> {
 }
 
 impl Emitter<'_> {
-    /// A net leaf, or `Ok(None)` when `name` is not one.
-    pub(crate) fn lower_net_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        let Some(op) = leaf_op(name) else { return Ok(None) };
+    /// The net leaf whose op is `op` (`leaf_op`, read by http_call.rs
+    /// `host_leaf`).
+    pub(crate) fn lower_net_leaf(&mut self, op: i32, args: &[IrExpr]) -> Result<SliceTy, EmitError> {
         let [a, b] = args else { return unsup("net-leaf-arity") };
         let b_ty = if SENDS_BYTES.contains(&op) { crate::bytes::BYTES } else { STR };
         self.fs_call_two((a, STR), (b, b_ty), op)?;
-        let t = if READS.contains(&op) { self.fs_result_bytes()? } else { self.fs_result_string()? };
-        Ok(Some(t))
+        if READS.contains(&op) { self.fs_result_bytes() } else { self.fs_result_string() }
     }
 }
 

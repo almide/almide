@@ -71,44 +71,37 @@ impl Emitter<'_> {
         }
     }
 
-    /// The two sources of `if c then a else b` when each arm is a bound
-    /// local (`Some(local)`) or a view the arm reads out of one — a slot
-    /// read, a `!` payload, a global (`None`). `None` for any other value.
-    fn witness_if_sources(&self, value: &almide_ir::IrExpr) -> Option<[Option<u32>; 2]> {
-        let almide_ir::IrExprKind::If { then, else_, .. } = &crate::rc_ownership::rc_tail(value).kind else {
+    /// The sources of `if c then a else b` when each arm is a bound local
+    /// (`Local`), a view the arm reads out of one — a slot read, a `!`
+    /// payload, a global (`View`) — or itself such an `if` (`Select`, the
+    /// nested `if x > 1 then a else b` of an arm). `None` for any other value.
+    fn witness_if_sources(&self, value: &almide_ir::IrExpr) -> Option<Src> {
+        let tail = crate::rc_ownership::rc_tail(value);
+        let almide_ir::IrExprKind::If { then, else_, .. } = &tail.kind else {
             return None;
         };
         let source = |arm: &almide_ir::IrExpr| match self.witness_src_local(arm) {
-            Some(l) => Some(Some(l)),
-            None if crate::witness_unwrap::is_extraction_view(arm) || self.witness_top_let_ty(arm).is_some() => Some(None),
-            None => None,
+            Some(l) => Some(Src::Local(l)),
+            None if crate::witness_unwrap::is_extraction_view(arm) || self.witness_top_let_ty(arm).is_some() => Some(Src::View),
+            None => self.witness_if_sources(arm),
         };
-        Some([source(then)?, source(else_)?])
+        let site = self.if_sites.get(&(tail as *const _)).copied();
+        Some(Src::Select(site, Box::new([source(then)?, source(else_)?])))
     }
 
     /// A borrowed `if` bound to `idx` (stmts.rs, right after the Bind route's
     /// share): a select site whose arms each take the share on their own
-    /// source — a local's block (`a`, aliased as `bind_alias` does) or a
-    /// view (`bind_view`). False when the value is not such an `if`.
+    /// source — a local's block (`a`, aliased as `bind_alias` does), a view
+    /// (`bind_view`), or a nested select's. False when the value is not such
+    /// an `if`.
     pub(crate) fn witness_bind_select(&mut self, idx: u32, value: &almide_ir::IrExpr) -> bool {
         let Some(sources) = self.witness_if_sources(value) else { return false };
-        let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(value) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        select_open(w, site.map(|s| s.0));
-        for (k, src) in sources.into_iter().enumerate() {
-            select_arm(w, site.map(|s| s.0));
-            // #4631: the arm's events are the +1 past the join on the value
-            // that arm chose: held to that shipped arm (or past its join).
-            if let Some(a) = site.and_then(|s| s.1[k]) {
-                w.branch_anchor(a);
-            }
-            match src {
-                Some(l) if w.bind_alias(idx, l) => {}
-                Some(_) => w.poison(),
-                None => w.bind_view(idx),
-            }
-        }
-        w.branch_close();
+        record_select(w, &sources, &mut |w, src| match src {
+            Some(l) if w.bind_alias(idx, l) => {}
+            Some(_) => w.poison(),
+            None => w.bind_view(idx),
+        });
         true
     }
 
@@ -117,24 +110,44 @@ impl Emitter<'_> {
     /// source and move it (`am`). False when the value is not such an `if`.
     pub(crate) fn witness_share_select(&mut self, e: &almide_ir::IrExpr) -> bool {
         let Some(sources) = self.witness_if_sources(e) else { return false };
-        let site = self.if_sites.get(&(crate::rc_ownership::rc_tail(e) as *const _)).copied();
         let Some(w) = self.witness.as_mut() else { return true };
-        select_open(w, site.map(|s| s.0));
-        for (k, src) in sources.into_iter().enumerate() {
-            select_arm(w, site.map(|s| s.0));
-            // #4631: the arm's events are the +1 past the join on the value
-            // that arm chose: held to that shipped arm (or past its join).
-            if let Some(a) = site.and_then(|s| s.1[k]) {
-                w.branch_anchor(a);
-            }
-            match src {
-                Some(l) if w.arg_share_move(l) => {}
-                Some(_) => w.poison(),
-                None => w.view_share_move(),
-            }
-        }
-        w.branch_close();
+        record_select(w, &sources, &mut |w, src| match src {
+            Some(l) if w.arg_share_move(l) => {}
+            Some(_) => w.poison(),
+            None => w.view_share_move(),
+        });
         true
+    }
+}
+
+/// Where a borrowed `if`'s value comes from, per arm (`witness_if_sources`).
+enum Src {
+    Local(u32),
+    View,
+    /// An `if` (its `if_sites` anchor, when `lower_if_arms` recorded one) and
+    /// its two arms' sources.
+    Select(Option<(u64, [Option<u64>; 2])>, Box<[Src; 2]>),
+}
+
+/// Record the select sites of `src`: per arm, its own site nested inside the
+/// arm that chose it, and on each leaf the share `leaf` takes (`Some(local)`
+/// or `None` for a view). #4631: each arm's events are the +1 past the join
+/// on the value that arm chose: held to that shipped arm (or past its join).
+fn record_select(w: &mut crate::witness::WitnessRecorder, src: &Src, leaf: &mut dyn FnMut(&mut crate::witness::WitnessRecorder, Option<u32>)) {
+    match src {
+        Src::Local(l) => leaf(w, Some(*l)),
+        Src::View => leaf(w, None),
+        Src::Select(site, arms) => {
+            select_open(w, site.map(|s| s.0));
+            for (k, arm) in arms.iter().enumerate() {
+                select_arm(w, site.map(|s| s.0));
+                if let Some(a) = site.and_then(|s| s.1[k]) {
+                    w.branch_anchor(a);
+                }
+                record_select(w, arm, leaf);
+            }
+            w.branch_close();
+        }
     }
 }
 

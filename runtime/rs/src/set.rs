@@ -49,9 +49,9 @@ impl<T> AlmideSet<T> {
 impl<T: PartialEq + 'static> AlmideSet<T> {
     /// `Q` is the borrowed member form (`str` for a `String` set), as in map.rs.
     #[inline]
-    fn position_with<Q: ?Sized + PartialEq>(&self, value: &Q, h: Option<u64>) -> Option<usize>
+    fn position_with<Q: ?Sized + AlmideKeySame>(&self, value: &Q, h: Option<u64>) -> Option<usize>
     where T: std::borrow::Borrow<Q> {
-        let is_v = |e: &Option<T>| matches!(e, Some(x) if x.borrow() == value);
+        let is_v = |e: &Option<T>| matches!(e, Some(x) if x.borrow().almide_key_same(value));
         match (&self.lookup, h) {
             (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| is_v(&self.items[p])),
             _ => self.items.iter().position(is_v),
@@ -59,7 +59,7 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
     }
 
     #[inline]
-    fn position<Q: ?Sized + PartialEq + AlmideMapKey>(&self, value: &Q) -> Option<usize>
+    fn position<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&self, value: &Q) -> Option<usize>
     where T: std::borrow::Borrow<Q> {
         if let Some(found) = self.lookup.ordered_position(value) {
             return found;
@@ -114,7 +114,7 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
         self.note_push(h);
         true
     }
-    pub fn contains<Q: ?Sized + PartialEq + AlmideMapKey>(&self, value: &Q) -> bool
+    pub fn contains<Q: ?Sized + AlmideKeySame + AlmideMapKey>(&self, value: &Q) -> bool
     where T: std::borrow::Borrow<Q> {
         self.position(value).is_some()
     }
@@ -216,7 +216,7 @@ pub fn almide_rt_set_remove<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, va
 pub fn almide_rt_set_insert_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.insert(value); s }
 pub fn almide_rt_set_remove_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.remove(&value); s }
 // Borrowed member (`@borrow_ref(value)` in stdlib/set.almd), as map.get is.
-pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + PartialEq + AlmideMapKey>(s: &AlmideSet<T>, value: &Q) -> bool
+pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + AlmideKeySame + AlmideMapKey>(s: &AlmideSet<T>, value: &Q) -> bool
 where T: std::borrow::Borrow<Q> { s.contains(value) }
 pub fn almide_rt_set_len<T>(s: &AlmideSet<T>) -> i64 { s.len() as i64 }
 pub fn almide_rt_set_is_empty<T>(s: &AlmideSet<T>) -> bool { s.is_empty() }

@@ -20,6 +20,60 @@ use crate::fs_meta::{
 };
 use crate::*;
 
+/// A bodyless self-host leaf (`= _`), resolved from its name before anything
+/// is emitted — the one table every leaf family's name is read from.
+#[derive(Clone, Copy)]
+enum HostLeaf {
+    /// Two text-layout operands in a/b, a Result[String, String] answer:
+    /// the http_framed leaves and the subprocess leaves.
+    Two(i32),
+    ServeBind,
+    ServeNext,
+    ServeReply,
+    ServeRun,
+    CallOpen,
+    /// A `__http_call_*` op on the handle's id.
+    CallId(i32),
+    /// A net / udp / unix / shm leaf (net_call.rs).
+    Net(i32),
+}
+
+fn host_leaf(name: &str) -> Option<HostLeaf> {
+    use crate::fs_meta::{OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, PROC_LEAVES};
+    use HostLeaf::*;
+    Some(match name {
+        // The http_framed leaves (#1710 increment 3): url in a, the
+        // method/body/headers frame in b — the intra-module twins of the
+        // host_env http arms.
+        "__http_framed_text" => Two(OP_HTTP_FRAMED_TEXT),
+        "__http_framed_status" => Two(OP_HTTP_FRAMED_STATUS),
+        "__http_framed_response" => Two(OP_HTTP_FRAMED_RESPONSE),
+        // The http.serve loop's leaves (#2650).
+        "__http_serve_bind" => ServeBind,
+        "__http_serve_next" => ServeNext,
+        "__http_serve_reply" => ServeReply,
+        "__http_serve_run" => ServeRun,
+        // The http call handle's leaves (#2633).
+        "__http_call_open" => CallOpen,
+        "__http_call_state" => CallId(OP_HTTP_CALL_STATE),
+        "__http_call_wait_raw" | "__http_call_result_raw" => CallId(OP_HTTP_CALL_WAIT),
+        "__http_call_read_raw" => CallId(OP_HTTP_CALL_READ),
+        "__http_call_cancel_raw" => CallId(OP_HTTP_CALL_CANCEL),
+        "__http_call_step_raw" => CallId(OP_HTTP_CALL_STEP),
+        // The subprocess leaves (#2589, ADR-0025), then the tcp family's
+        // (#3620).
+        _ => {
+            return PROC_LEAVES
+                .iter()
+                .find(|(l, _)| *l == name)
+                .map(|&(_, op)| op)
+                .or_else(|| crate::fs_meta::proc_child_op(name))
+                .map(Two)
+                .or_else(|| crate::net_call::leaf_op(name).map(Net));
+        }
+    })
+}
+
 impl Emitter<'_> {
     /// A bodyless self-host leaf (`= _`) lowered as a host op, or
     /// `Ok(None)` when `name` is not one. They carry no table body, so they
@@ -32,64 +86,73 @@ impl Emitter<'_> {
     /// `__http_frame(…)` frame, the `__proc_argv(…)` cells) is released once
     /// the answer is on the stack — without the scope it stayed parked and
     /// was never released.
+    ///
+    /// The witness covers a leaf as it covers a module arm (calls_modules.rs
+    /// `lower_module_call`): every operand enters through `lower_arg` (the
+    /// argument hook), the audit asks that a hook fired for each of the
+    /// call's own argument nodes — or the frame declines — and the leaf's
+    /// instructions, with the scope's releases, are the arm window the RC
+    /// byte check reads.
     pub(crate) fn lower_host_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        self.arm_scope(|em| em.lower_host_leaf_op(name, args))
+        let Some(leaf) = host_leaf(name) else { return Ok(None) };
+        let hooks_before = self.witness.as_ref().map(|w| w.arg_hooks());
+        let arm_from = self.f.byte_len();
+        let window = crate::witness::rc::window_open();
+        let lowered = self.arm_scope(|em| {
+            let t = em.lower_host_leaf_op(leaf, args)?;
+            if let Some(before) = hooks_before {
+                em.witness_module_result(name, args, before);
+            }
+            Ok(t)
+        });
+        match lowered {
+            Ok(t) => {
+                crate::witness::rc::arm(window, arm_from, self.f.byte_len());
+                Ok(Some(t))
+            }
+            Err(e) => {
+                crate::witness::rc::window_dropped(window);
+                Err(e)
+            }
+        }
     }
 
-    fn lower_host_leaf_op(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_host_leaf_op(&mut self, leaf: HostLeaf, args: &[IrExpr]) -> Result<SliceTy, EmitError> {
         use crate::fs_meta::{
             OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
-            OP_HTTP_SERVE_REPLY, PROC_LEAVES,
+            OP_HTTP_SERVE_REPLY,
         };
-        // The http_framed leaves (#1710 increment 3): url in a, the
-        // method/body/headers frame in b — the intra-module twins of the
-        // host_env http arms.
-        let framed = match name {
-            "__http_framed_text" => Some(OP_HTTP_FRAMED_TEXT),
-            "__http_framed_status" => Some(OP_HTTP_FRAMED_STATUS),
-            "__http_framed_response" => Some(OP_HTTP_FRAMED_RESPONSE),
-            _ => None,
-        };
-        // The subprocess leaves (#2589, ADR-0025): two text operands in
-        // a/b, a Result[String, String] answer.
-        let proc = PROC_LEAVES
-            .iter()
-            .find(|(l, _)| *l == name)
-            .map(|&(_, op)| op)
-            .or_else(|| crate::fs_meta::proc_child_op(name));
-        if let Some(op) = framed.or(proc) {
-            let [a, b] = args else { return unsup("host-leaf-arity") };
-            // The response leaf's frame is Bytes: its body cell is the
-            // request's exact bytes (#4744). Both are the text block layout.
-            let frame_ty = if op == OP_HTTP_FRAMED_RESPONSE { crate::bytes::BYTES } else { STR };
-            self.fs_call_two((a, STR), (b, frame_ty), op)?;
-            // The text and status leaves answer the response body as the
-            // server sent it: decode it lossily, as native does (#4387). The
-            // response leaf's answer keeps the raw body cell `body_bytes`
-            // reads (http_framed.almd); the subprocess leaves are unchanged.
-            let text = op == OP_HTTP_FRAMED_TEXT || op == OP_HTTP_FRAMED_STATUS;
-            return Ok(Some(if text { self.fs_result_text_lossy()? } else { self.fs_result_string()? }));
-        }
-        // The http.serve loop's leaves (#2650): bind (port text), next (the
-        // request as a List[String] of frames), reply (the response's cells
-        // in a, its body's bytes in b).
-        let t = match (name, args) {
-            ("__http_serve_bind", [p]) => {
+        Ok(match (leaf, args) {
+            (HostLeaf::Two(op), [a, b]) => {
+                // The response leaf's frame is Bytes: its body cell is the
+                // request's exact bytes (#4744). Both are the text block layout.
+                let frame_ty = if op == OP_HTTP_FRAMED_RESPONSE { crate::bytes::BYTES } else { STR };
+                self.fs_call_two((a, STR), (b, frame_ty), op)?;
+                // The text and status leaves answer the response body as the
+                // server sent it: decode it lossily, as native does (#4387). The
+                // response leaf's answer keeps the raw body cell `body_bytes`
+                // reads (http_framed.almd); the subprocess leaves are unchanged.
+                let text = op == OP_HTTP_FRAMED_TEXT || op == OP_HTTP_FRAMED_STATUS;
+                if text { self.fs_result_text_lossy()? } else { self.fs_result_string()? }
+            }
+            // bind (port text), next (the request as a List[String] of
+            // frames), reply (the response's cells in a, its body's bytes in b).
+            (HostLeaf::ServeBind, [p]) => {
                 self.fs_call_1(p, OP_HTTP_SERVE_BIND)?;
                 self.fs_result_unit()?
             }
-            ("__http_serve_next", []) => {
+            (HostLeaf::ServeNext, []) => {
                 self.fs_call_0(OP_HTTP_SERVE_NEXT)?;
                 self.fs_result_string_list()?
             }
             // The body crosses as Bytes in b, exactly (#4311).
-            ("__http_serve_reply", [r, body]) => {
+            (HostLeaf::ServeReply, [r, body]) => {
                 self.fs_call_two((r, STR), (body, crate::bytes::BYTES), OP_HTTP_SERVE_REPLY)?;
                 self.fs_result_unit()?
             }
             // The contained loop (#4203): the step closure's env pointer in
             // the a_len slot; the host calls the closure itself.
-            ("__http_serve_run", [step]) => {
+            (HostLeaf::ServeRun, [step]) => {
                 use crate::fs_meta::OP_HTTP_SERVE_RUN;
                 self.note_host_op(OP_HTTP_SERVE_RUN);
                 let got = self.lower_arg(step, None, ArgMode::Borrow)?;
@@ -108,16 +171,14 @@ impl Emitter<'_> {
                 self.release_serve_step_result()?;
                 self.fs_result_unit()?
             }
-            // The http call handle's leaves (#2633), then the tcp family's
-            // (#3620).
-            _ => {
-                return match self.lower_http_call_leaf(name, args)? {
-                    Some(t) => Ok(Some(t)),
-                    None => self.lower_net_leaf(name, args),
-                };
+            (HostLeaf::CallOpen, _) => self.lower_http_call_open(args)?,
+            (HostLeaf::CallId(op), [c]) => {
+                self.http_call_id_op(c, op)?;
+                if op == OP_HTTP_CALL_WAIT { self.fs_result_string_list()? } else { self.fs_result_string()? }
             }
-        };
-        Ok(Some(t))
+            (HostLeaf::Net(op), _) => self.lower_net_leaf(op, args)?,
+            _ => return unsup("host-leaf-arity"),
+        })
     }
 
     /// The contained loop's answer (#4769): a served run hands back the step
@@ -155,22 +216,6 @@ impl Emitter<'_> {
             return unsup("http-call-ty");
         };
         Ok((t, r.fields[0].offset))
-    }
-
-    /// A `__http_call_*` leaf, or `Ok(None)` when `name` is not one.
-    fn lower_http_call_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
-        let op = match name {
-            "__http_call_open" => return self.lower_http_call_open(args).map(Some),
-            "__http_call_state" => OP_HTTP_CALL_STATE,
-            "__http_call_wait_raw" | "__http_call_result_raw" => OP_HTTP_CALL_WAIT,
-            "__http_call_read_raw" => OP_HTTP_CALL_READ,
-            "__http_call_cancel_raw" => OP_HTTP_CALL_CANCEL,
-            "__http_call_step_raw" => OP_HTTP_CALL_STEP,
-            _ => return Ok(None),
-        };
-        let [c] = args else { return unsup("http-call-arity") };
-        self.http_call_id_op(c, op)?;
-        Ok(Some(if op == OP_HTTP_CALL_WAIT { self.fs_result_string_list()? } else { self.fs_result_string()? }))
     }
 
     /// `fs_call(op, 0, id, 0, 0)` for the handle `c` — the id rides the

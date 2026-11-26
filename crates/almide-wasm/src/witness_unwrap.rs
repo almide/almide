@@ -65,9 +65,20 @@ pub(crate) fn slot_read_of_var(e: &almide_ir::IrExpr) -> bool {
         // #2755: the payload a `!` reads out of a bound carrier is a view
         // of the carrier's slot (`is_extraction_view`).
         K::Try { expr } | K::Unwrap { expr } => matches!(expr.kind, K::Var { .. }),
-        K::IndexAccess { object, .. } | K::Member { object, .. } | K::TupleIndex { object, .. } => slot_read_of_var(object),
+        K::IndexAccess { object, .. } => slot_read_of_var(object),
+        K::Member { object, .. } | K::TupleIndex { object, .. } => slot_read_of_var(object) || borrowed_join(object),
         _ => false,
     }
+}
+
+/// `(c ?? v).f`: a `??` over a bound carrier whose fallback is a bound Var
+/// is a join the frame never owns (arg_temps.rs `unwrap_or_joins_owned`,
+/// data.rs `unwrap_or_owns_join`): either arm is a view (the carrier's slot,
+/// the borrowed var's block), so a field of it is a view of that block's slot.
+fn borrowed_join(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::IrExprKind as K;
+    matches!(&crate::rc_ownership::rc_tail(e).kind,
+        K::UnwrapOr { expr, fallback } if slot_read_of_var(expr) && matches!(fallback.kind, K::Var { .. }))
 }
 
 /// Is `e` a VIEW read out of a bound block: a payload out of a BORROWED
@@ -170,16 +181,6 @@ impl Emitter<'_> {
             w.temp_ops(o, "d");
         }
         w.arm_err_exit();
-    }
-
-    /// A route that leaves the frame some other way (a converted error, an
-    /// abort, a trap): withdraw. The exit such a route may still emit is armed, so it is attributed
-    /// rather than mistaken for a hook disagreement.
-    pub(crate) fn witness_unwrap_decline(&mut self, route: &str) {
-        self.witness_decline(&format!("unwrap:{route}"));
-        if let Some(w) = self.witness.as_mut() {
-            w.arm_err_exit();
-        }
     }
 
     /// The site joins (after the `if_`'s `end`): the ok path is the empty

@@ -1,0 +1,8 @@
+// The probe of witness.native-route-refusals (C-461): a wasm-only host hook
+// with no Almide body, reached from main, has nothing a native binary runs.
+@extern(wasm, "js", "js_log")
+fn js_log(msg: String) -> Unit
+
+test "a wasm-only hook" {
+  js_log("probe")
+}

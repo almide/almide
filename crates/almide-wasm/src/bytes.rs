@@ -11,6 +11,10 @@ use crate::*;
 
 pub(crate) const BYTES: SliceTy = SliceTy::Scalar(Scalar::Bytes);
 
+/// The suffix of a position read's fused `?? d` form (`__read_u32_le#or`,
+/// inline_calls/readers.rs, #4944).
+pub(crate) const READ_OR_SUFFIX: &str = "#or";
+
 pub(crate) fn byte_at() -> MemArg {
     MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, target: wasm_encoder::MemArgTarget::Memory(0), ordering: None }
 }
@@ -183,6 +187,25 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i32();
         Ok(Some(Lowered::scalar(INT)))
+    }
+
+    /// The room test of a byte window as a Bool (`front_desugar::BYTES_ROOM`,
+    /// #4944): the same `bytes_room` every read and set asks, no branch.
+    pub(crate) fn lower_bytes_room_test(&mut self, b: &IrExpr, i: &IrExpr, w: &IrExpr) -> ArmResult {
+        let almide_ir::IrExprKind::LitInt { value: width } = w.kind else {
+            return unsup("bytes-room-width");
+        };
+        let Ok(width) = u8::try_from(width) else { return unsup("bytes-room-width") };
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower_arg(i, Some(INT), ArgMode::Borrow)?;
+        let ih = self.hold_i64()?;
+        self.f.instructions().local_set(ih);
+        self.bytes_room(bh, ih, width);
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
@@ -525,6 +548,11 @@ impl Emitter<'_> {
         // IO matrix's position `__read_*` / `__set_*`): the same native arm as
         // before. The linked primitives (`__read_*_at`, `__read_*_array`) keep
         // their `__` name — it is their registry key.
+        // A checked reader's `?? d` read in place (#4944, inline_calls/readers.rs):
+        // `__read_*#or(b, pos, w, d)`.
+        if let Some(read) = func.strip_prefix("__").and_then(|f| f.strip_suffix(READ_OR_SUFFIX)) {
+            return self.lower_bytes_read_or(read, args);
+        }
         let func = match func.strip_prefix("__") {
             Some(f)
                 if f == "chunks"
@@ -554,6 +582,7 @@ impl Emitter<'_> {
             }
             ("set" | "slice", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
             (crate::emit::front_desugar::BYTES_GET_OR, [b, i, d]) => self.lower_bytes_get_or(b, i, d),
+            (crate::emit::front_desugar::BYTES_ROOM, [b, i, w]) => self.lower_bytes_room_test(b, i, w),
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
             ("drop_end", [b, n]) => self.lower_bytes_drop_end(b, n),
             ("clear", [b]) => self.lower_bytes_clear(b),

@@ -261,14 +261,22 @@ fn a_malformed_request_line_or_host_is_400() {
     }
 }
 
-/// C-407 (#4134): every response carries `X-Content-Type-Options: nosniff`
-/// after the handler's fields, unless the handler set that field.
+/// C-407 (#4134, amended by the owner ruling 2026-11-25): every response
+/// carries `X-Content-Type-Options: nosniff` after the handler's fields; the
+/// field is the server's, so a handler's own (any case, any value) is dropped.
 #[test]
-fn the_response_carries_nosniff_unless_the_handler_set_it() {
+fn the_response_always_carries_nosniff() {
     let plain = String::from_utf8(server::http_server_response_bytes(200, &[("X-A".into(), "1".into())], "x")).expect("utf8");
     assert_eq!(plain, "HTTP/1.1 200 OK\r\nX-A: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx");
-    let own = String::from_utf8(server::http_server_response_bytes(200, &[("x-content-type-options".into(), "other".into())], "")).expect("utf8");
-    assert_eq!(own, "HTTP/1.1 200 OK\r\nx-content-type-options: other\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    for own in ["other", "", "nosniff"] {
+        let out = String::from_utf8(server::http_server_response_bytes(
+            200,
+            &[("Content-Type".into(), "text/javascript".into()), ("x-content-type-options".into(), own.into())],
+            "",
+        ))
+        .expect("utf8");
+        assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", "{own:?}");
+    }
 }
 
 /// C-402 (#4116): the client's URL splitter applies url.parse's rules where

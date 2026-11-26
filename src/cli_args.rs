@@ -186,6 +186,13 @@ pub(crate) enum Commands {
         /// machine) next to the measured wall clock on this host.
         #[arg(long)]
         time_report: bool,
+        /// `--target wasm`: let a module whose own certificate is INCOMPLETE
+        /// (every witness accepted, some function the compiler could not
+        /// certify) through with a warning naming each uncertified function.
+        /// Without it an INCOMPLETE certificate is refused like a rejected one
+        /// (C-462). A rejected certificate is refused either way
+        #[arg(long = "allow-incomplete-verification")]
+        allow_incomplete_verification: bool,
         /// `almide check`'s profile flags, parsed here only to be refused
         /// (#4885): without them `run app.almd --profile critical` handed the
         /// flag to the program and ran it unprofiled. A program argument
@@ -223,6 +230,13 @@ pub(crate) enum Commands {
         /// and write no lock (#4093, #4852)
         #[arg(long)]
         locked: bool,
+        /// `--target wasm`: let a module whose own certificate is INCOMPLETE
+        /// (every witness accepted, some function the compiler could not
+        /// certify) through with a warning naming each uncertified function.
+        /// Without it an INCOMPLETE certificate is refused like a rejected one
+        /// (C-462). A rejected certificate is refused either way
+        #[arg(long = "allow-incomplete-verification")]
+        allow_incomplete_verification: bool,
     },
     /// Build a binary
     Build {
@@ -280,6 +294,13 @@ pub(crate) enum Commands {
         /// verification failure is a hard error.
         #[arg(long)]
         emit_unverified: bool,
+        /// `--target wasm`: let a module whose own certificate is INCOMPLETE
+        /// (every witness accepted, some function the compiler could not
+        /// certify) through with a warning naming each uncertified function.
+        /// Without it an INCOMPLETE certificate is refused like a rejected one
+        /// (C-462). A rejected certificate is refused either way
+        #[arg(long = "allow-incomplete-verification")]
+        allow_incomplete_verification: bool,
         /// The v1 PCC-verified trust-spine renderer is the DEFAULT on BOTH
         /// targets (wasm since 0.29.0; native since 0.30.0). On wasm it is the
         /// ONLY path (the v0 emitter was retired in #782 — a wall is a hard,
@@ -380,6 +401,13 @@ pub(crate) enum Commands {
         /// (a failing test's output is always shown under its failure)
         #[arg(long)]
         show_output: bool,
+        /// `--target wasm`: let a module whose own certificate is INCOMPLETE
+        /// (every witness accepted, some function the compiler could not
+        /// certify) through with a warning naming each uncertified function.
+        /// Without it an INCOMPLETE certificate is refused like a rejected one
+        /// (C-462). A rejected certificate is refused either way
+        #[arg(long = "allow-incomplete-verification")]
+        allow_incomplete_verification: bool,
     },
     /// Type check only
     Check {
@@ -428,7 +456,9 @@ pub(crate) enum Commands {
         /// the same two-leg routing `build --target wasm` uses and report
         /// E081 / E082 at check time instead of at build time. `wasi` judges
         /// the rustc wasm32-wasip1 route `build --target wasi` takes (E081,
-        /// #4913). Only `wasm` or `wasi`.
+        /// #4913). `native` judges the native build route `build` / `run`
+        /// take (E081 for an `@extern` fn with no native binding, C-461).
+        /// Only `wasm`, `wasi` or `native`.
         #[arg(long)]
         target: Option<String>,
     },

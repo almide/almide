@@ -23,6 +23,11 @@ pub(crate) enum NamedOp {
     /// The ordering twin of `EqTy`: ONE inlined level of an `ETy`'s
     /// total-order compare.
     CmpTy,
+    /// ALS-C11 (ADR-0039): the collection key equality twins of `Eq` and
+    /// `EqTy` — the same walk with every Float leaf equating NaN to NaN.
+    /// Separate helpers, so `==` never reuses a key-equality body.
+    KeyEq,
+    KeyEqTy,
     /// `$named_hashty_<ety>(key) -> i32` — the deep key hash of an `ETy`
     /// (map_index_deep.rs, #4887). One param, not two.
     HashTy,
@@ -93,6 +98,10 @@ pub(crate) enum Helper {
     /// a Helper, not a fixed function, because its f64 param breaks the
     /// fixed-index signature set).
     ScanF64,
+    /// `$scan_f64_key(block, stride, off, needle) -> i32` — the float lane
+    /// of the scan family under the collection key equality (ALS-C11):
+    /// `-0.0` matches `0.0` and every NaN matches every NaN.
+    ScanF64Key,
     /// `$split(str, sep) -> i32` — Rust split semantics: byte-level
     /// full-separator match, non-overlapping left-to-right, empty pieces
     /// kept, count = separators + 1. Empty separator traps (Rust's

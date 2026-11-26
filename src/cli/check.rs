@@ -288,6 +288,17 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Combine parse errors + checker errors
     report_check_errors_or_exit(&parse_errors, &diagnostics, &warnings, &source_text, deny_warnings);
 
+    // C-461: `--target native` — the native build route's verdict: a
+    // reachable `@extern` fn with no native binding and no Almide body is
+    // refused (E081), as `build` / `run` refuse it. A program for another
+    // target's host stays a clean language check without the flag.
+    if target == CheckTarget::NativeRoute
+        && let Some(ir) = whole_ir.as_ref()
+        && super::native_extern_gate::check(ir, file).is_err()
+    {
+        std::process::exit(1);
+    }
+
     // Security Layer 2: the `[permissions]` of the entry file's project
     // (the nearest almide.toml at or above it, else the working directory's).
     if let Some(proj) = project::permissions_project_for(file) {
@@ -469,6 +480,14 @@ fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) 
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
+        // C-461: `--target native` — the native route's refusals (E081).
+        if target == CheckTarget::NativeRoute {
+            let rows = super::native_extern_gate::refusals(whole.as_ref().unwrap_or(&ir), file);
+            for (code, text) in &rows {
+                out(&crate::diagnostic_render::to_json(&route_refusal_diagnostic(file, code, text, "--target native")));
+            }
+            clean &= rows.is_empty();
+        }
         // #4815: the `[permissions]` gate `check` runs (rows 17/18, 26), on
         // the same whole-program IR — `check --json` is the MCP `almide_check`.
         if let Some(proj) = project::permissions_project_for(file) {
@@ -506,13 +525,15 @@ fn check_json_one(file: &str, critical: Option<&[String]>, target: CheckTarget) 
     clean
 }
 
-/// The compile target `almide check --target` judges besides the native
-/// one: `wasm` (#1922) or `wasi` (#4913).
+/// The build route `almide check --target` judges besides the language
+/// check every target shares: `wasm` (#1922), `wasi` (#4913) or `native`
+/// (C-461). `Native` is no `--target`: the language check alone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CheckTarget {
     Native,
     Wasm,
     Wasi,
+    NativeRoute,
 }
 
 /// A route refusal's text (`error[EXXX]: message` then its indented lines)

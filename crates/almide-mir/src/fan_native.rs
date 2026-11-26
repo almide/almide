@@ -203,6 +203,9 @@ pub(crate) fn thread_crossable(ty: &Ty, decls: &[almide_ir::IrTypeDecl], depth: 
     let ok = |t: &Ty| thread_crossable(t, decls, depth + 1);
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::String | Ty::Bytes => true,
+        // A `Handle` is a foreign token: whether its library allows another
+        // thread to use it is the library's word, which no type states.
+        Ty::RawPtr => false,
         t if crate::render_native_rec::is_lane_scalar(t) => true,
         Ty::Applied(TC::List | TC::Option | TC::Result | TC::Map | TC::Set, args) => args.iter().all(ok),
         Ty::Tuple(elems) => elems.iter().all(ok),
