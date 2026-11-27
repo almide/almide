@@ -456,7 +456,17 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
             // carrier — the owned-carrier route of the `!` site
             // (witness_unwrap.rs): born at the site, out on the err arm,
             // released on the ok path. Its payload store is the constructor's.
-            IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // #4955: so are `ok(v)!` / `some(v)!` (a fallible callback's lifted
+            // tail `ok(ok(acc + [n])!)`), and a branch or block whose every
+            // value leaf is one of those or a call (`owned_carrier_leaves`).
+            IrExprKind::ResultErr { .. } | IrExprKind::ResultOk { .. } | IrExprKind::OptionSome { .. } => {
+                value_subset(expr).map(|w| w.inside("unwrap-operand"))
+            }
+            IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }
+                if crate::witness_unwrap::owned_carrier_leaves(expr) =>
+            {
+                value_subset(expr).map(|w| w.inside("unwrap-operand"))
+            }
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs

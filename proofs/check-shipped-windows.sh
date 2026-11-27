@@ -29,6 +29,12 @@
 # say why). Writes <work-dir>/verdicts.tsv (label, function, access, bytes,
 # ok | REFUSED).
 #
+# The floor counts the leg's WHOLE list, so it is judged on a full run only.
+# Under a CI slice (ALMIDE_CI_SLICE=k > 1, a PR into develop: one fixture in
+# k) every proposal the slice holds is still judged by the kernel and a
+# refusal still fails, but the count is printed with no verdict against the
+# floor, and the last line says so.
+#
 # Needs coqc and the compiled spine (proofs/check.sh, or at least
 # GuardWindow.vo).
 set -euo pipefail
@@ -128,15 +134,21 @@ done
 
 floor="$(awk -v leg="$LEG" '$1 == leg { print $2 }' "$FLOORS")"
 [ -n "$floor" ] || { echo "FAIL: $FLOORS has no row for the leg \`$LEG\`"; exit 1; }
-python3 -I - "$WORK/verdicts.tsv" "$WORK/swept.txt" "$LEG" "$floor" <<'PY' || fail=1
+# shellcheck source=../scripts/lib/ci-slice.sh
+. "$HERE/../scripts/lib/ci-slice.sh"
+slice="$(ci_slice_k)"
+python3 -I - "$WORK/verdicts.tsv" "$WORK/swept.txt" "$LEG" "$floor" "$slice" <<'PY' || fail=1
 import collections, sys
 rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1], encoding="utf-8")]
 mods, swept, proposed = (int(x) for x in open(sys.argv[2], encoding="utf-8").read().split())
-leg, floor = sys.argv[3], int(sys.argv[4])
+leg, floor, slice_k = sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
 by = collections.Counter(r[4] for r in rows)
 ok = by.get("ok", 0)
 with_one = len({r[0] for r in rows if r[4] == "ok"})
 print(f"shipped windows [{leg}]: {mods} module(s), {swept} load(s) and store(s) swept, {proposed} window(s) proposed: {dict(by)}")
+if slice_k > 1:
+    print(f"  proven in bounds from the bytes alone: {ok} access(es) in {with_one} module(s) (a 1-in-{slice_k} CI slice: the floor of {floor} counts the whole list and is NOT judged here; a full run judges it)")
+    sys.exit(0)
 print(f"  proven in bounds from the bytes alone: {ok} access(es) in {with_one} module(s) (floor {floor})")
 if ok < floor:
     print(f"FAIL: {ok} window(s) proven, below the floor of {floor} for `{leg}`: evidence was lost. Restore it, or lower proofs/shipped-windows-floor.txt in its own commit and say why.")
@@ -145,4 +157,8 @@ if ok > floor:
     print(f"  note: {ok - floor} above the floor; raise the `{leg}` row of proofs/shipped-windows-floor.txt to {ok} to keep them.")
 PY
 [ "$fail" -eq 0 ] || exit 1
-echo "ok   every proposed window is accepted by the kernel, and the count holds its floor"
+if [ "$slice" -gt 1 ]; then
+  echo "ok   every proposed window is accepted by the kernel (a CI slice: the floor is judged on a full run, not here)"
+else
+  echo "ok   every proposed window is accepted by the kernel, and the count holds its floor"
+fi

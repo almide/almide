@@ -68,14 +68,13 @@ pub fn serving_bodies(module: &str, func: &str) -> Vec<(&'static Program, String
 /// The self-host registry bodies served under the bare call name `call` (a
 /// compiler-derived helper the IR names without a module: the derived
 /// Codec's `__err_at`, `__decode_option_string`, …).
+#[cfg(test)]
 pub(crate) fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
     let mut out = Vec::new();
     for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
         for (imp, name) in rows.iter() {
             if *name == call {
-                if let Some(prog) = almide_lang::parse_cached(src) {
-                    out.push((prog, imp.to_string()));
-                }
+                out.extend(almide_lang::parse_cached(src).map(|prog| (prog, imp.to_string())));
             }
         }
     }
@@ -85,6 +84,7 @@ pub(crate) fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
 /// Does fn `name` of the stdlib source `prog` reach a floor host op or an
 /// output builtin that does not abort, directly or through what it calls?
 /// A bodyless declaration it reaches is judged by its own `@category`.
+#[cfg(test)]
 pub(crate) fn body_reaches_category(prog: &Program, name: &str) -> bool {
     let mut seen = HashSet::new();
     reaches_in(prog, "", name, &mut seen, Mode::CATEGORY)

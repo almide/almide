@@ -342,7 +342,13 @@ pub fn stdlib_declares(module: &str, func: &str) -> bool {
     match module_effects(module) {
         None => false,
         Some(_) if module == "fan" => true,
-        Some(_) => module_fns(module).any(|d| fn_name(d) == func),
+        // The committed declaration index (#4458, held to the parser by
+        // almide-frontend tests/decl_index_test.rs) answers without parsing a
+        // module the program does not otherwise reach.
+        Some(_) => match almide_lang::decl_index::fn_names(module) {
+            Some(names) => names.contains(&func),
+            None => module_fns(module).any(|d| fn_name(d) == func),
+        },
     }
 }
 
@@ -385,22 +391,39 @@ fn runtime_symbol_module(symbol: &str) -> Option<&'static str> {
         .map(|(_, m)| m)
 }
 
-/// Every `@intrinsic` symbol a classified module's source declares, with
-/// the module and the declaring fn: the declaration a runtime symbol is
-/// classified by, wherever its head points (`value.__decode_list_string` is
-/// `almide_rt___decode_list_string`).
-fn intrinsic_declarations() -> &'static HashMap<String, (&'static str, &'static almide_lang::ast::Decl)> {
-    static MAP: std::sync::OnceLock<HashMap<String, (&'static str, &'static almide_lang::ast::Decl)>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| {
-        let mut map = HashMap::new();
+/// The `@intrinsic` declaration of `symbol` in a classified module's source,
+/// with its module: the declaration a runtime symbol is classified by,
+/// wherever its head points (`value.__decode_list_string` is
+/// `almide_rt___decode_list_string`). The first module in
+/// [`STDLIB_MODULE_EFFECTS`] order that declares it answers.
+///
+/// Only a module whose source text names the symbol in an `@intrinsic(..)`
+/// attribute is parsed (#4458: a program parses only the stdlib it reaches);
+/// the parse then confirms the declaration, so the text alone decides
+/// nothing (an occurrence in a comment finds no fn and is skipped).
+fn intrinsic_declaration(symbol: &str) -> Option<(&'static str, &'static almide_lang::ast::Decl)> {
+    static CANDIDATES: std::sync::OnceLock<HashMap<&'static str, Vec<&'static str>>> = std::sync::OnceLock::new();
+    let candidates = CANDIDATES.get_or_init(|| {
+        let mut map: HashMap<&'static str, Vec<&'static str>> = HashMap::new();
         for (m, _) in STDLIB_MODULE_EFFECTS {
-            for d in module_fns(m) {
-                if let Some(sym) = intrinsic_symbol(d) {
-                    map.entry(sym.to_string()).or_insert((*m, d));
+            let Some(src) = almide_lang::stdlib_info::bundled_source(m) else { continue };
+            for sym in intrinsic_literals(src) {
+                let ms = map.entry(sym).or_default();
+                if !ms.contains(m) {
+                    ms.push(m);
                 }
             }
         }
         map
+    });
+    candidates.get(symbol)?.iter().find_map(|m| module_fns(m).find(|d| intrinsic_symbol(d) == Some(symbol)).map(|d| (*m, d)))
+}
+
+/// The string literal opening each `@intrinsic(` in `src`, unparsed.
+fn intrinsic_literals(src: &'static str) -> impl Iterator<Item = &'static str> {
+    src.split("@intrinsic(").skip(1).filter_map(|rest| {
+        let lit = rest.trim_start().strip_prefix('"')?;
+        lit.find('"').map(|end| &lit[..end])
     })
 }
 
@@ -408,7 +431,7 @@ fn intrinsic_declarations() -> &'static HashMap<String, (&'static str, &'static 
 /// `@intrinsic` of a declared stdlib fn, or one whose head names a classified
 /// module ([`runtime_symbol_effect`])?
 pub fn runtime_symbol_classified(symbol: &str) -> bool {
-    intrinsic_declarations().contains_key(symbol) || runtime_symbol_module(symbol).is_some()
+    intrinsic_declaration(symbol).is_some() || runtime_symbol_module(symbol).is_some()
 }
 
 /// The categories a runtime call (`almide_rt_<module>_<fn>`, the `@intrinsic`
@@ -419,7 +442,7 @@ pub fn runtime_symbol_classified(symbol: &str) -> bool {
 /// symbol whose head names no classified module is unknown: every category
 /// ([`unknown_call_effects`]).
 pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
-    if let Some((m, d)) = intrinsic_declarations().get(symbol) {
+    if let Some((m, d)) = intrinsic_declaration(symbol) {
         return module_effects(m).map_or_else(unknown_call_effects, |row| decl_effects(row, d));
     }
     let Some(module) = runtime_symbol_module(symbol) else { return unknown_call_effects() };
@@ -442,7 +465,24 @@ pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
 /// name: a body's own `@category`, else nothing when no body serving it
 /// reaches a floor host op or an output builtin, else every category.
 /// `None` when no registry row serves the name — not a derived helper.
+///
+/// The verdict is read from `derived_helper_effects.rs`, committed and held
+/// to the registry bodies by `the_derived_helper_table_matches_the_registry_bodies`:
+/// judging them live parsed the stdlib sources they reach (the value module,
+/// the prim strings) on every `check` that calls one (#4458).
 pub fn derived_helper_effect(call: &str) -> Option<Vec<Effect>> {
+    let served = almide_lang::self_host_registry::self_host_runtime().iter().any(|(_, rows)| rows.iter().any(|(_, n)| *n == call));
+    if !served {
+        return None;
+    }
+    let row = crate::derived_helper_effects::DERIVED_HELPER_EFFECTS.iter().find(|(n, _)| *n == call);
+    Some(row.map_or_else(Vec::new, |(_, cats)| cats.to_vec()))
+}
+
+/// [`derived_helper_effect`] judged from the registry bodies themselves:
+/// what `derived_helper_effects.rs` records, and what its gate recomputes.
+#[cfg(test)]
+fn derived_helper_effect_live(call: &str) -> Option<Vec<Effect>> {
     let bodies = crate::host_reach::registry_bodies(call);
     if bodies.is_empty() {
         return None;
@@ -838,6 +878,60 @@ mod classification_gate {
             }
         }
         assert!(checked > 500, "only {checked} intrinsics checked — the source scan found nothing");
+    }
+
+    /// The text scan that picks which modules to parse finds every
+    /// `@intrinsic` a full parse of every classified module finds, and the
+    /// same first declaring module.
+    #[test]
+    fn the_intrinsic_lookup_parses_only_where_the_text_names_the_symbol_and_misses_none() {
+        let mut first: HashMap<&str, &str> = HashMap::new();
+        for (m, _) in STDLIB_MODULE_EFFECTS {
+            for d in module_fns(m) {
+                if let Some(sym) = intrinsic_symbol(d) {
+                    first.entry(sym).or_insert(m);
+                }
+            }
+        }
+        assert!(first.len() > 500, "only {} intrinsics found", first.len());
+        for (sym, m) in &first {
+            assert_eq!(intrinsic_declaration(sym).map(|(dm, _)| dm), Some(*m), "`{sym}`");
+        }
+        assert!(intrinsic_declaration("almide_rt_no_such_symbol_zz").is_none());
+    }
+
+    /// `derived_helper_effects.rs` is what judging every registry-served
+    /// call by its bodies gives: a body added or changed under it, or a row
+    /// edited by hand, fails here. `ALMIDE_REGEN_DERIVED_HELPER_EFFECTS=1`
+    /// rewrites the file from the bodies.
+    #[test]
+    fn the_derived_helper_table_matches_the_registry_bodies() {
+        let mut names: Vec<&str> = almide_lang::self_host_registry::self_host_runtime()
+            .iter()
+            .flat_map(|(_, rows)| rows.iter().map(|(_, n)| *n))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        assert!(names.len() > 300, "only {} registry calls", names.len());
+        let mut text = String::from("// @generated by the_derived_helper_table_matches_the_registry_bodies\n// (crates/almide-ir/src/effect.rs); regenerate with\n// ALMIDE_REGEN_DERIVED_HELPER_EFFECTS=1 cargo test -p almide-ir --lib derived_helper_table. Do not edit.\n\nuse crate::effect::Effect;\n\n/// Every call a self-host registry row serves whose bodies reach a category,\n/// with the categories `derived_helper_effect` charges it; a served call\n/// absent here reaches none.\npub(crate) const DERIVED_HELPER_EFFECTS: &[(&str, &[Effect])] = &[\n");
+        let mut drift = Vec::new();
+        for n in &names {
+            let live = derived_helper_effect_live(n).unwrap_or_else(|| panic!("`{n}` has a registry row but no body"));
+            if derived_helper_effect(n).as_ref() != Some(&live) {
+                drift.push(format!("{n}: table {:?}, bodies {live:?}", derived_helper_effect(n)));
+            }
+            if !live.is_empty() {
+                let cats: Vec<String> = live.iter().map(|c| format!("Effect::{c:?}")).collect();
+                text.push_str(&format!("    ({n:?}, &[{}]),\n", cats.join(", ")));
+            }
+        }
+        text.push_str("];\n");
+        if std::env::var_os("ALMIDE_REGEN_DERIVED_HELPER_EFFECTS").is_some() {
+            std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/derived_helper_effects.rs"), &text).unwrap();
+            return;
+        }
+        assert!(drift.is_empty(), "derived_helper_effects.rs is stale (regenerate it):\n{}", drift.join("\n"));
+        assert_eq!(include_str!("derived_helper_effects.rs"), text, "derived_helper_effects.rs is not what the bodies give (regenerate it)");
     }
 
     /// The rows #3246 fixed, in ADR-0026 D2's leaves.

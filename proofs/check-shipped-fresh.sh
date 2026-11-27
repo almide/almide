@@ -32,6 +32,12 @@
 # was lost: restore it, or lower the floor in its own commit and say why).
 # Writes <work-dir>/verdicts.tsv (label, function, access, ok | REFUSED).
 #
+# The floor counts the leg's WHOLE list, so it is judged on a full run only.
+# Under a CI slice (ALMIDE_CI_SLICE=k > 1, a PR into develop: one fixture in
+# k) every proposal the slice holds is still judged by the kernel and a
+# refusal still fails, but the count is printed with no verdict against the
+# floor, and the last line says so.
+#
 # Needs coqc and the compiled spine (proofs/check.sh, or at least
 # GuardWindow.vo and GuardFresh.vo). That the function at the allocator's
 # index is the proven allocator is proofs/check-shipped-routines.sh's verdict
@@ -146,9 +152,12 @@ done
 
 floor="$(awk -v leg="$LEG" '$1 == leg { print $2 }' "$FLOORS")"
 [ -n "$floor" ] || { echo "FAIL: $FLOORS has no row for the leg \`$LEG\`"; exit 1; }
-python3 -I - "$WORK" "$LEG" "$floor" <<'PY' || fail=1
+# shellcheck source=../scripts/lib/ci-slice.sh
+. "$HERE/../scripts/lib/ci-slice.sh"
+slice="$(ci_slice_k)"
+python3 -I - "$WORK" "$LEG" "$floor" "$slice" <<'PY' || fail=1
 import sys
-work, leg, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
+work, leg, floor, slice_k = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 refused = {l.strip() for l in open(f"{work}/refused.txt", encoding="utf-8") if l.strip()}
 rows = [l.rstrip("\n").split("\t") for l in open(f"{work}/index.tsv", encoding="utf-8")]
 mods, named, proposed, distinct = (int(x) for x in open(f"{work}/swept.txt", encoding="utf-8").read().split())
@@ -159,17 +168,25 @@ with open(f"{work}/verdicts.tsv", "w", encoding="utf-8") as out:
 ok = len(rows) - len(bad)
 with_one = len({r[1] for r in rows if r[0] not in refused})
 print(f"shipped fresh-block accesses [{leg}]: {mods} module(s), {named} naming an allocator, {proposed} access(es) proposed as {distinct} distinct triple(s): {ok} ok, {len(bad)} REFUSED")
-print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (floor {floor})")
+sliced = slice_k > 1
+if sliced:
+    print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (a 1-in-{slice_k} CI slice: the floor of {floor} counts the whole list and is NOT judged here; a full run judges it)")
+else:
+    print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (floor {floor})")
 failed = False
 for name, label, func, acc in bad[:20]:
     print(f"FAIL: {label}: the access at function {func}, instruction {acc} goes through a pointer just allocated and the kernel refuses it ({work}/one_{name}.v)")
     failed = True
-if ok < floor:
+if not sliced and ok < floor:
     print(f"FAIL: {ok} access(es) proven, below the floor of {floor} for `{leg}`: evidence was lost. Restore it, or lower proofs/shipped-fresh-floor.txt in its own commit and say why.")
     failed = True
-if ok > floor:
+if not sliced and ok > floor:
     print(f"  note: {ok - floor} above the floor; raise the `{leg}` row of proofs/shipped-fresh-floor.txt to {ok} to keep them.")
 sys.exit(1 if failed else 0)
 PY
 [ "$fail" -eq 0 ] || exit 1
-echo "ok   every proposed access is accepted by the kernel, and the count holds its floor"
+if [ "$slice" -gt 1 ]; then
+  echo "ok   every proposed access is accepted by the kernel (a CI slice: the floor is judged on a full run, not here)"
+else
+  echo "ok   every proposed access is accepted by the kernel, and the count holds its floor"
+fi

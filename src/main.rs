@@ -138,7 +138,7 @@ fn print_error_explanation(code: &str) {
     // kind of host-dependent behavior the embedded table exists to end.
     let code = code.to_ascii_uppercase();
     match DIAGNOSTIC_DOCS.iter().find(|(k, _)| *k == code) {
-        Some((_, doc)) => out(&format!("{}", doc)),
+        Some((_, doc)) => out(doc),
         None => {
             err(&format!("Unknown error code: {}", code));
             std::process::exit(1);
