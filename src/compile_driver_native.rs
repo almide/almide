@@ -30,9 +30,10 @@ pub(crate) struct PendingRust {
 }
 
 impl PendingRust {
-    /// The native test harness uses the same checked input as build/run.
-    /// An unsupported body is a compilation failure, never an implicit v0 run.
-    pub(crate) fn generate_tests(mut self) -> Result<String, String> {
+    /// The native test harness uses the same checked input as build/run: the
+    /// certified v1 render, or, when it walls, the standard codegen with the
+    /// v1-rendered regions of a metered program linked in (`note_test_wall`).
+    pub(crate) fn generate_tests(mut self, metered: Option<almide::ir::IrProgram>) -> Result<String, String> {
         // `ALMIDE_IR_FAULT` names a pass of the standard codegen, which this
         // route never runs. A fault that cannot be injected must not read as
         // a clean compile (it used to: the file was reported as passed), so
@@ -43,7 +44,17 @@ impl PendingRust {
         }
         let input = self.native_input.take().ok_or_else(|| "native tests require checked IR".to_string())?;
         let host = self.host_source();
-        render_native_tests(&self.source, std::mem::take(&mut self.native_text), host, input, self.fs_scope.clone())
+        let why = match render_native_tests(&self.source, std::mem::take(&mut self.native_text), host, input, self.fs_scope.clone())? {
+            TestRender::Rendered(rust) => return Ok(rust),
+            TestRender::Walled(why) => why,
+        };
+        note_test_wall(&self.source, &why);
+        let (source, opts) = (std::mem::take(&mut self.source), self.opts.clone());
+        let rust = self.generate();
+        Ok(match metered {
+            Some(ir) => cli::link_metered_regions(&source, rust, &why, ir, &opts),
+            None => rust,
+        })
     }
 
     /// The standard codegen's Rust for this program, made when the native
@@ -86,11 +97,31 @@ pub(crate) fn host_source(ir: &almide::ir::IrProgram, opts: &codegen::CodegenOpt
     })
 }
 
-pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput, fs_scope: Option<Vec<String>>) -> Result<String, String> {
+/// What the native test harness's v1 render made of a program.
+pub(crate) enum TestRender {
+    /// The certified render, its certificates judged.
+    Rendered(String),
+    /// A wall, and why: the program is built through the standard codegen.
+    Walled(String),
+}
+
+/// Owner ruling 2026-11-27 (#4956): a test program the verified native render
+/// walls is built through the standard codegen, as build and run do (and as
+/// v0.69.1's test lane did), with their note under `-v`. Making those shapes
+/// verified is the native-verified-fallback known limit.
+pub(crate) fn note_test_wall(source: &str, why: &str) {
+    cli::record_native_wall("test", source, why);
+    if almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
+        crate::err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {why}"));
+    }
+}
+
+pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostSource, (ir, checker): NativeInput, fs_scope: Option<Vec<String>>) -> Result<TestRender, String> {
     let _callbacks = almide_mir::native_callbacks::Scope::enter(native_text).with_host_source(host);
-    let (rust, certs) = almide_mir::pipeline::try_render_rust_checked_tests_certified(
-        source, ir, checker, fs_scope,
-    ).map_err(|error| format!("native v1 test render: {error:?}"))?;
+    let (rust, certs) = match almide_mir::pipeline::try_render_rust_checked_tests_certified(source, ir, checker, fs_scope) {
+        Ok(rendered) => rendered,
+        Err(error) => return Ok(TestRender::Walled(error.to_string())),
+    };
     // Owner ruling 2026-11-24 (#4932): the test harness ships its render's
     // certificates to the same linked verifier as build/run/bench; a
     // rejection is a compiler bug and the test binary is not built.
@@ -102,7 +133,7 @@ pub(crate) fn render_native_tests(source: &str, native_text: String, host: HostS
     if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
         crate::err("native: v1 trust-spine render (test harness)");
     }
-    Ok(rust)
+    Ok(TestRender::Rendered(rust))
 }
 
 /// [`try_compile_reporting`] up to, not including, the codegen.

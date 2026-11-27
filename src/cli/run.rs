@@ -65,7 +65,7 @@ fn generate_native_source(file: &str, no_check: bool, test_mode: bool, native_ve
         return Err("compile failed".to_string());
     }
     let rs_code = if test_mode {
-        pending.generate_tests()?
+        pending.generate_tests(metered)?
     } else if native_verified {
         super::render_v1_native_or_fallback(pending, metered, &opts)
     } else {

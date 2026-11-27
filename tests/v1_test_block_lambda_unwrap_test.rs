@@ -5,7 +5,9 @@
 //! the payload. Its tail was lowered as a function's tail `!` is — the callee's
 //! Result handed back as it is — and the test binary did not compile: the
 //! callback returned a Result where the list builder reads the payload. The
-//! native render now refuses such a test file instead of emitting it.
+//! native render now refuses such a test file instead of emitting it, and
+//! since #4956 the test lane builds a refused file through the standard
+//! codegen, as build and run do: either way the file runs and passes.
 use std::process::Command;
 
 const HEAP_PAYLOAD_CALLBACK: &str = r##"fn mk(n: Int) -> Result[List[Int], String] =
@@ -25,8 +27,8 @@ fn a_test_block_callback_unwrapping_a_heap_payload_never_reaches_the_rust_compil
         .current_dir(dir.path()).output().expect("almide test");
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(!stderr.contains("error[E"), "the emitted test binary did not compile: {stderr}");
-    // Either the file runs and passes, or the native render refused it by name.
-    assert!(run.status.success() || stderr.contains("native v1 test render"), "{stderr}");
+    // Certified, or walled and built through the standard codegen: it passes.
+    assert!(run.status.success(), "{stderr}");
     // The wasm leg runs it.
     let wasm = Command::new(env!("CARGO_BIN_EXE_almide")).args(["test", "--target", "wasm", "callback_test.almd"])
         .current_dir(dir.path()).output().expect("almide test");

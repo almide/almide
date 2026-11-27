@@ -871,6 +871,22 @@ fn compile_test_batch_inner(plan: &TestRunContext, batch: &[PlannedTestFile], re
         None => Box::new(String::new),
     };
     let fs_scope = plan.project.as_ref().and_then(|p| p.fs_allow.clone());
-    let rs_code = render_native_tests("", native_text, host, native_input, fs_scope).map_err(unattributed)?;
+    let rs_code = match render_native_tests("", native_text, host, native_input, fs_scope).map_err(unattributed)? {
+        TestRender::Rendered(rust) => rust,
+        // #4956: the standard codegen builds a walled batch, as v0.69.1 did.
+        TestRender::Walled(why) => {
+            let ir = ir_program.as_mut().ok_or_else(|| unattributed("the test run did not lower".into()))?;
+            // A metered program (`fan.bounded` & co.) links v1-rendered regions
+            // against its entry file's source: that stays a per-file build.
+            if almide::ir::runtime_use::uses_metered_prims(ir) {
+                return Err(unattributed("a test file uses the deterministic meter".into()));
+            }
+            note_test_wall("", &why);
+            match codegen::codegen_with(ir, codegen::pass::Target::Rust, &codegen::CodegenOptions::default()) {
+                codegen::CodegenOutput::Source(s) => s,
+                codegen::CodegenOutput::Binary(_) => unreachable!(),
+            }
+        }
+    };
     Ok(TestRunProgram { rs_code, test_prefixes })
 }

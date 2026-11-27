@@ -40,6 +40,7 @@ fn a_string_tuple_literal_match_renders_natively_in_linear_size() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
         .args(["test", "--target", "rust"])
         .arg(&src)
+        .env("ALMIDE_VERIFIED_DEBUG", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -70,6 +71,8 @@ fn a_string_tuple_literal_match_renders_natively_in_linear_size() {
     };
     let (out, err) = (out.join().unwrap(), err.join().unwrap());
     assert!(status.success(), "native test lane failed:\n{out}\n{err}");
-    assert!(!err.contains("native v1 test render"), "the native test render walled:\n{err}");
+    // A wall now builds through the standard codegen (#4956): the render must
+    // be the certified one.
+    assert!(err.contains("native: v1 trust-spine render (test harness)") && !err.contains("walled"), "not the certified render:\n{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
