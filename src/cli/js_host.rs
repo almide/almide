@@ -13,7 +13,9 @@
 //! - every `@extern(wasm, "js", "name")` import is wired to
 //!   `init(source, { js: { name } })`, with `String` args decoded from the
 //!   block header before the user function runs and its return encoded;
-//! - every `pub fn` becomes a wrapper marshalling `Int` ↔ `number` (range
+//! - every `pub fn` becomes a wrapper (the glue binding `$<name>`, exported
+//!   as `<name>`: no source name is ever a binding of the glue, #4943)
+//!   marshalling `Int` ↔ `number` (range
 //!   checked at ±2^53), `Float`, `Bool`, `String`, `Unit`, and the block
 //!   shapes `Bytes`, `List[T]`, `Option[T]` and records (#3354, planned in
 //!   `js_host_exports.rs` from the layout the emitter records); any other
@@ -82,6 +84,11 @@ pub(crate) struct HostSurface {
     /// `@extern(wasm, "js", name, returns: promise)` (#3371; #3353 took
     /// them from a build flag).
     pub async_imports: Vec<String>,
+    /// Pub fns the module does not export because their name is one the
+    /// toolchain writes into the module itself (`memory`, `_start`, the `__`
+    /// space: `host_exports::is_reserved_export`, #3490). No wrapper can
+    /// call them, so `--host js` refuses them by name (#4943).
+    pub unexported: Vec<String>,
 }
 
 impl HostSurface {
@@ -137,11 +144,16 @@ impl HostSurface {
             // pub fns not synthesized by the compiler and not named into the
             // toolchain's own export space; monomorphic, not tests.
             let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm");
-            let exports = declared.is_some()
-                || (matches!(f.visibility, almide_ir::IrVisibility::Public)
-                    && !almide_ir::is_synthesized_entry_fn(f.name.as_str())
-                    && !almide_wasm::host_exports::is_reserved_export(name));
-            if !exports || f.is_test || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
+            let public = matches!(f.visibility, almide_ir::IrVisibility::Public) && !almide_ir::is_synthesized_entry_fn(f.name.as_str());
+            let reserved = almide_wasm::host_exports::is_reserved_export(name);
+            let exports = declared.is_some() || (public && !reserved);
+            if f.is_test || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
+                continue;
+            }
+            if !exports {
+                if public && reserved {
+                    s.unexported.push(name.to_string());
+                }
                 continue;
             }
             // `@export(wasm, "sym")` (#2752) renames the module's export,
@@ -556,6 +568,77 @@ fn wasi_object_js(sigs: &WasmSigs, fs_on: bool) -> String {
     js
 }
 
+/// The glue's own binding for the wrapper of the `pub fn` `name` (#4943):
+/// `$` + the name. An Almide identifier never contains `$` — the lexer's
+/// `is_ident_start_char` / `is_ident_continue_char` (crates/almide-syntax/
+/// src/lexer.rs, UAX #31 XID plus ASCII `_`; a backticked name takes the same
+/// character set) admit no `$` — so no source name is ever spelled like a
+/// wrapper, and no source name is ever a binding of the glue's module scope:
+/// the module exports the wrapper under the source name
+/// (`export { $process as process }`), where neither the glue's helpers
+/// (`init`, `view`, `memory`, ...) nor the platform's globals (`process`,
+/// `fetch`) can be shadowed or redeclared by it.
+pub(crate) fn glue_binding(name: &str) -> String {
+    format!("${name}")
+}
+
+/// The words ECMAScript reserves in module (strict) code, where a binding
+/// cannot take them: the `.d.ts` cannot declare a function or a parameter by
+/// one (a JS export NAME may be any of them, so the `.js` needs no table).
+/// Almide allows each as a name (`fn delete`, a param `default`, a
+/// backticked `let`), so the typings spell those through [`glue_binding`] /
+/// [`ts_param`] instead of emitting a declaration TypeScript rejects (#4943).
+const JS_RESERVED: &[&str] = &[
+    "arguments", "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
+    "else", "enum", "eval", "export", "extends", "false", "finally", "for", "function", "if", "implements", "import", "in",
+    "instanceof", "interface", "let", "new", "null", "package", "private", "protected", "public", "return", "static",
+    "super", "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
+];
+
+pub(crate) fn js_reserved(name: &str) -> bool {
+    JS_RESERVED.contains(&name)
+}
+
+/// A parameter's name in the `.d.ts`: the source name, or the source name
+/// and a `$` when module code reserves it (`default$`). The `$` keeps it
+/// distinct from every other source name (none contains `$`).
+pub(crate) fn ts_param(name: &str) -> String {
+    if js_reserved(name) { format!("{name}$") } else { name.to_string() }
+}
+
+/// The names the glue itself exports — its entry points and classes, read
+/// off the generated text (`export function` / `export async function` /
+/// `export class`), so the list is the glue's actual surface for this build
+/// (`run` only with a `main`, `memoryBytes` only with the value helpers,
+/// `files` only with the filesystem, ...), never a hand-kept one.
+fn glue_exports(js: &str) -> std::collections::BTreeSet<&str> {
+    js.lines()
+        .filter_map(|l| l.strip_prefix("export "))
+        .filter_map(|l| {
+            let l = l.strip_prefix("async ").unwrap_or(l);
+            l.strip_prefix("function ").or_else(|| l.strip_prefix("class "))
+        })
+        .map(|l| &l[..l.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$')).unwrap_or(l.len())])
+        .collect()
+}
+
+/// A `pub fn` whose name the glue already exports cannot be exported beside
+/// it: an ES module has one export per name. Refused by name, with the
+/// glue's surface for this build (#4943).
+fn check_export_names(glue: &str, wrapped: &[&str]) -> Result<(), String> {
+    let taken = glue_exports(glue);
+    match wrapped.iter().find(|n| taken.contains(**n)) {
+        None => Ok(()),
+        Some(name) => {
+            let list: Vec<&str> = taken.into_iter().collect();
+            Err(format!(
+                "error: --host js cannot export `{name}`: the generated glue already exports `{name}`, and a module has one export per name — the glue exports {} for this build\n  hint: rename `{name}`, or write `local fn {name}` to keep it out of the JS surface",
+                list.join(", ")
+            ))
+        }
+    }
+}
+
 /// The `wasi_snapshot_preview1` names the shipped module imports.
 fn wasi_imports(sigs: &WasmSigs) -> impl Iterator<Item = &str> {
     sigs.imports.iter().filter(|(m, _, _)| m == "wasi_snapshot_preview1").map(|(_, n, _)| n.as_str())
@@ -578,7 +661,7 @@ fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), St
 /// marshalling closure per extern import.
 
 fn signature_dts(f: &HostFn) -> String {
-    let params: Vec<String> = f.params.iter().map(|(p, ty)| format!("{p}: {}", ts_of(marshal_of(ty).expect("checked")))).collect();
+    let params: Vec<String> = f.params.iter().map(|(p, ty)| format!("{}: {}", ts_param(p), ts_of(marshal_of(ty).expect("checked")))).collect();
     format!("({}) => {}", params.join(", "), ts_of(marshal_of(visible_ret(f)).expect("checked")))
 }
 
@@ -637,6 +720,11 @@ pub(crate) fn generate(
     let sigs = wasm_sigs(bytes)?;
     check_marshallable(surface)?;
     check_imports_served(&sigs, surface)?;
+    if let Some(name) = surface.unexported.first() {
+        return Err(format!(
+            "error: --host js cannot export `{name}`: the toolchain writes an export of that name into the module itself (its memory, `_start`, `main`, `cabi_realloc` or the `__` runtime space, #3490), so the module does not export the fn and no wrapper can call it\n  hint: write `local fn {name}` to keep it internal, or `@export(wasm, \"<another name>\")` to export it under a name of its own"
+        ));
+    }
     let wrapped = surface.exports.iter().map(|f| f.name.clone()).chain(std::iter::once("_start".to_string())).collect();
     let suspension = jspi::analyse(bytes, &surface.async_imports, &wrapped)?;
 
@@ -652,6 +740,7 @@ pub(crate) fn generate(
     let mut export_dts = String::new();
     let mut needs_values = false;
     let mut region_release = false;
+    let mut wrapped: Vec<&str> = Vec::new();
     for f in &surface.exports {
         // The structural leg exports a pub fn only when its whole call
         // closure lowers; a fn the module does not export gets no wrapper.
@@ -661,7 +750,8 @@ pub(crate) fn generate(
         needs_values |= plan.needs_values();
         let entry = suspension.entry(&f.name);
         region_release |= plan.ret.hands_out_share();
-        wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
+        wrappers.push_str(&exports::wrapper_js(f, wrapped.len(), sig, owned, &plan, entry)?);
+        wrapped.push(&f.name);
         export_dts.push_str(&exports::export_dts(f, &plan, entry));
     }
     // A Region export (ADR-0031 amendment A1, #4354) hands the host one share
@@ -733,6 +823,13 @@ pub(crate) fn generate(
         }
     }
     js.push_str(&wrappers);
+    check_export_names(&js, &wrapped)?;
+    // Every wrapper is a `$` binding (see `glue_binding`), exported under
+    // its source name — any IdentifierName, reserved words included.
+    if !wrapped.is_empty() {
+        let rows: Vec<String> = wrapped.iter().map(|n| format!("{} as {n}", glue_binding(n))).collect();
+        js.push_str(&format!("export {{ {} }};\n", rows.join(", ")));
+    }
     dts.push_str(&export_dts);
     Ok((js, dts))
 }

@@ -55,6 +55,14 @@ Open Scope Z_scope.
 
 (* ─── reuse-freedom of a line ─── *)
 
+(* reuse-freedom of a nested arm (format v10), at every depth *)
+Fixpoint nno_reuse (n : NOps) : bool :=
+  match n with
+  | NEnd => true
+  | NOp1 o rest => andb (no_reuse [o]) (nno_reuse rest)
+  | NBr t e rest => andb (andb (nno_reuse t) (nno_reuse e)) (nno_reuse rest)
+  end.
+
 Definition item_no_reuse (c : CertItem) : bool :=
   match c with
   | COp o => no_reuse [o]
@@ -63,6 +71,7 @@ Definition item_no_reuse (c : CertItem) : bool :=
   | CBranch t e => andb (no_reuse t) (no_reuse e)
   | CBranchRet _ t e => andb (no_reuse t) (no_reuse e)
   | CBranchAbort _ t e => andb (no_reuse t) (no_reuse e)
+  | CNest t e => andb (nno_reuse t) (nno_reuse e)
   | CPoison => false
   end.
 
@@ -93,6 +102,18 @@ Proof.
   destruct b; simpl; rewrite no_reuse_app, IH; rewrite ?Ht, ?He; reflexivity.
 Qed.
 
+Lemma nno_reuse_unroll :
+  forall ns f, NUnrolls ns f -> nno_reuse ns = true -> no_reuse f = true.
+Proof.
+  intros ns f HU. induction HU as [| o a b HU IH | t e a ft b choice HT IHT HU IH];
+    intros H; simpl in H.
+  - reflexivity.
+  - apply andb_prop in H. destruct H as [H1 H2].
+    destruct o; simpl in H1 |- *; try discriminate; apply IH; exact H2.
+  - apply andb_prop in H. destruct H as [H1 H2]. apply andb_prop in H1. destruct H1 as [Ht He].
+    rewrite no_reuse_app, (IH H2). destruct choice; rewrite (IHT ltac:(assumption)); reflexivity.
+Qed.
+
 (* Every concrete run of a reuse-free line is reuse-free. *)
 Lemma line_no_reuse_unroll :
   forall cs fops, line_no_reuse cs = true -> UnrollsL cs fops -> no_reuse fops = true.
@@ -113,6 +134,9 @@ Proof.
     rewrite no_reuse_app, (IHHU H2). destruct retthen; simpl; rewrite ?Ht, ?He; reflexivity.
   - apply andb_prop in H. destruct H as [H1 H2]. apply andb_prop in H1. destruct H1 as [Ht He].
     rewrite no_reuse_app, (IHHU H2). destruct abthen; simpl; rewrite ?Ht, ?He; reflexivity.
+  - apply andb_prop in H. destruct H as [H1 H2]. apply andb_prop in H1. destruct H1 as [Ht He].
+    rewrite no_reuse_app, (IHHU H2), (nno_reuse_unroll _ _ Hnest ltac:(destruct choice; assumption)).
+    reflexivity.
 Qed.
 
 (* ─── a parameter line, judged from its declared entry count ─── *)

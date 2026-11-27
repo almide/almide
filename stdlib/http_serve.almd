@@ -117,15 +117,14 @@ fn __hs_refusal(resp: List[String]) -> String? = {
 }
 
 fn __hs_owned(k: String) -> Bool = list.contains(
-  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  ["connection", "content-length", "transfer-encoding", "keep-alive", "x-content-type-options"],
   string.to_lower(k),
 )
 
-// The core's secure default (C-407): `X-Content-Type-Options: nosniff` is
-// added unless the handler set the field.
-fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
-  if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
-  else pairs + [("X-Content-Type-Options", "nosniff")]
+// The core's secure field (C-407, owner ruling 2026-11-25): every response
+// says `X-Content-Type-Options: nosniff`; a handler's own field is dropped
+// with the other core-owned ones, so a granted script type is never sniffed.
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 

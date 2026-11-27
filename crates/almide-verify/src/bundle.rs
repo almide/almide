@@ -43,6 +43,18 @@
 //! site moves, and its ownership lines (proofs/NativeCalls.v). A
 //! `native-calls` record in a bundle before version 5 is refused.
 //!
+//! Version 6 (#1961) is version 5 whose `ownership` (and `rc-sig`) lines may
+//! carry the region reclaim `w` (certificate format v9, `Reclaim` in
+//! proofs/OwnershipChecker.v): the parked temporary of a region window,
+//! discharged by the window's restore. Format v8 skipped a `w` byte as
+//! noise, so a bundle before version 6 carrying one is refused.
+//!
+//! Version 7 is version 6 whose `ownership` (and `rc-sig`) lines may carry a
+//! NESTED branch — a `{…|…}` arm holding `{…|…}` of its own (certificate
+//! format v10, `CNest` in proofs/OwnershipChecker.v). Every earlier checker
+//! poisoned a nested brace, so a bundle before version 7 carrying one is
+//! refused rather than read either way.
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
@@ -63,6 +75,24 @@ pub const MAGIC_V3: &str = "almide-certificate-bundle 3";
 pub const MAGIC_V4: &str = "almide-certificate-bundle 4";
 /// The first line of a version-5 bundle (version 4 + `native-calls` records).
 pub const MAGIC_V5: &str = "almide-certificate-bundle 5";
+/// The first line of a version-6 bundle (version 5 + the region reclaim `w`).
+pub const MAGIC_V6: &str = "almide-certificate-bundle 6";
+/// The first line of a version-7 bundle (version 6 + nested branches).
+pub const MAGIC_V7: &str = "almide-certificate-bundle 7";
+
+/// Does an ownership line nest a `{…}` inside another (format v10)?
+pub fn nests_branches(witness: &[u8]) -> bool {
+    let mut depth = 0u32;
+    witness.iter().any(|&b| {
+        match b {
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            b'\n' => depth = 0,
+            _ => {}
+        }
+        depth > 1
+    })
+}
 
 /// The shipped file a version-2 bundle's witnesses describe.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,9 +281,11 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
         Some(MAGIC_V3) => 3,
         Some(MAGIC_V4) => 4,
         Some(MAGIC_V5) => 5,
+        Some(MAGIC_V6) => 6,
+        Some(MAGIC_V7) => 7,
         Some(other) => {
             return Err(r.err(format!(
-                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}` or `{MAGIC_V5}`, found `{other}`"
+                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}`, `{MAGIC_V5}`, `{MAGIC_V6}` or `{MAGIC_V7}`, found `{other}`"
             )))
         }
         None => return Err(r.err("the bundle is empty")),
@@ -270,6 +302,22 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                 }
                 if version < 4 && property == Property::RcSig {
                     return Err(r.err("an `rc-sig` record in a bundle before version 4"));
+                }
+                // Version 6 (#1961): a region reclaim `w` on an ownership line
+                // (certificate format v9). Every earlier checker skipped `w`
+                // as noise — a line `w` balanced there — so an earlier
+                // bundle carrying one is refused, never read either way.
+                if version < 6
+                    && matches!(property, Property::Ownership | Property::RcSig)
+                    && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b'w'))
+                {
+                    return Err(r.err("a region reclaim `w` in an ownership line of a bundle before version 6"));
+                }
+                // Version 7 (format v10): a nested branch. Every earlier
+                // checker poisoned it; an earlier bundle carrying one is
+                // refused, never read either way.
+                if version < 7 && matches!(property, Property::Ownership | Property::RcSig) && nests_branches(&bytes) {
+                    return Err(r.err("a nested branch in an ownership line of a bundle before version 7"));
                 }
                 if version < 5 && property == Property::NativeCalls {
                     return Err(r.err("a `native-calls` record in a bundle before version 5"));
@@ -379,8 +427,35 @@ mod tests {
     }
 
     #[test]
+    fn a_region_reclaim_is_read_only_in_a_version_six_bundle() {
+        // #1961: format v8 skipped `w`, where a lone `w` line balanced; a
+        // bundle before version 6 carrying one is refused, either case.
+        assert!(parse(format!("{MAGIC_V5}\nwitness ownership 2 main\niw\n").as_bytes()).is_err());
+        assert!(parse(&bundle("witness ownership 2 main\nIW\n")).is_err());
+        let b = parse(format!("{}\n{}", MAGIC_V6, "witness ownership 2 main\niw\n").as_bytes()).expect("a v6 bundle carries `w`");
+        assert_eq!(verify(&b).1, Outcome::Certified);
+        let b = parse(format!("{}\n{}", MAGIC_V6, "witness ownership 1 main\nw\n").as_bytes()).expect("well-formed");
+        assert_ne!(verify(&b).1, Outcome::Certified);
+        // Another property's `w` is its own byte.
+        assert!(parse(&bundle("witness names 3 main\nw|1\n")).is_ok());
+    }
+
+    #[test]
+    fn a_nested_branch_is_read_only_in_a_version_seven_bundle() {
+        // Format v10: every reader before version 7 poisoned a nested brace;
+        // a bundle before version 7 carrying one is refused.
+        assert!(parse(format!("{}\n{}", MAGIC_V6, "witness ownership 11 main\ni{a{d|m}|}d\n").as_bytes()).is_err());
+        let b = parse(format!("{}\n{}", MAGIC_V7, "witness ownership 11 main\ni{a{d|m}|}d\n").as_bytes()).expect("a v7 bundle nests");
+        assert_eq!(verify(&b).1, Outcome::Certified);
+        let b = parse(format!("{}\n{}", MAGIC_V7, "witness ownership 10 main\ni{{dd|}|}d\n").as_bytes()).expect("well-formed");
+        assert_ne!(verify(&b).1, Outcome::Certified);
+        // Two flat branches in a row are not nested.
+        assert!(parse(format!("{}\n{}", MAGIC_V6, "witness ownership 12 main\ni{a|a}{d|d}d\n").as_bytes()).is_ok());
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 6\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 8\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

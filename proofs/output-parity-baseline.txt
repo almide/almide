@@ -244,6 +244,7 @@ spec/wasm_cross/codec_triple_list.almd
 spec/wasm_cross/codec_variant_roundtrip.almd
 spec/wasm_cross/codec_variant_tuple_arity.almd
 spec/wasm_cross/codec_whitespace_tolerance.almd
+spec/wasm_cross/collection_key_total_equality.almd
 spec/wasm_cross/collection_literals.almd
 spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_eq.almd
@@ -1173,6 +1174,7 @@ spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 spec/wasm_host_js/effect_export_scalar.almd
 spec/wasm_host_js/effect_exports.almd
 spec/wasm_host_js/fs_preopens.almd
+spec/wasm_host_js/glue_names.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd

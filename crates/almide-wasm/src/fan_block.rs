@@ -182,7 +182,6 @@ impl Emitter<'_> {
     /// is closed here.
     fn fan_err_site_converted(&mut self, c: &FanCarrier, ert: SliceTy, err_ir: Option<&Ty>) -> Result<(), EmitError> {
         let hold = c.hold;
-        let joined = self.is_str_list(ert);
         self.emit_abort_message(ert, err_ir, |s| {
             s.f.instructions().local_get(hold);
             s.load_ty_slot(ert, almide_layout::SUM_FIELD);
@@ -203,11 +202,11 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(c.ty);
             self.f.instructions().local_get(hold).call(dec);
         }
-        if joined {
-            // The joined route is not recorded, as on a `!` (witness_unwrap.rs).
-            self.witness_decline("fan:err-joined");
-        } else if let Some(w) = self.witness.as_mut() {
-            // The repr text moves into the err block; the chosen carrier is released.
+        // The message moves into the err block — the repr text, or the joined
+        // `List[String]` (`$list_join` reads the list and answers a fresh
+        // block, as on a `!`: err_channel.rs `propagate_err_joined`); the
+        // chosen carrier is released.
+        if let Some(w) = self.witness.as_mut() {
             w.temp_move();
         }
         self.fan_witness_ops(c.obj, "d");

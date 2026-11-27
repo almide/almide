@@ -17,7 +17,12 @@
 #     where the access ends, are the module's bytes there, inside that one body;
 #   * every place a string starts or ends is where an instruction starts in
 #     this script's own reading of the body;
-#   * a window starts at the access's control depth and never goes below it.
+#   * a window starts at the access's control depth and never goes below it;
+#   * the module has ONE memory, unshared and addressed by 32-bit offsets. The
+#     three rules read a load or a store as an access of the one linear memory
+#     that no other thread writes, and the kernel is never shown the import
+#     section or the memory section, so that this is true of the artifact is
+#     held here.
 #
 # It judges where the bytes are, not what they mean: the verdict on a proposal
 # stays the kernel's.
@@ -36,7 +41,10 @@
 # dumps, cut down to one module's proposals, with ONE proposal altered (a
 # start moved inside an instruction, a cut between two strings moved inside
 # one, a byte changed, another function named, a module's block removed) and
-# a file `expect` with the words the refusal must contain. The caller runs this script on each and requires the
+# a file `expect` with the words the refusal must contain. Two more leave the
+# dumps as they are and alter the MODULE (a second memory added to its memory
+# section; its memory made shared): their sub-directory also holds the forged
+# `module.wasm` and a `manifest` that names it. The caller runs this script on each and requires the
 # refusal (proofs/structural-wall.sh does, on every run). The forgeries are
 # built with this script's decoder so that each breaks exactly one point.
 set -euo pipefail
@@ -111,6 +119,67 @@ def function_bodies(b):
     return out
 
 
+def limits(b, p, end):
+    """(flags, minimum, maximum or None, the offset past the limits)."""
+    if p >= end:
+        raise Unread("limits run past their section")
+    flags = b[p]
+    if flags > 0x07:
+        raise Unread(f"limits with flags 0x{flags:02x}")
+    lo, p = uleb(b, p + 1, end)
+    hi = None
+    if flags & 0x01:
+        hi, p = uleb(b, p, end)
+    return flags, lo, hi, p
+
+
+def memories(b):
+    """(flags, minimum, maximum or None) of every memory the module imports or
+    defines, in index order. function_bodies has held the sections' extents."""
+    p, out = 8, []
+    while p < len(b):
+        sid = b[p]
+        size, p = uleb(b, p + 1, len(b))
+        end = p + size
+        if sid == 2:
+            n, q = uleb(b, p, end)
+            for _ in range(n):
+                for _name in range(2):
+                    k, q = uleb(b, q, end)
+                    q += k
+                if q >= end:
+                    raise Unread("an import runs past its section")
+                kind, q = b[q], q + 1
+                if kind == 0x00:
+                    _, q = uleb(b, q, end)
+                elif kind == 0x01:
+                    if q >= end or b[q] not in (0x70, 0x6F):
+                        raise Unread("an imported table of a type this script does not read")
+                    q = limits(b, q + 1, end)[3]
+                elif kind == 0x02:
+                    flags, lo, hi, q = limits(b, q, end)
+                    out.append((flags, lo, hi))
+                elif kind == 0x03:
+                    if q >= end or b[q] not in VALTYPES:
+                        raise Unread("an imported global of a type this script does not read")
+                    q += 2
+                elif kind == 0x04:
+                    _, q = uleb(b, q + 1, end)
+                else:
+                    raise Unread(f"an import of kind 0x{kind:02x}")
+            if q != end:
+                raise Unread("the import section does not end with its last import")
+        elif sid == 5:
+            n, q = uleb(b, p, end)
+            for _ in range(n):
+                flags, lo, hi, q = limits(b, q, end)
+                out.append((flags, lo, hi))
+            if q != end:
+                raise Unread("the memory section does not end with its last memory")
+        p = end
+    return out
+
+
 def instructions(b, start, end):
     """(offset, opcode, control depth before it) per instruction of a body."""
     p, depth, out = start, 0, []
@@ -177,6 +246,13 @@ class Module:
         self.bytes = open(path, "rb").read()
         self.bodies = function_bodies(self.bytes)
         self.read = {}
+        # None, or why the module is not one the rules are about: a load or a
+        # store must be an access of the one memory, unshared, 32-bit.
+        mems = memories(self.bytes)
+        self.memory = (f"the module has {len(mems)} memories" if len(mems) != 1
+                       else "its memory is shared" if mems[0][0] & 0x02
+                       else "its memory is addressed by 64-bit offsets" if mems[0][0] & 0x04
+                       else None)
 
     def body(self, func):
         """The function's instructions, and the offsets they start at."""
@@ -274,12 +350,16 @@ def verdict(manifest, dumps):
                 if path not in cache:
                     cache[path] = Module(path)
                 m = cache[path]
+                if m.memory:
+                    fails.append(f"{label}: {m.memory}: the rules are about a module with one unshared 32-bit memory")
+                    continue
                 for prop in props:
                     why = judge(m, prop)
                     if why:
                         fails.append(f"{label}: {prop[0]} {prop[1]} {prop[2]}: {why}")
             except Unread as e:
                 fails.append(f"{label}: this script's decoder does not read the module ({e}); no length is guessed")
+    counts["READ"] = len(cache)
     return fails, counts
 
 
@@ -297,7 +377,8 @@ if not forge_dir:
         sys.exit(1)
     print(f"shipped slices: {len(manifest)} module(s); {counts['WINDOW']} window(s), {counts['FRESH']} fresh-block proposal(s) "
           f"and {counts['LOOP']} loop proposal(s) re-derived from the module's bytes by a second decoder: "
-          f"every string is an instruction run of the function it names")
+          f"every string is an instruction run of the function it names, and each of the {counts['READ']} module(s) "
+          f"that hold a proposal has one unshared 32-bit memory")
     sys.exit(0)
 
 # --forge: the control first (the untouched dumps must pass), then one altered
@@ -409,6 +490,64 @@ if p:
         made += 1
 else:
     missing.append("loop")
+
+
+# Two forged MODULES, the dumps untouched: the first swept module that holds a
+# proposal and defines its one memory, with a second memory added to its
+# memory section, and with that memory made shared. Functions and instructions
+# keep their indices, so every proposal is still where it says it is: the one
+# false thing is how many memories the module has, or of what kind.
+def leb(n):
+    out = bytearray()
+    while True:
+        x, n = n & 0x7F, n >> 7
+        out.append(x | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def with_memory_section(b, payload):
+    """The module with its memory section's payload replaced; None without one."""
+    p = 8
+    while p < len(b):
+        at, sid = p, b[p]
+        size, p = uleb(b, p + 1, len(b))
+        if sid == 5:
+            return b[:at] + b"\x05" + leb(len(payload)) + payload + b[p + size:]
+        p += size
+    return None
+
+
+def write_module(name, label, forged, expect):
+    write(name, None, label, None, None, expect)
+    d = os.path.join(forge_dir, name)
+    path = os.path.join(d, "module.wasm")
+    with open(path, "wb") as f:
+        f.write(forged)
+    with open(os.path.join(d, "manifest"), "w", encoding="utf-8") as f:
+        for l, p in manifest:
+            f.write(f"{l}\t{path if l == label else p}\n")
+
+
+done = False
+for label in dict.fromkeys(l for k in dumps for l, props in dumps[k] if props):
+    m = module(label)
+    mems = memories(m.bytes)
+    if len(mems) != 1 or mems[0][0] & 0x06:
+        continue
+    flags, lo, hi = mems[0]
+    entry = bytes([flags]) + leb(lo) + (leb(hi) if hi is not None else b"")
+    two = with_memory_section(m.bytes, leb(2) + entry + b"\x00\x01")
+    shared = with_memory_section(m.bytes, leb(1) + bytes([0x03]) + leb(lo) + leb(hi if hi is not None else max(lo, 1)))
+    if two is None or shared is None:
+        continue  # the memory is imported: there is no memory section to alter
+    write_module("module-second-memory", label, two, "the module has 2 memories")
+    write_module("module-shared-memory", label, shared, "its memory is shared")
+    made += 2
+    done = True
+    break
+if not done:
+    missing.append("module that defines its one memory")
 print(f"forged {made} input(s) under {forge_dir}" + (f"; no {', '.join(missing)} proposal to forge from" if missing else ""))
 if missing and os.environ.get("SLICES_FORGE_PARTIAL") != "1":
     sys.exit(1)

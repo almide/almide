@@ -32,6 +32,12 @@
 # was lost: restore it, or lower the floor in its own commit and say why).
 # Writes <work-dir>/verdicts.tsv (label, function, access, ok | REFUSED).
 #
+# The floor counts the leg's WHOLE list, so it is judged on a full run only.
+# Under a CI slice (ALMIDE_CI_SLICE=k > 1, a PR into develop: one fixture in
+# k) every proposal the slice holds is still judged by the kernel and a
+# refusal still fails, but the count is printed with no verdict against the
+# floor, and the last line says so.
+#
 # Needs coqc and the compiled spine (proofs/check.sh, or at least
 # GuardWindow.vo and GuardFresh.vo). That the function at the allocator's
 # index is the proven allocator is proofs/check-shipped-routines.sh's verdict
@@ -51,9 +57,16 @@ COQC="${COQC:-$(command -v coqc)}"
 # One .v per chunk of DISTINCT triples: `<work>/Fresh_<k>.v`; `<work>/goals.tsv`
 # (chunk, example name, the goal's four arguments) and `<work>/index.tsv`
 # (example name, label, function, access), one line per proposal.
-python3 -I - "$DUMP" "$WORK" "${FRESH_CHUNK:-400}" <<'PY'
+#
+# A chunk ends at FRESH_CHUNK goals or at FRESH_CHUNK_TEXT characters of goal
+# text, whichever comes first. A function that fills one block with a
+# thousand stores proposes a thousand triples whose middle string grows with
+# each store; 400 of those in one file is megabytes of byte lists, and the
+# kernel's memory for a file grows with its text (about 1.4 MB per 1,000
+# characters, measured), so a count alone lets one file take the machine.
+python3 -I - "$DUMP" "$WORK" "${FRESH_CHUNK:-400}" "${FRESH_CHUNK_TEXT:-300000}" <<'PY'
 import sys
-dump, work, chunk = sys.argv[1], sys.argv[2], int(sys.argv[3])
+dump, work, chunk, budget = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 mods, props, cur = [], [], None
 for line in open(dump, encoding="utf-8"):
     t = line.split()
@@ -88,24 +101,29 @@ Import ListNotations.
 Open Scope Z_scope.
 """
 names = {}
+k, held, text, largest = 0, 0, 0, 0
 with open(f"{work}/goals.tsv", "w", encoding="utf-8") as goals:
     for _, _, _, g in props:
         if g in names:
             continue
-        i = len(names)
-        k, name = i // chunk, f"f{i:06d}"
+        name = f"f{len(names):06d}"
         names[g] = name
-        with open(f"{work}/Fresh_{k:04d}.v", "a" if i % chunk else "w", encoding="utf-8") as f:
-            if i % chunk == 0:
+        goal = f"\nExample {name} : fresh_ok {g[0]} [{g[1]}] [{g[2]}] [{g[3]}] = true.\nProof. vm_compute. reflexivity. Qed.\n"
+        if held and (held >= chunk or text + len(goal) > budget):
+            k, held, text = k + 1, 0, 0
+        with open(f"{work}/Fresh_{k:04d}.v", "a" if held else "w", encoding="utf-8") as f:
+            if not held:
                 f.write(HEAD)
-            f.write(f"\nExample {name} : fresh_ok {g[0]} [{g[1]}] [{g[2]}] [{g[3]}] = true.\nProof. vm_compute. reflexivity. Qed.\n")
+            f.write(goal)
+        held, text = held + 1, text + len(goal)
+        largest = max(largest, text)
         goals.write(f"Fresh_{k:04d}\t{name}\n")
 with open(f"{work}/index.tsv", "w", encoding="utf-8") as idx:
     for label, func, acc, g in props:
         idx.write(f"{names[g]}\t{label}\t{func}\t{acc}\n")
 with open(f"{work}/swept.txt", "w", encoding="utf-8") as f:
     f.write(f"{len(mods)} {sum(1 for m in mods if m['alloc'] != '4294967295')} {len(props)} {len(names)}\n")
-print(f"{len(mods)} module(s), {len(props)} access(es) proposed, {len(names)} distinct triple(s)")
+print(f"{len(mods)} module(s), {len(props)} access(es) proposed, {len(names)} distinct triple(s) in {k + 1 if names else 0} file(s), the largest {largest} characters of goals")
 PY
 
 fail=0
@@ -134,9 +152,12 @@ done
 
 floor="$(awk -v leg="$LEG" '$1 == leg { print $2 }' "$FLOORS")"
 [ -n "$floor" ] || { echo "FAIL: $FLOORS has no row for the leg \`$LEG\`"; exit 1; }
-python3 -I - "$WORK" "$LEG" "$floor" <<'PY' || fail=1
+# shellcheck source=../scripts/lib/ci-slice.sh
+. "$HERE/../scripts/lib/ci-slice.sh"
+slice="$(ci_slice_k)"
+python3 -I - "$WORK" "$LEG" "$floor" "$slice" <<'PY' || fail=1
 import sys
-work, leg, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
+work, leg, floor, slice_k = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 refused = {l.strip() for l in open(f"{work}/refused.txt", encoding="utf-8") if l.strip()}
 rows = [l.rstrip("\n").split("\t") for l in open(f"{work}/index.tsv", encoding="utf-8")]
 mods, named, proposed, distinct = (int(x) for x in open(f"{work}/swept.txt", encoding="utf-8").read().split())
@@ -147,17 +168,25 @@ with open(f"{work}/verdicts.tsv", "w", encoding="utf-8") as out:
 ok = len(rows) - len(bad)
 with_one = len({r[1] for r in rows if r[0] not in refused})
 print(f"shipped fresh-block accesses [{leg}]: {mods} module(s), {named} naming an allocator, {proposed} access(es) proposed as {distinct} distinct triple(s): {ok} ok, {len(bad)} REFUSED")
-print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (floor {floor})")
+sliced = slice_k > 1
+if sliced:
+    print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (a 1-in-{slice_k} CI slice: the floor of {floor} counts the whole list and is NOT judged here; a full run judges it)")
+else:
+    print(f"  proven inside the block just allocated, from the bytes alone: {ok} access(es) in {with_one} module(s) (floor {floor})")
 failed = False
 for name, label, func, acc in bad[:20]:
     print(f"FAIL: {label}: the access at function {func}, instruction {acc} goes through a pointer just allocated and the kernel refuses it ({work}/one_{name}.v)")
     failed = True
-if ok < floor:
+if not sliced and ok < floor:
     print(f"FAIL: {ok} access(es) proven, below the floor of {floor} for `{leg}`: evidence was lost. Restore it, or lower proofs/shipped-fresh-floor.txt in its own commit and say why.")
     failed = True
-if ok > floor:
+if not sliced and ok > floor:
     print(f"  note: {ok - floor} above the floor; raise the `{leg}` row of proofs/shipped-fresh-floor.txt to {ok} to keep them.")
 sys.exit(1 if failed else 0)
 PY
 [ "$fail" -eq 0 ] || exit 1
-echo "ok   every proposed access is accepted by the kernel, and the count holds its floor"
+if [ "$slice" -gt 1 ]; then
+  echo "ok   every proposed access is accepted by the kernel (a CI slice: the floor is judged on a full run, not here)"
+else
+  echo "ok   every proposed access is accepted by the kernel, and the count holds its floor"
+fi

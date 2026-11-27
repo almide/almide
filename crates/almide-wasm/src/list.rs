@@ -319,7 +319,10 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        // The callback is a predicate activation like `list.any`'s; the hit
+        // stores a scalar index into the arm's own fresh cell, sharing
+        // nothing of the element.
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         // some(i): the first match's INDEX, then break the scan.
         self.f

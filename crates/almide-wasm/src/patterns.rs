@@ -101,11 +101,15 @@ impl Emitter<'_> {
             Some(g) if irrefutable => {
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
                 self.witness_pattern_views(&arm.pattern);
+                self.hold_arm_rests(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
+                self.settle_guard_rests(&arm.pattern);
             }
             Some(g) => {
+                let verdict = self.rest_verdict_local(&arm.pattern)?;
                 self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
-                self.f.instructions().if_(BlockType::Result(ValType::I32));
+                let vt = if verdict.is_some() { BlockType::Empty } else { BlockType::Result(ValType::I32) };
+                self.f.instructions().if_(vt);
                 let verdict_at = self.arm_anchor_here();
                 self.witness_verdict_open(split);
                 if split {
@@ -113,12 +117,24 @@ impl Emitter<'_> {
                 }
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
                 self.witness_pattern_views(&arm.pattern);
+                self.hold_arm_rests(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
+                self.settle_guard_rests(&arm.pattern);
+                if let Some(v) = verdict {
+                    self.f.instructions().local_set(v);
+                }
                 let failed_at = self.arm_anchor();
                 self.witness_verdict_close(split, failed_at);
                 self.f.instructions().else_();
                 self.arm_anchor_bind(failed_at);
-                self.f.instructions().i32_const(0).end();
+                if verdict.is_none() {
+                    self.f.instructions().i32_const(0);
+                }
+                self.f.instructions().end();
+                if let Some(v) = verdict {
+                    self.f.instructions().local_get(v);
+                    self.release_i32();
+                }
             }
         }
         let bt = match result {
@@ -146,9 +162,7 @@ impl Emitter<'_> {
                 self.hold_arm_rests(&arm.pattern);
             }
             self.lower_arm_body(&arm.body, result, tail)?;
-            if arm.guard.is_none() {
-                self.release_arm_rests(&arm.pattern);
-            }
+            self.release_arm_rests(&arm.pattern);
             self.f.instructions().else_();
             let else_at = self.arm_anchor_here();
             if arms.len() == 2 && arm.guard.is_none() && arms[1].guard.is_none() && result_halves(&arm.pattern, &arms[1].pattern) {

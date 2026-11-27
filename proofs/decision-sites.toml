@@ -46,10 +46,10 @@
 # Shrink-only ceilings (the judge refuses a count above its ceiling; lower the
 # ceiling in the PR that lowers the count; a rise is a reviewed header line
 # naming the PR and why):
-# unstamped_ceiling     = "83"
+# unstamped_ceiling     = "81"
 # unclassified_ceiling  = "0"
 # skipped_route_ceiling = "70"
-# failopen_ceiling      = "20"
+# failopen_ceiling      = "16"
 #
 # History:
 #   2026-11-19  seeded from the read-only draft (143 rows) plus the detector's
@@ -193,6 +193,16 @@
 #   2026-11-24  verify.verify-command STAMPED (its manifest read is the entry's own since
 #               #4830; novel fresh-bytes artifact, probe through `almide verify`, control):
 #               76 stamped, unstamped 85 -> 84.
+#   2026-11-24  26th engineer (ds-2, 8718c38412): effect.e095-serve-closure STAMPED (decided from
+#               @instance_closed, novel + probe on 14 columns + control red); fail-open closed on
+#               verify.gate-build-incomplete-accepted (C-462, wasi skipped #4836) and
+#               media.e116-header-write (the writer refuses an owned name whatever its source,
+#               owner ruling 2026-11-24; c1 text, 3 cells not observed). 78 stamped, 82 not, 17 fail-open.
+#   2026-11-24  27th engineer (ds-2): witness.subset-gate's host-leaf name-prefix decline deleted (the
+#               leaves are audited arms, 81ac837f6c); media.e117-literal-media decided from the closed
+#               `@media_table` declaration and the application's `[trust] media` "self" grant
+#               (unknown = refuse, novel + probe on 14 columns + control red): STAMPED.
+#               79 stamped, 81 not, 16 fail-open.
 
 [detector]
 # S2: constructing one of these is a refusal that never becomes a diagnostic
@@ -1894,7 +1904,7 @@ decides = "run native passes in a seeded random order permitted by declared edge
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the lock decides from the switch's DECLARED scope: every registered build-changing switch, enumerated from the registry by the novel test (so one registered later is covered), is read as unset when inherited; an unregistered name panics at its read (refused)"
-routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "runs", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "runs", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "runs" }
+routes = { check = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_json = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", check_effects = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", run = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", build = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", test = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", bench = "n.a.: the switch is not read on this route", native = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasm = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", wasi = "runs", component = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", lsp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", mcp = "n.a.: the switch is not read on this route (observed 2026-11-19: no IGNORED line inside or outside)", emit = "runs" }
 tests = [
   "tests/switch_lock_test.rs",
 ]
@@ -2096,7 +2106,7 @@ decides = "ALMIDE_SKIP_PASS (Ablation, ignored under the release lock) skips the
 from = "declaration"
 unknown = "refuse"
 unknown_note = "the names are read against the passes every target's pipeline declares (target.rs::every_pass_name, Rust and Wgsl, so a name valid for one target is not refused on the other); a name that is no declared pass panics at the read (pass.rs Pipeline::run) instead of skipping nothing (novel test with a fresh name, alone and after an empty item). The release lock (env.shuffle-passes' lock half) still holds it on a release build"
-routes = { check = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_json = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_effects = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", run = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", build = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", test = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", bench = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)", native = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", wasm = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: run / build / test / bench --target wasm, no refusal)", wasi = "runs: the rustc wasi route renders through the codegen pipeline (observed 2026-11-24 on a09368d423, route matrix ds-2: refused inside and outside the project)", component = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: --component, no refusal)", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)" }
+routes = { check = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_json = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", check_effects = "n.a.: check runs no codegen pipeline (observed 2026-11-24 ds-2: no refusal)", run = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", build = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", test = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", bench = "n.a.: the switch is not read on this route", native = "fallback-only: a v1-walled program renders through the codegen pipeline (#4006); a v1-rendered one never reads the switch (observed 2026-11-24 ds-2: no refusal)", wasm = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: run / build / test / bench --target wasm, no refusal)", wasi = "runs: the rustc wasi route renders through the codegen pipeline (observed 2026-11-24 on a09368d423, route matrix ds-2: refused inside and outside the project)", component = "n.a.: the structural wasm route runs no codegen pipeline (observed 2026-11-24 ds-2: --component, no refusal)", lsp = "n.a.", mcp = "n.a.", emit = "runs (observed 2026-11-24 on decision-sites a09368d423, route matrix ds-2: refused inside and outside the project)" }
 tests = [
   "tests/decision_skip_pass_novel_test.rs::novel_a_skip_pass_naming_no_declared_pass_is_refused",
   "tests/switch_lock_test.rs",
@@ -3232,32 +3242,36 @@ note = "Before #4836's in-process change a build with no almide-verify installed
 novel = "tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused"
 control_patch = "proofs/decision-controls/verify.gate-build.patch"
 control_test = "tests/decision_verify_gate_novel_test.rs::novel_a_certificate_the_linked_verifier_has_not_seen_is_refused"
-control_seen = "e105a32f96 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; panic at tests/decision_verify_gate_novel_test.rs:34, the novel-property refusal) (24th engineer)"
+control_seen = "8718c38412 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/decision_verify_gate_novel_test.rs:34, `an unknown property was not refused: Ok(Certified)`) (26th engineer; patch re-based on the allow_incomplete signature)"
 
 [[site]]
 id = "verify.gate-build-incomplete-accepted"
 at = "src/cli/verify.rs::gate_build"
 items = [
   "src/cli/verify.rs::gate_build",
+  "src/certificate_gate.rs::judge",
 ]
 keys = []
-decides = "exit 3 (INCOMPLETE: every witness accepted, some function declared uncertified) is a pass, the same as CERTIFIED"
+decides = "an INCOMPLETE certificate (every witness accepted, some function the producer declared uncertified) is refused on every wasm route that writes or runs the module unless `--allow-incomplete-verification` is given, which passes it with a warning naming each uncertified function (C-462, owner ruling 2026-11-24)"
 from = "declaration"
-unknown = "allow"
-unknown_note = "a frame the witness subset gate declines (any shape not yet admitted, witness_gate.rs) becomes an `uncertified` line (witness_bundle.rs:107-109), the bundle is INCOMPLETE, `Some(0 | 3) => Ok(())` (verify.rs:217) writes the artifact"
-routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs: rides the certificate gate_build judges in process on every wasm run (verify::certified, run.rs:747; #4836)", build = "runs", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build only", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
+unknown = "refuse"
+unknown_note = "a frame the witness subset gate declines (any shape not yet admitted) becomes an `uncertified` line; certificate_gate.rs::judge answers Outcome::Incomplete with an error unless allow_incomplete (the flag, verify::set_allow_incomplete) — a fresh uncertified fn with a fresh reason is refused (novel test). The corpus programs still INCOMPLETE are listed in proofs/incomplete-verification.toml (shrink-only)"
+routes = { check = "n.a.: check writes and runs no module, so no certificate is judged", check_json = "n.a.: check writes and runs no module, so no certificate is judged", check_effects = "n.a.: check writes and runs no module, so no certificate is judged", run = "runs", build = "runs", test = "runs", bench = "runs", native = "n.a.: a native build carries no wasm certificate (native certificate judging is the native-walls engineer's #4930)", wasm = "runs: the probe runs the module on the embedded host", wasi = "skipped: #4836 build --target wasi is the rustc route (build.rs:322) and carries no certificate at all (observed 2026-11-24: the probe builds)", component = "runs", lsp = "n.a.: the editor writes and runs no module", mcp = "n.a.: the MCP tools check and format; they write and run no wasm module", emit = "n.a.: emit writes Rust source, not a wasm module" }
 tests = [
   "crates/almide-verify/src/bundle.rs::tests::an_uncertified_function_makes_the_outcome_incomplete",
+  "tests/verify_incomplete_refused_test.rs::an_incomplete_certificate_is_refused_unless_the_flag_allows_it",
+  "tests/incomplete_verification_ledger_test.rs::the_incomplete_verification_ledger_is_shrink_only_and_well_formed",
 ]
-control_note = "NONE"
+control_note = "proofs/decision-controls/verify.gate-build-incomplete-accepted.patch lets Outcome::Incomplete pass without the flag"
 issues = [4836]
 status = "UNSTAMPED"
-reasons = [
-  "c2:fail-open (declined frames pass)",
-  "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
-  "c4:no-control",
-]
+reasons = ["c3:wasi skipped #4836 (the rustc route carries no certificate; it is judged only once wasi or native certificates are, #4836 / #4930)"]
 note = "By design (verify.rs:181-186 doc; Built line says `certificate pending`), but nothing bounds how much of a program may be uncertified: a module whose every frame declines still passes, as long as one witness (call-modes `(program)`) exists to avoid the empty-bundle reject. Measured 2026-11-24 (24th, owner Q4, behaviour unchanged): `almide verify` over every .almd in spec/, research/benchmark/perf/ and research/benchmark/exercises/ on 6364b73a53 — 2102 files: 1953 CERTIFIED, 32 INCOMPLETE (perf 5: btrees, binarytrees, treealloc, v1-shapes/set_bool_float_elements, v1-shapes/tree_window; exercises 1: affine-cipher; spec 26), 0 REJECTED, 117 not a core wasm module. Proposal awaiting the owner: refuse by default, an explicit opt-out flag that warns and records it."
+probe = "tests/decision-probes/verify.gate-build-incomplete-accepted"
+novel = "tests/decision_verify_gate_novel_test.rs::novel_an_incomplete_certificate_is_refused_without_the_flag"
+control_patch = "proofs/decision-controls/verify.gate-build-incomplete-accepted.patch"
+control_test = "tests/decision_verify_gate_novel_test.rs::novel_an_incomplete_certificate_is_refused_without_the_flag"
+control_seen = "8718c38412 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/decision_verify_gate_novel_test.rs:62, `an incomplete certificate was not refused by default: Ok(IncompleteAllowed(..))`); probe: run/build/test/bench/wasm/component refuse inside and outside (26th engineer)"
 
 [[site]]
 id = "verify.gate-build-scratch-files"
@@ -3541,9 +3555,9 @@ items = [
 ]
 keys = []
 decides = "which function bodies the structural recorder certifies; anything out of subset declines with `!decline:<reason>` (=> uncertified line)"
-from = "mixed:type+prefix"
+from = "mixed:type+name"
 unknown = "allow"
-unknown_note = "host-splice leaves are declined by a name-prefix list (__http_framed_/__http_call_/__http_serve_/__proc_, witness_gate.rs:533-538); the same lower_host_leaf path also intercepts __net_*/__unix_*/__shm_*/__net_udp_*/__net_lookup_host (net_call.rs:120, http_call.rs:115) which the list does not name, so those frames are admitted; a new leaf family is admitted the same way"
+unknown_note = "the host-leaf name-prefix decline is gone (27th engineer, 81ac837f6c): a bodyless host leaf (http_call.rs host_leaf) is audited like a module arm (every operand through lower_arg, witness_module_result, the arm window), so a leaf that lowered an operand any other way declines as module-arm:unaudited; what is still keyed by name is inline_callback_subset's arm table (witness_gate_callbacks.rs), whose fallback is the audited ordinary argument rule; a novel callback arm the table does not list is admitted only through that audit — not yet shown by a novel test with a control"
 routes = { check = "n.a.", check_json = "n.a.", check_effects = "n.a.", run = "runs only when sinks armed: never (#4836)", build = "runs: wasm with verifier", test = "runs: rides the certificate gate_build judges in process on both wasm test lanes (verify::certified_test, test_wasm.rs:196, :917; #4836)", bench = "runs: rides the certificate gate_build judges in process (verify::certified, bench.rs:124; #4836)", native = "n.a.", wasm = "runs: build / verify", wasi = "skipped: #4836", component = "runs: rides the certificate of the core module gate_build judges before packaging (build_wasm.rs:98-106; #4836)", lsp = "n.a.", mcp = "n.a.", emit = "n.a." }
 tests = [
   "crates/almide-wasm/tests/witness_*.rs",
@@ -3553,12 +3567,12 @@ control_note = "NONE"
 issues = [4836]
 status = "UNSTAMPED"
 reasons = [
-  "c1:prefix-keyed host-leaf decline",
-  "c2:fail-open novel host leaf",
+  "c1:name-keyed callback arm table (inline_callback_subset); the host-leaf prefix list is deleted",
+  "c2:fail-open until a novel callback arm is shown refused by the audit (test + control)",
   "c3:route-skipped #4836: run/test/bench/component are judged since the in-process verifier; left: wasi (wasi is the rustc route with no structural bundle; native certificates are #4828)",
   "c4:no-control",
 ]
-note = "NEW suspect, low: fs_call_two lowers both operands through lower_arg(Borrow) (fs.rs:165-171), so the argument hooks may fire for net leaves and the decline may be unnecessary for them; the point is that the admit/decline split is by spelling, not by the lowering route. Related to, not covered by, #4828."
+note = "Resolved suspect (27th): fs_call_two lowers both operands through lower_arg(Borrow), and the leaves now run under the module-call audit, so the prefix decline was removed rather than extended; measured on ds-2: host-splice declines 125 -> 0 across the root suite, REJECT 0."
 
 [[site]]
 id = "witness.call-modes-skip"
@@ -3611,6 +3625,39 @@ reasons = [
   "c3:test/bench/emit never verified",
 ]
 note = "Documented honest-wall design (mod.rs:416-422, 490-498); recorded as a pass/fallback site, not a refusal: the verified render's refusal never refuses the build."
+
+[[site]]
+id = "witness.native-route-refusals"
+at = "src/cli/native_extern_gate.rs::refusals"
+items = [
+  "src/cli/native_extern_gate.rs::refusals",
+]
+keys = [
+  "src/cli/native_extern_gate.rs::refusals::S1::E081",
+  "src/cli/native_extern_gate.rs::refusals::S1::E090",
+]
+decides = "the native build route refuses, before any render, a reachable @extern fn with no native binding and no body (E081, C-461), an @extern(rust) fn returning a Region (E090, C-464) and a fn holding a Set whose element holds a nested Float (E081, C-464)"
+from = "mixed:declaration+type+reach"
+unknown = "refuse"
+unknown_note = "reachability is reachable_native_program (main, @export(c), top-level lets); a type the scan cannot resolve (an undeclared Named) is not refused here and walls in the render instead"
+routes = { check = "n.a.: plain check is the shared language check (owner ruling W1)", check_json = "runs: check --json --target native (check.rs check_json_one)", check_effects = "n.a.: check --effects is the shared effect check every target reads; it builds no native code", run = "runs", build = "runs", test = "n.a.: outside C-461's native build route: the native test harness keeps its holes, so a test reaching one fails at the call (`not yet implemented: hole`, observed 2026-11-25 on the probe with test --target native); the default test target is wasm, which binds the import", bench = "runs (the v1 program)", native = "runs: build/run/bench/verify --mir and check --target native", wasm = "n.a.: a wasm route binds an @extern(wasm) import and has its own E081 (check --target wasm); this decides the native build route", wasi = "n.a.: a wasm route; this decides the native build route", component = "n.a.: a wasm route; this decides the native build route", lsp = "n.a.: the editor reports the shared language check (owner ruling W1), which builds no native code", mcp = "n.a.: almide_check runs plain check, the shared language check (owner ruling W1)", emit = "n.a.: --target rust is a declared unverified route (C-463)" }
+tests = [
+  "tests/diagnostics/e081-extern-no-native-binding/broken.almd",
+  "tests/diagnostics/e090-extern-rust-region-return/broken.almd",
+  "tests/diagnostics/e081-set-of-nested-floats/broken.almd",
+  "tests/decision_fixes_test.rs",
+]
+control_note = "tests/diagnostic_harness_test.rs runs each broken.almd with check --target native; the control patch drops refusals' rows, and the novel test (check --target native and build, three fresh subjects) turns red"
+issues = [4006]
+status = "STAMPED"
+reasons = []
+note = "C-461 (W1) and C-464 (owner ruling 2026-11-24: the shapes outside the corpus are rendered or refused before the flip)."
+probe = "tests/decision-probes/witness.native-route-refusals"
+novel = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
+control_patch = "proofs/decision-controls/witness.native-route-refusals.patch"
+control_test = "tests/decision_fixes_test.rs::novel_native_route_refuses_what_no_native_form_exists_for"
+control_seen = "0e28f10590 2026-11-25 bm-1: base green, patched red (scripts/run-decision-controls.sh); probe observed refusing on check_json, run, build, bench and native inside and outside the project, and every n.a. cell observed admitting (28th integrator)"
+stamp = "0e28f10590 2026-11-25"
 
 [[site]]
 id = "witness.codegen-ownership-certifier"
@@ -4297,16 +4344,22 @@ items = [
 keys = [
   "crates/almide-frontend/src/check/concurrent_reach_check.rs::served_app_closure_diagnostic::S1::E095",
 ]
-decides = "a handler passed to a serve surface may not close over a local mutable or app value shared across workers"
-from = "mixed:declaration+name"
-unknown = "allow"
-status = "UNSTAMPED"
-reasons = ["c1:name-keyed (SERVE_SURFACES, `m == \"http\"`)", "c2:fail-open (a new serve surface; latent, not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "the serve surfaces are a name list (SERVE_SURFACES = http.serve, http.serve_with_limits, concurrent_reach_closed.rs:25); a new @concurrent serve surface is not judged (latent; not probed)"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e095-serve-local-app-let"]
+decides = "the app passed to an `@instance_closed` slot (http.serve's handler, directly or through a wrapper fn) reads no local of the fn that passes it"
+from = "mixed:declaration+reach"
+unknown = "refuse"
+status = "STAMPED"
+reasons = []
+unknown_note = "the slot is instance-closed when its stdlib declaration says `@instance_closed(p)` (http.serve's app, concurrent_reach.rs::stdlib_closed_slots, read off every bundled module); a user wrapper's slot is inferred by reach to the closed slot it passes its argument to, so a fresh wrapper with a fresh name is judged (novel test). SERVE_SURFACES and serve_with_limits (no such fn) are gone; a slot attribute naming no parameter is refused by every_stdlib_slot_attribute_names_a_parameter"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+tests = ["tests/diagnostics/e095-serve-local-app-let", "tests/decision_novel_test.rs::novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused", "tests/decision_novel_test.rs::every_stdlib_slot_attribute_names_a_parameter"]
 issues = []
-note = "concurrent_reach_check.rs:136-160. neuter: concurrent_reach_closed.rs:49 + `|| !surface.is_empty()`."
+note = "concurrent_reach_closed.rs::check_served_app (SlotKind::Handler { closed: true }); concurrent_reach.rs::stdlib_closed_slots. 2026-11-24 (25th/26th): SERVE_SURFACES replaced by the declaration (owner ruling A, 24th Q-A). The `m == \"http\"` wording that tells a non-closed http slot (Handler) from a fan callback does not decide E095."
+probe = "tests/decision-probes/effect.e095-serve-closure"
+novel = "tests/decision_novel_test.rs::novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused"
+control_patch = "proofs/decision-controls/effect.e095-serve-closure.patch"
+control_test = "tests/decision_novel_test.rs::novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused"
+control_seen = "8718c38412 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/decision_novel_test.rs:41, `a fresh serve wrapper's app reading a fresh local: admitted`, exit 0); probe cells observed on all 14 columns, inside and outside the project (26th engineer)"
+stamp = "8718c38412 2026-11-24"
 
 [[site]]
 id = "secret.e103-secret-eq"
@@ -4366,16 +4419,21 @@ items = [
 keys = [
   "crates/almide-frontend/src/check/body_rules.rs::Checker::e116::S1::E116",
 ]
-decides = "a Content-Type header is written only through the typed media API (@header_write callees)"
+decides = "a response's owned header (Content-Type, the list `@header_write(owned = …)` names) is never written by name: a literal name is E116 at check time, and the writers (set_header, with_headers) refuse it at run time whatever the name's source, in any case (C-275)"
 from = "mixed:declaration+text"
-unknown = "allow"
+unknown = "refuse"
 status = "UNSTAMPED"
-reasons = ["c1:text (header literal compare)", "c2:fail-open (non-literal header name; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "only bundled-stdlib callees are judged; a header name that is not a literal (a variable holding \"Content-Type\") is admitted (body_rules.rs:163-166). Not probed"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e116-content-type-in-with-headers"]
+reasons = ["c1:text (the owned list is declared once, `@header_write(owned = …)` -> __http_response_body_headers, but the comparison is header-name text, the owner Q7 family: an external-spec name)", "c3:build/wasi/component not observed (the matrix cannot run those artifacts yet)"]
+unknown_note = "owner ruling 2026-11-24: the runtime writer decides; a name the checker cannot read (computed, from argv) reaches __http_response_owned_refusal, which compares it ASCII-case-insensitively with __http_response_body_headers() and aborts (novel test: a run-time name in a fresh case mix, both writers, both targets). E116 stays the early, literal-only diagnostic"
+routes = { check = "n.a.: check runs no code; a computed name is decided by the writer at run time (a literal one is E116 here, tests/diagnostics/e116-content-type-in-with-headers)", check_json = "n.a.: check runs no code; a computed name is decided by the writer at run time (a literal one is E116 here, tests/diagnostics/e116-content-type-in-with-headers)", check_effects = "n.a.: check runs no code; a computed name is decided by the writer at run time (a literal one is E116 here, tests/diagnostics/e116-content-type-in-with-headers)", run = "runs", build = "not observed: the build succeeds and the refusal is in the binary; the probe needs exec_out = [\"build\"] (next engineer)", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "not observed: the wasi build succeeds and the refusal is stdlib code in the module; the route matrix cannot run a wasi artifact", component = "not observed: the component builds and the refusal is stdlib code in it; the route matrix cannot run a component", lsp = "n.a.: the editor runs no code (observed 2026-11-24: it publishes no refusal for the computed name; it did report E029 unknown type HttpResponse at line 48, a separate finding)", mcp = "n.a.: the MCP tools check and format, they run no code", emit = "n.a.: emit writes Rust source and runs nothing; the refusal is in the emitted stdlib code" }
+tests = ["tests/diagnostics/e116-content-type-in-with-headers", "spec/stdlib/http_body_types_test.almd", "tests/decision_novel_test.rs::novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer"]
 issues = []
-note = "body_rules.rs:98-220."
+note = "body_rules.rs:98-220 (the check-time, literal half). The run-time half is stdlib/http.almd::__http_response_owned_refusal (called by __http_response_set_header and with_headers; the detector reads Rust items only, so it is named here, not in items)."
+probe = "tests/decision-probes/media.e116-header-write"
+novel = "tests/decision_novel_test.rs::novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer"
+control_patch = "proofs/decision-controls/media.e116-header-write.patch"
+control_test = "tests/decision_novel_test.rs::novel_a_header_name_known_only_at_run_time_is_refused_by_the_writer"
+control_seen = "8718c38412 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/decision_novel_test.rs:41, `http.set_header with a run-time name on rust: admitted`, exit 0) (26th engineer)"
 
 [[site]]
 id = "media.e117-literal-media"
@@ -4385,16 +4443,22 @@ items = [
 keys = [
   "crates/almide-frontend/src/check/body_rules.rs::Checker::e117::S1::E117",
 ]
-decides = "a script-capable media type (text/html, ...) is served only through its owner; http.typed takes a literal media type"
-from = "mixed:declaration+text"
-unknown = "allow"
-status = "UNSTAMPED"
-reasons = ["c1:text (media literal match)", "c2:fail-open (an unlisted script-capable media type; not probed)", "c4:no-control (a neuter is located in the row's note; not run)"]
-unknown_note = "a non-literal media type is refused; an unknown literal is admitted unless it matches the stdlib owner list or html's @script_capable set (media_owners.rs:73-81); only bundled callees are judged"
-routes = { check = "runs: the shared checker (validate_after_solve), not driven by a probe", check_json = "runs: the shared checker (validate_after_solve), not driven by a probe", check_effects = "runs: the shared checker (validate_after_solve), not driven by a probe", run = "runs: the shared checker (validate_after_solve), not driven by a probe", build = "runs: the shared checker (validate_after_solve), not driven by a probe", test = "runs: the shared checker (validate_after_solve), not driven by a probe", bench = "runs: the shared checker (validate_after_solve), not driven by a probe", native = "runs: the shared checker (validate_after_solve), not driven by a probe", wasm = "runs: the shared checker (validate_after_solve), not driven by a probe", wasi = "runs: the shared checker (validate_after_solve), not driven by a probe", component = "runs: the shared checker (validate_after_solve), not driven by a probe", lsp = "unknown: the editor route was not traced", mcp = "runs: the shared checker (validate_after_solve), not driven by a probe", emit = "runs: the shared checker (validate_after_solve), not driven by a probe" }
-tests = ["tests/diagnostics/e117-typed-html"]
+decides = "a `@literal_media` builder (http.typed) takes its media type as a literal from the closed `@media_table` its result type's media fn declares (standard non-script types), or one the root manifest grants the application itself (`[trust] media` \"self\"); a script-capable type only when that grant names it exactly, a stdlib-owned type whatever the grant is refused"
+from = "declaration"
+unknown = "refuse"
+status = "STAMPED"
+reasons = []
+unknown_note = "owner ruling 2026-11-24 (closed table): a well-formed type neither in the declared table (stdlib/http.almd `@media_table` on __typed_body_media_type, read through http.typed's declared result type) nor in the application's own grant is E117 (novel test); a builder whose result type declares no table refuses every type; a computed or malformed type or a stdlib-owned one (`@media_owns`) is E117 whatever the grant; a script-capable one (html's `@script_capable`, the JavaScript types included) is E117 unless the `\"self\"` grant names that exact type (owner ruling 2026-11-25: a pattern admits none); a `\"self\"` entry that is malformed, stdlib-owned or a pattern reaching a script-capable type is E118 (media_grant.rs); only bundled callees are judged"
+routes = { check = "runs", check_json = "runs", check_effects = "runs", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs", wasi = "runs", component = "runs", lsp = "runs", mcp = "runs", emit = "runs" }
+tests = ["tests/diagnostics/e117-typed-html", "tests/diagnostics/e117-typed-unlisted-media", "tests/media_self_grant_test.rs"]
 issues = []
-note = "body_rules.rs:98-220."
+note = "body_rules.rs (media_refusal, literal_media_table); the grant reader is media_grant.rs::self_grants_for, registered in dispatch for every route (the lsp cell refuses; #4935, the editor also reporting the bundled http module's own lines, is a separate defect). Contract: almide/als#278 (mirror pending)."
+probe = "tests/decision-probes/media.e117-literal-media"
+novel = "tests/media_self_grant_test.rs::novel_an_unlisted_type_is_refused_until_the_application_grants_it"
+control_patch = "proofs/decision-controls/media.e117-literal-media.patch"
+control_test = "tests/media_self_grant_test.rs::novel_an_unlisted_type_is_refused_until_the_application_grants_it"
+control_seen = "6178571054 2026-11-24 ds-2: base green, patched red (scripts/run-decision-controls.sh; by hand: panic at tests/media_self_grant_test.rs:54, `an unlisted type was admitted`, the type a fresh novel::ident); probe observed refusing on all 14 columns inside and outside the project (27th engineer)"
+stamp = "6178571054 2026-11-24"
 
 [[site]]
 id = "ownership.e119-lent-region-escape"

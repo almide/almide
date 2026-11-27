@@ -140,6 +140,7 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
     for (k, v) in &verdicts {
         println!("{k} = {}", toml_str(v));
     }
+    crate::incomplete::print_report();
     let _ = std::fs::remove_dir_all(&ctx.dir);
     if !all_pass {
         std::process::exit(1);
@@ -158,6 +159,9 @@ pub(super) fn test_cmd(ctx: &Ctx, file: &Path, wasm: bool) -> Result<(Command, W
     c.arg("test")
         .arg(file)
         .args(["--target", if wasm { "wasm" } else { "native" }]);
+    if wasm {
+        c.arg(crate::incomplete::FLAG);
+    }
     world.enter(&mut c);
     Ok((c, world))
 }
@@ -325,7 +329,7 @@ pub(super) fn test_art_leg(art: &Path) -> Option<bool> {
 pub(super) fn test_art_cmd(ctx: &Ctx, art: &Path, wasm: bool, cwd: &Path) -> Command {
     if wasm {
         let mut c = Command::new(&ctx.almide);
-        c.arg("test").arg(art).args(["--target", "wasm"]);
+        c.arg("test").arg(art).args(["--target", "wasm", crate::incomplete::FLAG]);
         return c;
     }
     let mut c = Command::new(art);
@@ -353,9 +357,10 @@ pub(super) fn run_test_art(
 ) -> Result<String, String> {
     let mut c = test_art_cmd(ctx, art, wasm, &world.dir);
     world.enter(&mut c);
-    let out = c
+    let mut out = c
         .output()
         .map_err(|e| format!("almide test did not run: {e}"))?;
+    crate::incomplete::take(&mut out.stderr);
     let t = output_transcript(&out);
     if !out.status.success() {
         return Err(format!("the test did not pass: {}", t.replace('\n', " / ")));
@@ -373,9 +378,10 @@ fn run_transcript(
     if let Some(d) = cwd {
         c.current_dir(d);
     }
-    let o = c
+    let mut o = c
         .output()
         .map_err(|e| format!("almide test did not run: {e}"))?;
+    crate::incomplete::take(&mut o.stderr);
     Ok(transcript(
         o.status.code(),
         &String::from_utf8_lossy(&o.stdout),
@@ -429,9 +435,10 @@ pub(super) fn alloc(ctx: &Ctx, fill: Fill) -> String {
         Ok(c) => c,
         Err(e) => return format!("SKIP: {e}"),
     };
-    let Ok(out) = c.env("ALMIDE_WASM_ALLOC_COUNT", "1").output() else {
+    let Ok(mut out) = c.env("ALMIDE_WASM_ALLOC_COUNT", "1").output() else {
         return "SKIP: could not run almide".into();
     };
+    crate::incomplete::take(&mut out.stderr);
     alloc_verdict(out.status.code(), &String::from_utf8_lossy(&out.stderr))
 }
 
@@ -796,7 +803,7 @@ mod tests {
         assert_eq!(w.get_program(), "/x/almide");
         assert_eq!(
             w.get_args().collect::<Vec<_>>(),
-            ["test", "/tmp/d/p00ab.wasmtest.almd", "--target", "wasm"]
+            ["test", "/tmp/d/p00ab.wasmtest.almd", "--target", "wasm", crate::incomplete::FLAG]
         );
     }
 

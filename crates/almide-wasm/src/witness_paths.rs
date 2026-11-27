@@ -59,11 +59,13 @@
 //!   that path. An exit in a nested loop is lifted level by level.
 //!
 //! The recorder declines what the decomposition cannot carry: more than two
-//! distinct paths that do not fold (`branch-paths:N`).
+//! distinct paths that do not fold (`branch-paths:N`), or more paths than
+//! [`PATH_CAP`] after the JOIN ([`Exits::Join`], witness_paths_join.rs) has
+//! merged the arms whose paths reach a branch's join in the same state.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::lines::{flat_exits, hoist, net, record};
+use super::lines::{flat_exits, hoist, items, net, record};
 
 /// The loop-carried locals (#2755), split for the file budget.
 #[path = "witness_carry.rs"]
@@ -77,6 +79,10 @@ mod skip;
 /// The certificate line of an object's paths (split for the file budget).
 #[path = "witness_paths_line.rs"]
 mod line_form;
+
+/// The join of a branch's surviving paths (split for the file budget).
+#[path = "witness_paths_join.rs"]
+mod join;
 use line_form::line;
 use skip::{Index, LoopRef, SeqIndex};
 
@@ -379,6 +385,21 @@ impl<'t> Scope<'t> {
 /// witness_paths_skip.rs): nothing in its body touches the object.
 type LoopEntries<'t> = Vec<(&'t [Node], &'t [u32], Option<Path>)>;
 
+/// Queue a loop activation unless one of the same loop is already queued
+/// from the same entry state: an activation is walked from its entry's
+/// `born` and holders alone (`render_object`), so the two would write the
+/// same paths onto the same loop line, which keeps one of each.
+fn queue<'t>(loops: &mut LoopEntries<'t>, body: &'t [Node], carried: &'t [u32], entry: Option<Path>) {
+    let state = |p: &Path| (p.born, p.holders.iter().map(|(&l, h)| (l, h.owner)).collect::<Vec<_>>());
+    let key = entry.as_ref().map(state);
+    let same = |(b, c, e): &(&'t [Node], &'t [u32], Option<Path>)| {
+        std::ptr::eq(*b, body) && std::ptr::eq(*c, carried) && e.as_ref().map(state) == key
+    };
+    if !loops.iter().any(same) {
+        loops.push((body, carried, entry));
+    }
+}
+
 fn step(ev: &Ev, o: u32, p: &mut Path) {
     match ev {
         Ev::Birth(b) if *b == o => p.born = true,
@@ -449,6 +470,13 @@ enum Exits {
     /// branch to exactly 0, the line continuing from the survivor. A frame
     /// with several `!` sites is then one path, not one per site.
     Fold,
+    /// [`Exits::Fold`], and the surviving arms of a branch that reach its
+    /// join in the same state are JOINED into one path with the one-shot
+    /// branch item `{a|b}` (witness_paths_join.rs) instead of being
+    /// enumerated: a frame of n sequential branches is one path, not 2^n.
+    /// Tried only for an object neither other form can carry, so every
+    /// certificate they write keeps its bytes.
+    Join,
 }
 
 /// Where one object's walk is: the object, the scope it runs in, and how a
@@ -481,6 +509,9 @@ fn walk<'t>(seq: &'t [Node], at: At<'t>, paths: Vec<Path>, cx: &mut Cx<'t, '_>) 
         }
         next.sort();
         next.dedup();
+        if at.exits == Exits::Join {
+            next = join::merge(next);
+        }
         if next.len() > PATH_CAP {
             return Err("branch-paths:cap".into());
         }
@@ -504,7 +535,7 @@ fn next_touch<'t>(si: &SeqIndex<'t>, len: usize, from: usize, o: u32, paths: &[P
     for _ in 0..live {
         for &(body, carried) in &refs {
             bump();
-            loops.push((body, carried, None));
+            queue(loops, body, carried, None);
         }
     }
     at
@@ -531,7 +562,7 @@ fn step_node<'t>(node: &'t Node, at: At<'t>, mut p: Path, cx: &mut Cx<'t, '_>, n
             p.exited = matches!(at.scope, Scope::Iteration { .. });
         }
         Node::Ev(ev) => step(ev, at.o, &mut p),
-        Node::Branch(arms) if at.exits == Exits::Fold => {
+        Node::Branch(arms) if at.exits != Exits::Paths => {
             next.extend(fold_branch(arms, at, p, cx)?);
             return Ok(());
         }
@@ -560,19 +591,29 @@ fn enter_loop<'t>(
     next: &mut Vec<Path>,
 ) -> Result<(), String> {
     bump();
-    cx.loops.push((body, carried, Some(p.clone())));
-    if !p.born || at.scope.lifted() {
+    queue(&mut cx.loops, body, carried, Some(p.clone()));
+    // An iteration with no exit in its body has no exit path to account.
+    if !p.born || at.scope.lifted() || !has_exit(body) {
         return Ok(());
     }
     let out = loop_exits(body, carried, at, p, cx.ix)?;
     match at.exits {
         Exits::Paths => next.extend(out.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r })),
-        Exits::Fold => {
+        Exits::Fold | Exits::Join => {
             let items: BTreeSet<String> = out.iter().map(|r| format!("{{{}x|}}", r.events)).collect();
             p.events.extend(items);
         }
     }
     Ok(())
+}
+
+/// Does `body` (nested loops and arms included) hold an exit?
+fn has_exit(body: &[Node]) -> bool {
+    body.iter().any(|n| match n {
+        Node::Ev(e) => *e == Ev::Exit,
+        Node::Branch(arms) => arms.iter().any(|a| has_exit(a)),
+        Node::Loop(b, _) => has_exit(b),
+    })
 }
 
 /// #2758: the paths of ONE iteration of `body` that EXIT, for an object
@@ -608,7 +649,7 @@ fn fold_branch<'t>(arms: &'t [Vec<Node>], at: At<'t>, p: Path, cx: &mut Cx<'t, '
     let mut survivors: Vec<Path> = Vec::new();
     for arm in arms {
         let start = Path { events: String::new(), ..p.clone() };
-        for r in walk(arm, At { exits: Exits::Fold, ..at }, vec![start], cx)? {
+        for r in walk(arm, at, vec![start], cx)? {
             if !r.ended {
                 survivors.push(r);
                 continue;
@@ -621,11 +662,19 @@ fn fold_branch<'t>(arms: &'t [Vec<Node>], at: At<'t>, p: Path, cx: &mut Cx<'t, '
             // this line's item (`loop_exits`).
             if !(r.exited && at.scope.lifted()) && (r.born || !r.events.is_empty()) {
                 for (flat, aborted) in flat_exits(&r.events, r.aborted) {
+                    // A joined item in an exiting path's prefix would nest
+                    // inside its exit item (v5 arms are flat).
+                    if flat.contains('{') {
+                        return Err("branch-paths:join-in-exit".into());
+                    }
                     exited.insert((flat, aborted));
                 }
             }
             ended.push(r);
         }
+    }
+    if at.exits == Exits::Join {
+        survivors = join::join(survivors);
     }
     if survivors.is_empty() {
         return Ok(ended.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r }).collect());
@@ -662,7 +711,7 @@ fn render_object<'t>(tree: &'t [Node], o: u32, exits: Exits, held: &'t [u32], ou
             if let Some(si) = ix.get(body) {
                 for &(b, c) in si.loops_between(0, body.len()) {
                     bump();
-                    cx.loops.push((b, c, None));
+                    queue(&mut cx.loops, b, c, None);
                 }
             }
             let untouched = Path { ended: true, ..Path::default() };
@@ -729,7 +778,13 @@ pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
                 return Err(e);
             }
             line.clear();
-            render_object(&tree, o, Exits::Fold, &held, &mut line, &ix)?;
+            if let Err(e) = render_object(&tree, o, Exits::Fold, &held, &mut line, &ix) {
+                if !e.starts_with("branch-paths") {
+                    return Err(e);
+                }
+                line.clear();
+                render_object(&tree, o, Exits::Join, &held, &mut line, &ix)?;
+            }
         }
         s.push_str(&line);
     }

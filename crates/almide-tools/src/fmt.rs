@@ -14,6 +14,25 @@ use almide_base::intern::Sym;
 // `test "decide_pick(\"big\") ..."`) round-tripped through fmt into a broken,
 // prematurely-closed string literal — not idempotent, and not even valid on
 // the first pass. Same rule set as fmt_expr's ExprKind::String double-quote arm.
+/// #4948: a name spelled like a keyword reached the AST through backticks
+/// (`` fn `let`(…) ``) and must be written back with them, or it re-lexes as
+/// the keyword. The set is the lexer's own table (`keyword_token`), never a
+/// list of our own. For binding and value positions: every keyword.
+pub(crate) fn name(s: &str) -> std::borrow::Cow<'_, str> {
+    if almide_lang::lexer::keyword_token(s).is_some() { format!("`{s}`").into() } else { s.into() }
+}
+
+/// A name in the parser's "any name" position (a record or type field, a
+/// member, a record-pattern field, an assigned field): the soft keywords
+/// (`Parser::is_soft_keyword_token`) are accepted bare there, so only the
+/// other keywords are backticked.
+pub(crate) fn field_name(s: &str) -> std::borrow::Cow<'_, str> {
+    match almide_lang::lexer::keyword_token(s) {
+        Some(t) if !almide_lang::parser::Parser::is_soft_keyword_token(&t) => format!("`{s}`").into(),
+        _ => s.into(),
+    }
+}
+
 pub(crate) fn escape_dquoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -1028,7 +1047,7 @@ fn fmt_vis(out: &mut String, vis: &Visibility) {
 fn fmt_generics(out: &mut String, params: &[GenericParam]) {
     out.push('[');
     comma_sep(out, params, |out, gp| {
-        out.push_str(&gp.name);
+        out.push_str(&self::name(&gp.name));
         if let Some(ref sb) = gp.structural_bound {
             out.push_str(": "); fmt_type(out, sb, 0);
         } else if let Some(ref bounds) = gp.bounds {
@@ -1075,7 +1094,7 @@ fn fmt_decl_type(out: &mut String, decl: &Decl, depth: usize) {
     let Decl::Type { name, ty, deriving, deriving_refs, visibility, generics, .. } = decl else { unreachable!() };
     out.push_str(&ind(depth));
     fmt_vis(out, visibility);
-    w!(out, "type {name}");
+    w!(out, "type {}", self::name(name));
     maybe_generics(out, generics);
     if let Some(d) = deriving {
         if !d.is_empty() {
@@ -1100,7 +1119,7 @@ fn fmt_decl_top_let(out: &mut String, decl: &Decl, depth: usize) {
     let Decl::TopLet { name, ty, value, visibility, mutable, .. } = decl else { unreachable!() };
     out.push_str(&ind(depth));
     fmt_vis(out, visibility);
-    w!(out, "{} {name}", if *mutable { "var" } else { "let" });
+    w!(out, "{} {}", if *mutable { "var" } else { "let" }, field_name(name));
     if let Some(te) = ty {
         out.push_str(": ");
         fmt_type(out, te, depth);
@@ -1143,7 +1162,7 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
     // `[vis] scoped effect fn` — the qualifier order the grammar fixes (#1997).
     if *scoped { out.push_str("scoped "); }
     if matches!(effect, Some(true)) { out.push_str("effect "); }
-    w!(out, "fn {name}");
+    w!(out, "fn {}", self::name(name));
     maybe_generics(out, generics);
     out.push('(');
     comma_sep(out, params, |out, p| {
@@ -1153,7 +1172,7 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
         if is_bare_self_param(p) {
             out.push_str("self");
         } else {
-            w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
+            w!(out, "{}: ", self::name(&p.name)); fmt_type(out, &p.ty, depth);
         }
         if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
     });
@@ -1248,14 +1267,14 @@ fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
             if is_bare_self_param(p) && !p.is_mut {
                 params_str.push_str("self");
             } else {
-                params_str.push_str(&p.name);
+                params_str.push_str(&self::name(&p.name));
                 params_str.push_str(": ");
                 fmt_type(&mut params_str, &p.ty, 0);
             }
         }
         let mut ret_str = String::new();
         fmt_type(&mut ret_str, &m.return_type, 0);
-        wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = m.name);
+        wln!(out, "{inner}{effect}fn {name}({params_str}) -> {ret_str}", name = self::name(&m.name));
     }
     w!(out, "{i}}}");
 }
@@ -1410,7 +1429,7 @@ fn type_is_string_simple(ty: &TypeExpr) -> bool {
 
 fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
     match ty {
-        TypeExpr::Simple { name } => out.push_str(name),
+        TypeExpr::Simple { name } => out.push_str(&self::name(name)),
         // ADR-0002 Phase 1: the pseudo-generic `!` prints back as the surface
         // spelling `T!` (never `![T]`) — the fmt roundtrip for `-> Int!`.
         TypeExpr::Generic { name, args } if name.as_str() == "!" && args.len() == 1 => {
@@ -1438,7 +1457,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
             fmt_option_shorthand(out, &args[0], depth)
         }
         TypeExpr::Generic { name, args } => {
-            out.push_str(name); out.push('[');
+            out.push_str(&self::name(name)); out.push('[');
             comma_sep(out, args, |out, a| fmt_type(out, a, depth));
             out.push(']');
         }
@@ -1473,19 +1492,19 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
 /// inside the enumerate loop is what pushed that function over the threshold.
 fn fmt_variant_case(out: &mut String, case: &VariantCase, depth: usize) {
     match case {
-        VariantCase::Unit { name } => out.push_str(name),
+        VariantCase::Unit { name } => out.push_str(&self::name(name)),
         VariantCase::Tuple { name, fields } => {
-            out.push_str(name);
+            out.push_str(&self::name(name));
             out.push('(');
             comma_sep(out, fields, |out, f| fmt_type(out, f, depth));
             out.push(')');
         }
         VariantCase::Record { name, fields } if fields_carry_comments(fields) => {
-            w!(out, "{name} ");
+            w!(out, "{} ", self::name(name));
             fmt_record_type_multiline(out, fields, false, depth);
         }
         VariantCase::Record { name, fields } => {
-            w!(out, "{name} {{ ");
+            w!(out, "{} {{ ", self::name(name));
             comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
             out.push_str(" }");
         }
@@ -1527,7 +1546,7 @@ fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
     for a in &f.attrs {
         w!(out, "{} ", format_attribute(a));
     }
-    w!(out, "{}", f.name);
+    w!(out, "{}", field_name(&f.name));
     if let Some(alias) = &f.alias { w!(out, " as \"{}\"", escape_dquoted(alias.as_str())); }
     out.push_str(": ");
     fmt_type(out, &f.ty, depth);

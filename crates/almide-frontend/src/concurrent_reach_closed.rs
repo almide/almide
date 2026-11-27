@@ -1,5 +1,5 @@
-//! E095 (ADR-0020 §5.2, #2698): the app passed to `http.serve` /
-//! `http.serve_with_limits` is INSTANCE-CLOSED. Every name its executable
+//! E095 (ADR-0020 §5.2, #2698): the app passed to `http.serve` is
+//! INSTANCE-CLOSED — the slot its declaration marks `@instance_closed`. Every name its executable
 //! closure reads, and that no body inside it binds, is a top-level item.
 //!
 //! The app is evaluated in several instances — one per worker natively, one
@@ -21,13 +21,10 @@ use super::{Analyzer, Mode, Scope, SlotKind};
 use almide_base::intern::Sym;
 use almide_lang::ast::{Expr, Span};
 
-/// The serve surfaces whose declared `@concurrent` slot is the app.
-const SERVE_SURFACES: &[&str] = &["http.serve", "http.serve_with_limits"];
-
 /// One local an `http.serve` app reads.
 #[derive(Clone, Debug)]
 pub struct ClosureFinding {
-    /// `http.serve` or `http.serve_with_limits`.
+    /// The surface whose `@instance_closed` slot it is (`http.serve`).
     pub surface: String,
     /// The user fn the app was passed to when the slot was inferred through
     /// a wrapper (`serve_on(8080, app)`).
@@ -42,13 +39,11 @@ pub struct ClosureFinding {
 }
 
 impl<'a> Analyzer<'a> {
-    /// At a site in discovery: when its slot is the app of `http.serve` (or
-    /// `serve_with_limits`), collect the locals the argument reads.
+    /// At a site in discovery: when its slot is declared `@instance_closed`
+    /// (the app of `http.serve`; carried through a wrapper's inferred slot),
+    /// collect the locals the argument reads.
     pub(super) fn check_served_app(&mut self, app: &'a Expr, kind: &SlotKind, wrapper: Option<&str>, scope: &mut Scope<'a>) {
-        let SlotKind::Handler { surface } = kind else { return };
-        if !SERVE_SURFACES.contains(&surface.as_str()) {
-            return;
-        }
+        let SlotKind::Handler { surface, closed: true } = kind else { return };
         let saved = std::mem::take(&mut self.closure_hits);
         self.walk(app, scope, Mode::Closed { base: scope.len() });
         let hits = std::mem::replace(&mut self.closure_hits, saved);

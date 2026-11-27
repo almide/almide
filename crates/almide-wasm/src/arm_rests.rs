@@ -79,18 +79,71 @@ impl Emitter<'_> {
             .collect()
     }
 
-    /// An unguarded arm bound `p`: its rests are frame credits until the
-    /// arm releases them (`release_arm_rests`).
+    /// An arm bound `p`: its rests are frame credits until the arm releases
+    /// them (`release_arm_rests`). A guarded arm binds before its guard runs
+    /// (the guard may read a rest), so its rests are held from there on.
     pub(crate) fn hold_arm_rests(&mut self, p: &IrPattern) {
         let rests = self.rest_locals(p);
         self.arm_rests.live.extend(rests);
     }
 
+    /// #2971: the guard of an arm that bound rests has left its Bool on the
+    /// stack. A FALSE guard falls through to the next arm with the rests
+    /// built, so that edge releases them and empties their locals; the guard
+    /// becomes the verdict through a two-arm `if` the recorder records as a
+    /// site (the true arm settles nothing, the body's arm releases the rests
+    /// after it; the false arm's `d`, after which the local holds nothing, so
+    /// the body's release on a path the product of sites only adds is a
+    /// release of NULL). Before this, every guarded arm's rest leaked — on a
+    /// false guard AND after a body that ran.
+    pub(crate) fn settle_guard_rests(&mut self, p: &IrPattern) {
+        let rests = self.rest_locals(p);
+        if rests.is_empty() {
+            return;
+        }
+        self.f.instructions().if_(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32));
+        let then_at = self.arm_anchor_here();
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_branch_anchor(then_at);
+        self.f.instructions().i32_const(1).else_();
+        let else_at = self.arm_anchor_here();
+        self.witness_branch_arm();
+        self.witness_branch_anchor(else_at);
+        for (idx, ty) in rests {
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().local_get(idx).call(dec).i32_const(0).local_set(idx);
+            if let Some(w) = self.witness.as_mut() {
+                if !w.dec_local(idx) {
+                    w.poison();
+                }
+                w.empty_local(idx);
+            }
+        }
+        self.witness_branch_close();
+        self.f.instructions().i32_const(0).end();
+    }
+
+    /// A REFUTABLE guarded arm that binds rests carries its verdict in a
+    /// local, 0 before the pattern test and the guard's (settled) verdict
+    /// once the pattern matched, which the select `if` reads: the path on
+    /// which the pattern did not match then holds a known 0 and never enters
+    /// the body, so the RC byte check's last-read walk (anchor-check
+    /// rc/after.rs, which decides an `if` only by a local it knows) does not
+    /// pair the body's read of a rest with a release from a previous
+    /// iteration. `None` (the verdict stays on the stack) for any other arm.
+    pub(crate) fn rest_verdict_local(&mut self, p: &IrPattern) -> Result<Option<u32>, EmitError> {
+        if self.rest_locals(p).is_empty() {
+            return Ok(None);
+        }
+        let v = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(v);
+        Ok(Some(v))
+    }
+
     /// The arm's body has run: it releases each rest block (its value, if
     /// any, holds its own credit — `lower_arm_body` normalizes every value
     /// arm to one). Unregistered first: no later edge releases it again.
-    /// A guarded arm never registered its rests and keeps the old leak (a
-    /// false guard falls through with the rest already built).
     pub(crate) fn release_arm_rests(&mut self, p: &IrPattern) {
         for (idx, ty) in self.rest_locals(p) {
             if let Some(k) = self.arm_rests.live.iter().rposition(|&(l, _)| l == idx) {

@@ -634,7 +634,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json; body is JSON text.
 - `http.with_headers(status: Int, body: B, headers: List[(String, String)]) -> HttpResponse` — Reply with body and these headers in order after its Content-Type; a repeated name keeps its first spelling and last value.
 - `http.with_body(resp: HttpResponse, body: B) -> HttpResponse` — resp with its body replaced by body and its Content-Type by body's type.
-- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+- `http.typed(media_type: String, body: Bytes) -> TypedBody` — A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url, an empty body and Content-Type text/plain; charset=utf-8.
 - `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
 - `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.

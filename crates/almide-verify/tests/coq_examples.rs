@@ -113,6 +113,17 @@ fn ownership_checker_examples() {
             ("i{dx|t}", false),
             ("i{t|}", false),
             ("i{tx|}d", false),
+            // format v10: nested branches (OwnershipChecker.v cert_xc_nested_*).
+            ("i{a{d|m}|}d", true),
+            ("i{{a{d|m}|}|b}d", true),
+            ("i{{dd|}|}d", false),
+            ("i{{a|}|}d", false),
+            ("i{{d|m}a|}d", false),
+            ("i{{d|m}|a}d", false),
+            ("i{{dx|}|}d", false),
+            ("i{{d|d}x|}d", false),
+            ("i{{(d)|}|}d", false),
+            ("i{{d|}|d", false),
             // check_xc (#3229, owned-line resurrection)
             ("idam", false),
             ("iiddam", false),

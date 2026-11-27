@@ -10347,8 +10347,10 @@ fn script_json(v: Value) -> SafeHtml = {
 
 
 
+
+
 @media_owns("text/html", "application/xhtml+xml")
-@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml")
+@script_capable("text/html", "application/xhtml+xml", "image/svg+xml", "*/xml", "*/*+xml", "text/javascript", "application/javascript", "application/ecmascript", "application/x-javascript", "application/x-ecmascript", "text/ecmascript", "text/x-javascript", "text/x-ecmascript", "text/jscript", "text/livescript", "text/javascript1.0", "text/javascript1.1", "text/javascript1.2", "text/javascript1.3", "text/javascript1.4", "text/javascript1.5")
 fn __safe_html_media_type(h: SafeHtml) -> String = "text/html; charset=utf-8"
 
 fn __safe_html_to_bytes(h: SafeHtml) -> Bytes = bytes.from_string(to_string(h))
@@ -10384,8 +10386,10 @@ import url
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(handler)
+@instance_closed(handler)
 @category("Net.listen")
 effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
+
 
 
 
@@ -10431,7 +10435,7 @@ fn with_body[B: Body](resp: HttpResponse, body: B) -> HttpResponse = http.__http
   body.__self_media_type(),
 )
 
-/// A body of media type media_type; a literal, never a script-capable or stdlib-owned one.
+/// A body of media type media_type; a literal, never a stdlib-owned one, and a script-capable one only when almide.toml grants the application that exact type.
 @literal_media(media_type)
 fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
   media_type: media_type,
@@ -10441,6 +10445,11 @@ fn typed(media_type: String, body: Bytes) -> TypedBody = TypedBody {
 /// A body of a declared media type, built only by `http.typed`.
 mod type TypedBody: Body = { media_type: String, bytes: Bytes }
 
+
+
+
+
+@media_table("text/plain", "text/csv", "text/css", "text/markdown", "text/tab-separated-values", "application/json", "application/octet-stream", "application/zip", "application/gzip", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "audio/mpeg", "audio/ogg", "audio/wav", "video/mp4", "video/webm", "font/woff", "font/woff2")
 fn __typed_body_media_type(b: TypedBody) -> String = b.media_type
 
 fn __typed_body_to_bytes(b: TypedBody) -> Bytes = b.bytes
@@ -11818,15 +11827,14 @@ fn __hs_refusal(resp: List[String]) -> String? = {
 }
 
 fn __hs_owned(k: String) -> Bool = list.contains(
-  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  ["connection", "content-length", "transfer-encoding", "keep-alive", "x-content-type-options"],
   string.to_lower(k),
 )
 
 
 
-fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
-  if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
-  else pairs + [("X-Content-Type-Options", "nosniff")]
+
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 

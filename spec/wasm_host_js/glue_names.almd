@@ -1,0 +1,37 @@
+// @leg: structural
+// #4943: every pub fn is a `$<name>` binding of the glue exported under its
+// own name, so a name the glue itself uses (`process` and `fetch`, the
+// platform globals it reads; `view`, `hooks`, `imports`, `flush`,
+// `instance`, `ready`, `readString`, its own helpers) neither shadows nor
+// redeclares anything, and a name JS reserves (`delete`, a `default` or
+// `new` parameter, a backticked `let`) is still a valid export. The host
+// calls each one after init() in glue_names.host.mjs. (`init` is the glue's
+// own export and `memory` the module's, so those two are build-time
+// refusals: tests/js_host_test.rs.)
+fn process(s: String) -> String = "processed " + s
+
+fn view(x: Int) -> Int = x + 1
+
+fn hooks(x: Int) -> Int = x + 2
+
+fn imports(x: Int) -> Int = x + 3
+
+fn flush(x: Int) -> Int = x + 4
+
+fn fetch(x: Int) -> Int = x + 6
+
+fn instance(x: Int) -> Int = x + 7
+
+fn ready(x: Int) -> Int = x + 8
+
+fn readString(s: String) -> Int = string.len(s)
+
+fn delete(default: Int, new: Int) -> Int = default - new
+
+fn `let`(class: String) -> String = class + "!"
+
+fn main() -> Unit = {
+  println(process("main"))
+  println(int.to_string(view(1) + fetch(1) + delete(10, 3)))
+  println(`let`("main"))
+}

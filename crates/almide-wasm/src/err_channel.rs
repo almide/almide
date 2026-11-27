@@ -25,13 +25,17 @@ impl Emitter<'_> {
     /// `expr!` whose operand fails with a `List[String]` inside a String
     /// channel (#2748): native's `map_err_join` — the propagated block is a
     /// FRESH `err(errs.join(", "))`. Read, never moved, exactly as
-    /// [`Self::propagate_err_as_repr`] reads its carrier. Emits the
-    /// propagation's `return`.
+    /// [`Self::propagate_err_as_repr`] reads its carrier, and recorded as
+    /// that route is: `$list_join` reads the list and the separator and
+    /// answers one fresh block (runtime.rs `emit_list_join`, no RC call), so
+    /// the message is a temporary that moves into the fresh err block, which
+    /// leaves. Emits the propagation's `return`.
     pub(crate) fn propagate_err_joined(
         &mut self,
         carrier_ty: SliceTy,
         ert: SliceTy,
         owned_carrier: bool,
+        wc: crate::witness_unwrap::WCarrier,
     ) -> Result<(), EmitError> {
         let car = self.hold_i32()?;
         let blk = self.hold_i32()?;
@@ -56,9 +60,11 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(carrier_ty);
             self.f.instructions().local_get(car).call(dec);
         }
+        self.witness_repr_built(wc);
         let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
         self.emit_exit(&plan);
         self.f.instructions().local_get(blk).return_();
+        self.witness_unwrap_exit(wc, crate::witness_unwrap::Leaves::Fresh);
         self.release_i32();
         self.release_i32();
         Ok(())

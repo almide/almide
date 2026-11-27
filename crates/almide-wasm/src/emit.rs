@@ -77,6 +77,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     let ir = erased.as_ref().unwrap_or(ir);
     let desugared = front_desugar::desugar(ir);
     let ir = desugared.as_ref().unwrap_or(ir);
+    // #4944: a checked reader's Option taken apart on the spot is read in
+    // place (inline_calls/readers.rs), before arg_temps names the Option.
+    let read_in_place = crate::inline_calls::inline_checked_readers(ir);
+    let ir = read_in_place.as_ref().unwrap_or(ir);
     // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
     // arms inline (eta.rs) — one HOF lowering, never a second call path.
     let expanded = eta::eta_expand_callbacks(ir);
@@ -746,7 +750,7 @@ fn emit_program_pass(
         stubs: declared.iter().map(|d| d.index).collect(),
     });
     let creators = decls_rec::Creators { fns: &fn_lambdas, main: main_lambdas.clone(), lambdas: &lambda_children, entry_fn_indices: &entry_fn_indices };
-    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, &bytes);
+    decls_rec::record_decls(&program_fns, (main, main_index), &work, &declared, &creators, (&pre_declare, &bytes));
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
 }

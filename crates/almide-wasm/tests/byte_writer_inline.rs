@@ -8,8 +8,9 @@
 //! buffer is a bare variable: all widths (1, 2, 4, 8), both endiannesses,
 //! signed and unsigned, bool, f16 / f32 / f64. The matrix below is read from
 //! the stdlib source, so a new `put_*` joins it without an edit here. The
-//! `get_*` readers answer an Option and stay calls (outside the inliner's
-//! scalar subset); they are exercised here as the read half of each cell.
+//! `get_*` readers are exercised here as the read half of each cell; where
+//! their Option is taken apart on the spot they inline too (#4944,
+//! byte_reader_inline.rs).
 //!
 //! Each case runs on the wasm leg and on the interpreter (the definition) and
 //! pins the expected text where it is short, so a bug in both cannot agree.

@@ -1,0 +1,15 @@
+# Negative control of effect.e095-serve-closure (proofs/decision-sites.toml): an @instance_closed slot is never walked, so no E095 is reported
+# control_test: tests/decision_novel_test.rs::novel_a_fresh_serve_wrapper_whose_app_reads_a_local_is_refused
+diff --git a/crates/almide-frontend/src/concurrent_reach_closed.rs b/crates/almide-frontend/src/concurrent_reach_closed.rs
+--- a/crates/almide-frontend/src/concurrent_reach_closed.rs
++++ b/crates/almide-frontend/src/concurrent_reach_closed.rs
+@@ -44,6 +44,9 @@
+     /// collect the locals the argument reads.
+     pub(super) fn check_served_app(&mut self, app: &'a Expr, kind: &SlotKind, wrapper: Option<&str>, scope: &mut Scope<'a>) {
+         let SlotKind::Handler { surface, closed: true } = kind else { return };
++        if !surface.is_empty() {
++            return;
++        }
+         let saved = std::mem::take(&mut self.closure_hits);
+         self.walk(app, scope, Mode::Closed { base: scope.len() });
+         let hits = std::mem::replace(&mut self.closure_hits, saved);

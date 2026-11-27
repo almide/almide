@@ -143,7 +143,10 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
                             .collect();
                         let possible =
                             indirect_callee_indices(&program, &index_of, args, (table_targets.as_slice(), table_unseeable));
-                        if possible.is_empty() {
+                        // #4934: with every table entry seen, a site no entry's
+                        // shape fits reaches no program function — it has no row,
+                        // like a callee-free site. An unseeable table still refuses.
+                        if possible.is_empty() && table_unseeable {
                             sites.push(site_row(unknown, &actual));
                         } else {
                             sites.extend(possible.into_iter().map(|idx| site_row(idx, &actual)));

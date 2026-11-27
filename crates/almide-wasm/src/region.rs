@@ -404,15 +404,24 @@ impl<'a> Emitter<'a> {
     /// node into a class list the restore then overwrites: pure cost, the
     /// whole tree once #2317 let the nodes reach rc 0. Only the heap
     /// argument can be parked here — every other argument is a scalar.
-    pub(crate) fn forget_window_temps(&mut self, depth: usize) {
+    ///
+    /// #1961: the witness recorded that temporary as born only (`i`,
+    /// `witness_arg_borrowed`); its credit is the restore's — the returned
+    /// object gets the region reclaim `w` there. A parked temporary the
+    /// witness did not see as this site's withdraws the certificate.
+    pub(crate) fn forget_window_temps(&mut self, depth: usize) -> Option<u32> {
         debug_assert!(self.borrowed_temps.len() <= depth + 1, "a window parks at most its heap argument");
-        if self.borrowed_temps.len() > depth {
-            // The witness records a parked temporary as released by the
-            // site (`id`); this site releases nothing, so the frame's
-            // certificate is withdrawn rather than over-claimed.
-            self.witness_decline("region-window-elided-release");
-        }
+        let parked = std::mem::take(&mut self.region_parked);
+        let reclaimed = if self.borrowed_temps.len() > depth {
+            if parked.is_none() {
+                self.witness_decline("region-window-elided-release");
+            }
+            parked
+        } else {
+            None
+        };
         self.borrowed_temps.truncate(depth);
+        reclaimed
     }
 
     /// `RegionRestore`: heads back, bump pointer back, the save block
@@ -423,7 +432,12 @@ impl<'a> Emitter<'a> {
     /// `allocs − frees − snapshot`, which puts the live count `allocs −
     /// frees − reclaimed` back at the snapshot (nested and sequential
     /// windows compose: each restores the live count it found).
-    pub(crate) fn emit_region_restore(&mut self, (blk, snap): RegionSlot) {
+    ///
+    /// `reclaimed`: the parked temporary's witness object (#1961). Its `w`
+    /// is held to these instructions (`w-@<window>`, almide-anchor-check).
+    pub(crate) fn emit_region_restore(&mut self, (blk, snap): RegionSlot, reclaimed: Option<u32>) {
+        let window = crate::witness::rc::site_id();
+        let from = self.f.byte_len();
         {
             let mut i = self.f.instructions();
             // The window's peak is the bump pointer right now (frees
@@ -447,6 +461,10 @@ impl<'a> Emitter<'a> {
                     .i64_sub()
                     .global_set(c + crate::alloc_count::RECLAIMED);
             }
+        }
+        crate::witness::rc::site_window(window, from, self.f.byte_len());
+        if let (Some(o), Some(w)) = (reclaimed, self.witness.as_mut()) {
+            w.region_reclaimed(o, window);
         }
         if snap.is_some() {
             self.release_i64();

@@ -75,6 +75,10 @@ pub struct PassDecls {
     pub creations: Vec<(u32, u32)>,
     /// The pass's finished module (post-declare, pre-`to_wasi`).
     pub bytes: Vec<u8>,
+    /// The same module BEFORE the `imports::declare` post-pass, when it
+    /// declared any stub (empty otherwise): the bodies the witness anchors
+    /// were recorded against, by digest and byte offset.
+    pub pre_declare: Vec<u8>,
 }
 
 fn sink() -> &'static Mutex<Option<Vec<PassDecls>>> {

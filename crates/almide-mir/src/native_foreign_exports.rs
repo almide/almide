@@ -11,9 +11,9 @@
 // writes the message to stderr and exits 1 before the caller regains control
 // (C-452).
 //
-// Only the scalar rows are adapted here. A signature holding any other row (a
-// `Region` lent over the caller's buffer, a `Handle`) walls, so its build
-// keeps the standard codegen, which renders that wrapper.
+// The scalar rows and `Handle` (a `*mut u8` whose address the i64 lane holds,
+// the same pointer coming back) are adapted here. A signature holding any
+// other row (a `Region` lent over the caller's buffer) walls.
 
 fn c_export(f: &IrFunction) -> Option<&almide_lang::ast::ExportAttr> {
     f.export_attrs.iter().find(|a| a.target.as_str() == "c")
@@ -29,7 +29,7 @@ pub(crate) fn is_c_export(f: &IrFunction) -> bool {
 /// the scalar rows this render adapts.
 fn export_scalar(ty: &Ty, param: bool) -> Option<CAbi> {
     let abi = if param { c_export_param_abi(ty) } else { c_export_return_abi(ty) }?;
-    let adapted = scalar_host_type(ty).is_some() || (!param && *ty == Ty::Unit);
+    let adapted = scalar_host_type(ty).is_some() || *ty == Ty::RawPtr || (!param && *ty == Ty::Unit);
     (adapted && matches!(abi.conv, CConv::Same | CConv::BoolAsI32)).then_some(abi)
 }
 

@@ -62,8 +62,11 @@ pub enum SlotKind {
     FanBlock { surface: String },
     /// A fn-valued argument of a `fan.<op>(…)` call.
     FanCallback { surface: String },
-    /// An `http` handler or middleware slot.
-    Handler { surface: String },
+    /// An `http` handler or middleware slot. `closed`: the slot's
+    /// declaration marks it `@instance_closed` (E095, the app of
+    /// `http.serve`): its argument may read no local of the fn it is
+    /// written in.
+    Handler { surface: String, closed: bool },
 }
 
 /// One step of a witness path: a top-level fn the reach went through.
@@ -510,12 +513,18 @@ impl<'a> Analyzer<'a> {
                 if declared.is_empty() {
                     return Vec::new();
                 }
+                let closed = stdlib_closed_slots(m.as_str(), f.as_str());
                 let surface = format!("{m}.{f}");
                 declared
                     .into_iter()
                     .map(|i| {
-                        let kind = if m.as_str() == "http" {
-                            SlotKind::Handler { surface: surface.clone() }
+                        // An `@instance_closed` slot is a serve surface's
+                        // app (E095): what decides it is the declaration.
+                        // The other `http` slots are handlers by wording.
+                        let kind = if closed.contains(&i) {
+                            SlotKind::Handler { surface: surface.clone(), closed: true }
+                        } else if m.as_str() == "http" {
+                            SlotKind::Handler { surface: surface.clone(), closed: false }
                         } else {
                             SlotKind::FanCallback { surface: surface.clone() }
                         };
@@ -1229,8 +1238,23 @@ fn collect_written_stmts(stmts: &[Stmt], out: &mut HashSet<Sym>) {
 
 /// The parameter indices a fn's `@concurrent(p, …)` attribute names.
 fn declared_slots_of(attrs: &[ast::Attribute], params: &[ast::Param]) -> Vec<usize> {
+    let mut out = params_named_by(attrs, params, "concurrent");
+    // An instance-closed slot is a concurrent slot too (its app runs in
+    // several instances), whether or not `@concurrent` names it again.
+    for i in params_named_by(attrs, params, "instance_closed") {
+        if !out.contains(&i) {
+            out.push(i);
+        }
+    }
+    out
+}
+
+/// The parameter indices `@<attr>(p, …)` names, in declaration order. A name
+/// that is no parameter of the fn is a malformed stdlib declaration:
+/// `every_stdlib_slot_attribute_names_a_parameter` refuses it.
+fn params_named_by(attrs: &[ast::Attribute], params: &[ast::Param], attr: &str) -> Vec<usize> {
     let mut out = Vec::new();
-    for a in attrs.iter().filter(|a| a.name.as_str() == "concurrent") {
+    for a in attrs.iter().filter(|a| a.name.as_str() == attr) {
         for arg in &a.args {
             let name = match &arg.value {
                 ast::AttrValue::Ident { name } => name.to_string(),
@@ -1258,7 +1282,7 @@ fn stdlib_slot_table() -> &'static HashMap<&'static str, HashMap<String, Vec<usi
         let mut out = HashMap::new();
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
             let Some(src) = crate::stdlib::get_bundled_source(module) else { continue };
-            if !src.contains("@concurrent") {
+            if !src.contains("@concurrent") && !src.contains("@instance_closed") {
                 continue;
             }
             let Some(prog) = almide_lang::parse_cached(src) else { continue };
@@ -1290,6 +1314,71 @@ fn stdlib_method_module(func: &str) -> Option<&'static str> {
     hits.first().copied()
 }
 
+/// Every bundled stdlib fn's `@instance_closed` slots (E095): module → fn →
+/// slot indices. The app of a serve surface runs in several instances (one
+/// per worker natively, one per request on a wasi:http export host), so its
+/// argument may read no local of the fn that passes it — a property of the
+/// declaration, not of the surface's name.
+fn stdlib_closed_table() -> &'static HashMap<&'static str, HashMap<String, Vec<usize>>> {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<HashMap<&'static str, HashMap<String, Vec<usize>>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = HashMap::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(src) = crate::stdlib::get_bundled_source(module) else { continue };
+            if !src.contains("@instance_closed") {
+                continue;
+            }
+            let Some(prog) = almide_lang::parse_cached(src) else { continue };
+            let mut t = HashMap::new();
+            for d in &prog.decls {
+                if let Decl::Fn { name, attrs, params, .. } = d {
+                    let slots = params_named_by(attrs, params, "instance_closed");
+                    if !slots.is_empty() {
+                        t.insert(name.to_string(), slots);
+                    }
+                }
+            }
+            if !t.is_empty() {
+                out.insert(module, t);
+            }
+        }
+        out
+    })
+}
+
+/// The `@instance_closed` slots of a bundled stdlib fn.
+pub fn stdlib_closed_slots(module: &str, func: &str) -> Vec<usize> {
+    stdlib_closed_table().get(module).and_then(|t| t.get(func)).cloned().unwrap_or_default()
+}
+
+/// Every `@concurrent` / `@instance_closed` argument of a bundled stdlib fn
+/// that names no parameter of it: `(module, fn, attribute, name)`. Empty in a
+/// well-formed stdlib (the gate test below).
+pub fn stdlib_slot_attributes_naming_no_parameter() -> Vec<(String, String, String, String)> {
+    let mut out = Vec::new();
+    for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let Some(src) = crate::stdlib::get_bundled_source(module) else { continue };
+        let Some(prog) = almide_lang::parse_cached(src) else { continue };
+        for d in &prog.decls {
+            let Decl::Fn { name, attrs, params, .. } = d else { continue };
+            for a in attrs.iter().filter(|a| matches!(a.name.as_str(), "concurrent" | "instance_closed")) {
+                for arg in &a.args {
+                    let n = match &arg.value {
+                        ast::AttrValue::Ident { name } => name.to_string(),
+                        ast::AttrValue::String { value } => value.clone(),
+                        other => format!("{other:?}"),
+                    };
+                    if !params.iter().any(|p| p.name.as_str() == n) {
+                        out.push((module.to_string(), name.to_string(), a.name.to_string(), n));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The concurrent slots a bundled stdlib fn declares with `@concurrent`.
 pub fn stdlib_declared_slots(module: &str, func: &str) -> Vec<usize> {
     stdlib_slot_table().get(module).and_then(|t| t.get(func)).cloned().unwrap_or_default()
@@ -1306,7 +1395,7 @@ fn slot_heads() -> &'static [Sym] {
     HEADS.get_or_init(|| {
         let mut out = vec![sym("fan")];
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
-            if crate::stdlib::get_bundled_source(module).is_some_and(|src| src.contains("@concurrent")) {
+            if crate::stdlib::get_bundled_source(module).is_some_and(|src| src.contains("@concurrent") || src.contains("@instance_closed")) {
                 out.push(sym(module));
             }
         }

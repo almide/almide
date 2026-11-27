@@ -1,0 +1,6 @@
+import http
+
+test "probe" {
+  let r = http.response(200, http.typed("application/vnd.other+json", bytes.from_string("{}")))
+  assert_eq(http.body(r), "{}")
+}

@@ -874,7 +874,7 @@ class = "legacy"
 names = 3
 
 [[site]]
-id = "crates/almide-wasm/src/http_call.rs::lower_http_call_leaf::or-pattern"
+id = "crates/almide-wasm/src/http_call.rs::host_leaf::or-pattern"
 class = "legacy"
 names = 2
 
@@ -1054,11 +1054,6 @@ names = 7
 id = "crates/almide-wasm/src/witness_gate_callbacks.rs::inline_callback_subset::or-pattern"
 class = "legacy"
 names = 27
-
-[[site]]
-id = "crates/almide-wasm/src/witness_gate_callbacks.rs::is_self_hosted_hof::or-pattern"
-class = "legacy"
-names = 6
 
 [[site]]
 id = "src/cargo_cfg.rs::expr::or-pattern"
@@ -1271,3 +1266,9 @@ id = "crates/almide-frontend/src/attr_vocab.rs::KNOWN_ATTRS::table"
 class = "justified"
 names = 2
 why = "KNOWN_ATTRS is the attribute vocabulary the parser accepts (`@region`, `@fs_glob`, ...), not a group of stdlib functions: two attribute names happen to spell stdlib names (`region`, and `fs_glob` for the fs runtime symbol). Each attribute is the declaration the other legs read (#4825 reads @fs_path / @fs_glob / @fs_temp / @fs_root off the intrinsics), so this list is where declarations are admitted, not a copy of a property."
+
+[[site]]
+id = "src/cli/js_host.rs::JS_RESERVED::table"
+class = "justified"
+names = 2
+why = "JS_RESERVED is ECMAScript's list of words a binding in module code cannot take (ReservedWord plus the strict-mode and module-goal words), not a group of stdlib functions: `new` and `null` only happen to spell stdlib names. The `.d.ts` the JS host writes declares each pub fn and its parameters as TypeScript bindings, and Almide admits these words as fn and parameter names, so the typings escape exactly them (#4943). The `.js` glue needs no table: its wrappers are `$`-named bindings exported under any name. tests/js_host_test.rs checks the escaped typings, and tsc accepts them."

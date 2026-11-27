@@ -97,11 +97,15 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // (`almide verify` refuses it the same way): the core module it
     // packages is judged before it is packaged (#4836).
     let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
-    if let Err(e) = super::verify::gate_build(file, &emitted, shipped, &[]) {
-        err(&format!(
-            "error[certificate-rejected]: {file}: {e}\n  {output} was not written: the build's own certificate does not hold, which is a compiler bug — please report it"
-        ));
-        std::process::exit(1);
+    let incomplete = match super::verify::gate_build(file, &emitted, shipped, &[]) {
+        Ok(note) => note,
+        Err(e) => {
+            err(&format!("{}\n  {output} was not written", super::verify::refusal(file, &e)));
+            std::process::exit(1);
+        }
+    };
+    if let Some(warning) = &incomplete {
+        err(warning);
     }
 
     super::phase_lap("certify");
@@ -127,7 +131,13 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // The JS host is derived from the bytes that SHIP (#2276): after the
     // optional `wasm-opt` rewrite below, never from the pre-opt module.
     let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
-    report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &super::build::guarantee_note(&outside_guarantee));
+    // C-462: a pass under --allow-incomplete-verification is recorded on
+    // the Built line, not only in the warning above it.
+    let mut note = super::build::guarantee_note(&outside_guarantee);
+    if incomplete.is_some() {
+        note.push_str(&format!(" — certificate INCOMPLETE, passed under {}", almide::certificate_gate::ALLOW_INCOMPLETE_FLAG));
+    }
+    report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &note);
 }
 
 /// The core module a plain `almide build --target wasm` writes for this

@@ -39,7 +39,7 @@ fn stmt_reads(s: &IrStmt, v: VarId) -> usize {
 
 /// The node cap of a checked writer's body: its guard, the in-place write
 /// and the cold out-of-range call, each a call over params and literals.
-const WRITER_MAX: usize = 20;
+pub(super) const WRITER_MAX: usize = 20;
 
 /// A call of a checked writer's arm: a Unit call (a `Named` fn of the
 /// module, or a non-`prim` module call) whose arguments are params, string
@@ -121,7 +121,7 @@ pub(super) fn writer_body(f: &IrFunction, fns: &HashSet<String>, module: &str) -
 }
 
 /// Respells a module's own `Named` calls as `module.fn` calls.
-struct Respell<'a>(&'a str);
+pub(super) struct Respell<'a>(pub(super) &'a str);
 
 impl almide_ir::visit_mut::IrMutVisitor for Respell<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {

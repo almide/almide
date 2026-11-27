@@ -520,8 +520,18 @@ fn desugar_map_access_calls(body: &IrExpr) -> Option<IrExpr> {
 /// desugar chain, while the arm is still a `Never`-typed call.
 fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
+    /// A `Never` call, or a block of `let`s ending in one: the native test
+    /// render's `panic` binds its marked message before the abort
+    /// (`native_test_panic`), and its arm must split as the program
+    /// render's bare `panic` call does (#4932).
     fn diverges(e: &IrExpr) -> bool {
-        matches!(e.ty, Ty::Never) && matches!(e.kind, IrExprKind::Call { .. })
+        matches!(e.ty, Ty::Never) && match &e.kind {
+            IrExprKind::Call { .. } => true,
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                stmts.iter().all(|s| matches!(s.kind, IrStmtKind::Bind { .. })) && diverges(tail)
+            }
+            _ => false,
+        }
     }
     fn binds(p: &almide_ir::IrPattern) -> bool {
         use almide_ir::IrPattern as P;

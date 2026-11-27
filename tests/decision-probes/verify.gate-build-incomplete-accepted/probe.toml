@@ -1,0 +1,14 @@
+# The probe of verify.gate-build-incomplete-accepted (C-462): an Option `?`
+# at a fn's tail over an owned temporary is a frame the wasm ownership
+# witness does not certify yet (`tail:view-result`; the guarded list rest and
+# then the match-arm select this probe used certify since the 29th and 31st
+# engineers), so the module's certificate is INCOMPLETE; every route that
+# makes or runs the module refuses it without the flag. Each column names
+# --target wasm itself.
+expect = "certificate-incomplete"
+
+[argv]
+run = ["run", "{main}", "--target", "wasm"]
+build = ["build", "{main}", "--target", "wasm", "-o", "{out}.wasm"]
+test = ["test", "{test}", "--target", "wasm"]
+bench = ["bench", "{main}", "--target", "wasm", "--runs", "1"]

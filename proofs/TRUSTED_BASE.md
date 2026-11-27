@@ -332,6 +332,28 @@ no certificate carries a trace yet, so the theorem the definition is for — `K(
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
 
+**Region purity (#1961).** A region window (`consume(produce(scalars))` on
+the structural leg) parks its temporary and rewinds the allocator at its
+`RegionRestore` instead of releasing each block; the ownership witness
+records that temporary as `iw` (the reclaim `w`, certificate format v9).
+What is proven: a `w` folds like a release (`OwnershipChecker.v` `Reclaim`;
+`RuntimeModel.v` `reclaim_steps_like_dec`), and a restore over a window that
+frees only blocks allocated after its save returns every block the window
+handed out (`RuntimeModel.v` `region_restore_reclaims`, given the premise
+`frees_above`). What is checked: each `w` names a shipped restore in its own
+window, the heads copied back, the bump pointer reloaded from the save block
+and the save block freed by a call that is no RC call of the frame
+(`crates/almide-anchor-check/src/rc.rs` `reclaim_holds`). What is trusted:
+the premise itself, that the window IS pure. It rests on the emitter's
+classification, `crates/almide-wasm/src/region.rs` `region_pure_fns` (the
+pure set, a greatest fixpoint over the pure vocabulary) and
+`region_window_opens` (the consumer in the pure set with a scalar result,
+exactly one heap argument, a call to a pure producer over scalar arguments,
+and every other argument scalar; a declared `scoped` entry is held to the
+same set by `scoped_entry_window`). No checker re-derives it: a wrong
+classification would let the restore reclaim a block the outer program still
+holds, a use after free.
+
 **Record, tuple and variant fields (#4013 TYPE clause, #4279).** A field is
 read and written at a CONSTANT offset with no check, so it is in bounds and
 initialized exactly when its block was built with the layout the access
@@ -461,7 +483,13 @@ on each proposed window's bytes (`proofs/check-shipped-windows.sh`); a
 proposal the kernel refuses fails the gate, and so does a count below the
 leg's floor (`proofs/shipped-windows-floor.txt`), so a change that moves a
 count out of its window (a hoisted length, a call between the compare and
-the access) shows as lost evidence. Trusted for it: the meaning the proof
+the access) shows as lost evidence. The floor counts the whole list, so it
+is judged on a full run (a push to develop or main, a tag, a manual run, a
+PR into main); a PR into develop runs a 1-in-k slice of the list
+(`ALMIDE_CI_SLICE`), where every proposal is still judged and the count is
+printed with no verdict against the floor, so evidence lost outside the
+slice shows on the push to develop, not on the PR. The same holds for the
+two floors below. Trusted for it: the meaning the proof
 gives nine instructions (`usem` / `bsem`: i32 add, mul, shl, div_u, shr_u,
 ge_u, i64 ge_u, wrap, extend_u), that any other one-byte numeric
 instruction is a function of its operands, that a load reads memory and
@@ -496,7 +524,8 @@ cutter (`almide-anchor-check --fresh`, fresh.rs) propose EVERY access of the
 shape, testing no bound, and the Rocq kernel compute `fresh_ok` on each
 distinct triple (`proofs/check-shipped-fresh.sh`): a store past its block is
 a proposal the kernel refuses and fails the gate, and so does a count below
-the leg's floor (`proofs/shipped-fresh-floor.txt`). Trusted for it: what the
+the leg's floor (`proofs/shipped-fresh-floor.txt`; on a full run, as for the
+windows floor above). Trusted for it: what the
 window language trusts above; that an instruction the scan lets through
 leaves the local alone (only `local.set` and `local.tee` assign one) and
 that the third string is reached only through the first, an argument from
@@ -541,10 +570,12 @@ anchor file gives one number, the increment routine's function index.
 loops.rs) propose every access addressed by the captured block's local and
 the tested counter, testing no bound, stride, offset or width, and the Rocq
 kernel prove each distinct proposal's class (`proofs/check-shipped-loops.sh`):
-a count of accepted reads below the leg's floor fails the gate, and so do
-more reads with nothing behind the length word than the leg's first ceiling
-and more reads whose core the kernel refuses than its second
-(`proofs/shipped-loops-floor.txt`). The refusals the corpus holds are loops
+a count of accepted reads below the leg's floor fails the gate (on a full
+run, as for the windows floor above), and so do more reads with nothing
+behind the length word than the leg's first ceiling and more reads whose
+core the kernel refuses than its second (`proofs/shipped-loops-floor.txt`;
+the ceilings are judged on a slice too, a slice being part of the list). The
+refusals the corpus holds are loops
 that count bytes and read 4- or 8-byte elements: in bounds because length
 and counter are multiples of the element size, which the rule does not know
 and so does not accept.
@@ -583,6 +614,12 @@ time (a start or a cut moved inside an instruction, a byte changed, another
 function named, a module's block removed) and requires each forged dump to
 be refused for its own reason. Not a proof: two decoders agreeing. Trusted
 for it: that no instruction's length is wrong in both tables the same way.
+The same script holds each module that has a proposal to ONE memory, unshared
+and with 32-bit offsets, read from its import and memory sections: the three
+rules take a load or a store to be an access of the one linear memory no
+other thread writes, and the kernel is shown neither section. Two forged
+modules (a second memory added; the memory made shared) are refused on every
+run. This is this script's reading of two sections, not a proof.
 
 **The passes after the emitter.** A module ships after the stock-WASI
 transform (`crates/almide-wasi/src/lib.rs`: the `almide.*` imports become WASI

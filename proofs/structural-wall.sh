@@ -308,7 +308,9 @@ bash "$ROOT/proofs/check-shipped-routines.sh" "$OUT/shipped-dump" "$OUT/shipped"
 # kernel decodes that window's bytes with GuardWindow.v and `window_sound`
 # puts the access inside the block's payload in every run. The cutter
 # proposes the windows over EVERY load and store; a proposal the kernel
-# refuses fails, and so does a count below the leg's floor.
+# refuses fails, and so does a count below the leg's floor. The floor counts
+# the whole list: this gate and the two after it judge it on a full run, and
+# under a CI slice print the slice's count with no verdict against it.
 echo "== guarded accesses proven in bounds from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/window-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for guarded-access windows — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "$MODE" | sed 's/^/  /'
@@ -320,7 +322,7 @@ bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "
 # the three byte strings with GuardFresh.v and `fresh_sound` puts the access
 # inside the block's header and requested payload in every run. The cutter
 # proposes every such access and tests no bound; a proposal the kernel refuses
-# fails, and so does a count below the leg's floor.
+# fails, and so does a count below the leg's floor (on a full run).
 echo "== accesses into a block just allocated, proven inside it from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/fresh-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for fresh-block accesses — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE" | sed 's/^/  /'
@@ -335,8 +337,9 @@ bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE
 # captured count, and `loop_class` says what stands behind the length word.
 # The cutter proposes every access addressed by the captured block's local
 # and the tested counter; a count of accepted reads below the leg's floor
-# fails, and so do more reads with nothing behind the length word, or more
-# reads the kernel refuses, than the leg's ceilings.
+# fails (on a full run), and so do more reads with nothing behind the length
+# word, or more reads the kernel refuses, than the leg's ceilings (on every
+# run: a slice over a ceiling puts the whole list over it).
 echo "== the reads a loop's exit test guards, proven inside the looped block from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/loops-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for loop reads — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE" | sed 's/^/  /'
@@ -346,10 +349,14 @@ bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE
 # function. A second decoder (check-shipped-slices.sh: the module's sections
 # and every instruction's length, no library) re-derives every proposal from
 # the artifact: the strings are the module's bytes, end to end, inside the one
-# function body named, cut where instructions start. Then the drill: dumps
+# function body named, cut where instructions start. It also holds each module
+# that has a proposal to ONE unshared 32-bit memory, which the three rules
+# take for granted and the kernel is never shown. Then the drill: dumps
 # with ONE proposal altered each (a start or a cut moved inside an
 # instruction, a byte changed, another function named, a module's block
-# removed) must every one be refused, for its own reason.
+# removed), and the untouched dumps beside ONE module altered (a second memory
+# added, its memory made shared; that forgery brings its own manifest), must
+# every one be refused, for its own reason.
 echo "== the byte strings the kernel judged are instruction runs of the functions they name (a second decoder) =="
 bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$OUT/window-dump" "$OUT/fresh-dump" "$OUT/loops-dump" | sed 's/^/  /'
 # A slice may hold no proposal of one kind to forge from; a full run must.
@@ -364,19 +371,22 @@ forged=0
 for d in "$OUT"/slices-forged/*/; do
   [ -f "$d/expect" ] || continue
   rc=0
-  bash "$ROOT/proofs/check-shipped-slices.sh" "$OUT/slice-manifest" "$d/window-dump" "$d/fresh-dump" "$d/loops-dump" > "$d/out" 2>&1 || rc=$?
+  # A forged MODULE comes with the manifest that names it.
+  forged_manifest="$OUT/slice-manifest"
+  if [ -f "$d/manifest" ]; then forged_manifest="$d/manifest"; fi
+  bash "$ROOT/proofs/check-shipped-slices.sh" "$forged_manifest" "$d/window-dump" "$d/fresh-dump" "$d/loops-dump" > "$d/out" 2>&1 || rc=$?
   if [ "$rc" -ne 1 ] || ! grep -qF -- "$(cat "$d/expect")" "$d/out"; then
-    echo "STRUCTURAL WALL FAIL: the forged dump \`$(basename "$d")\` was not refused for its reason (exit $rc; want 1 and \`$(cat "$d/expect")\`):" >&2
+    echo "STRUCTURAL WALL FAIL: the forged input \`$(basename "$d")\` was not refused for its reason (exit $rc; want 1 and \`$(cat "$d/expect")\`):" >&2
     head -3 "$d/out" | sed 's/^/  /' >&2
     exit 1
   fi
   forged=$((forged + 1))
 done
 if [ "$forged" -eq 0 ]; then
-  echo "STRUCTURAL WALL FAIL: no forged dump was made — the drill on the byte strings would pass vacuously" >&2
+  echo "STRUCTURAL WALL FAIL: no forged input was made — the drill on the byte strings would pass vacuously" >&2
   exit 1
 fi
-echo "  ok: $forged forged dump(s), one proposal altered in each, every one refused for its reason ($(ls "$OUT/slices-forged" | tr '\n' ' ' | sed 's/ $//'))"
+echo "  ok: $forged forged input(s), one proposal or one module altered in each, every one refused for its reason ($(ls "$OUT/slices-forged" | tr '\n' ' ' | sed 's/ $//'))"
 if [ "$MODE" = tests ]; then
   echo "  $N of $SEEN stdlib test file(s) judged; $(wc -l < "$OUT/declined" | tr -d ' ') declined by the structural leg (they run on native), $(wc -l < "$OUT/embedded-only" | tr -d ' ') need the embedded host (no stock artifact)"
   sed 's/^/    declined: /' "$OUT/declined"

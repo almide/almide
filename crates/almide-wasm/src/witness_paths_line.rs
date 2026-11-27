@@ -34,6 +34,9 @@ pub(super) fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
     if let [one] = set.iter().collect::<Vec<_>>().as_slice()
         && !one.ends_with('t')
     {
+        if exits == Exits::Join && !super::join::markers_flat(one) {
+            return Err("branch-paths:join-nested".into());
+        }
         return Ok((*one).clone());
     }
     let mut hoisted: BTreeSet<String> = BTreeSet::new();
@@ -60,6 +63,21 @@ pub(super) fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
         // The whole-path form keeps its two-arm shape; a frame whose paths
         // it cannot carry is rendered again in the folded form first.
         more if exits == Exits::Paths => return Err(format!("branch-paths:{}", more.len())),
+        // Format v10: the returning whole paths as one nested branch
+        // `{p1|{p2|…}}` — each runs from 0, all must agree, and the line
+        // ends at 0, so each is checked to exactly 0 as its own item would
+        // be; an aborting path stays its own flat item.
+        more if exits == Exits::Join => {
+            let (aborting, returning): (Vec<&str>, Vec<&str>) = more.iter().partition(|p| p.ends_with('t'));
+            let items: String = aborting.iter().map(|p| format!("{{{p}|}}")).collect();
+            let chain = returning.iter().rev().fold(None::<String>, |acc, p| {
+                Some(match acc {
+                    None => (*p).to_string(),
+                    Some(rest) => format!("{{{p}|{rest}}}"),
+                })
+            });
+            format!("{items}{}", chain.unwrap_or_default())
+        }
         more => {
             let (aborting, returning): (Vec<&str>, Vec<&str>) = more.iter().partition(|p| p.ends_with('t'));
             let (tail, rest) = returning.split_last().map_or(("", &[][..]), |(t, r)| (*t, r));
@@ -71,5 +89,9 @@ pub(super) fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
             format!("{items}{tail}")
         }
     };
-    Ok(format!("{head}{body}"))
+    let line = format!("{head}{body}");
+    if exits == Exits::Join && !super::join::markers_flat(&line) {
+        return Err("branch-paths:join-nested".into());
+    }
+    Ok(line)
 }
