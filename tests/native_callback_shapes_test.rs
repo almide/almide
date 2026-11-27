@@ -302,9 +302,9 @@ pub fn run_all() -> String {
 /// by value, and for this failure its error arm does not carry the
 /// parameter, so the adapter would lose the write the previous release shows
 /// after the `Err` (`[1, 2, 9]`). It is refused by name instead: `run` keeps
-/// the standard codegen's build and that output; the package's tests, which
-/// have no such route, do not build. This row moves when that error arm
-/// carries its parameters.
+/// the standard codegen's build and that output, and since #4956 so do the
+/// package's tests, the wall named under `-v`. This row moves when that error
+/// arm carries its parameters.
 #[test]
 fn a_mut_callback_whose_error_arm_carries_nothing_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
     if !available() {
@@ -317,8 +317,8 @@ fn a_mut_callback_whose_error_arm_carries_nothing_is_refused_by_name_and_still_r
     assert_eq!(out, "Err(\"none\")[1, 2, 9]\nhello main\n");
     assert!(err.contains("walled") && err.contains(refusal), "the refusal is not named:\n{err}");
     let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
-    assert!(!ok, "a package the native render refuses built its tests:\n{out}{err}");
-    assert!(format!("{out}{err}").contains(refusal), "the refusal is not named:\n{out}{err}");
+    assert!(ok, "the package's tests did not build on the standard codegen:\n{out}{err}");
+    assert!(err.contains("walled") && err.contains(refusal), "the refusal is not named:\n{out}{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
 

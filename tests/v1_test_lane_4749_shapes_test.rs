@@ -24,7 +24,10 @@
 //!
 //! Each test file passes on the native test lane and on wasm, and the main
 //! program prints the same lines on both, its native build the certified
-//! render's own.
+//! render's own. Since #4956 a test program the certified render walls is
+//! built through the standard codegen instead of refused, so a pass alone no
+//! longer shows the render took it: each native run also names the certified
+//! render (`ALMIDE_VERIFIED_DEBUG`) and no wall ([`assert_certified`]).
 
 use std::path::Path;
 use std::process::Command;
@@ -175,6 +178,7 @@ fn almide(dir: &Path, args: &[&str]) -> (bool, String, String) {
         .args(args)
         .current_dir(dir)
         .env("ALMIDE_CERTIFY_OWNERSHIP", "fail")
+        .env("ALMIDE_VERIFIED_DEBUG", "1")
         .output()
         .expect("almide");
     (
@@ -182,6 +186,15 @@ fn almide(dir: &Path, args: &[&str]) -> (bool, String, String) {
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+/// The native test lane took `name` through the certified render, not the
+/// standard codegen a wall falls back to; the wasm lane did not wall.
+fn assert_certified(name: &str, target: &str, stderr: &str) {
+    assert!(!stderr.contains("native v1 test render") && !stderr.contains("walled"), "{name} on {target}:\n{stderr}");
+    if target == "native" {
+        assert!(stderr.contains("native: v1 trust-spine render (test harness)"), "{name} on {target}: not the certified render:\n{stderr}");
+    }
 }
 
 #[test]
@@ -193,7 +206,7 @@ fn each_shape_passes_on_the_native_test_lane_and_on_wasm() {
         for target in ["native", "wasm"] {
             let (ok, stdout, stderr) = almide(dir.path(), &["test", "--target", target, &file]);
             assert!(ok, "{name} on {target}:\n{stdout}\n{stderr}");
-            assert!(!stderr.contains("native v1 test render"), "{name} on {target}:\n{stderr}");
+            assert_certified(name, target, &stderr);
         }
     }
 }
@@ -241,7 +254,7 @@ fn a_runtime_backed_value_compares_on_the_native_test_lane_and_on_wasm() {
     for target in ["native", "wasm"] {
         let (ok, stdout, stderr) = almide(dir.path(), &["test", "--target", target, "runtime_eq_test.almd"]);
         assert!(ok, "runtime_eq_test on {target}:\n{stdout}\n{stderr}");
-        assert!(!stderr.contains("native v1 test render"), "runtime_eq_test on {target}:\n{stderr}");
+        assert_certified("runtime_eq_test", target, &stderr);
     }
 }
 
@@ -449,7 +462,7 @@ fn shapes_5_and_6_pass_on_the_native_test_lane_and_on_wasm() {
         for target in ["native", "wasm"] {
             let (ok, stdout, stderr) = almide(dir.path(), &["test", "--target", target, &file]);
             assert!(ok, "{name} on {target}:\n{stdout}\n{stderr}");
-            assert!(!stderr.contains("native v1 test render"), "{name} on {target}:\n{stderr}");
+            assert_certified(name, target, &stderr);
         }
     }
 }

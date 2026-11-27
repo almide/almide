@@ -221,9 +221,9 @@ pub fn run_all() -> String {
 /// and a structural record: `tests/native_callback_shapes_test.rs`.) The
 /// previous release built and ran this package, tests included, and printed
 /// the line below. The native render refuses the callback by name: `run`
-/// keeps the standard codegen's build and that output; the package's tests,
-/// which have no such route, do not build. This row moves when that kind is
-/// adapted.
+/// keeps the standard codegen's build and that output, and since #4956 so do
+/// the package's tests, the wall named under `-v`. This row moves when that
+/// kind is adapted.
 #[test]
 fn a_function_parameter_callback_is_refused_by_name_and_still_runs_on_the_standard_codegen() {
     if !available() {
@@ -234,8 +234,9 @@ fn a_function_parameter_callback_is_refused_by_name_and_still_runs_on_the_standa
     assert!(ok, "the package did not build and run:\n{err}");
     assert_eq!(out, "11\nhello main\n");
     assert!(err.contains("walled") && err.contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{err}");
+    write(root.join("src/cb_test.almd"), &format!("{EXTERN}\ntest \"native code calls back\" {{\n  assert_eq(run_all(), \"11\")\n  assert_eq(cb.greet(\"t\"), \"hello t\")\n}}\n"));
     let (ok, out, err) = almide(&root, &["test", "src/cb_test.almd", "--target", "rust"]);
-    assert!(!ok, "a package the native render refuses built its tests:\n{out}{err}");
-    assert!(format!("{out}{err}").contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{out}{err}");
+    assert!(ok, "the package's tests did not build on the standard codegen:\n{out}{err}");
+    assert!(err.contains("walled") && err.contains("(fn(Int) -> Int) has no host adapter"), "the refusal is not named:\n{out}{err}");
     let _ = std::fs::remove_dir_all(&root);
 }
