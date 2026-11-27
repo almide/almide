@@ -73,7 +73,7 @@ fn dispatch_test(args: TestArgs) {
     let update = update_snapshots || almide_base::env::flag("ALMIDE_UPDATE_SNAPSHOTS");
     let ci = ci || env_flag("CI");
     if update && ci {
-        eprintln!("CI mode (--ci / CI=true): --update-snapshots writes nothing — accept snapshots locally with `almide test --update-snapshots <file>` and commit the change");
+        crate::err("CI mode (--ci / CI=true): --update-snapshots writes nothing — accept snapshots locally with `almide test --update-snapshots <file>` and commit the change");
     } else if update {
         cli::cmd_test_update_snapshots(file_str, no_check, run.as_deref(), target.as_deref() == Some("wasm"));
         return;
@@ -122,9 +122,7 @@ fn dispatch_check(args: CheckCmd) {
     // only routes a certificate covers. The rustc `--target wasi` route ships
     // the standard codegen's Rust, a declared unverified route.
     if critical.is_some() && check_target == cli::CheckTarget::Wasi {
-        eprintln!(
-            "error: --profile critical refuses --target wasi: the rustc wasm32-wasip1 route is an unverified route, it ships the standard codegen's Rust, which no certificate covers (#4006)\n  hint: judge the verified routes instead, `--target wasm` or `--target native`"
-        );
+        crate::err("error: --profile critical refuses --target wasi: the rustc wasm32-wasip1 route is an unverified route, it ships the standard codegen's Rust, which no certificate covers (#4006)\n  hint: judge the verified routes instead, `--target wasm` or `--target native`");
         std::process::exit(1);
     }
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
@@ -138,12 +136,12 @@ fn dispatch_check(args: CheckCmd) {
         None => resolve_file(file),
     };
     if check_target != cli::CheckTarget::Native && effects {
-        eprintln!("error: --target {} is not supported with --effects", target.as_deref().unwrap_or_default());
+        crate::err(&format!("error: --target {} is not supported with --effects", target.as_deref().unwrap_or_default()));
         std::process::exit(1);
     }
     if effects {
         if critical.is_some() {
-            eprintln!("error: --profile is not supported with --effects");
+            crate::err("error: --profile is not supported with --effects");
             std::process::exit(1);
         }
         cli::cmd_check_effects(&file);
@@ -166,14 +164,14 @@ fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Ve
     match profile {
         None => {
             if !allow.is_empty() {
-                eprintln!("error: --allow requires --profile critical");
+                crate::err("error: --allow requires --profile critical");
                 std::process::exit(1);
             }
             None
         }
         Some("critical") => Some(expand_capability_grants(allow)),
         Some(other) => {
-            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
+            crate::err(&format!("error: unknown profile `{other}` — the only profile is `critical`"));
             std::process::exit(1);
         }
     }
@@ -188,10 +186,8 @@ fn refuse_check_profile_on_run(profile: Option<&str>, allow: &[String]) {
         (None, Some(a)) => format!("--allow {a}"),
         (None, None) => return,
     };
-    eprintln!(
-        "error: `almide run` does not apply `{flag}`: it is an `almide check` flag. \
-         Check the program first (`almide check <file> {flag}`); to pass it to the program as an argument, put it after `--`"
-    );
+    crate::err(&format!("error: `almide run` does not apply `{flag}`: it is an `almide check` flag. \
+         Check the program first (`almide check <file> {flag}`); to pass it to the program as an argument, put it after `--`"));
     std::process::exit(1);
 }
 
@@ -201,10 +197,8 @@ fn refuse_check_profile_on_run(profile: Option<&str>, allow: &[String]) {
 fn refuse_build_switches_under_critical() {
     let on = almide_base::env::inherited_build_switches();
     if !on.is_empty() {
-        eprintln!(
-            "error: --profile critical refuses a build-changing environment switch: {} (unset it; `almide switches` says what each does)",
-            on.join(", ")
-        );
+        crate::err(&format!("error: --profile critical refuses a build-changing environment switch: {} (unset it; `almide switches` says what each does)",
+            on.join(", ")));
         std::process::exit(1);
     }
 }
@@ -219,7 +213,7 @@ fn check_target_route(target: Option<&str>) -> cli::CheckTarget {
         Some("wasi") => cli::CheckTarget::Wasi,
         Some("native") => cli::CheckTarget::NativeRoute,
         Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm`, `wasi` or `native` (got `{other}`)");
+            crate::err(&format!("error: `almide check --target` accepts only `wasm`, `wasi` or `native` (got `{other}`)"));
             std::process::exit(1);
         }
     }
@@ -271,7 +265,7 @@ fn expand_capability_grants(allow: &[String]) -> Vec<String> {
     for cap in allow {
         let Some((_, granted)) = almide::check::CAPABILITY_GRANTS.iter().find(|(c, _)| c == cap) else {
             let names: Vec<&str> = almide::check::CAPABILITY_GRANTS.iter().map(|(c, _)| *c).collect();
-            eprintln!("error: {}", project::unknown_capability_message(cap, "--allow", &names));
+            crate::err(&format!("error: {}", project::unknown_capability_message(cap, "--allow", &names)));
             std::process::exit(1);
         };
         for m in *granted {
@@ -940,7 +934,7 @@ fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content:
 fn arm_switch_lock(cli: &crate::cli_args::Cli) {
     for name in &cli.allow_switch {
         if let Err(e) = almide_base::env::check_allowed(name) {
-            eprintln!("error: --allow-switch: {e}");
+            crate::err(&format!("error: --allow-switch: {e}"));
             std::process::exit(1);
         }
     }
@@ -960,19 +954,19 @@ fn arm_budgets(cli: &crate::cli_args::Cli) {
         && let Some(crate::cli_args::Commands::Check { profile: Some(p), .. }) = &cli.command
         && p == "critical"
     {
-        eprintln!("error: --profile critical refuses --budget: the critical profile judges a program under the default compile-cost budgets");
+        crate::err("error: --profile critical refuses --budget: the critical profile judges a program under the default compile-cost budgets");
         std::process::exit(1);
     }
     for b in &cli.budget {
         if let Err(e) = almide_base::budget::set_override(b) {
-            eprintln!("error: {e}");
+            crate::err(&format!("error: {e}"));
             std::process::exit(1);
         }
     }
     #[cfg(unix)]
     if cli.budget_report {
         extern "C" fn print_budget_report() {
-            eprint!("{}", almide_base::budget::report());
+            crate::err_no_nl(&format!("{}", almide_base::budget::report()));
         }
         // SAFETY: registers a plain `extern "C" fn` with no captured state;
         // it runs once at process exit, `std::process::exit` included.
@@ -1108,10 +1102,10 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             cli::cmd_docs_gen(check);
         }
         Commands::Budgets { md } => {
-            print!("{}", if md { almide_base::budget::markdown_table() } else { almide_base::budget::plain_table() });
+            crate::out_no_nl(&format!("{}", if md { almide_base::budget::markdown_table() } else { almide_base::budget::plain_table() }));
         }
         Commands::Switches { md } => {
-            print!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() });
+            crate::out_no_nl(&format!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() }));
         }
         other => dispatch_tooling(other),
     }

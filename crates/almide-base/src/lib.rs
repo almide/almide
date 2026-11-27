@@ -22,6 +22,8 @@ pub const ERR_TEXT_NATIVE_SHIM: &str = concat!(
     include_str!("err_text.rs"),
     "\n}\nfn rt_string___err_text(s: &str) -> AlmideString { AlmideString::from(__almd_errtext_shim::almide_rt_errtext_escape(s)) }"
 );
+/// The compiler's one output sink escaper (front.diagnostic-echo, #4819).
+pub mod echo;
 pub mod json_limits;
 pub mod native_stack_guard;
 pub mod rust_lit;

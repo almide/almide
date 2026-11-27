@@ -1,0 +1,5 @@
+# The probe of front.diagnostic-echo: raw hidden characters (a bidi override,
+# a zero-width space, a Tags character) in an expression; every route refuses
+# it (E101) and none prints any of them raw — the echoed line is escaped.
+expect = "E101"
+forbid = "\u202E\u200B\U000E0041"

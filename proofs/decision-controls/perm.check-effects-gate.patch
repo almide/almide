@@ -1,9 +1,10 @@
-# Negative control of perm.check-effects-gate (proofs/decision-sites.toml): check --effects skips the whole-program gate and judges the entry's IR alone again (#4815)
-# control_test: tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module
+# Negative control of perm.check-effects-gate (proofs/decision-sites.toml): check --effects skips the whole-program gate and judges the entry's own fns alone again (#4815)
+# control_test: tests/decision_batch1a_test.rs::novel_check_effects_judges_a_fresh_imported_fn_the_entry_never_calls
 diff --git a/src/cli/check.rs b/src/cli/check.rs
+index 302c2202ac..39391ca52f 100644
 --- a/src/cli/check.rs
 +++ b/src/cli/check.rs
-@@ -604,7 +604,7 @@ pub fn cmd_check_effects(file: &str) {
+@@ -683,7 +683,7 @@ pub fn cmd_check_effects(file: &str) {
          if proj.permissions.is_some() || proj.proc_allow.is_some() {
              let whole = whole
                  .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));

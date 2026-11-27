@@ -196,6 +196,35 @@ fn novel_check_judges_a_fresh_module_against_the_entrys_manifest() {
 /// gate, so a capability reached only through a fresh imported module is
 /// refused there too (the per-fn report reads the entry's IR alone).
 /// Control: granted, it reports `Permissions OK`.
+/// A fresh module with one fn that reaches `fs` and one that reaches
+/// nothing; the entry calls only the second. The per-fn report of
+/// `check --effects` judges the entry's own fns, so only the whole-program
+/// `[permissions]` gate sees the first.
+fn fs_in_a_fresh_module_the_entry_never_calls() -> Vec<(String, String)> {
+    let (m, f, g) = (novel::module(), novel::ident("reach"), novel::ident("label"));
+    let module = fill("import fs\n\neffect fn @F@(p: String) -> String = fs.read_text(p)!\n\nfn @G@() -> String = \"novel\"\n", &[("@F@", &f), ("@G@", &g)]);
+    let main = fill("import @M@\n\neffect fn main() -> Unit = println(@M@.@G@())\n", &[("@M@", &m), ("@G@", &g)]);
+    vec![("src/main.almd".to_string(), main), (format!("src/{m}.almd"), module)]
+}
+
+/// perm.check-effects-gate (#4815), the whole-program gate as the decider:
+/// a capability in an imported fn the entry never calls is outside every
+/// entry fn's transitive set, so the per-fn report admits it and the
+/// `[permissions]` gate `check` runs over the whole program is what refuses
+/// it. Control: with FS granted the same tree passes.
+#[test]
+fn novel_check_effects_judges_a_fresh_imported_fn_the_entry_never_calls() {
+    let files = fs_in_a_fresh_module_the_entry_never_calls();
+    let t = tree_owned(&manifest("\n[permissions]\nallow = [\"IO\"]\n"), &files);
+    for (what, o) in both_sides(&t, &["check", "--effects", "{main}"]) {
+        refused(&what, &o, &["capability violation", "FS.read"]);
+    }
+    let t = tree_owned(&manifest("\n[permissions]\nallow = [\"IO\", \"FS\"]\n"), &files);
+    let o = inside(&t, &["check", "--effects", "{main}"]);
+    admitted("check --effects with FS granted", &o);
+    assert!(text(&o).contains("Permissions OK"), "{}", text(&o));
+}
+
 #[test]
 fn novel_check_effects_refuses_a_capability_of_a_fresh_imported_module() {
     let files = fs_through_a_fresh_module();
@@ -444,8 +473,13 @@ fn novel_a_fresh_dependencys_manifest_error_is_not_swallowed() {
         let t = tree(&app, &[("src/main.almd", main.clone())]);
         put(&t.proj.join(&dep).join("almide.toml"), &bad);
         put(&t.proj.join(&dep).join("src/mod.almd"), &fill("fn @F@() -> Int = 7\n", &[("@F@", &f)]));
+        // The walk's own refusal (project_fetch.rs, resolve_fetched_dep_manifest),
+        // not only some refusal naming the dependency: with the walk's check
+        // removed, the native-grant survey still refuses the unparsed manifest
+        // as unscannable, and a test asserting the name alone stays green.
+        let walk = format!("the manifest of dependency `{dep}`");
         for args in [&["run", "{main}"][..], &["emit", "{main}", "--target", "rust"][..]] {
-            refused(&format!("almide {} with a dependency manifest\n{bad}", args.join(" ")), &inside(&t, args), &[format!("dependency `{dep}`").as_str()]);
+            refused(&format!("almide {} with a dependency manifest\n{bad}", args.join(" ")), &inside(&t, args), &[walk.as_str(), "is refused:"]);
         }
     }
     let t = tree(&app, &[("src/main.almd", main)]);

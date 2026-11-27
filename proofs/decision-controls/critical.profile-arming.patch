@@ -3,12 +3,12 @@
 diff --git a/src/dispatch.rs b/src/dispatch.rs
 --- a/src/dispatch.rs
 +++ b/src/dispatch.rs
-@@ -163,10 +163,7 @@
+@@ -170,10 +170,7 @@ fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Ve
              None
          }
          Some("critical") => Some(expand_capability_grants(allow)),
 -        Some(other) => {
--            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
+-            crate::err(&format!("error: unknown profile `{other}` — the only profile is `critical`"));
 -            std::process::exit(1);
 -        }
 +        Some(_other) => Some(expand_capability_grants(allow)),
