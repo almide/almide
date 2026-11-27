@@ -81,6 +81,24 @@ fn borrowed_join(e: &almide_ir::IrExpr) -> bool {
         K::UnwrapOr { expr, fallback } if slot_read_of_var(expr) && matches!(fallback.kind, K::Var { .. }))
 }
 
+/// #4955: is every value leaf of the `!` operand `e` (through block tails and
+/// `if` / `match` arms) a constructor or a call of a program function, each a
+/// fresh credit (`rc_certainly_fresh`, a table fn's handed-over result)? Then
+/// the join is an owned carrier born at the site. A leaf that is a bound Var
+/// (`(if c then a else b)!`) or any other read is a borrowed join, which the
+/// recorder cannot attribute: the gate declines it.
+pub(crate) fn owned_carrier_leaves(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::IrExprKind as K;
+    match &e.kind {
+        K::Block { expr: Some(t), .. } => owned_carrier_leaves(t),
+        K::If { then, else_, .. } => owned_carrier_leaves(then) && owned_carrier_leaves(else_),
+        K::Match { arms, .. } => !arms.is_empty() && arms.iter().all(|a| owned_carrier_leaves(&a.body)),
+        K::ResultOk { .. } | K::ResultErr { .. } | K::OptionSome { .. } | K::OptionNone => true,
+        K::Call { target: almide_ir::CallTarget::Named { .. }, .. } => true,
+        _ => false,
+    }
+}
+
 /// Is `e` a VIEW read out of a bound block: a payload out of a BORROWED
 /// carrier (a `!` over a local), or an element of a bound list (`xs[i]`)?
 pub(crate) fn is_extraction_view(e: &almide_ir::IrExpr) -> bool {

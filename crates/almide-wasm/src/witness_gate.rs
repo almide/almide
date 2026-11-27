@@ -456,16 +456,15 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
             // carrier — the owned-carrier route of the `!` site
             // (witness_unwrap.rs): born at the site, out on the err arm,
             // released on the ok path. Its payload store is the constructor's.
-            IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
-            // `ok(v)!` / `some(v)!`: what a fallible callback's lifted tail
-            // makes of a written `ok(v)!` (fallible_tail.rs wraps the
-            // List-typed `ok(acc + [n])!` in `ok(..)`). A constructor is a
-            // certainly-fresh carrier (`rc_certainly_fresh`), so it takes the
-            // owned-carrier route `err(m)!` takes: born at the site, its
-            // payload store the constructor's, the block released on the ok
-            // path (`release_ok_carrier`) and its payload's credit moving to
-            // the value.
-            IrExprKind::ResultOk { .. } | IrExprKind::OptionSome { .. } => {
+            // #4955: so are `ok(v)!` / `some(v)!` (a fallible callback's lifted
+            // tail `ok(ok(acc + [n])!)`), and a branch or block whose every
+            // value leaf is one of those or a call (`owned_carrier_leaves`).
+            IrExprKind::ResultErr { .. } | IrExprKind::ResultOk { .. } | IrExprKind::OptionSome { .. } => {
+                value_subset(expr).map(|w| w.inside("unwrap-operand"))
+            }
+            IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. }
+                if crate::witness_unwrap::owned_carrier_leaves(expr) =>
+            {
                 value_subset(expr).map(|w| w.inside("unwrap-operand"))
             }
             _ => Some(Why::Here(tag(&e.kind))),
