@@ -140,11 +140,16 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &note);
 }
 
+/// The artifact that ships and, for a core module, where each defined body of
+/// the rendered module ships in it (`to_wasi_mapped`'s map; `None` for a
+/// component).
+pub(super) type ShippedCore = (Vec<u8>, Option<Vec<Option<u32>>>);
+
 /// The core module a plain `almide build --target wasm` writes for this
 /// render (no `--component`), or — when the program ships as a component
 /// (an `http.serve` export) — the leg it ships on, as the refusal. `almide
 /// verify` pins the certificate to exactly these bytes.
-pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<(Vec<u8>, Option<Vec<Option<u32>>>), &'static str> {
+pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<ShippedCore, &'static str> {
     let shape = WasmPackage::decide(host_ops, false);
     if shape.component {
         return Err(shape.leg());
@@ -238,7 +243,7 @@ impl WasmPackage {
     /// Turn the renderer's `almide.*` module into the artifact that ships,
     /// with, for a core module, where each defined body of `bytes` ships in
     /// it (`to_wasi_mapped`'s map; `None` for a component).
-    fn package(&self, file: &str, bytes: &[u8], host_ops: &[i32]) -> (Vec<u8>, Option<Vec<Option<u32>>>) {
+    fn package(&self, file: &str, bytes: &[u8], host_ops: &[i32]) -> ShippedCore {
         use almide_wasm_run::{wasi, wasi_p2, wasi_p3};
         if self.serve_export {
             return (or_almide_bug(wasi_p3::to_p3_service(bytes, host_ops), "p3 serve export transform"), None);
