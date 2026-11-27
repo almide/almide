@@ -966,7 +966,7 @@ fn arm_budgets(cli: &crate::cli_args::Cli) {
     #[cfg(unix)]
     if cli.budget_report {
         extern "C" fn print_budget_report() {
-            crate::err_no_nl(&format!("{}", almide_base::budget::report()));
+            crate::err_no_nl(&almide_base::budget::report());
         }
         // SAFETY: registers a plain `extern "C" fn` with no captured state;
         // it runs once at process exit, `std::process::exit` included.
@@ -1102,10 +1102,10 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             cli::cmd_docs_gen(check);
         }
         Commands::Budgets { md } => {
-            crate::out_no_nl(&format!("{}", if md { almide_base::budget::markdown_table() } else { almide_base::budget::plain_table() }));
+            crate::out_no_nl(&(if md { almide_base::budget::markdown_table() } else { almide_base::budget::plain_table() }));
         }
         Commands::Switches { md } => {
-            crate::out_no_nl(&format!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() }));
+            crate::out_no_nl(&(if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() }));
         }
         other => dispatch_tooling(other),
     }
