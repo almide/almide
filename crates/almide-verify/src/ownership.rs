@@ -292,60 +292,72 @@ impl LineState {
 
     /// One byte that is not a newline.
     fn step(&mut self, b: u8) {
-        if let Some(brx) = self.branch.as_mut() {
-            let nested = !brx.stack.is_empty();
-            match b {
-                // Format v10: `{` opens a nested branch in the innermost
-                // arm (malformed in the branch's own arm after its mark).
-                b'{' => {
-                    if !nested {
-                        brx.malformed |= if brx.in_else {
-                            brx.else_exited || brx.else_aborted
-                        } else {
-                            brx.then_exited || brx.then_aborted
-                        };
-                    }
-                    brx.stack.push((false, Vec::new(), Vec::new()));
-                }
-                b'|' if nested => match brx.stack.last_mut() {
-                    Some((fe, _, _)) if !*fe => *fe = true,
-                    _ => self.poison_region(),
-                },
-                b'}' if nested => match brx.stack.pop() {
-                    Some((true, t, e)) => brx.add(Node::Br(t, e)),
-                    _ => self.poison_region(),
-                },
-                // A terminal mark inside a nested arm: exit and abort arms
-                // are flat.
-                _ if nested && (is_xmark(b) || is_tmark(b)) => self.poison_region(),
-                // A second separator, a `}` before the one separator, or any
-                // other delimiter inside an arm poisons (the region ends).
-                b'|' if !brx.in_else => brx.in_else = true,
-                b'}' if brx.in_else => {
-                    let closed = self.branch.take().map(Brx::close);
-                    self.items.extend(closed);
-                }
-                _ if is_struct(b) => self.poison_region(),
-                _ => brx.step(b),
-            }
+        if self.branch.is_some() {
+            self.step_branch(b);
         } else if is_xmark(b) || is_tmark(b) {
             // An exit or abort marker outside a `{…}` branch poisons the line.
             self.items.push(Item::Poison);
-        } else if let Some(cond) = self.cond.as_mut() {
-            match b {
-                b'|' if !cond.in_else => cond.in_else = true,
-                b']' if cond.in_else => {
-                    let cond = self.cond.take().unwrap_or_default();
-                    self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
-                }
-                _ if is_struct(b) => {
-                    self.cond = None;
-                    self.items.push(Item::Poison);
-                }
-                _ => cond.step(b),
-            }
+        } else if self.cond.is_some() {
+            self.step_cond(b);
         } else {
             self.step_plain(b);
+        }
+    }
+
+    /// One byte inside an open `{…}` branch.
+    fn step_branch(&mut self, b: u8) {
+        let Some(brx) = self.branch.as_mut() else { return };
+        let nested = !brx.stack.is_empty();
+        match b {
+            // Format v10: `{` opens a nested branch in the innermost
+            // arm (malformed in the branch's own arm after its mark).
+            b'{' => {
+                if !nested {
+                    brx.malformed |= if brx.in_else {
+                        brx.else_exited || brx.else_aborted
+                    } else {
+                        brx.then_exited || brx.then_aborted
+                    };
+                }
+                brx.stack.push((false, Vec::new(), Vec::new()));
+            }
+            b'|' if nested => match brx.stack.last_mut() {
+                Some((fe, _, _)) if !*fe => *fe = true,
+                _ => self.poison_region(),
+            },
+            b'}' if nested => match brx.stack.pop() {
+                Some((true, t, e)) => brx.add(Node::Br(t, e)),
+                _ => self.poison_region(),
+            },
+            // A terminal mark inside a nested arm: exit and abort arms
+            // are flat.
+            _ if nested && (is_xmark(b) || is_tmark(b)) => self.poison_region(),
+            // A second separator, a `}` before the one separator, or any
+            // other delimiter inside an arm poisons (the region ends).
+            b'|' if !brx.in_else => brx.in_else = true,
+            b'}' if brx.in_else => {
+                let closed = self.branch.take().map(Brx::close);
+                self.items.extend(closed);
+            }
+            _ if is_struct(b) => self.poison_region(),
+            _ => brx.step(b),
+        }
+    }
+
+    /// One byte inside an open `[…]` region.
+    fn step_cond(&mut self, b: u8) {
+        let Some(cond) = self.cond.as_mut() else { return };
+        match b {
+            b'|' if !cond.in_else => cond.in_else = true,
+            b']' if cond.in_else => {
+                let cond = self.cond.take().unwrap_or_default();
+                self.items.push(Item::CondLoop(cond.then_ops, cond.else_ops));
+            }
+            _ if is_struct(b) => {
+                self.cond = None;
+                self.items.push(Item::Poison);
+            }
+            _ => cond.step(b),
         }
     }
 
