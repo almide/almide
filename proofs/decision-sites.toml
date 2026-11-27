@@ -458,21 +458,22 @@ items = [
   "src/cli/check.rs::enforce_effect_permissions",
 ]
 keys = []
-decides = "check --effects refuses any fn in the ENTRY IR whose transitive set leaves [permissions].allow"
+decides = "check --effects refuses a program whose [permissions] the program does not keep, with two deciders: the whole-program [permissions] gate (src/cli/mod.rs::enforce_project_permissions, the one `check` runs, #4815) over every user fn of every module, then the per-fn report (enforce_effect_permissions) over the entry's own fns, whose transitive sets are inferred over the whole program"
 from = "mixed:reach+name"
 unknown = "refuse"
-unknown_note = "check --effects runs the whole-program [permissions] gate before its per-fn report (check.rs:525-531, #4815): a capability reached through an imported module and the proc list are judged. The per-fn report (enforce_effect_permissions) still reads the entry's IR, and the whole-program lowering falls back to the entry's IR when it fails (check.rs:527-528)"
-routes = { check = "runs (observed 2026-11-20, inside and outside the project)", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs: entry only #4815", run = "runs (observed 2026-11-20, inside and outside the project)", build = "runs (observed 2026-11-20, inside and outside the project)", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "runs (observed 2026-11-20, inside and outside the project)", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "runs (observed 2026-11-20, inside and outside the project)", component = "runs (observed 2026-11-20, inside and outside the project)", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs (observed 2026-11-20, inside and outside the project)" }
-tests = ["tests/effect_permissions_test.rs::check_effects_reports_the_extern_and_its_caller", "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"]
+unknown_note = "check --effects runs effect inference over the whole program and reports the entry's own fns (check.rs cmd_check_effects), so the per-fn report refuses a capability an entry fn reaches through an imported module by itself. A capability in an imported fn no entry fn reaches is outside every reported set: only the whole-program gate refuses it, and the novel test and control observe that case (the control removes the whole-program gate; the reached-through-import test stays refused by both). The whole-program lowering falls back to the entry's IR when it fails (check.rs, issue draft issue-check-whole-ir-fallback)."
+routes = { check = "runs (observed 2026-11-20, inside and outside the project)", check_json = "runs (observed 2026-11-20, inside and outside the project)", check_effects = "runs (whole program and the entry fns' report, #4815)", run = "runs (observed 2026-11-20, inside and outside the project)", build = "runs (observed 2026-11-20, inside and outside the project)", test = "runs (observed 2026-11-20, inside and outside the project)", bench = "runs (observed 2026-11-20, inside and outside the project)", native = "runs (observed 2026-11-20, inside and outside the project)", wasm = "runs (observed 2026-11-20, inside and outside the project)", wasi = "runs (observed 2026-11-20, inside and outside the project)", component = "runs (observed 2026-11-20, inside and outside the project)", lsp = "n.a.", mcp = "runs (observed 2026-11-20, inside and outside the project)", emit = "runs (observed 2026-11-20, inside and outside the project)" }
+tests = ["tests/effect_permissions_test.rs::check_effects_reports_the_extern_and_its_caller", "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module", "tests/decision_batch1a_test.rs::novel_check_effects_judges_a_fresh_imported_fn_the_entry_never_calls"]
 control_note = "NONE"
 issues = [4815]
 status = "UNSTAMPED"
 reasons = ["c1: the categories come from the shared classification (runtime symbol prefix, module rows; #4827)", "c2: the whole-program lowering falls back to the entry's IR when it fails (check.rs:527-528; issue draft issue-check-whole-ir-fallback)"]
 note = "#4815 closed (a0dc3ae5c1). unknown was `allow` (imported module unseen); now `refuse` (failopen count -1)."
-novel = "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"
-control_test = "tests/decision_batch1a_test.rs::novel_check_effects_refuses_a_capability_of_a_fresh_imported_module"
+novel = "tests/decision_batch1a_test.rs::novel_check_effects_judges_a_fresh_imported_fn_the_entry_never_calls"
+control_test = "tests/decision_batch1a_test.rs::novel_check_effects_judges_a_fresh_imported_fn_the_entry_never_calls"
 control_patch = "proofs/decision-controls/perm.check-effects-gate.patch"
 probe = "tests/decision-probes/perm.check-effects-gate"
+control_seen = "c677dd2661 2026-11-27 bm-1: base green, patched red (scripts/run-decision-controls.sh); was DECORATIVE on land-failopen 6bc4acb43e because the per-fn report, inferred over the whole program, refused the reached-through-import test by itself"
 
 [[site]]
 id = "perm.proc-allowlist-static"
@@ -2943,7 +2944,7 @@ keys = []
 decides = "a fetched dependency's almide.toml that parse_toml refuses is read as no manifest: the dependency key becomes its name and its transitive deps are dropped"
 from = "declaration"
 unknown = "refuse"
-unknown_note = "a fetched dependency's almide.toml is read by parse_toml and any refusal ends the walk naming the dependency and its chain (project_fetch.rs:920-930, #4820)"
+unknown_note = "a fetched dependency's almide.toml is read by parse_toml and any refusal ends the walk naming the dependency and its chain (project_fetch.rs resolve_fetched_dep_manifest, #4820). A second fail-closed reader backs it: the native-grant survey counts a manifest that does not parse as unscannable native code (native_grant.rs native_code_of) and refuses the dependency too, so the novel test asserts the walk's own refusal text, not only the dependency's name."
 routes = { check = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", check_json = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", check_effects = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", run = "runs", build = "runs", test = "runs", bench = "runs", native = "runs", wasm = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", wasi = "runs", component = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", lsp = "n.a.: the LSP produces no code and reads no manifest (observed 2026-11-20: the probe is not judged there)", mcp = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)", emit = "runs (observed 2026-11-20 on decision-sites 88531b1b22 (bugs-final merged, #4830 fix fdd8fa4af4), route matrix ds-2: refused inside and outside the project)" }
 tests = ["tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed", "tests/hidden_char_inputs_test.rs::a_dependency_manifest_with_a_hidden_character_is_refused"]
 control_note = "NONE"
@@ -2955,7 +2956,7 @@ novel = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_erro
 control_test = "tests/decision_batch1a_test.rs::novel_a_fresh_dependencys_manifest_error_is_not_swallowed"
 probe = "tests/decision-probes/deps.dep-manifest-swallow"
 control_patch = "proofs/decision-controls/deps.dep-manifest-swallow.patch"
-control_seen = "88531b1b22 + merge of bugs-final 4f2c1d37be, ds-2 2026-11-20: base green, patched red (scripts/run-decision-controls.sh)"
+control_seen = "c677dd2661 2026-11-27 bm-1: base green, patched red (scripts/run-decision-controls.sh); was DECORATIVE because the test asserted only the dependency's name, which the native-grant refusal also prints"
 stamp = "88531b1b22 2026-11-20"
 
 [[site]]
