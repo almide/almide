@@ -483,7 +483,13 @@ on each proposed window's bytes (`proofs/check-shipped-windows.sh`); a
 proposal the kernel refuses fails the gate, and so does a count below the
 leg's floor (`proofs/shipped-windows-floor.txt`), so a change that moves a
 count out of its window (a hoisted length, a call between the compare and
-the access) shows as lost evidence. Trusted for it: the meaning the proof
+the access) shows as lost evidence. The floor counts the whole list, so it
+is judged on a full run (a push to develop or main, a tag, a manual run, a
+PR into main); a PR into develop runs a 1-in-k slice of the list
+(`ALMIDE_CI_SLICE`), where every proposal is still judged and the count is
+printed with no verdict against the floor, so evidence lost outside the
+slice shows on the push to develop, not on the PR. The same holds for the
+two floors below. Trusted for it: the meaning the proof
 gives nine instructions (`usem` / `bsem`: i32 add, mul, shl, div_u, shr_u,
 ge_u, i64 ge_u, wrap, extend_u), that any other one-byte numeric
 instruction is a function of its operands, that a load reads memory and
@@ -518,7 +524,8 @@ cutter (`almide-anchor-check --fresh`, fresh.rs) propose EVERY access of the
 shape, testing no bound, and the Rocq kernel compute `fresh_ok` on each
 distinct triple (`proofs/check-shipped-fresh.sh`): a store past its block is
 a proposal the kernel refuses and fails the gate, and so does a count below
-the leg's floor (`proofs/shipped-fresh-floor.txt`). Trusted for it: what the
+the leg's floor (`proofs/shipped-fresh-floor.txt`; on a full run, as for the
+windows floor above). Trusted for it: what the
 window language trusts above; that an instruction the scan lets through
 leaves the local alone (only `local.set` and `local.tee` assign one) and
 that the third string is reached only through the first, an argument from
@@ -563,10 +570,12 @@ anchor file gives one number, the increment routine's function index.
 loops.rs) propose every access addressed by the captured block's local and
 the tested counter, testing no bound, stride, offset or width, and the Rocq
 kernel prove each distinct proposal's class (`proofs/check-shipped-loops.sh`):
-a count of accepted reads below the leg's floor fails the gate, and so do
-more reads with nothing behind the length word than the leg's first ceiling
-and more reads whose core the kernel refuses than its second
-(`proofs/shipped-loops-floor.txt`). The refusals the corpus holds are loops
+a count of accepted reads below the leg's floor fails the gate (on a full
+run, as for the windows floor above), and so do more reads with nothing
+behind the length word than the leg's first ceiling and more reads whose
+core the kernel refuses than its second (`proofs/shipped-loops-floor.txt`;
+the ceilings are judged on a slice too, a slice being part of the list). The
+refusals the corpus holds are loops
 that count bytes and read 4- or 8-byte elements: in bounds because length
 and counter are multiples of the element size, which the rule does not know
 and so does not accept.

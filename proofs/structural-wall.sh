@@ -308,7 +308,9 @@ bash "$ROOT/proofs/check-shipped-routines.sh" "$OUT/shipped-dump" "$OUT/shipped"
 # kernel decodes that window's bytes with GuardWindow.v and `window_sound`
 # puts the access inside the block's payload in every run. The cutter
 # proposes the windows over EVERY load and store; a proposal the kernel
-# refuses fails, and so does a count below the leg's floor.
+# refuses fails, and so does a count below the leg's floor. The floor counts
+# the whole list: this gate and the two after it judge it on a full run, and
+# under a CI slice print the slice's count with no verdict against it.
 echo "== guarded accesses proven in bounds from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/window-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for guarded-access windows — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "$MODE" | sed 's/^/  /'
@@ -320,7 +322,7 @@ bash "$ROOT/proofs/check-shipped-windows.sh" "$OUT/window-dump" "$OUT/windows" "
 # the three byte strings with GuardFresh.v and `fresh_sound` puts the access
 # inside the block's header and requested payload in every run. The cutter
 # proposes every such access and tests no bound; a proposal the kernel refuses
-# fails, and so does a count below the leg's floor.
+# fails, and so does a count below the leg's floor (on a full run).
 echo "== accesses into a block just allocated, proven inside it from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/fresh-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for fresh-block accesses — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE" | sed 's/^/  /'
@@ -335,8 +337,9 @@ bash "$ROOT/proofs/check-shipped-fresh.sh" "$OUT/fresh-dump" "$OUT/fresh" "$MODE
 # captured count, and `loop_class` says what stands behind the length word.
 # The cutter proposes every access addressed by the captured block's local
 # and the tested counter; a count of accepted reads below the leg's floor
-# fails, and so do more reads with nothing behind the length word, or more
-# reads the kernel refuses, than the leg's ceilings.
+# fails (on a full run), and so do more reads with nothing behind the length
+# word, or more reads the kernel refuses, than the leg's ceilings (on every
+# run: a slice over a ceiling puts the whole list over it).
 echo "== the reads a loop's exit test guards, proven inside the looped block from the shipped bytes alone (Rocq kernel) =="
 [ -s "$OUT/loops-dump" ] || { echo "STRUCTURAL WALL FAIL: no artifact was swept for loop reads — the check went blind" >&2; exit 1; }
 bash "$ROOT/proofs/check-shipped-loops.sh" "$OUT/loops-dump" "$OUT/loops" "$MODE" | sed 's/^/  /'
