@@ -385,22 +385,39 @@ fn runtime_symbol_module(symbol: &str) -> Option<&'static str> {
         .map(|(_, m)| m)
 }
 
-/// Every `@intrinsic` symbol a classified module's source declares, with
-/// the module and the declaring fn: the declaration a runtime symbol is
-/// classified by, wherever its head points (`value.__decode_list_string` is
-/// `almide_rt___decode_list_string`).
-fn intrinsic_declarations() -> &'static HashMap<String, (&'static str, &'static almide_lang::ast::Decl)> {
-    static MAP: std::sync::OnceLock<HashMap<String, (&'static str, &'static almide_lang::ast::Decl)>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| {
-        let mut map = HashMap::new();
+/// The `@intrinsic` declaration of `symbol` in a classified module's source,
+/// with its module: the declaration a runtime symbol is classified by,
+/// wherever its head points (`value.__decode_list_string` is
+/// `almide_rt___decode_list_string`). The first module in
+/// [`STDLIB_MODULE_EFFECTS`] order that declares it answers.
+///
+/// Only a module whose source text names the symbol in an `@intrinsic(..)`
+/// attribute is parsed (#4458: a program parses only the stdlib it reaches);
+/// the parse then confirms the declaration, so the text alone decides
+/// nothing (an occurrence in a comment finds no fn and is skipped).
+fn intrinsic_declaration(symbol: &str) -> Option<(&'static str, &'static almide_lang::ast::Decl)> {
+    static CANDIDATES: std::sync::OnceLock<HashMap<&'static str, Vec<&'static str>>> = std::sync::OnceLock::new();
+    let candidates = CANDIDATES.get_or_init(|| {
+        let mut map: HashMap<&'static str, Vec<&'static str>> = HashMap::new();
         for (m, _) in STDLIB_MODULE_EFFECTS {
-            for d in module_fns(m) {
-                if let Some(sym) = intrinsic_symbol(d) {
-                    map.entry(sym.to_string()).or_insert((*m, d));
+            let Some(src) = almide_lang::stdlib_info::bundled_source(m) else { continue };
+            for sym in intrinsic_literals(src) {
+                let ms = map.entry(sym).or_default();
+                if !ms.contains(m) {
+                    ms.push(m);
                 }
             }
         }
         map
+    });
+    candidates.get(symbol)?.iter().find_map(|m| module_fns(m).find(|d| intrinsic_symbol(d) == Some(symbol)).map(|d| (*m, d)))
+}
+
+/// The string literal opening each `@intrinsic(` in `src`, unparsed.
+fn intrinsic_literals(src: &'static str) -> impl Iterator<Item = &'static str> {
+    src.split("@intrinsic(").skip(1).filter_map(|rest| {
+        let lit = rest.trim_start().strip_prefix('"')?;
+        lit.find('"').map(|end| &lit[..end])
     })
 }
 
@@ -408,7 +425,7 @@ fn intrinsic_declarations() -> &'static HashMap<String, (&'static str, &'static 
 /// `@intrinsic` of a declared stdlib fn, or one whose head names a classified
 /// module ([`runtime_symbol_effect`])?
 pub fn runtime_symbol_classified(symbol: &str) -> bool {
-    intrinsic_declarations().contains_key(symbol) || runtime_symbol_module(symbol).is_some()
+    intrinsic_declaration(symbol).is_some() || runtime_symbol_module(symbol).is_some()
 }
 
 /// The categories a runtime call (`almide_rt_<module>_<fn>`, the `@intrinsic`
@@ -419,7 +436,7 @@ pub fn runtime_symbol_classified(symbol: &str) -> bool {
 /// symbol whose head names no classified module is unknown: every category
 /// ([`unknown_call_effects`]).
 pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
-    if let Some((m, d)) = intrinsic_declarations().get(symbol) {
+    if let Some((m, d)) = intrinsic_declaration(symbol) {
         return module_effects(m).map_or_else(unknown_call_effects, |row| decl_effects(row, d));
     }
     let Some(module) = runtime_symbol_module(symbol) else { return unknown_call_effects() };
@@ -838,6 +855,26 @@ mod classification_gate {
             }
         }
         assert!(checked > 500, "only {checked} intrinsics checked — the source scan found nothing");
+    }
+
+    /// The text scan that picks which modules to parse finds every
+    /// `@intrinsic` a full parse of every classified module finds, and the
+    /// same first declaring module.
+    #[test]
+    fn the_intrinsic_lookup_parses_only_where_the_text_names_the_symbol_and_misses_none() {
+        let mut first: HashMap<&str, &str> = HashMap::new();
+        for (m, _) in STDLIB_MODULE_EFFECTS {
+            for d in module_fns(m) {
+                if let Some(sym) = intrinsic_symbol(d) {
+                    first.entry(sym).or_insert(m);
+                }
+            }
+        }
+        assert!(first.len() > 500, "only {} intrinsics found", first.len());
+        for (sym, m) in &first {
+            assert_eq!(intrinsic_declaration(sym).map(|(dm, _)| dm), Some(*m), "`{sym}`");
+        }
+        assert!(intrinsic_declaration("almide_rt_no_such_symbol_zz").is_none());
     }
 
     /// The rows #3246 fixed, in ADR-0026 D2's leaves.
