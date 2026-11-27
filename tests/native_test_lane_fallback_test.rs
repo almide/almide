@@ -5,10 +5,10 @@
 //! such a file (`native v1 test render: Unsupported(..)`) while the wasm lane
 //! and `run` ran it: 30 dojo task-bank programs failed that way.
 //!
-//! The first test below walls on the v1 render today (a fallible tail tuple
-//! with a spread record element, which the ownership self-check refuses as a
-//! double release). When the v1 render covers it, the file stays a passing
-//! test on every lane; only the note goes away.
+//! `converter` below walls on the v1 render today (a heap-result `if` built
+//! into an Option a returned closure captures). When the v1 render covers it,
+//! the file stays a passing test on every lane; only the note goes away. (The
+//! spread-record tail tuple this file first used is certified since #4958.)
 
 use std::process::Command;
 
@@ -30,6 +30,19 @@ test "a fallible tail with a spread record element" {
   assert_eq(a.lots, [2, 3])
   assert_eq(n, 3)
   assert_eq(ship(Stock { sku: "x", lots: [] }), err("empty"))
+}
+
+fn converter(xs: List[(String, Int)], rate: Int) -> (String) -> String = {
+  let total = if list.len(xs) > 0 then some(xs |> list.fold(0, (a, e) => a + e.1) * rate / 1000) else none
+  (code) => match total {
+    some(t) => int.to_string(t) + " " + code,
+    none => "missing rate",
+  }
+}
+
+test "a closure over a branch-built option" {
+  assert_eq(converter([("EUR", 1000), ("EUR", 2000)], 1100)("USD"), "3300 USD")
+  assert_eq(converter([], 1100)("USD"), "missing rate")
 }
 
 test "a heap value handed to its own tail call" {
@@ -60,7 +73,7 @@ fn a_walled_test_program_builds_through_the_standard_codegen_on_the_native_lanes
     );
     let (ok, out, err) = almide(dir.path(), &["test", "--json", "lots_test.almd"]);
     assert!(ok, "--json refused the file:\n{out}{err}");
-    assert!(out.contains(r#""status":"pass""#) && out.contains(r#""tests":2"#), "--json:\n{out}{err}");
+    assert!(out.contains(r#""status":"pass""#) && out.contains(r#""tests":3"#), "--json:\n{out}{err}");
     let (ok, out, err) = almide(dir.path(), &["test", "--target", "wasm", "lots_test.almd"]);
     assert!(ok, "the wasm lane:\n{out}{err}");
 }
