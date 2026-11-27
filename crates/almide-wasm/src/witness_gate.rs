@@ -457,6 +457,17 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
             // (witness_unwrap.rs): born at the site, out on the err arm,
             // released on the ok path. Its payload store is the constructor's.
             IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // `ok(v)!` / `some(v)!`: what a fallible callback's lifted tail
+            // makes of a written `ok(v)!` (fallible_tail.rs wraps the
+            // List-typed `ok(acc + [n])!` in `ok(..)`). A constructor is a
+            // certainly-fresh carrier (`rc_certainly_fresh`), so it takes the
+            // owned-carrier route `err(m)!` takes: born at the site, its
+            // payload store the constructor's, the block released on the ok
+            // path (`release_ok_carrier`) and its payload's credit moving to
+            // the value.
+            IrExprKind::ResultOk { .. } | IrExprKind::OptionSome { .. } => {
+                value_subset(expr).map(|w| w.inside("unwrap-operand"))
+            }
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs
