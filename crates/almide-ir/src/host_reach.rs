@@ -74,9 +74,7 @@ pub(crate) fn registry_bodies(call: &str) -> Vec<(&'static Program, String)> {
     for (src, rows) in almide_lang::self_host_registry::self_host_runtime() {
         for (imp, name) in rows.iter() {
             if *name == call {
-                if let Some(prog) = almide_lang::parse_cached(src) {
-                    out.push((prog, imp.to_string()));
-                }
+                out.extend(almide_lang::parse_cached(src).map(|prog| (prog, imp.to_string())));
             }
         }
     }

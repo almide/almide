@@ -294,7 +294,7 @@ pub fn cmd_build(args: BuildArgs) {
     // #3604: scoped like the triple; read by every native release build path.
     let _cpu = super::native_target::TargetCpuGuard::set(target_cpu.map(str::to_string));
     if print_release_rustflags {
-        crate::out(&format!("{}", super::native_target::release_codegen_rustc_args().join(" ")));
+        crate::out(&super::native_target::release_codegen_rustc_args().join(" "));
         return;
     }
 
