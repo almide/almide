@@ -216,10 +216,14 @@ pub(crate) fn proved_anchors(text: &str) -> Result<Option<(Option<u32>, Option<u
     }
 }
 
+/// One `rcnames` entry: the shipped position of a function's body (`None` when
+/// it did not ship) and its name.
+pub(crate) type RcName = (Option<usize>, String);
+
 /// The anchor file's `rcnames` line: per function the bundle certifies
 /// (an `ownership` record), `<position>:<name>` where its body ships, `-:<name>`
 /// where it did not ship (no bytes to hold). `None` when the file has none.
-pub(crate) fn rc_names(text: &str) -> Result<Option<Vec<(Option<usize>, String)>>, String> {
+pub(crate) fn rc_names(text: &str) -> Result<Option<Vec<RcName>>, String> {
     let Some(rest) = text.lines().find_map(|l| if l == "rcnames" { Some("") } else { l.strip_prefix("rcnames ") }) else {
         return Ok(None);
     };

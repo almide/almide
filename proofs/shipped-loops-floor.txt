@@ -22,5 +22,5 @@
 # raise a ceiling only in its own commit, with the reason in the message.
 #
 # leg       accepted   nothing-behind   refused
-fixtures    1258       408              26
+fixtures    1260       408              26
 tests       753        628              64
