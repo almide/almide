@@ -50,6 +50,13 @@
 # floor or raise a ceiling in its own commit and say why.
 # Writes <work-dir>/verdicts.tsv (label, function, access, class).
 #
+# The floor counts the leg's WHOLE list, so it is judged on a full run only.
+# Under a CI slice (ALMIDE_CI_SLICE=k > 1, a PR into develop: one fixture in
+# k) the kernel still classes every proposal the slice holds, and the two
+# ceilings are still judged: a slice is part of the list, so a slice over a
+# ceiling puts the whole list over it. The accepted count is printed with no
+# verdict against the floor, and the last line says so.
+#
 # Needs coqc and the compiled spine (proofs/check.sh, or at least
 # GuardWindow.vo, GuardFresh.vo and GuardLoop.vo). That the function at the
 # increment's index is the proven routine is proofs/check-shipped-routines.sh's
@@ -160,10 +167,14 @@ find "$WORK" -maxdepth 1 -name 'Proved_*.v' | LC_ALL=C sort \
 row="$(awk -v leg="$LEG" '$1 == leg && NF == 4 { print $2, $3, $4 }' "$FLOORS")"
 [ -n "$row" ] || { echo "FAIL: $FLOORS has no row of four fields for the leg \`$LEG\`"; exit 1; }
 fail=0
+# shellcheck source=../scripts/lib/ci-slice.sh
+. "$HERE/../scripts/lib/ci-slice.sh"
+slice="$(ci_slice_k)"
 # shellcheck disable=SC2086
-python3 -I - "$WORK" "$LEG" $row <<'PY' || fail=1
+python3 -I - "$WORK" "$LEG" $row "$slice" <<'PY' || fail=1
 import sys
-work, leg, floor, ceiling, refusals = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+work, leg, floor, ceiling, refusals, slice_k = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
+sliced = slice_k > 1
 cls = dict(l.split() for l in open(f"{work}/classes.tsv", encoding="utf-8"))
 rows = [l.rstrip("\n").split("\t") for l in open(f"{work}/index.tsv", encoding="utf-8")]
 mods, named, proposed, distinct = (int(x) for x in open(f"{work}/swept.txt", encoding="utf-8").read().split())
@@ -176,14 +187,15 @@ bare = [r for r, v in zip(rows, c) if v == 4]
 bad = [r for r, v in zip(rows, c) if v == 0]
 with_one = len({r[1] for r, v in zip(rows, c) if v > 4})
 print(f"shipped loop reads [{leg}]: {mods} module(s), {named} naming an increment routine, {proposed} read(s) proposed as {distinct} distinct: {ok} accepted, {len(bare)} with nothing behind the length word, {len(bad)} refused")
-print(f"  accepted: pure {sum(1 for v in c if v > 4 and v & 1)}, held {sum(1 for v in c if v > 4 and v & 2)}, kept {sum(1 for v in c if v > 4 and v & 8)} (a read may be more than one), in {with_one} module(s) (floor {floor}); nothing behind: {len(bare)} (ceiling {ceiling}); refused: {len(bad)} (ceiling {refusals})")
+floor_says = f"a 1-in-{slice_k} CI slice: the floor of {floor} counts the whole list and is NOT judged here; a full run judges it" if sliced else f"floor {floor}"
+print(f"  accepted: pure {sum(1 for v in c if v > 4 and v & 1)}, held {sum(1 for v in c if v > 4 and v & 2)}, kept {sum(1 for v in c if v > 4 and v & 8)} (a read may be more than one), in {with_one} module(s) ({floor_says}); nothing behind: {len(bare)} (ceiling {ceiling}); refused: {len(bad)} (ceiling {refusals})")
 failed = False
 if len(bad) > refusals:
     for i, label, func, acc in bad[:20]:
         print(f"  refused: {label}: the read at function {func}, instruction {acc} addresses the looped block by the tested counter and the kernel cannot place it inside (goal l{int(i):06d} of {work})")
     print(f"FAIL: {len(bad)} read(s) are refused by the kernel, above the ceiling of {refusals} for `{leg}`: a loop reads through its block by its counter where the rule cannot place the read. Fix the read, or raise proofs/shipped-loops-floor.txt in its own commit and say why it is in bounds.")
     failed = True
-if ok < floor:
+if not sliced and ok < floor:
     print(f"FAIL: {ok} read(s) accepted, below the floor of {floor} for `{leg}`: evidence was lost. Restore it, or lower proofs/shipped-loops-floor.txt in its own commit and say why.")
     failed = True
 if len(bare) > ceiling:
@@ -191,13 +203,19 @@ if len(bare) > ceiling:
         print(f"  nothing behind the length word: {label}, function {func}, instruction {acc}")
     print(f"FAIL: {len(bare)} read(s) rest on a count captured before a loop that nothing protects, above the ceiling of {ceiling} for `{leg}`. Protect the loop, or raise proofs/shipped-loops-floor.txt in its own commit and say why.")
     failed = True
-if ok > floor:
+# The three notes below ask for a row to be moved to this run's count, which
+# only the whole list's count can justify: a slice prints none of them.
+if not sliced and ok > floor:
     print(f"  note: {ok - floor} above the floor; raise the `{leg}` row of proofs/shipped-loops-floor.txt to {ok} to keep them.")
-if len(bare) < ceiling:
+if not sliced and len(bare) < ceiling:
     print(f"  note: {ceiling - len(bare)} below the ceiling; lower the `{leg}` row's first ceiling to {len(bare)} to keep it.")
-if len(bad) < refusals:
+if not sliced and len(bad) < refusals:
     print(f"  note: {refusals - len(bad)} below the refusal ceiling; lower the `{leg}` row's second ceiling to {len(bad)} to keep it.")
 sys.exit(1 if failed else 0)
 PY
 [ "$fail" -eq 0 ] || exit 1
-echo "ok   every proposed loop read is classed by the kernel, and the counts hold their floor and ceilings"
+if [ "$slice" -gt 1 ]; then
+  echo "ok   every proposed loop read is classed by the kernel, and the counts hold their ceilings (a CI slice: the floor is judged on a full run, not here)"
+else
+  echo "ok   every proposed loop read is classed by the kernel, and the counts hold their floor and ceilings"
+fi
