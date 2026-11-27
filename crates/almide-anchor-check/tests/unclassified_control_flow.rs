@@ -15,7 +15,7 @@ use almide_anchor_check::decode;
 fn novel_a_legacy_try_in_a_fresh_function_is_refused() {
     let f = novel::ident("f");
     let tag = novel::ident("t");
-    let plain = wat::parse_str(format!("(module (func ${f} (block (nop))))")).unwrap();
+    let plain = wat::parse_str(format!("(module (func ${f} (block (nop))))")).expect("the probe module parses");
     assert!(decode(&plain).is_ok(), "control: a plain module decodes");
     let legacy = wat::parse_str(format!(
         "(module (tag ${tag}) (func ${f} try throw ${tag} catch_all end))"
@@ -28,8 +28,8 @@ fn novel_a_legacy_try_in_a_fresh_function_is_refused() {
 #[test]
 fn novel_depth_is_the_validators_control_stack() {
     let f = novel::ident("g");
-    let m = wat::parse_str(format!("(module (func ${f} (block (loop (block (nop))))))")).unwrap();
-    let bodies = decode(&m).unwrap();
+    let m = wat::parse_str(format!("(module (func ${f} (block (loop (block (nop))))))")).expect("the probe module parses");
+    let bodies = decode(&m).expect("the probe module decodes");
     // block, loop, block, nop, end, end, end, end(fn)
     assert_eq!(bodies[0].depth, vec![0, 1, 2, 3, 3, 2, 1, 0]);
 }
