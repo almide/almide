@@ -125,15 +125,14 @@ def main():
 
     # ---- the acquire rule
     arc = codes(f"{d}/acquire/[AS]_*.rc")
-    goal_of = {}
-    for line in open(f"{d}/acquire/index.tsv", encoding="utf-8"):
-        goal, label, pos, func, total_a, placed, left = line.rstrip("\n").split("\t")
-        goal_of[(label, pos)] = goal
+    # acquire_verdicts.py writes one line of frames.tsv per line of index.tsv, in order.
+    goals = [line.split("\t", 1)[0] for line in open(f"{d}/acquire/index.tsv", encoding="utf-8")]
+    rows = [line.rstrip("\n").split("\t") for line in open(f"{d}/frames.tsv", encoding="utf-8")]
+    if len(goals) != len(rows):
+        sys.exit(f"acquire: index.tsv has {len(goals)} line(s), frames.tsv {len(rows)}")
     frames, acquires = collections.Counter(), 0
-    for line in open(f"{d}/frames.tsv", encoding="utf-8"):
-        label, pos, func, total_a, placed, v, left, _ = line.rstrip("\n").split("\t")
-        g = goal_of.get((label, pos), "-")
-        if v == "refused" and arc.get(g, ("98", 0))[0] in NOT_ASKED:
+    for g, (label, pos, func, total_a, placed, v, left, _) in zip(goals, rows):
+        if v in ("refused", "out of time") and arc.get(g, ("98", 0))[0] in NOT_ASKED:
             v = "not asked"
         frames[v] += 1
         acquires += int(total_a)

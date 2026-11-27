@@ -1,0 +1,122 @@
+name: Probe — the path rule and the acquire rule over every certified fixture
+# A one-off measurement on its own branch. Not a gate.
+on:
+  push:
+    branches: [probe/corpus-kernel-rules]
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    name: Build every fixture, cut it, write the statements
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.97.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: false
+          workspaces: "."
+          prefix-key: "trust-spine"
+      - name: Build, cut and write the distinct statements
+        run: bash scripts/probe-corpus-kernel-rules.sh cut "$RUNNER_TEMP/corpus"
+      - name: Upload the statements
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpus-goals
+          path: ${{ runner.temp }}/corpus/corpus-goals.tgz
+          retention-days: 14
+
+  judge:
+    name: Kernel, shard ${{ matrix.shard }} of 20
+    needs: cut
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/root-tmpdir
+      - name: Restore opam root (OCaml + Rocq)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.opam
+          key: opam-${{ runner.os }}-ocaml5.4.1-rocq9.3.0-v1-a04b045f1534714416da6b4f8e8e67d2defbb750
+      - name: Rocq on PATH
+        run: |
+          BIN="$HOME/.opam/5.4.1/bin"
+          ls "$BIN" | grep -E '^(rocq|coqc)$' || { echo "no Rocq in the restored opam root" >&2; exit 1; }
+          if [ ! -x "$BIN/coqc" ]; then printf '#!/bin/sh\nexec rocq compile "$@"\n' > "$BIN/coqc"; chmod +x "$BIN/coqc"; fi
+          echo "$BIN" >> "$GITHUB_PATH"
+      - name: Download the statements
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: corpus-goals
+          path: ${{ runner.temp }}/corpus
+      - name: Ask the kernel this shard's statements
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          tar -C "$RUNNER_TEMP/corpus" -xzf "$RUNNER_TEMP/corpus/corpus-goals.tgz"
+          bash scripts/probe-corpus-kernel-rules.sh judge "$RUNNER_TEMP/corpus" "$SHARD" 20
+      - name: Upload the answers
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rc-${{ matrix.shard }}
+          path: ${{ runner.temp }}/corpus/rc-${{ matrix.shard }}.tgz
+          retention-days: 14
+          if-no-files-found: warn
+
+  sum:
+    name: Totals over the corpus
+    needs: judge
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the statements
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: corpus-goals
+          path: ${{ runner.temp }}/corpus
+      - name: Download every shard's answers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rc-*
+          path: ${{ runner.temp }}/rc
+          merge-multiple: true
+      - name: Sum
+        run: |
+          tar -C "$RUNNER_TEMP/corpus" -xzf "$RUNNER_TEMP/corpus/corpus-goals.tgz"
+          n=0
+          for t in "$RUNNER_TEMP"/rc/rc-*.tgz; do
+            [ -e "$t" ] || continue
+            tar -C "$RUNNER_TEMP/corpus" -xzf "$t"
+            n=$((n + 1))
+          done
+          echo "== answers from $n of 20 shard(s)"
+          bash scripts/probe-corpus-kernel-rules.sh sum "$RUNNER_TEMP/corpus"
+      - name: Upload the verdicts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: corpus-verdicts
+          path: |
+            ${{ runner.temp }}/corpus/modules.tsv
+            ${{ runner.temp }}/corpus/ranges.tsv
+            ${{ runner.temp }}/corpus/frames.tsv
+            ${{ runner.temp }}/corpus/path-by-module.txt
+            ${{ runner.temp }}/corpus/acquire-by-module.txt
+            ${{ runner.temp }}/corpus/goals/index.tsv
+            ${{ runner.temp }}/corpus/goals/nopath.tsv
+            ${{ runner.temp }}/corpus/acquire/index.tsv
+          retention-days: 30
