@@ -11,12 +11,24 @@ use std::process::{Command, Output, Stdio};
 #[path = "support/novel.rs"]
 mod novel;
 
+#[path = "support/verifier.rs"]
+mod support_verifier;
+
 fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
     Command::new(almide()).args(args).current_dir(dir).stdin(Stdio::null()).output().expect("almide runs")
+}
+
+/// `almide verify` with the real verifier first on `PATH` (built when the run
+/// did not build it, a failed build failing the test): without it the command
+/// stops at `verifier-missing` before judging anything.
+fn run_verify(dir: &Path, args: &[&str]) -> Output {
+    Command::new(almide()).args(args).current_dir(dir).stdin(Stdio::null())
+        .env("PATH", support_verifier::path_with_verifier(None))
+        .output().expect("almide runs")
 }
 
 fn text(o: &Output) -> String {
@@ -342,12 +354,13 @@ fn novel_verify_refuses_a_fresh_file_that_is_not_the_built_module() {
     let (_td, proj) = project(&[(&format!("{stem}.almd"), "effect fn main() -> Unit = println(\"hi\")\n".to_string())]);
     let wasm = proj.join(format!("{stem}.wasm"));
     std::fs::write(&wasm, format!("\0asm{}", novel::ident("bytes"))).unwrap();
-    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    let o = run_verify(&proj, &["verify", &format!("{stem}.almd")]);
     let t = text(&o);
     assert_eq!(o.status.code(), Some(1), "{t}");
     assert!(t.contains("is not the module") && t.contains(&format!("{stem}.wasm")), "a file of fresh bytes was taken as the built module:\n{t}");
     std::fs::remove_file(&wasm).unwrap();
-    let o = run(&proj, &["verify", &format!("{stem}.almd")]);
+    let o = run_verify(&proj, &["verify", &format!("{stem}.almd")]);
+    assert!(!text(&o).contains("verifier-missing"), "control: the verifier did not run:\n{}", text(&o));
     assert!(!text(&o).contains("is not the module"), "control: with no file there is nothing to mismatch:\n{}", text(&o));
 }
 
