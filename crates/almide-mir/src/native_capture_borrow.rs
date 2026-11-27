@@ -392,17 +392,21 @@ pub(crate) fn collapsed(v: ValueId) -> bool {
     COLLAPSED.with(|c| c.borrow().contains(&(f, v)))
 }
 
-/// Pre-render (the move-param pass): is the `Dup` at `at` a copy a
-/// non-escaping closure only lends? Such a parameter stays borrowed, so the
-/// closure can borrow it instead of the caller copying it in.
-pub(crate) fn lent_to_closure(func: &MirFunction, at: usize) -> bool {
-    let Some(Op::Dup { dst, .. }) = func.ops.get(at) else { return false };
+/// Pre-render (the move-param pass): the `Dup`s of `func` that are copies a
+/// non-escaping closure only lends. Such a parameter stays borrowed, so the
+/// closure can borrow it instead of the caller copying it in. One scan of
+/// the closure sites per body: a caller asking about many copies reads this
+/// set instead of scanning the sites again per copy (#4006 — a 28-arm chain
+/// spent seconds rescanning them per `Dup`).
+pub(crate) fn closure_lent_copies(func: &MirFunction) -> std::collections::BTreeSet<ValueId> {
     // The render's rule ahead of the final param modes: a program function's
     // borrowed position (a runtime route keeps its own convention).
     let lends = |name: &str, k: usize| !crate::native_move_params::by_value(name, k) && crate::native_move_params::has_program_body(name);
-    sites(func, &lends).iter().any(|s| {
-        s.slots.as_ref().is_some_and(|v| v.iter().any(|x| x.dup == *dst && slot_kind(&s.lambda, x.k).is_some() && rich_matches(&s.lambda, x)))
-    })
+    sites(func, &lends).iter()
+        .flat_map(|s| s.slots.iter().flatten()
+            .filter(|x| slot_kind(&s.lambda, x.k).is_some() && rich_matches(&s.lambda, x))
+            .map(|x| x.dup))
+        .collect()
 }
 
 // ---- the native spelling --------------------------------------------------

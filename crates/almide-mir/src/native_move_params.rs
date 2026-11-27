@@ -99,7 +99,8 @@ fn movable_params(func: &MirFunction, takes: &dyn Fn(usize) -> bool) -> Vec<(usi
         let [at] = named.as_slice() else { continue };
         let Op::Dup { src, .. } = func.ops[*at] else { continue };
         // A copy that only lends stays the borrowed param's own reference.
-        let lent = lent_copy(func, *at, &crate::render_native_borrow_read::roots(func));
+        let lent = lent_copy(func, *at, &crate::render_native_borrow_read::roots(func),
+            &crate::native_capture_borrow::closure_lent_copies(func));
         if depth[*at] == 0 && src == p.value && takes(k) && !lent {
             out.push((k, *at));
         }
@@ -127,6 +128,7 @@ fn consumed_params(
     let depth = depths(func);
     let root = crate::render_native_borrow_read::roots(func);
     let lambda = crate::lambda_sigs::get(&func.name).is_some();
+    let closure_lent = std::cell::OnceCell::new();
     let mut out = Vec::new();
     for (k, p) in func.params.iter().enumerate() {
         if !p.repr.is_heap() || !takes(k) {
@@ -163,7 +165,8 @@ fn consumed_params(
         // write-back copy) or handed to a by-value position (`if c then
         // grow(xs, x)`): each of those is its last use there.
         let gives = |i: usize| match &func.ops[i] {
-            Op::Dup { src, .. } => *src == p.value && !lent_copy(func, i, &root),
+            Op::Dup { src, .. } => *src == p.value
+                && !lent_copy(func, i, &root, closure_lent.get_or_init(|| crate::native_capture_borrow::closure_lent_copies(func))),
             Op::CallFn { name, args, .. } => {
                 values(&func.ops[i]).iter().filter(|x| **x == p.value).count() == 1
                     && args.iter().position(|a| matches!(a, crate::CallArg::Handle(v) if *v == p.value)).is_some_and(|j| {
