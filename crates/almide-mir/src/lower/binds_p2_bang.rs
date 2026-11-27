@@ -349,9 +349,10 @@ impl LowerCtx {
         // A converted err (a fn that returns its err, never a void one): its String
         // is computed here, on the exit path only, and OWNED — it moves into the
         // fresh err block.
-        let text = match err_text {
-            Some((evar, err_ty, conv)) => Some(self.bang_err_text_value(h, *evar, err_ty, conv)?),
-            None => None,
+        let text = if let Some((evar, err_ty, conv)) = err_text {
+            Some(self.bang_err_text_value(h, *evar, err_ty, conv)?)
+        } else {
+            None
         };
         // The exit path never mutates `live_heap_handles` — the surviving ok
         // continuation still owns everything; the arm only EMITS the drops.

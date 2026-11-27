@@ -18,6 +18,9 @@ use built::built_value_subset;
 #[path = "witness_gate_effect.rs"]
 mod effect;
 pub use effect::effect_subset;
+/// The block and branch value rules (split for the file budget).
+#[path = "witness_gate_branch.rs"]
+mod branch;
 
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
@@ -327,25 +330,8 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::BinOp { left, right, .. } => binop_subset(left, right),
         // A scalar negation / `not`: no site of its own.
         IrExprKind::UnOp { operand, .. } => value_subset(operand).map(|w| w.inside("operand")),
-        // `{ let t = f(x); op(t) }` — arg_temps.rs's shape: the binds are the
-        // Bind hook's (the frame's exit plan releases them), the value is
-        // the tail's (`rc_owned_result` and the hooks read through blocks).
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            stmts_subset(stmts).map(Why::Deep).or_else(|| value_subset(tail))
-        }
-        // A block with no tail is the same shape with a Unit tail (no block,
-        // no site): its statements are the frame's, judged as any body's
-        // (an inlined callback's `(line) => { count = count + 1 }`).
-        IrExprKind::Block { stmts, expr: None } => stmts_subset(stmts).map(Why::Deep),
-        // #2756: a value-position branch — one site, each arm hands the
-        // join one credit (`witness_arm_value`); the condition runs first.
-        IrExprKind::If { cond, then, else_ } => value_subset(cond)
-            .map(|w| w.inside("if-cond"))
-            .or_else(|| value_subset(then))
-            .or_else(|| value_subset(else_)),
-        IrExprKind::Match { subject, arms } => match_head_subset(subject, arms)
-            .map(Why::Deep)
-            .or_else(|| arms.iter().find_map(|a| value_subset(&a.body))),
+        // A block and a value-position branch (witness_gate_branch.rs).
+        IrExprKind::Block { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. } => branch::branch_value_subset(e),
         // #2758: `!` / `?` — a one-arm branch whose arm propagates (the exit
         // plan's releases, the err block's move-out; witness_unwrap.rs).
         // The operand is a bound carrier (arg_temps.rs parks every

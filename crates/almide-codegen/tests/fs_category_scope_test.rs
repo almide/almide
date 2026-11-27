@@ -38,7 +38,7 @@ fn novel_an_fs_category_call_with_no_path_mark_is_refused() {
     let mut refused = vec![peek.clone(), touch.clone()];
     refused.sort();
     assert_eq!(
-        fs_scope_refusals(&sources, &reached).unwrap(),
+        fs_scope_refusals(&sources, &reached).expect("the fs scope reads"),
         refused,
         "the unmarked FS calls are refused, the marked one and the Time call are not"
     );
@@ -47,13 +47,13 @@ fn novel_an_fs_category_call_with_no_path_mark_is_refused() {
     let fs_src = format!("@intrinsic(\"{sym}\")\neffect fn {f}(n: Int) -> Int = _\n");
     let fs_row = [("fs", fs_src.as_str())];
     let reached: HashSet<&str> = [sym.as_str()].into_iter().collect();
-    assert_eq!(fs_scope_refusals(&fs_row, &reached).unwrap(), vec![sym.clone()]);
+    assert_eq!(fs_scope_refusals(&fs_row, &reached).expect("the fs scope reads"), vec![sym.clone()]);
     // The bundled stdlib has none: every FS call carries its mark.
-    let all: HashSet<String> = fs_category_symbols_from(&bundled()).unwrap();
+    let all: HashSet<String> = fs_category_symbols_from(&bundled()).expect("the fs category reads");
     assert!(all.len() > 30, "{all:?}");
     let reached: HashSet<&str> = all.iter().map(String::as_str).collect();
-    assert_eq!(fs_scope_refusals(&bundled(), &reached).unwrap(), Vec::<String>::new());
-    assert_eq!(fs_runtime_guards_from(&sources).unwrap().len(), 1);
+    assert_eq!(fs_scope_refusals(&bundled(), &reached).expect("the fs scope reads"), Vec::<String>::new());
+    assert_eq!(fs_runtime_guards_from(&sources).expect("the runtime guards read").len(), 1);
 }
 
 #[test]
@@ -71,13 +71,13 @@ fn novel_a_guarded_fn_named_as_a_value_refuses_the_scope() {
         assert!(r.as_ref().is_err_and(|e| e.contains("named other than as a direct call")), "{calls}: {r:?}");
     }
     let calls = "let r = almide_rt_fs_write(p, c);";
-    let scope = FsScope::new(&roots, "", "", calls).unwrap();
+    let scope = FsScope::new(&roots, "", "", calls).expect("the scope builds");
     assert!(scope.wrap_calls(calls).is_ok_and(|w| w.contains("__almide_fs_path!(")));
 }
 
 #[test]
 fn novel_every_fs_category_call_makes_the_scope_apply() {
-    let syms = fs_category_symbols_from(&bundled()).unwrap();
+    let syms = fs_category_symbols_from(&bundled()).expect("the fs category reads");
     assert!(syms.len() > 30, "{syms:?}");
     for s in &syms {
         assert!(FsScope::applies_to(&format!("let r = {s}(p);")), "`{s}` does not make the scope apply");
