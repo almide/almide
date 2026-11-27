@@ -3,7 +3,7 @@
 diff --git a/crates/almide-ir/src/effect.rs b/crates/almide-ir/src/effect.rs
 --- a/crates/almide-ir/src/effect.rs
 +++ b/crates/almide-ir/src/effect.rs
-@@ -358,7 +358,7 @@ pub fn stdlib_call_effect(module: &str, func: &str) -> Vec<Effect> {
+@@ -375,7 +375,7 @@
          // A language form with no stdlib source.
          return match row { ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => e.to_vec(), ModuleEffects::Pure => Vec::new() };
      }
@@ -12,8 +12,8 @@ diff --git a/crates/almide-ir/src/effect.rs b/crates/almide-ir/src/effect.rs
  }
  
  /// The classified module a runtime symbol's head names: the longest table
-@@ -411,7 +411,7 @@ pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
-     if let Some((m, d)) = intrinsic_declarations().get(symbol) {
+@@ -445,7 +445,7 @@
+     if let Some((m, d)) = intrinsic_declaration(symbol) {
          return module_effects(m).map_or_else(unknown_call_effects, |row| decl_effects(row, d));
      }
 -    let Some(module) = runtime_symbol_module(symbol) else { return unknown_call_effects() };
