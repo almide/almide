@@ -229,7 +229,10 @@ fn checked_native_input_keeps_an_unreferenced_module_c_export_visible() {
 }
 
 #[test]
-fn checked_native_input_walls_an_unreferenced_module_c_export_outside_the_scalar_rows() {
+fn checked_native_input_keeps_an_unreferenced_module_c_export_with_a_region_parameter() {
+    // C-452: an `@export(c)` Region parameter has its native adapter (the
+    // caller's `(ptr, len)` lent as a block for the call), so the v1 render
+    // keeps the symbol of an export nothing in the program calls.
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "almide.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n");
     write(dir.path(), "src/helper.almd", "import ffi\n@export(c, \"keep\")\neffect fn keep(r: Region) -> Int = ffi.len(r)\nfn used() -> Int = 7\n");
@@ -237,9 +240,10 @@ fn checked_native_input_walls_an_unreferenced_module_c_export_outside_the_scalar
     let (mut pending, _, _) = try_compile_pending(dir.path().join("src/main.almd").to_str().unwrap(),
         false, &codegen::CodegenOptions::default()).expect("valid module export");
     let (ir, checker) = pending.native_input.take().unwrap();
-    let error = almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, None)
-        .expect_err("the v1 renderer must not silently drop a C symbol it has no adapter for");
-    assert!(error.to_string().contains("parameter `r: Region` is outside the scalar C rows"), "{error}");
+    let (rust, _) = almide_mir::pipeline::try_render_rust_checked_scoped_certified(&pending.source, ir, checker, None)
+        .expect("a Region module export renders with its C adapter");
+    assert!(rust.contains("#[export_name = \"keep\"]\npub extern \"C\" fn "), "the v1 render dropped a required C symbol:\n{rust}");
+    assert!(rust.contains("almide_rt_ffi_block_lend("), "the Region parameter is not lent through its adapter:\n{rust}");
 }
 
 /// Export the actual CLI frontend's witnesses for the independent verifier.
