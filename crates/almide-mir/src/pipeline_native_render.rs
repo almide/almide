@@ -605,7 +605,7 @@ fn render_native_parts_for(prepare: impl FnOnce() -> Result<almide_ir::IrProgram
     }
     let callbacks = crate::native_callbacks::render(&ir, &sigs, &rust)?;
     rust.push_str(&callbacks);
-    rust.push_str(&crate::native_foreign::render_exports(&ir, &sigs)?);
+    rust.push_str(&crate::native_foreign::render_exports(&ir, &sigs, &program.functions)?);
     let mut certs = native_ownership_certs(&program.functions, &crate::native_hof::sites());
     // Row 4: each function's bounds witness, recorded as the render wrote its
     // element accesses (render_native_bounds).

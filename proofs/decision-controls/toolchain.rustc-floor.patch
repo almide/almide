@@ -1,0 +1,24 @@
+# Negative control of toolchain.rustc-floor (proofs/decision-sites.toml): the rustc on PATH is judged as named, never by the toolchain binary its sysroot names
+# control_test: tests/rustc_floor_test.rs::a_rustc_proxy_is_judged_by_the_toolchain_it_selects
+diff --git a/src/cli/rustc_floor.rs b/src/cli/rustc_floor.rs
+--- a/src/cli/rustc_floor.rs
++++ b/src/cli/rustc_floor.rs
+@@ -34,9 +34,6 @@ pub(crate) fn min_rustc_string() -> String {
+ /// rustup installs under the cargo home (`crate::find_rustc`) — each named
+ /// by its toolchain's own binary ([`toolchain_binary`]) when it has one.
+ pub(crate) fn locate_rustc() -> String {
+-    if let Some(own) = toolchain_binary("rustc") {
+-        return own;
+-    }
+     if version_output("rustc").is_some() {
+         return "rustc".to_string();
+     }
+@@ -182,7 +179,7 @@ pub(crate) fn require() -> Result<(), String> {
+                 judge(&rustc, &version_output(&rustc).unwrap_or_default())?;
+                 // A rustc that is not its toolchain's own binary would pick
+                 // its toolchain again wherever it runs: not judged, refused.
+-                if toolchain_binary(&rustc).as_deref() != Some(rustc.as_str()) {
++                if false {
+                     return Err(format!(
+                         "error: could not locate the toolchain behind `{rustc}` (`{rustc} --print sysroot` names no sysroot holding a rustc), so the rustc a native build runs cannot be judged against the floor rustc {}\n  \
+                          hint: run `rustup update`, or set RUSTC to the toolchain's own rustc",

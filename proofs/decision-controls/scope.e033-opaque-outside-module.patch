@@ -1,0 +1,15 @@
+# Negative control of scope.e033-opaque-outside-module (proofs/decision-sites.toml): a bare opaque name two user records share resolves to no record, so a field read through it is admitted
+# control_test: tests/decision_novel_test.rs::novel_a_bare_opaque_name_two_fresh_dependencies_share_is_refused
+diff --git a/crates/almide-frontend/src/check/infer_members.rs b/crates/almide-frontend/src/check/infer_members.rs
+--- a/crates/almide-frontend/src/check/infer_members.rs
++++ b/crates/almide-frontend/src/check/infer_members.rs
+@@ -117,6 +117,9 @@ impl Checker {
+                     .collect();
+                 hits.sort_by(|x, y| x.0.as_str().cmp(y.0.as_str()));
+                 let first = *hits.first()?;
++                if hits.len() > 1 {
++                    return None;
++                }
+                 if hits.len() > 1 {
+                     return Some(hits.into_iter().find(|(owner, vis)| !self.user_opaque_visible_here(*owner, *vis))
+                         .map(|(owner, _)| (bare.to_string(), owner)));

@@ -21,7 +21,17 @@
 # now renders and is accepted fails it too, so the row is deleted in the same
 # change that fixed it. The rows only ever go down, to zero.
 #
+# The corpus is not every program the compiler is handed: the CLI test files
+# (tests/*.rs) build hundreds more, written inline. `--cli-log FILE` judges
+# those: FILE is the ALMIDE_NATIVE_WALL_LOG a test run wrote (one
+# `wall<TAB>route<TAB>hash<TAB>reason<TAB>caller` line per wall, src/cli/mod.rs
+# record_native_wall), and the number of distinct walled programs in it (by
+# source hash) must not exceed the `cli-walls` ceiling of
+# proofs/native-walls.txt — shrink-only, like the rows. CI's test shards each
+# write their own log and judge it against the whole ceiling.
+#
 # Usage: scripts/check-native-walls.sh [--write]   (from anywhere)
+#        scripts/check-native-walls.sh --cli-log FILE
 #   ALMIDE_BIN  the almide binary (default target/release/almide); the
 #               almide-verify binary must sit next to it or on PATH.
 #   JOBS        parallel programs (default: nproc)
@@ -37,6 +47,21 @@ EXPECTED=proofs/native-walls.txt
 LIMIT="${NATIVE_WALLS_LIMIT:-600}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 WRITE=0; [ "${1:-}" = "--write" ] && WRITE=1
+
+if [ "${1:-}" = "--cli-log" ]; then
+  LOG="${2:?--cli-log needs the log file}"
+  ceiling="$(awk -F'\t' '$1 == "cli-walls" { print $2 }' "$EXPECTED")"
+  [ -n "$ceiling" ] || { echo "::error::native-walls: $EXPECTED has no cli-walls ceiling"; exit 2; }
+  # Programs, not builds: a test that builds one program N times is one wall.
+  n=0; [ -f "$LOG" ] && n="$(awk -F'\t' '$1 == "wall" { print $3 }' "$LOG" | sort -u | wc -l | tr -d ' ')"
+  echo "native-walls (CLI test programs): $n walled program(s), ceiling $ceiling"
+  if [ "$n" -gt "$ceiling" ]; then
+    awk -F'\t' '$1 == "wall" { print "  " $5 ": " $4 " (" $3 ")" }' "$LOG" | sort | uniq -c | sort -rn | head -40
+    echo "::error::native-walls: a CLI test program walls on the verified native render (a new wall is a regression, never a raised ceiling)"
+    exit 1
+  fi
+  exit 0
+fi
 
 "$BIN" --version >/dev/null || { echo "::error::native-walls: $BIN does not run"; exit 2; }
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
@@ -84,7 +109,7 @@ fail=0
 if [ "$(count hang)" -ne 0 ]; then
   awk -F'\t' '$1 == "hang" { print "FAIL hang (no verdict in " $3 "): " $2 }' "$WORK/rows.tsv"; fail=1
 fi
-grep -vE '^(#|$)' "$EXPECTED" | cut -f1,2 | sort -t "$(printf '\t')" -k2,2 > "$WORK/expected.tsv"
+grep -vE '^(#|$|cli-walls	)' "$EXPECTED" | cut -f1,2 | sort -t "$(printf '\t')" -k2,2 > "$WORK/expected.tsv"
 awk -F'\t' '$1 == "wall" || $1 == "reject" { print $1 "\t" $2 }' "$WORK/rows.tsv" > "$WORK/measured.tsv"
 # New: measured but not expected — a regression, never a new row.
 while IFS=$'\t' read -r cls f; do

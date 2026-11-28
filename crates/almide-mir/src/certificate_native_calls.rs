@@ -22,12 +22,14 @@
 ///   argument its callee takes over is refused;
 /// - `marks`: for every call-site move (`MirFunction::call_moves`), the line
 ///   of the object it moves — where the certificate wrote its `M`;
-/// - `hosts`: one id per call to a native host op (an `fs.*` or `unix.*` host
-///   op the render serves from the runtime's own module, #4006 class E): the
-///   index of its runtime symbol in `host_ops::NATIVE_HOST_CLASSES`' lists laid
-///   end to end (fs's, then unix's), or their total length when the symbol is
-///   not named, which the checker rejects (`NativeCalls.hosts_ok`: the named
-///   sets are the trusted base's rows);
+/// - `hosts`: one id per call to a native host op — every row of
+///   `host_ops::HOST_OPS`, whatever its module: the index of its runtime
+///   symbol in `host_ops::NATIVE_HOST_CLASSES`' lists laid end to end (fs's,
+///   then unix's; #4006 class E), then `host_ops::native_row_host_calls`
+///   (every other capability module's rows, derived from the table), or
+///   their total length when the call is not named, which the checker
+///   rejects (`NativeCalls.hosts_ok`: the named sets are the trusted base's
+///   rows);
 /// - the lines: [`certificate_lines`], the heap params' lines first (empty
 ///   when a param has no event), a MOVE param's line without the leading `i`
 ///   (the checker seeds it from the mode), then the rest in emission order.
@@ -90,9 +92,10 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
                         let key = (runtime[&(f.name.clone(), at)].clone(), borrow_modes(args).len());
                         let idx = names.len() + runtime_blocks.iter().position(|b| *b == key).unwrap_or(runtime_blocks.len());
                         sites.push(site_row(idx, &borrow_modes(args)));
-                        if crate::host_ops::HOST_OPS.iter().any(|o| crate::host_ops::native_host_class(o.module).is_some() && o.symbol == key.0) {
-                            hosts.push(crate::host_ops::native_host_id(&key.0)
-                                .unwrap_or(crate::host_ops::native_host_call_count()).to_string());
+                        // A runtime body that is a host op's (any capability
+                        // module's, verify.native-calls-hosts) is a host call.
+                        if let Some(row) = crate::host_ops::HOST_OPS.iter().find(|o| o.symbol == key.0) {
+                            hosts.push(crate::host_ops::native_host_id_of_call(row, Some(&key.0)).to_string());
                         }
                     }
                     Op::CallFn { name: callee, args, .. } => {
@@ -179,15 +182,22 @@ pub(crate) fn native_calls_witness_with(functions: &[MirFunction], runtime: &BTr
 }
 
 /// The witness host id of a `CallFn` to `callee` when it is a native host
-/// call: a host op of a native host class's module (`fs`, `unix`) the render
-/// serves from the runtime floor. Its id is the index of the runtime symbol it
-/// calls in the named sets laid end to end, or their total length (out of
-/// range: refused) when that symbol is not named there.
+/// call: ANY host op row's call (decision row verify.native-calls-hosts — no
+/// capability module is left without ids). A class module's call (`fs`,
+/// `unix`) is named by the runtime symbol the floor serves it with, any other
+/// module's by its row ([`crate::host_ops::native_host_id_of_call`]); a call
+/// the sets do not name gets their total length (out of range: refused).
 fn native_host_site(callee: &str) -> Option<usize> {
     let row = crate::host_ops::host_op_for_call_name(callee)?;
-    crate::host_ops::native_host_class(row.module)?;
-    let symbol = crate::native_floor::declared(callee)?.symbol.as_str();
-    Some(crate::host_ops::native_host_id(symbol).unwrap_or(crate::host_ops::native_host_call_count()))
+    let symbol = crate::native_floor::declared(callee).map(|d| d.symbol.clone());
+    // A class call the floor declares no body for under this name is served
+    // through the runtime body its declaration names (a callback walker's
+    // typed twin, `crate::native_hof`): that site is recorded by the
+    // runtime-served branch above, by the symbol it calls.
+    if symbol.is_none() && crate::host_ops::native_host_class(row.module).is_some() {
+        return None;
+    }
+    Some(crate::host_ops::native_host_id_of_call(row, symbol.as_deref()))
 }
 
 /// Is `name`, a callee outside the program, one the render serves and whose

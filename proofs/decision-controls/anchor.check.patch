@@ -1,0 +1,23 @@
+# Negative control of anchor.check (proofs/decision-sites.toml): the RC frames are no longer held to the certified functions and an absent init / bounds / fields record reads as an empty witness again
+# control_test: crates/almide-anchor-check/tests/decision_anchor_check_novel.rs::novel_every_certified_function_needs_its_rc_frame_and_every_record_its_witness
+diff --git a/crates/almide-anchor-check/src/lib.rs b/crates/almide-anchor-check/src/lib.rs
+--- a/crates/almide-anchor-check/src/lib.rs
++++ b/crates/almide-anchor-check/src/lib.rs
+@@ -273,7 +273,7 @@ pub fn bundle_records(bundle: &[u8], property: &str) -> Result<Vec<(String, Stri
+ /// events were not handed over — refused, never judged as none
+ /// (decision row anchor.check).
+ fn required_witness(bundle: &[u8], property: &str) -> Result<String, String> {
+-    if bundle_records(bundle, property)?.iter().any(|(f, _)| f == "(program)") {
++    if true || bundle_records(bundle, property)?.iter().any(|(f, _)| f == "(program)") {
+         bundle_witness(bundle, property)
+     } else {
+         Err(format!("bundle: no `{property}` record — an absent witness is not an empty one"))
+@@ -288,7 +288,7 @@ fn required_witness(bundle: &[u8], property: &str) -> Result<String, String> {
+ /// Returns how many certified functions did not ship (`-`: no bytes).
+ fn rc_frames_cover(bundle: &[u8], anchors: &str, frames: Option<&[(usize, String)]>) -> Result<usize, String> {
+     let certified: Vec<String> = bundle_records(bundle, "ownership")?.into_iter().map(|(f, _)| f).collect();
+-    if certified.is_empty() {
++    if certified.is_empty() || !certified.is_empty() {
+         return Ok(0);
+     }
+     let frames = frames.ok_or("anchors: the bundle certifies functions and the anchor file has no `rc` lines")?;

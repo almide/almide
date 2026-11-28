@@ -1,0 +1,3 @@
+mod type Vault = { key: String }
+
+pub fn make(s: String) -> Vault = { key: s }

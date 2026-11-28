@@ -230,6 +230,7 @@ mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 pub use exit_plan::{test_omit_exit_record, test_omit_first_release};
+pub use calls_modules::test_novel_callback_arm;
 pub use inline_calls::{reader_sites, writer_sites};
 pub use fs_meta::{ABORT_SITE_OPS, OP_ABORT_SITE_RUN, OP_ABORT_SITE_SELECTED};
 mod fuel;

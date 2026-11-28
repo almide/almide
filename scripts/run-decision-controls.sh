@@ -24,8 +24,21 @@ if [ ${#ids[@]} = 0 ]; then
   for p in proofs/decision-controls/*.patch; do ids+=("$(basename "$p" .patch)"); done
 fi
 
-run_test() { # [crates/<crate>/]tests/<file>.rs::<fn>
+run_test() { # [crates/<crate>/]tests/<file>.rs::<fn>, or [crates/<crate>/]src/<path>.rs::<fn> (a unit test)
   local file="${1%%::*}" fn="${1##*::}" pkg=()
+  local unit=()
+  case "$file" in
+    src/*) unit=(--bin almide);;
+    crates/*/src/*) unit=(-p "$(echo "$file" | cut -d/ -f2)" --lib);;
+  esac
+  if [ ${#unit[@]} -gt 0 ]; then
+    # A unit test is named by its module path; the fn name must match exactly one test.
+    local n
+    n="$(cargo test --release -q "${unit[@]}" -- --list 2>/dev/null | grep -c "::$fn: test$")"
+    [ "$n" = 1 ] || return 1
+    cargo test --release -q "${unit[@]}" -- "::$fn" >/dev/null 2>&1
+    return
+  fi
   case "$file" in crates/*/tests/*) pkg=(-p "$(echo "$file" | cut -d/ -f2)");; esac
   cargo test --release -q "${pkg[@]}" --test "$(basename "$file" .rs)" -- --exact "$fn" >/dev/null 2>&1
 }

@@ -31,8 +31,12 @@ pub(crate) fn min_rustc_string() -> String {
 }
 
 /// The rustc the direct-rustc routes run: `rustc` on PATH, else the one
-/// rustup installs under the cargo home (`crate::find_rustc`).
+/// rustup installs under the cargo home (`crate::find_rustc`) — each named
+/// by its toolchain's own binary ([`toolchain_binary`]) when it has one.
 pub(crate) fn locate_rustc() -> String {
+    if let Some(own) = toolchain_binary("rustc") {
+        return own;
+    }
     if version_output("rustc").is_some() {
         return "rustc".to_string();
     }
@@ -43,9 +47,38 @@ pub(crate) fn locate_rustc() -> String {
         std::env::var_os("USERPROFILE"),
     );
     match fallback {
-        Some(p) if p.exists() => p.to_string_lossy().to_string(),
+        Some(p) if p.exists() => {
+            let p = p.to_string_lossy().to_string();
+            toolchain_binary(&p).unwrap_or(p)
+        }
         _ => "rustc".to_string(),
     }
+}
+
+/// The toolchain's own rustc behind `rustc`: `<sysroot>/bin/rustc`, where
+/// `rustc --print sysroot` names the sysroot. A rustup proxy picks its
+/// toolchain per directory (a `rust-toolchain.toml` in the build directory or
+/// any parent, a directory override), so the version the floor read in this
+/// process's directory need not be the rustc cargo runs in the generated
+/// crate's. The toolchain's own binary picks nothing: the floor judges it and
+/// every route runs it (decision row toolchain.rustc-floor). `None` when the
+/// sysroot cannot be read or holds no rustc.
+pub(crate) fn toolchain_binary(rustc: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static OWN: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    let mut own = OWN.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    own.entry(rustc.to_owned())
+        .or_insert_with(|| {
+            let o = std::process::Command::new(rustc).args(["--print", "sysroot"]).output().ok()?;
+            let sysroot = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if !o.status.success() || sysroot.is_empty() {
+                return None;
+            }
+            let p = std::path::Path::new(&sysroot).join("bin").join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+            p.is_file().then(|| p.to_string_lossy().into_owned())
+        })
+        .clone()
 }
 
 /// Share one verbose probe between discovery, the version floor and the
@@ -127,6 +160,7 @@ fn cargo_rustc() -> String {
         .iter()
         .find_map(|k| std::env::var_os(k).filter(|r| !r.is_empty()))
         .map(|r| r.to_string_lossy().into_owned())
+        .map(|r| toolchain_binary(&r).unwrap_or(r))
         .unwrap_or_else(locate_rustc)
 }
 
@@ -146,6 +180,15 @@ pub(crate) fn require() -> Result<(), String> {
             candidates.dedup();
             for rustc in candidates {
                 judge(&rustc, &version_output(&rustc).unwrap_or_default())?;
+                // A rustc that is not its toolchain's own binary would pick
+                // its toolchain again wherever it runs: not judged, refused.
+                if toolchain_binary(&rustc).as_deref() != Some(rustc.as_str()) {
+                    return Err(format!(
+                        "error: could not locate the toolchain behind `{rustc}` (`{rustc} --print sysroot` names no sysroot holding a rustc), so the rustc a native build runs cannot be judged against the floor rustc {}\n  \
+                         hint: run `rustup update`, or set RUSTC to the toolchain's own rustc",
+                        min_rustc_string()
+                    ));
+                }
             }
             Ok(())
         })

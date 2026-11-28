@@ -11,3 +11,11 @@
 #
 # class<TAB>program
 #
+#
+# The CLI test files' programs (`--cli-log`, the Test Rust shards): the number
+# of distinct walled programs (by source hash) a test run's
+# ALMIDE_NATIVE_WALL_LOG holds may not exceed this ceiling. SHRINK-ONLY, as
+# the rows: lower it in the change that removes a wall, never raise it.
+# 2026-11-26 (native-walls-zero, ds-2, the 617 CLI-driving tests/*.rs):
+# 72 walled programs (162 builds) at fail-open-verify b980d03063, 56 after.
+cli-walls	56

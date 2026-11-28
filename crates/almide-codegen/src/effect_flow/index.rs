@@ -31,11 +31,17 @@ pub(super) struct Index<'a> {
     pub toplets: Vec<HashMap<VarId, NodeId>>,
     /// The pseudo-scope of each variable table.
     pub top_scope: Vec<FnIx>,
+    /// Per variable table: is it a stdlib module's (bundled, no package
+    /// identity)? Its functions carry their declarations' categories.
+    stdlib_table: Vec<bool>,
 }
 
 impl<'a> Index<'a> {
     pub fn build(program: &'a IrProgram, g: &mut Graph) -> Index<'a> {
-        let mut ix = Index { fns: Vec::new(), root: HashMap::new(), in_module: HashMap::new(), toplets: Vec::new(), top_scope: Vec::new() };
+        let stdlib_table = std::iter::once(false)
+            .chain(program.modules.iter().map(crate::pass_effect_inference::is_stdlib_module))
+            .collect();
+        let mut ix = Index { fns: Vec::new(), root: HashMap::new(), in_module: HashMap::new(), toplets: Vec::new(), top_scope: Vec::new(), stdlib_table };
         for func in &program.functions {
             let f = ix.add(g, Some(func), func.name.to_string(), 0);
             ix.root.insert(func.name.to_string(), f);
@@ -74,6 +80,11 @@ impl<'a> Index<'a> {
         g.fn_names.push(name.clone());
         self.fns.push(FnInfo { func, name, table, own, ret, fn_val });
         f
+    }
+
+    /// Is `f` a function of a stdlib module the program carries?
+    pub fn is_stdlib_fn(&self, f: FnIx) -> bool {
+        self.stdlib_table.get(self.fns[f].table).copied().unwrap_or(false)
     }
 
     /// The function `name` calls from variable table `table`: a sibling in

@@ -523,8 +523,12 @@ impl Checker {
     // `m.Token` for a module's own, bare for a bundled module's).
     fn check_type_name_opaque_alias(&mut self, name: &str, key: Sym, arg_tys: &[Ty]) -> Ty {
         let target_ty = self.env.opaque_alias_targets.get(&key).cloned().unwrap_or(Ty::Unknown);
+        // An alias with no recorded visibility is not known to be public:
+        // it is judged as the narrowest (`local`), so only its defining
+        // module may build it (decision row scope.e033-opaque-outside-module:
+        // an unknown visibility is refused, never read as Public).
         let vis = self.env.opaque_alias_visibility.get(&key).copied()
-            .unwrap_or(ast::Visibility::Public);
+            .unwrap_or(ast::Visibility::Local);
         if !matches!(vis, ast::Visibility::Public) {
             // Check if we're in the defining module
             let defining_module = self.env.opaque_alias_module.get(&key)

@@ -497,6 +497,7 @@ pub(crate) fn render_v1_native_or_fallback(
             v1_code
         }
         Err(e) => {
+            record_native_wall(if metered.is_some() { "metered" } else { "program" }, &source_text, &e.to_string());
             // Stage 1 probe: fuel is built on the trust spine ONLY. A v0
             // fallback has no Charge ops, so the probe would silently report
             // nothing — the exact silent-miss the probe exists to prevent.
@@ -540,6 +541,42 @@ pub(crate) fn warn_unverified_route(route: &str) {
     err(&format!(
         "warning: {route} is an unverified route: it ships the standard codegen's Rust, which no certificate covers (#4006); `almide build` / `almide run` ship the verified native render"
     ));
+}
+
+/// #4006: one line per verified native render wall into the file
+/// `ALMIDE_NATIVE_WALL_LOG` names, `wall<TAB>route<TAB>hash<TAB>reason<TAB>caller`
+/// (the caller: the executable that started this compiler, a test binary
+/// where the process table says so), so a whole test run's walls are counted (scripts/check-native-walls.sh
+/// --cli-log), not only the corpus programs the gate builds itself. When a
+/// directory `<log>.src` exists, the program's source is kept there under its
+/// hash, for triage.
+pub(crate) fn record_native_wall(route: &str, source_text: &str, reason: &str) {
+    let Some(log) = almide_base::env::var("ALMIDE_NATIVE_WALL_LOG") else { return };
+    let hash = format!("{:016x}", hash64(source_text.as_bytes()));
+    let reason = reason.replace(['\n', '\t'], " ");
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = f.write_all(format!("wall\t{route}\t{hash}\t{reason}\t{}\n", wall_caller()).as_bytes());
+    }
+    let src_dir = std::path::PathBuf::from(format!("{log}.src"));
+    if src_dir.is_dir() {
+        let _ = std::fs::write(src_dir.join(format!("{hash}.almd")), source_text);
+    }
+}
+
+/// The file name of the executable that started this process, for the wall
+/// log's caller column (empty where the platform does not say).
+fn wall_caller() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        let ppid = std::os::unix::process::parent_id();
+        if let Ok(cmd) = std::fs::read(format!("/proc/{ppid}/cmdline")) {
+            let first = cmd.split(|b| *b == 0).next().unwrap_or_default();
+            let path = String::from_utf8_lossy(first);
+            return path.rsplit('/').next().unwrap_or_default().to_string();
+        }
+    }
+    String::new()
 }
 
 fn verbose() -> bool {

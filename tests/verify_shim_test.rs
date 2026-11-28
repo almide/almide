@@ -163,15 +163,15 @@ fn mir_emits_the_certificates_of_the_mir_the_native_route_ships() {
 #[test]
 fn a_program_the_native_route_walls_is_reported_uncertified() {
     // #4909: a shape the native render does not serve walls the whole
-    // program (here an `@export(c)` fn over a Region parameter, a row the
-    // native C adapters do not cover yet). The bundle names the wall and
+    // program (here a C Region return, `@region(len, release)`: foreign
+    // storage no native form holds). The bundle names the wall and
     // holds no witness, and the command fails — nothing falls back to
     // another producer.
     let stage = Stage::new("mir-wall", true);
     let src = stage.dir.join("walled.almd");
     std::fs::write(
         &src,
-        "import ffi\n\n@export(c, \"walled_size\")\neffect fn size(buf: Region) -> Int = ffi.len(buf)\n\neffect fn main() -> Unit = println(\"walled\")\n",
+        "import ffi\n\n@extern(c, \"c\", \"malloc\")\n@region(len = n, release = \"free\")\nfn c_malloc(n: UInt64) -> Region = _\n\neffect fn main() -> Unit = println(\"walled ${ffi.len(c_malloc(8))}\")\n",
     )
     .expect("source");
     let out = stage.dir.join("walled.bundle");

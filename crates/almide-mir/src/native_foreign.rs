@@ -11,6 +11,9 @@ use std::{cell::RefCell, collections::BTreeMap, fmt::Write as _};
 thread_local! {
     static DECLS: RefCell<BTreeMap<String, Declaration>> = RefCell::new(BTreeMap::new());
     static ORIGINALS: RefCell<BTreeMap<String, IrFunction>> = RefCell::new(BTreeMap::new());
+    /// Does an `@export(c)` fn of the program take a Region (its adapter
+    /// lends a block over the caller's buffer, `native_foreign_exports.rs`)?
+    static LENDS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[derive(Clone)]
@@ -38,7 +41,7 @@ pub(crate) fn prepare_mutable(ir: &mut IrProgram) {
     }
 }
 
-pub(crate) struct Scope(BTreeMap<String, Declaration>);
+pub(crate) struct Scope(BTreeMap<String, Declaration>, bool);
 impl Scope {
     pub(crate) fn enter(ir: &IrProgram) -> Self {
         let next = ir.functions.iter().filter(|f| selected(f).is_some())
@@ -46,11 +49,15 @@ impl Scope {
                 let host = ORIGINALS.with(|d| d.borrow().get(f.name.as_str()).cloned()).unwrap_or_else(|| f.clone());
                 (f.name.to_string(), Declaration { host, lowered_return: f.ret_ty.clone() })
             }).collect();
-        Self(DECLS.with(|d| std::mem::replace(&mut *d.borrow_mut(), next)))
+        let lends = ir.functions.iter().any(|f| is_c_export(f) && f.params.iter().any(|p| almide_lang::types::extern_abi::is_region(&p.ty)));
+        Self(DECLS.with(|d| std::mem::replace(&mut *d.borrow_mut(), next)), LENDS.with(|l| l.replace(lends)))
     }
 }
 impl Drop for Scope {
-    fn drop(&mut self) { DECLS.with(|d| *d.borrow_mut() = std::mem::take(&mut self.0)); }
+    fn drop(&mut self) {
+        DECLS.with(|d| *d.borrow_mut() = std::mem::take(&mut self.0));
+        LENDS.with(|l| l.set(self.1));
+    }
 }
 
 pub(crate) fn selected(f: &IrFunction) -> Option<(NativeExtern, &ExternAttr)> {
@@ -86,9 +93,13 @@ pub(crate) fn check_decl(f: &IrFunction, kind: NativeExtern) -> Result<(), Lower
         if kind == NativeExtern::C {
             let abi = if param { c_param_abi(ty) } else { c_return_abi(ty) }
                 .ok_or_else(|| wall(format!("native: foreign C type {ty:?} has no declared ABI")))?;
-            if abi.conv == CConv::Region {
+            // A Region parameter is lent as its block's `(ptr, len)`
+            // (`push_c`, the pair `push_rust` hands a Rust host); a Region
+            // return builds foreign storage this render has no form for.
+            if abi.conv == CConv::Region && !param {
                 return Err(wall("native: foreign Region needs its loan/release adapter"));
             }
+            if abi.conv == CConv::Region { continue; }
         }
         if param && kind == NativeExtern::Rust {
             // A Region is lent as its block's `(ptr, len)` (`push_rust`).
@@ -222,6 +233,18 @@ impl ForeignArgs {
 
     /// Argument `j` (value `v` of kind `k`) of a C target.
     fn push_c(&mut self, j: usize, v: ValueId, k: NTy, p: &almide_ir::IrParam) -> Result<(), LowerError> {
+        if almide_lang::types::extern_abi::is_region(&p.ty) {
+            // ADR-0031 D2 on the C ABI: the caller's `(uint8_t*, size_t)`,
+            // the block's address at the view's offset and the view's length,
+            // lent for the call exactly as to a Rust host.
+            if p.is_mut { return Err(wall("native: a foreign Region is lent, never written back")); }
+            let (base, off, len) = lent_region(k)?;
+            let r = var(v);
+            self.c_params.push(format!("a{j}: *mut u8, a{j}_len: usize"));
+            self.actuals.push(format!("almide_rt_ffi_block_ptr(&{r}.f{base}, {r}.f{off})"));
+            self.actuals.push(format!("({r}.f{len}).max(0) as usize"));
+            return Ok(());
+        }
         let value = convert(&format!("&{}", var(v)), &p.ty, k, true, 0)?;
         let abi = c_param_abi(&p.ty).ok_or_else(|| wall("native: missing C parameter ABI"))?;
         self.c_params.push(format!("a{j}: {}", abi.c_ty));
@@ -297,6 +320,9 @@ pub(crate) fn runtime_items() -> Result<Vec<&'static str>, LowerError> {
         }
         Ok::<_, LowerError>(types)
     })?;
+    let types = if LENDS.with(|l| l.get()) {
+        types + "almide_rt_ffi_block_lend\nalmide_rt_ffi_block_lent_end\n"
+    } else { types };
     crate::native_floor::runtime_items_named_by(&types).map_err(wall)
 }
 

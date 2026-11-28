@@ -255,6 +255,8 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
 pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     crate::resolve::parse_cache::enable();
+    // #4959: an INCOMPLETE wasm certificate sends the file to native here.
+    super::verify::set_incomplete_routes_native(true);
     let test_files: Vec<String> = discover_test_files(file);
 
     let cpus = cpu_slots();
@@ -409,6 +411,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
 /// the default harness's: wasm first (rustc-free, so a round is cheap),
 /// native when the wasm leg walls; `wasm_only` is `--target wasm`.
 pub fn cmd_test_update_snapshots(file: &str, no_check: bool, run_filter: Option<&str>, wasm_only: bool) {
+    super::verify::set_incomplete_routes_native(!wasm_only);
     let test_files: Vec<String> = discover_test_files(file);
     let program_args = test_harness_args(run_filter);
     // In the private cache base (#4835): a fixed name in the shared temp

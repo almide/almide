@@ -152,6 +152,25 @@ fn bindings(p: &IrPattern, out: &mut Vec<(VarId, Ty)>) -> Option<()> {
     }
     Some(())
 }
+// The test of a pattern built of literals, binders, wildcards and tuples of
+// them, with every binder a wildcard, and each binder's projection of
+// `value`. `None` for any other pattern: its binders need a tag test first.
+fn projections(p: &IrPattern, value: &IrExpr, binds: &mut Vec<(VarId, IrExpr)>) -> Option<IrPattern> {
+    match p {
+        IrPattern::Bind { var, .. } => { binds.push((*var, value.clone())); Some(IrPattern::Wildcard) }
+        IrPattern::Wildcard | IrPattern::Literal { .. } => Some(p.clone()),
+        IrPattern::Tuple { elements } => {
+            let Ty::Tuple(ts) = &value.ty else { return None };
+            if ts.len() != elements.len() { return None; }
+            let elements = elements.iter().zip(ts.iter()).enumerate().map(|(i, (p, ty))| {
+                let at = node(IrExprKind::TupleIndex { object: Box::new(value.clone()), index: i }, ty.clone());
+                projections(p, &at, binds)
+            }).collect::<Option<Vec<_>>>()?;
+            Some(IrPattern::Tuple { elements })
+        }
+        _ => None,
+    }
+}
 impl IrMutVisitor for Patterns<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
@@ -212,6 +231,10 @@ impl Patterns<'_> {
         let final_pattern = boolean_final_bindings(&last.pattern);
         let mut rest = self.pattern(&final_pattern, value.clone(), last.body.clone(), last.body.clone())?;
         for arm in init.iter().rev() {
+            if let Some(row) = self.projection_row(arm, &value, &rest) {
+                rest = row;
+                continue;
+            }
             let mut bs = Vec::new(); bindings(&arm.pattern, &mut bs)?;
             // A dummy scalar keeps even a binder-free row's carrier concrete.
             let mut fields = vec![int(0)]; fields.extend(bs.iter().map(|(v, t)| var(*v, t)));
@@ -237,6 +260,22 @@ impl Patterns<'_> {
             rest = bind(matched, candidate, choose);
         }
         Some(bind(root, subject.clone(), rest))
+    }
+    // A row whose binders are plain projections of the subject (a tuple of
+    // literals, binders and wildcards, #4954): its test is a Bool, its body
+    // reads the binders as projections, so `if test then body else rest`
+    // holds the body and the next row once each. Carried as an Option of
+    // bindings instead, the let-bound branch has one leaf per literal test,
+    // and the lowering's tail duplication copied the next row into every
+    // leaf: a 7-row `match (state, ev)` over string literals grew to 111,504
+    // native ops (x3 per row) and the native test render ran for minutes.
+    fn projection_row(&mut self, arm: &IrMatchArm, value: &IrExpr, rest: &IrExpr) -> Option<IrExpr> {
+        let mut binds = Vec::new();
+        let test = projections(&arm.pattern, value, &mut binds)?;
+        let read = |e: &IrExpr| binds.iter().fold(e.clone(), |e, (v, at)| almide_ir::substitute_var_in_expr(&e, *v, at));
+        let yes = arm.guard.as_ref().map_or_else(|| node(IrExprKind::LitBool { value: true }, Ty::Bool), read);
+        let cond = self.pattern(&test, value.clone(), yes, node(IrExprKind::LitBool { value: false }, Ty::Bool))?;
+        Some(branch(cond, read(&arm.body), rest.clone()))
     }
     fn pattern(&mut self, p: &IrPattern, value: IrExpr, yes: IrExpr, no: IrExpr) -> Option<IrExpr> {
         if !literal_or_bind(p) && !matches!(value.kind, IrExprKind::Var { .. }) {

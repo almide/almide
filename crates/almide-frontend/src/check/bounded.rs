@@ -236,6 +236,21 @@ mod bounded_tables_tests {
             .collect();
         assert!(both.is_empty(), "modules both pure and denied: {both:?}");
     }
+
+    /// Decision row bounded.member-module-gate (#4827): a member the profile
+    /// admits as pure is one the effect classification charges nothing, and
+    /// a fn charged nothing reaches no host op (almide-ir effect.rs
+    /// `a_fn_charged_no_category_reaches_no_declared_host_op`). So a
+    /// pure-listed module is one the classification calls `Pure`: a plain fn
+    /// of it reaching a prim host op cannot be admitted, whatever its name.
+    #[test]
+    fn every_bounded_pure_module_is_classified_pure() {
+        let not_pure: Vec<&&str> = BOUNDED_PURE_MODULES
+            .iter()
+            .filter(|m| almide_ir::effect::module_effects(m) != Some(almide_ir::effect::ModuleEffects::Pure))
+            .collect();
+        assert!(not_pure.is_empty(), "the @bounded pure list names modules the effect classification does not call Pure: {not_pure:?}");
+    }
 }
 
 /// #4855: does a value of this type hold a block of its own? An `Option` /

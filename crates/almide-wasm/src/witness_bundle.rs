@@ -31,19 +31,42 @@ pub struct Record {
 /// The records and the uncertified frames `(function, reason)`.
 pub type Witnesses = (Vec<Record>, Vec<(String, String)>);
 
+/// The bundle's `coverage` record (version 8, crates/almide-verify/src/
+/// coverage.rs): per defined body of the shipped module, the source
+/// functions whose sealed body it is (empty: a body the emitter wrote that
+/// is no source function, rendered `*`), and the functions whose body the
+/// build pruned.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Coverage {
+    pub positions: Vec<Vec<String>>,
+    pub unshipped: Vec<String>,
+}
+
 /// The witnesses of the build the sinks just recorded. Arm the sinks with
 /// [`super::start_collecting`] before the build; `emitted` is the module
 /// the structural leg returned (importing `almide.*`), `shipped` its
 /// stock-WASI form — the bytes the `names` witness is about. `allow` is an
 /// `almide.toml [permissions].allow` list, which narrows what an `effect
 /// fn` declares (cert_project.rs `caps_allowed`). Returns the records and
-/// the uncertified frames `(function, reason)`.
+/// the uncertified frames `(function, reason)`, and the coverage of
+/// `shipped`. `fmap` is where each defined body of `emitted` ships in
+/// `shipped` (`to_wasi_mapped`'s map); `None` when they are one module.
 pub fn records(
     emitted: &[u8],
     shipped: &[u8],
     allow: Option<&[String]>,
-) -> Result<Witnesses, String> {
-    records_inner(emitted, shipped, allow, None).map(|(w, _)| w)
+    fmap: Option<&[Option<u32>]>,
+) -> Result<(Witnesses, Coverage), String> {
+    let identity;
+    let fmap = match fmap {
+        Some(m) => m,
+        None if emitted == shipped => {
+            identity = (0..raw_bodies(emitted)?.len() as u32).map(Some).collect::<Vec<_>>();
+            &identity
+        }
+        None => return Err("no function map from the emitted module to the shipped one".into()),
+    };
+    records_inner(emitted, shipped, allow, fmap, false).map(|(w, _, c)| (w, c))
 }
 
 /// [`records`] plus the ANCHOR file of the shipped pass's bounds and init
@@ -73,16 +96,17 @@ pub fn records_with_anchors(
     shipped: &[u8],
     allow: Option<&[String]>,
     fmap: &[Option<u32>],
-) -> Result<(Witnesses, String), String> {
-    records_inner(emitted, shipped, allow, Some(fmap))
+) -> Result<(Witnesses, String, Coverage), String> {
+    records_inner(emitted, shipped, allow, fmap, true)
 }
 
 fn records_inner(
     emitted: &[u8],
     shipped: &[u8],
     allow: Option<&[String]>,
-    fmap: Option<&[Option<u32>]>,
-) -> Result<(Witnesses, String), String> {
+    fmap: &[Option<u32>],
+    anchors: bool,
+) -> Result<(Witnesses, String, Coverage), String> {
     let (pass, frames) = super::take_shipped().ok_or("no shipped pass recorded")?;
     let modes = super::take_modes();
     let bounds = super::take_bounds();
@@ -96,7 +120,7 @@ fn records_inner(
     let heap_params = super::bounds::take_heaps();
     let (rc_frames, rc_releases, rc_arms, rc_routines, rc_window_ids, rc_helpers) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
-    let (seals, remaps) = super::anchor::take_all();
+    let super::anchor::Sealed { sealed: seals, remaps, names: body_names } = super::anchor::take_all();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
@@ -124,9 +148,6 @@ fn records_inner(
     // A pass with no index access records no stretch; its witness is the
     // empty program, which the checker accepts vacuously.
     let pick = |v: Vec<(usize, String)>| v.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
-    let anchor_file = match fmap {
-        None => String::new(),
-        Some(fmap) => {
     // The anchors name the bodies as the emitter wrote them: before the
     // declare post-pass re-encoded every call (#2275), when it ran.
     let (anchored, anchored_map) = if decls.stubs.is_empty() {
@@ -135,6 +156,10 @@ fn records_inner(
         let ei = cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?;
         (decls.pre_declare.as_slice(), pre_declare_map(&decls.pre_declare, &decls.stubs, ei, fmap)?)
     };
+    let coverage = coverage(anchored, &anchored_map, shipped, &seals, &body_names, pass)?;
+    let anchor_file = match anchors {
+        false => String::new(),
+        true => {
     let locate = Locator::new(anchored, shipped, seals, remaps, &anchored_map)?;
     format!(
         "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\nfields {}\njudges {}\nholds {}\n",
@@ -174,6 +199,10 @@ fn records_inner(
             };
             format!("proved {} {}\n", ship(crate::F_DEC_FLAT), ship(crate::F_FREE))
         }
+        // Per certified function, where its RC frame ships (`-`: its body
+        // did not ship): the anchor check refuses a certified function with
+        // no entry, or one whose position carries no `rc` frame.
+        + &format!("rcnames {}\n", rc_names(&locate, &rc_frames, &records))
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -202,7 +231,90 @@ fn records_inner(
         records.push(Record { property: "caps", function, bytes });
     }
     records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
-    Ok(((records, uncertified), anchor_file))
+    Ok(((records, uncertified), anchor_file, coverage))
+}
+
+/// The `coverage` record: each shipped defined body named by the source
+/// functions of the shipped `pass` whose sealed body it is, found by the
+/// digest the seal took (the body as the emitter wrote it, `anchored`) and
+/// the map to where it ships; a named body that maps to no shipped body is
+/// unshipped.
+fn coverage(
+    anchored: &[u8],
+    map: &[Option<u32>],
+    shipped: &[u8],
+    seals: &std::collections::HashMap<u64, u64>,
+    names: &std::collections::HashMap<u64, (usize, String)>,
+    pass: usize,
+) -> Result<Coverage, String> {
+    let bodies = raw_bodies(anchored)?;
+    if map.len() != bodies.len() {
+        return Err(format!("coverage: the function map has {} rows for {} emitted bodies", map.len(), bodies.len()));
+    }
+    let mut by_digest: std::collections::HashMap<u64, Vec<usize>> = std::collections::HashMap::new();
+    for (i, raw) in bodies.iter().enumerate() {
+        by_digest.entry(super::anchor::body_digest(raw)).or_default().push(i);
+    }
+    let mut cov = Coverage { positions: vec![Vec::new(); raw_bodies(shipped)?.len()], unshipped: Vec::new() };
+    let mut named: Vec<(&u64, &String)> = names.iter().filter(|(_, (p, _))| *p == pass).map(|(k, (_, n))| (k, n)).collect();
+    named.sort();
+    for (k, name) in named {
+        let name = one_line(name);
+        let at = seals.get(k).and_then(|d| by_digest.get(d)).map(Vec::as_slice).unwrap_or_default();
+        let ships: Vec<u32> = at.iter().filter_map(|&i| map[i]).collect();
+        if ships.is_empty() {
+            if !cov.unshipped.contains(&name) {
+                cov.unshipped.push(name);
+            }
+            continue;
+        }
+        for j in ships {
+            let slot = cov.positions.get_mut(j as usize).ok_or_else(|| format!("coverage: body ships at {j}, past the shipped bodies"))?;
+            if !slot.contains(&name) {
+                slot.push(name.clone());
+            }
+        }
+    }
+    // A function placed at a body is not also unshipped.
+    let placed: std::collections::HashSet<String> = cov.positions.iter().flatten().cloned().collect();
+    cov.unshipped.retain(|n| !placed.contains(n));
+    Ok(cov)
+}
+
+/// Each defined body's bytes (its locals and instructions), undecoded.
+fn raw_bodies(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let mut out = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+        if let wasmparser::Payload::CodeSectionEntry(body) = payload.map_err(|e| e.to_string())? {
+            let range = body.range();
+            out.push(bytes[range.start as usize..range.end as usize].to_vec());
+        }
+    }
+    Ok(out)
+}
+
+/// The `rcnames` tokens: each `ownership` record's function, at the shipped
+/// position of its rc frame (`-` when that body did not ship). A certified
+/// function the rc sink recorded no frame for gets no token, which the anchor
+/// check refuses.
+fn rc_names(locate: &Locator, frames: &[(u64, String, String)], records: &[Record]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    records
+        .iter()
+        .filter(|r| r.property == "ownership" && seen.insert(r.function.as_str()))
+        .filter_map(|r| {
+            let mine: Vec<u64> = frames.iter().filter(|(_, n, _)| *n == r.function).map(|(k, _, _)| *k).collect();
+            if mine.is_empty() {
+                return None;
+            }
+            let name = one_line(&r.function);
+            Some(match mine.iter().find_map(|k| locate.position(*k)) {
+                Some(j) => format!("{j}:{name}"),
+                None => format!("-:{name}"),
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The rc sink's frames that the shipped pass certified.
@@ -315,14 +427,12 @@ fn rc_lines(
                 })
                 .collect();
             // A body the self-tail-call loop conversion rewrote after sealing
-            // records each carried local's release at the loop-back, where
-            // the bytes hold none (witness_hooks.rs `witness_loop_back`):
-            // the rc translation check has no rule for that yet, so its
-            // frame is left out, as it was before the body's anchors were
-            // retargeted.
-            if locate.rewritten(*k) {
-                return None;
-            }
+            // (tco.rs) ships like any other: its anchors and windows were
+            // retargeted to the rewritten body (witness_anchor.rs
+            // `retarget`), and the loop-back's release of a carried local is
+            // the release its next rebind or an exit performs — the
+            // iteration-end rule of a `for` body (witness_paths.rs
+            // `end_iteration`), which the RC check already holds.
             locate.position(*k).map(|j| format!("{j}|{}", ev.join(" ")))
         })
         .collect();
@@ -464,12 +574,9 @@ impl Locator {
     /// Body `serial`'s instructions between byte offsets `from` and `to`, as
     /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
     /// `None` for a body that did not ship or an empty window.
-    /// Only rc reads windows, and a rewritten body's rc frame is left out
-    /// (`rc_lines`), so its windows are too.
+    /// A body rewritten after sealing (tco.rs) reads its windows through
+    /// the retarget map.
     fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
-        if self.rewritten(serial) {
-            return None;
-        }
         let (from, to) = (self.remap(serial, from)?, self.remap(serial, to)?);
         let &i = self.pos.get(&serial)?;
         let j = self.ships_at[i]?;
@@ -505,11 +612,6 @@ impl Locator {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    /// Was body `serial` rewritten after sealing (tco.rs)?
-    fn rewritten(&self, serial: u64) -> bool {
-        self.remaps.contains_key(&serial)
     }
 
     /// The shipped position of body `serial`, when it shipped.
@@ -566,6 +668,7 @@ pub fn render(
     artifact: Option<(&str, &str)>,
     records: &[Record],
     uncertified: &[(String, String)],
+    coverage: Option<&Coverage>,
 ) -> String {
     // Version 3 (#4278): an ownership witness carries an arm share-out `s`,
     // which a reader before version 3 must refuse rather than skip.
@@ -582,7 +685,8 @@ pub fn render(
     let nested = records
         .iter()
         .any(|r| (r.property == "ownership" || r.property == "rc-sig") && nests_branches(&r.bytes));
-    let late = if nested { Some(7) } else if reclaim { Some(6) } else { None };
+    // Version 8: the `coverage` record, which every reader before refuses.
+    let late = if coverage.is_some() { Some(8) } else if nested { Some(7) } else if reclaim { Some(6) } else { None };
     let mut out = match (artifact, share_out, helper_sig) {
         (None, false, false) if late.is_none() => {
             format!("almide-certificate-bundle 1\nproducer {}\nsource {}\n", one_line(producer), one_line(source))
@@ -606,6 +710,17 @@ pub fn render(
     }
     for (f, reason) in uncertified {
         out.push_str(&format!("uncertified {} {}\n", one_line(f), one_line(reason)));
+    }
+    if let Some(c) = coverage {
+        out.push_str(&format!("coverage {} {}\n", c.positions.len(), c.unshipped.len()));
+        for names in &c.positions {
+            out.push_str(&if names.is_empty() { "*".to_string() } else { names.join("\t") });
+            out.push('\n');
+        }
+        for n in &c.unshipped {
+            out.push_str(n);
+            out.push('\n');
+        }
     }
     out
 }

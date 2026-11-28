@@ -55,6 +55,11 @@
 //! poisoned a nested brace, so a bundle before version 7 carrying one is
 //! refused rather than read either way.
 //!
+//! Version 8 is version 7 plus one `coverage` record (crates/almide-verify/
+//! src/coverage.rs): per defined body of the shipped wasm module, the
+//! function it is. A bundle over a wasm module without one certifies no
+//! coverage and is refused by [`crate::coverage::judge`].
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
@@ -79,6 +84,8 @@ pub const MAGIC_V5: &str = "almide-certificate-bundle 5";
 pub const MAGIC_V6: &str = "almide-certificate-bundle 6";
 /// The first line of a version-7 bundle (version 6 + nested branches).
 pub const MAGIC_V7: &str = "almide-certificate-bundle 7";
+/// The first line of a version-8 bundle (version 7 + the `coverage` record).
+pub(crate) const MAGIC_V8: &str = "almide-certificate-bundle 8";
 
 /// Does an ownership line nest a `{…}` inside another (format v10)?
 pub fn nests_branches(witness: &[u8]) -> bool {
@@ -124,6 +131,8 @@ pub struct Bundle {
     pub uncertified: Vec<(String, String)>,
     /// Version 2: the artifact the witnesses describe, checked by hash.
     pub artifact: Option<Artifact>,
+    /// Version 8: which function each defined body of the artifact is.
+    pub coverage: Option<crate::coverage::Coverage>,
 }
 
 /// Does `bytes` hash to the digest the artifact record names?
@@ -275,21 +284,7 @@ fn witness_header(r: &Reader, rest: &str) -> Result<(Property, usize, String), B
 /// Parse a bundle. Refuses (never guesses) on anything version 1 does not define.
 pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
     let mut r = Reader { bytes, pos: 0, line: 0 };
-    let version = match r.next_line()? {
-        Some(MAGIC) => 1,
-        Some(MAGIC_V2) => 2,
-        Some(MAGIC_V3) => 3,
-        Some(MAGIC_V4) => 4,
-        Some(MAGIC_V5) => 5,
-        Some(MAGIC_V6) => 6,
-        Some(MAGIC_V7) => 7,
-        Some(other) => {
-            return Err(r.err(format!(
-                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}`, `{MAGIC_V5}`, `{MAGIC_V6}` or `{MAGIC_V7}`, found `{other}`"
-            )))
-        }
-        None => return Err(r.err("the bundle is empty")),
-    };
+    let version = bundle_version(&mut r)?;
     let mut bundle = Bundle::default();
     while let Some(line) = r.next_line()? {
         let (keyword, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -297,31 +292,7 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
             "witness" => {
                 let (property, len, function) = witness_header(&r, rest)?;
                 let bytes = r.take_witness(len)?;
-                if version < 3 && property == Property::Ownership && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b's')) {
-                    return Err(r.err("a share-out `s` in an ownership witness of a bundle before version 3"));
-                }
-                if version < 4 && property == Property::RcSig {
-                    return Err(r.err("an `rc-sig` record in a bundle before version 4"));
-                }
-                // Version 6 (#1961): a region reclaim `w` on an ownership line
-                // (certificate format v9). Every earlier checker skipped `w`
-                // as noise — a line `w` balanced there — so an earlier
-                // bundle carrying one is refused, never read either way.
-                if version < 6
-                    && matches!(property, Property::Ownership | Property::RcSig)
-                    && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b'w'))
-                {
-                    return Err(r.err("a region reclaim `w` in an ownership line of a bundle before version 6"));
-                }
-                // Version 7 (format v10): a nested branch. Every earlier
-                // checker poisoned it; an earlier bundle carrying one is
-                // refused, never read either way.
-                if version < 7 && matches!(property, Property::Ownership | Property::RcSig) && nests_branches(&bytes) {
-                    return Err(r.err("a nested branch in an ownership line of a bundle before version 7"));
-                }
-                if version < 5 && property == Property::NativeCalls {
-                    return Err(r.err("a `native-calls` record in a bundle before version 5"));
-                }
+                version_admits(&r, version, property, &bytes)?;
                 bundle.witnesses.push(Witness { property, function, bytes });
             }
             "uncertified" => {
@@ -337,6 +308,13 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                 }
                 bundle.artifact = Some(artifact_record(&r, rest)?);
             }
+            "coverage" if version >= 8 => {
+                if bundle.coverage.is_some() {
+                    return Err(r.err("a second coverage record"));
+                }
+                let cov = coverage_record(&mut r, rest)?;
+                bundle.coverage = Some(cov);
+            }
             key if METADATA_KEYS.contains(&key) => {
                 if !bundle.witnesses.is_empty() || !bundle.uncertified.is_empty() {
                     return Err(r.err(format!("metadata `{key}` after the first record")));
@@ -347,6 +325,75 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
         }
     }
     Ok(bundle)
+}
+
+/// The bundle format version its magic line names.
+fn bundle_version(r: &mut Reader) -> Result<i32, BundleError> {
+    Ok(match r.next_line()? {
+        Some(MAGIC) => 1,
+        Some(MAGIC_V2) => 2,
+        Some(MAGIC_V3) => 3,
+        Some(MAGIC_V4) => 4,
+        Some(MAGIC_V5) => 5,
+        Some(MAGIC_V6) => 6,
+        Some(MAGIC_V7) => 7,
+        Some(MAGIC_V8) => 8,
+        Some(other) => {
+            return Err(r.err(format!(
+                "expected `{MAGIC}`, `{MAGIC_V2}`, `{MAGIC_V3}`, `{MAGIC_V4}`, `{MAGIC_V5}`, `{MAGIC_V6}`, `{MAGIC_V7}` or `{MAGIC_V8}`, found `{other}`"
+            )))
+        }
+        None => return Err(r.err("the bundle is empty")),
+    })
+}
+
+/// A witness record's property against the bundle's version: each event and
+/// record kind is refused in a bundle older than the version that brought it.
+fn version_admits(r: &Reader, version: i32, property: Property, bytes: &[u8]) -> Result<(), BundleError> {
+    if version < 3 && property == Property::Ownership && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b's')) {
+        return Err(r.err("a share-out `s` in an ownership witness of a bundle before version 3"));
+    }
+    if version < 4 && property == Property::RcSig {
+        return Err(r.err("an `rc-sig` record in a bundle before version 4"));
+    }
+    // Version 6 (#1961): a region reclaim `w` on an ownership line
+    // (certificate format v9). Every earlier checker skipped `w`
+    // as noise — a line `w` balanced there — so an earlier
+    // bundle carrying one is refused, never read either way.
+    if version < 6
+        && matches!(property, Property::Ownership | Property::RcSig)
+        && bytes.iter().any(|b| b.eq_ignore_ascii_case(&b'w'))
+    {
+        return Err(r.err("a region reclaim `w` in an ownership line of a bundle before version 6"));
+    }
+    // Version 7 (format v10): a nested branch. Every earlier
+    // checker poisoned it; an earlier bundle carrying one is
+    // refused, never read either way.
+    if version < 7 && matches!(property, Property::Ownership | Property::RcSig) && nests_branches(bytes) {
+        return Err(r.err("a nested branch in an ownership line of a bundle before version 7"));
+    }
+    if version < 5 && property == Property::NativeCalls {
+        return Err(r.err("a `native-calls` record in a bundle before version 5"));
+    }
+    Ok(())
+}
+
+/// A `coverage` record: its positions and unshipped functions, read off the
+/// lines after its header.
+fn coverage_record(r: &mut Reader, rest: &str) -> Result<crate::coverage::Coverage, BundleError> {
+    let (n, m) = crate::coverage::header(rest).ok_or_else(|| r.err(format!("`{rest}` is not two counts")))?;
+    let mut cov = crate::coverage::Coverage::default();
+    for i in 0..n + m {
+        let line = r.next_line()?.ok_or_else(|| r.err("the coverage record ends early"))?;
+        if i < n {
+            cov.positions.push(crate::coverage::position(line).ok_or_else(|| r.err(format!("`{line}` is not a coverage position")))?);
+        } else if line.is_empty() || line.contains('\t') {
+            return Err(r.err(format!("`{line}` is not one unshipped function")));
+        } else {
+            cov.unshipped.push(line.to_string());
+        }
+    }
+    Ok(cov)
 }
 
 #[cfg(test)]
@@ -454,8 +501,27 @@ mod tests {
     }
 
     #[test]
+    fn a_version_eight_bundle_covers_every_body_of_its_artifact() {
+        use crate::coverage::judge;
+        let m: &[u8] = b"\0asm\x01\0\0\0\x01\x04\x01\x60\0\0\x0a\x07\x02\x02\0\x0b\x02\0\x0b";
+        let b = |cov: &str| parse(format!("{MAGIC_V8}\nwitness ownership 2 main\nid\nuncertified f why\n{cov}").as_bytes());
+        let ok = b("coverage 2 0\nmain\n*\n").expect("a well-formed coverage record");
+        assert_eq!(judge(&ok, Some(m)), Ok(()));
+        assert!(judge(&b("coverage 2 1\n*\nf\nmain\n").unwrap(), Some(m)).is_ok(), "unshipped placement");
+        assert!(judge(&b("coverage 1 0\nmain\n").unwrap(), Some(m)).unwrap_err().contains("defines 2"));
+        assert!(judge(&b("coverage 2 0\n*\n*\n").unwrap(), Some(m)).unwrap_err().contains("places it at no body"));
+        assert!(judge(&b("coverage 2 0\nmain\tg\n*\n").unwrap(), Some(m)).unwrap_err().contains("`g`"));
+        assert!(judge(&b("").unwrap(), Some(m)).unwrap_err().contains("names no coverage"));
+        assert!(judge(&b("").unwrap(), Some(b"\x7fELF")).is_ok(), "a native artifact has no code section to cover");
+        assert!(b("coverage 2 0\nmain\n").is_err(), "a short record");
+        assert!(b("coverage 2 0\nmain\n\t\n").is_err(), "an empty name");
+        assert!(b("coverage 1 0\nmain\ncoverage 1 0\nmain\n").is_err(), "a second record");
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 8\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 9\n").is_err());
+        assert!(parse(format!("{MAGIC_V7}\ncoverage 0 0\n").as_bytes()).is_err(), "coverage needs version 8");
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

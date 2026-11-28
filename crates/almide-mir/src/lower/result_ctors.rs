@@ -127,6 +127,11 @@ impl LowerCtx {
                 let s0 = self.load_addr(th, 12);
                 self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0, rh] });
                 self.ops.push(Op::Consume { v: rec });
+                // #4958: the record is moved in, so it leaves the live set like
+                // every other moved-in piece. A spread record (`{ ...s, f: v }`
+                // via `lower_result_str_piece`) is tracked there, and the arm's
+                // `drop_arm_locals` released it a second time.
+                self.live_heap_handles.retain(|h| *h != rec);
                 let s1o = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: s1o, value: 20 });
                 let s1 = self.fresh_value();

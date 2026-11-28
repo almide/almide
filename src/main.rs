@@ -16,7 +16,7 @@ pub use almide::{
     import_table, intern, ir, lexer, lower, mono, optimize,
     parser, project, project_fetch, native_grant, media_grant, media_owners, trust, resolve, stdlib, types,
     git_source,
-    out, out_no_nl, err, err_no_nl, WASM_WALL_MARKER,
+    out, out_no_nl, err, err_no_nl, out_json_line, out_lsp_frame, relay_program_output, flush_out, stderr_is_terminal, WASM_WALL_MARKER,
 };
 
 // `cli/*.rs` call these via `crate::<name>` — re-exported here (private,
@@ -42,7 +42,7 @@ use dispatch::dispatch;
 /// through here or cargo through `cli::rustc_floor::cargo_command`.
 fn find_rustc() -> String {
     if let Err(e) = cli::rustc_floor::require() {
-        eprintln!("{e}");
+        crate::err(&format!("{e}"));
         std::process::exit(1);
     }
     cli::rustc_floor::locate_rustc()
@@ -138,7 +138,7 @@ fn print_error_explanation(code: &str) {
     // kind of host-dependent behavior the embedded table exists to end.
     let code = code.to_ascii_uppercase();
     match DIAGNOSTIC_DOCS.iter().find(|(k, _)| *k == code) {
-        Some((_, doc)) => out(&format!("{}", doc)),
+        Some((_, doc)) => out(doc),
         None => {
             err(&format!("Unknown error code: {}", code));
             std::process::exit(1);

@@ -91,13 +91,13 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     };
     let proc_op = refuse_unpackageable(file, &host_ops, req.component, js_host);
     let shape = WasmPackage::decide(&host_ops, req.component);
-    let bytes = shape.package(file, &emitted, &host_ops);
+    let (bytes, fmap) = shape.package(file, &emitted, &host_ops);
     super::phase_lap("package");
     // A component is not the core module the certificate describes
     // (`almide verify` refuses it the same way): the core module it
     // packages is judged before it is packaged (#4836).
-    let shipped: &[u8] = if shape.component { &emitted } else { &bytes };
-    let incomplete = match super::verify::gate_build(file, &emitted, shipped, &[]) {
+    let (shipped, fmap): (&[u8], Option<&[Option<u32>]>) = if shape.component { (&emitted, None) } else { (&bytes, fmap.as_deref()) };
+    let incomplete = match super::verify::gate_build(file, &emitted, shipped, fmap, &[]) {
         Ok(note) => note,
         Err(e) => {
             err(&format!("{}\n  {output} was not written", super::verify::refusal(file, &e)));
@@ -140,11 +140,16 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &note);
 }
 
+/// The artifact that ships and, for a core module, where each defined body of
+/// the rendered module ships in it (`to_wasi_mapped`'s map; `None` for a
+/// component).
+pub(super) type ShippedCore = (Vec<u8>, Option<Vec<Option<u32>>>);
+
 /// The core module a plain `almide build --target wasm` writes for this
 /// render (no `--component`), or — when the program ships as a component
 /// (an `http.serve` export) — the leg it ships on, as the refusal. `almide
 /// verify` pins the certificate to exactly these bytes.
-pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<Vec<u8>, &'static str> {
+pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<ShippedCore, &'static str> {
     let shape = WasmPackage::decide(host_ops, false);
     if shape.component {
         return Err(shape.leg());
@@ -235,26 +240,29 @@ impl WasmPackage {
         WasmPackage { component, serve_export, p3_default, direct_p2, direct_p3 }
     }
 
-    /// Turn the renderer's `almide.*` module into the artifact that ships.
-    fn package(&self, file: &str, bytes: &[u8], host_ops: &[i32]) -> Vec<u8> {
+    /// Turn the renderer's `almide.*` module into the artifact that ships,
+    /// with, for a core module, where each defined body of `bytes` ships in
+    /// it (`to_wasi_mapped`'s map; `None` for a component).
+    fn package(&self, file: &str, bytes: &[u8], host_ops: &[i32]) -> ShippedCore {
         use almide_wasm_run::{wasi, wasi_p2, wasi_p3};
         if self.serve_export {
-            return or_almide_bug(wasi_p3::to_p3_service(bytes, host_ops), "p3 serve export transform");
+            return (or_almide_bug(wasi_p3::to_p3_service(bytes, host_ops), "p3 serve export transform"), None);
         }
         if self.direct_p3 {
-            return or_almide_bug(wasi_p3::to_p3(bytes, host_ops), "p3 component transform");
+            return (or_almide_bug(wasi_p3::to_p3(bytes, host_ops), "p3 component transform"), None);
         }
         if self.direct_p2 {
-            return or_almide_bug(wasi_p2::to_p2(bytes), "p2 component transform");
+            return (or_almide_bug(wasi_p2::to_p2(bytes), "p2 component transform"), None);
         }
         let wasi = or_almide_bug(wasi::to_wasi_mapped(bytes, host_ops), "WASI transform");
+        let fmap = wasi.1.clone();
         let bytes = with_debug_lines(file, bytes, wasi);
         // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
         // preview1 adapter. Packaging, not a rewrite.
         if self.component {
-            return or_almide_bug(wrap_component(&bytes), "component encoding");
+            return (or_almide_bug(wrap_component(&bytes), "component encoding"), None);
         }
-        bytes
+        (bytes, Some(fmap))
     }
 
     /// Name the LEG in the one line every build prints: "which renderer

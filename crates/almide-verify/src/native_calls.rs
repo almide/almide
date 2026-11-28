@@ -5,7 +5,8 @@
 //! `#`-separated: `<modes>|<sites>|<marks>`, a newline, then the function's
 //! ownership lines (heap parameters first), with an optional fourth header
 //! field `|<hosts>`: one id per native host call (#4006 class E), each an
-//! index into [`NATIVE_FS_HOST_CALLS`] followed by [`NATIVE_UNIX_HOST_CALLS`]. The program's signature table is
+//! index into [`NATIVE_FS_HOST_CALLS`] followed by [`NATIVE_UNIX_HOST_CALLS`] and
+//! [`NATIVE_ROW_HOST_CALLS`]. The program's signature table is
 //! the list of every block's modes. A block is accepted iff its modes are 0
 //! or 1, every site agrees with its callee block's modes, the marks are as
 //! many as the arguments the sites move, each names a line of the block, and
@@ -107,10 +108,80 @@ pub const NATIVE_UNIX_HOST_CALLS: &[&str] = &[
     "almide_rt_unix___os_shm_read",
 ];
 
+/// `native_row_host_calls` (NativeCalls.v): every other capability module's
+/// host ops, in the order `almide_mir::host_ops::native_row_host_calls`
+/// derives them from the host-op table (tests/native_fs_host_calls_test.rs
+/// holds the copies to that derivation).
+pub const NATIVE_ROW_HOST_CALLS: &[&str] = &[
+    "almide_rt_datetime_now",
+    "almide_rt_datetime_monotonic_ns",
+    "almide_rt_datetime_now_ms",
+    "almide_rt_env_args",
+    "almide_rt_env_get",
+    "almide_rt_env___set",
+    "almide_rt_env___environ",
+    "almide_rt_env_cwd",
+    "almide_rt_env_sleep_ms",
+    "almide_http_get",
+    "almide_http_request",
+    "almide_http_get_response",
+    "almide_http_request_response",
+    "almide_rt_http___call_start",
+    "almide_http_call_poll",
+    "almide_http_call_read_new",
+    "almide_http_call_wait",
+    "almide_http_call_cancel",
+    "almide_rt_http_serve",
+    "almide_rt_io_print",
+    "almide_rt_io_eprint",
+    "almide_rt_io___write_stdout",
+    "almide_rt_io___write_stderr",
+    "almide_rt_io_read_line",
+    "almide_rt_io_read_all",
+    "almide_rt_io___read_stdin_bytes",
+    "almide_rt_net___os_tcp_connect",
+    "almide_rt_net___os_tcp_read",
+    "almide_rt_net___os_tcp_write",
+    "almide_rt_net___os_tcp_close",
+    "almide_rt_net___os_tcp_is_open",
+    "almide_rt_net___os_tcp_read_timeout",
+    "almide_rt_net___os_tcp_set_timeout",
+    "almide_rt_net___os_tcp_available",
+    "almide_rt_net___os_tcp_listen",
+    "almide_rt_net___os_tcp_local_port",
+    "almide_rt_net___os_tcp_accept",
+    "almide_rt_net___os_tcp_close_listener",
+    "almide_rt_net___os_udp_bind",
+    "almide_rt_net___os_udp_local_port",
+    "almide_rt_net___os_udp_send_to",
+    "almide_rt_net___os_udp_recv_from",
+    "almide_rt_net___os_udp_close",
+    "almide_rt_net___os_lookup_host",
+    "almide_rt_process_exec",
+    "almide_rt_process_kill",
+    "almide_rt_process___os_output",
+    "almide_rt_process___os_run",
+    "almide_rt_process___os_start",
+    "almide_rt_process___os_poll",
+    "almide_rt_process___os_wait",
+    "almide_rt_process___os_stop",
+    "almide_rt_process___os_read_new",
+    "almide_rt_process___os_child_pid",
+    "almide_rt_process_pid",
+    "almide_rt_random_int",
+    "almide_rt_random_float",
+    "almide_rt_random_choice",
+    "almide_rt_random_shuffle",
+    "almide_rt_random_bytes",
+    "almide_rt_test_abort_site_run",
+    "almide_rt_test_abort_site_selected",
+    "almide_rt_uuid___v7_stamp",
+];
+
 /// `hosts_ok`: every host id names a function of `native_host_calls`, the
-/// fs set followed by the unix set.
+/// fs set, then the unix set, then the row calls.
 fn hosts_ok(b: &Block<'_>) -> bool {
-    let named = NATIVE_FS_HOST_CALLS.len() + NATIVE_UNIX_HOST_CALLS.len();
+    let named = NATIVE_FS_HOST_CALLS.len() + NATIVE_UNIX_HOST_CALLS.len() + NATIVE_ROW_HOST_CALLS.len();
     b.hosts.iter().all(|h| h.as_index().is_some_and(|i| i < named))
 }
 
@@ -174,6 +245,7 @@ mod tests {
         assert!(c(b"||| 30 31\nid"));
         assert!(c(b"||| 32 33 34 35 36 37\nid"));
         assert!(c(b"||| 38 43 49\nid"));
-        assert!(!c(b"||| 50\nid"));
+        assert!(c(b"||| 50 76 112\nid"));
+        assert!(!c(b"||| 113\nid"));
     }
 }

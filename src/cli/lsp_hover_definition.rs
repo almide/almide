@@ -256,7 +256,7 @@ fn compute_formatting(doc: &AnalyzedDoc) -> Vec<TextEdit> {
     // reason lands in the LSP server log as E054 (#1464) instead of being
     // discarded, so "format did nothing" is at least explainable.
     if let Err(why) = crate::fmt::verify_format(&doc.source, &doc.program, &formatted) {
-        eprintln!("{}", crate::fmt::verify_format_diagnostic("<buffer>", &why).display());
+        crate::err(&crate::fmt::verify_format_diagnostic("<buffer>", &why).display());
         return vec![];
     }
     let line_count = doc.source.lines().count().max(1);

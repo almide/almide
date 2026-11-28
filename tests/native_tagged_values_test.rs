@@ -1748,16 +1748,16 @@ effect fn main() -> Unit = {
 "#;
 
 /// A Region reaches a host only as a by-value parameter of an
-/// `@extern(rust)` fn, lent as its block's `(ptr, len)` for the call. Any
-/// other way a live boundary could carry its address is refused: a C binding
-/// (no loan adapter), a written-back parameter, a declared record holding
-/// one, a callback's parameter, a returned Region, or a type parameter
-/// instantiated with a value holding one.
+/// `@extern(rust)` or `@extern(c)` fn, lent as its block's `(ptr, len)` for
+/// the call. Any other way a live boundary could carry its address is
+/// refused: a C Region return, a written-back parameter, a declared record
+/// holding one, a callback's parameter, a returned Region, or a type
+/// parameter instantiated with a value holding one.
 #[test]
 fn a_live_host_boundary_that_can_carry_a_region_address_is_refused() {
     let host_max = "@extern(rust, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int = _\n";
     for (name, decls, call) in [
-        ("c binding", "@extern(c, \"host\", \"take\")\nfn take(r: Region) -> Int = _\n", "take(r)"),
+        ("c region return", "@extern(c, \"host\", \"take\")\n@region(len = n, release = \"give\")\nfn take(n: Int) -> Region = _\n", "ffi.len(take(1))"),
         ("written back", "@extern(rust, \"host\", \"take\")\nfn take(mut r: Region) -> Int = _\n\
             fn lend(r: Region) -> Int = {\n var w = r\n take(w)\n}\n", "lend(r)"),
         ("declared", "type Holder = { inner: Region, n: Int }\n@extern(rust, \"host\", \"take\")\nfn take(h: Holder) -> Int = _\n",

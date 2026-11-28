@@ -112,6 +112,35 @@ pub fn builtin_call_effects(name: &str) -> Vec<Effect> {
     BUILTIN_EFFECTS.iter().find(|(n, _)| *n == name).map_or_else(Vec::new, |(_, e)| e.to_vec())
 }
 
+/// Is `name` an output builtin that does not end the program — one whose
+/// leaves are streams only (`println`, `eprintln`), as opposed to an abort
+/// builtin (`panic`, `assert*`), which carries `Abort`?
+pub(crate) fn builtin_writes_without_aborting(name: &str) -> bool {
+    let e = builtin_call_effects(name);
+    !e.is_empty() && !e.contains(&Effect::Abort)
+}
+
+/// Do `cats` describe only ADR-0022's halt — `Abort`, with nothing beyond
+/// what an abort builtin (`panic`, `assert`) carries, its report on stderr?
+/// A testing assertion is such a fn (#4951): it reaches no host capability,
+/// so a consumer asking "may this run without one" (the native renderer's
+/// purity) admits it, while `@pure` and `[permissions]` still see the leaves.
+pub fn only_halts(cats: &[Effect]) -> bool {
+    let halt: Vec<Effect> = BUILTIN_EFFECTS.iter().filter(|(_, e)| e.contains(&Effect::Abort)).flat_map(|(_, e)| e.iter().copied()).collect();
+    cats.contains(&Effect::Abort) && cats.iter().all(|c| halt.contains(c))
+}
+
+/// The leaves a plain `fn` may carry (ADR-0022): those of the output and
+/// abort builtins, which a plain fn may call. Any other leaf belongs to an
+/// `effect fn`.
+#[cfg(test)]
+pub(crate) fn plain_fn_leaves() -> Vec<Effect> {
+    let mut v: Vec<Effect> = BUILTIN_EFFECTS.iter().flat_map(|(_, e)| e.iter().copied()).collect();
+    v.sort_by_key(|e| e.name());
+    v.dedup();
+    v
+}
+
 /// How the calls into one stdlib module are classified. A function may name
 /// its own categories with `@category("FS.write", …)` on its declaration,
 /// which replaces the module's default for that function (ADR-0026 D2:
@@ -306,45 +335,121 @@ pub fn declaration_effects(module: &str, decl: &almide_lang::ast::Decl) -> Vec<E
     module_effects(module).map_or_else(Vec::new, |row| decl_effects(row, decl))
 }
 
-/// The categories a call `module.func` carries, empty for a pure call.
-///
-/// The function must be one the stdlib module declares: a call to a name the
-/// module's source does not declare is a USER module that shares the stdlib
-/// module's name (`net`, `io` — #2223), and its effects travel through the
-/// call graph like any user fn's. (A user module that also reuses a stdlib
-/// function's name is classified as the stdlib function: an
-/// over-approximation, never a missed category.)
-pub fn stdlib_call_effect(module: &str, func: &str) -> Vec<Effect> {
-    let Some(row) = module_effects(module) else { return Vec::new() };
-    if row == ModuleEffects::Pure {
-        return Vec::new();
+/// Is `module.func` a function the stdlib declares — a fn of its module's
+/// own source, or the `fan` language form — so [`stdlib_call_effect`] answers
+/// for it from a declaration?
+pub fn stdlib_declares(module: &str, func: &str) -> bool {
+    match module_effects(module) {
+        None => false,
+        Some(_) if module == "fan" => true,
+        // The committed declaration index (#4458, held to the parser by
+        // almide-frontend tests/decl_index_test.rs) answers without parsing a
+        // module the program does not otherwise reach.
+        Some(_) => match almide_lang::decl_index::fn_names(module) {
+            Some(names) => names.contains(&func),
+            None => module_fns(module).any(|d| fn_name(d) == func),
+        },
     }
+}
+
+/// What a call the classification cannot answer for carries — a stdlib
+/// call of a fn no stdlib source declares, a runtime symbol whose head
+/// names no classified module: every leaf, ⊤, as an `@extern` does
+/// (decision rows purity.effect-classification, effect.flow-categories).
+pub fn unknown_call_effects() -> Vec<Effect> {
+    Effect::ALL.to_vec()
+}
+
+/// The categories a STDLIB call `module.func` carries, empty for a pure call.
+///
+/// Read off the declaration: its own `@category`, else its module's row. A
+/// call this cannot answer for — a module the table does not classify, a fn
+/// the module's source does not declare — is unknown and carries every
+/// category ([`unknown_call_effects`]), never the empty set. A consumer asks
+/// only about a call it resolved to the stdlib: a user module that shares a
+/// stdlib module's name (`net`, `io` — #2223) is a user module, judged by its
+/// own body through the call graph, and never reaches here.
+pub fn stdlib_call_effect(module: &str, func: &str) -> Vec<Effect> {
+    let Some(row) = module_effects(module) else { return unknown_call_effects() };
     if module == "fan" {
         // A language form with no stdlib source.
         return match row { ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => e.to_vec(), ModuleEffects::Pure => Vec::new() };
     }
-    module_fns(module).find(|d| fn_name(d) == func).map_or_else(Vec::new, |d| decl_effects(row, d))
+    module_fns(module).find(|d| fn_name(d) == func).map_or_else(unknown_call_effects, |d| decl_effects(row, d))
+}
+
+/// The classified module a runtime symbol's head names: the longest table
+/// entry (or alias) after `almide_rt_` / `almide_`, `None` when it names none.
+fn runtime_symbol_module(symbol: &str) -> Option<&'static str> {
+    let rest = symbol.strip_prefix("almide_rt_").or_else(|| symbol.strip_prefix("almide_"))?;
+    STDLIB_MODULE_EFFECTS
+        .iter()
+        .map(|(m, _)| (*m, *m))
+        .chain(RUNTIME_PREFIX_ALIASES.iter().copied())
+        .filter(|(prefix, _)| rest.strip_prefix(prefix).is_some_and(|r| r.starts_with('_')))
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, m)| m)
+}
+
+/// The `@intrinsic` declaration of `symbol` in a classified module's source,
+/// with its module: the declaration a runtime symbol is classified by,
+/// wherever its head points (`value.__decode_list_string` is
+/// `almide_rt___decode_list_string`). The first module in
+/// [`STDLIB_MODULE_EFFECTS`] order that declares it answers.
+///
+/// Only a module whose source text names the symbol in an `@intrinsic(..)`
+/// attribute is parsed (#4458: a program parses only the stdlib it reaches);
+/// the parse then confirms the declaration, so the text alone decides
+/// nothing (an occurrence in a comment finds no fn and is skipped).
+fn intrinsic_declaration(symbol: &str) -> Option<(&'static str, &'static almide_lang::ast::Decl)> {
+    static CANDIDATES: std::sync::OnceLock<HashMap<&'static str, Vec<&'static str>>> = std::sync::OnceLock::new();
+    let candidates = CANDIDATES.get_or_init(|| {
+        let mut map: HashMap<&'static str, Vec<&'static str>> = HashMap::new();
+        for (m, _) in STDLIB_MODULE_EFFECTS {
+            let Some(src) = almide_lang::stdlib_info::bundled_source(m) else { continue };
+            for sym in intrinsic_literals(src) {
+                let ms = map.entry(sym).or_default();
+                if !ms.contains(m) {
+                    ms.push(m);
+                }
+            }
+        }
+        map
+    });
+    candidates.get(symbol)?.iter().find_map(|m| module_fns(m).find(|d| intrinsic_symbol(d) == Some(symbol)).map(|d| (*m, d)))
+}
+
+/// The string literal opening each `@intrinsic(` in `src`, unparsed.
+fn intrinsic_literals(src: &'static str) -> impl Iterator<Item = &'static str> {
+    src.split("@intrinsic(").skip(1).filter_map(|rest| {
+        let lit = rest.trim_start().strip_prefix('"')?;
+        lit.find('"').map(|end| &lit[..end])
+    })
+}
+
+/// Is `symbol` a runtime symbol the classification answers for — the
+/// `@intrinsic` of a declared stdlib fn, or one whose head names a classified
+/// module ([`runtime_symbol_effect`])?
+pub fn runtime_symbol_classified(symbol: &str) -> bool {
+    intrinsic_declaration(symbol).is_some() || runtime_symbol_module(symbol).is_some()
 }
 
 /// The categories a runtime call (`almide_rt_<module>_<fn>`, the `@intrinsic`
 /// mangling; `http` / `json` / `regex` also use `almide_<module>_<fn>`)
 /// carries. The module is the longest table entry (or alias) the symbol's
 /// head names; the declaring function is found by its `@intrinsic` symbol,
-/// and an undeclared symbol fails closed to the module's whole default.
+/// and an undeclared symbol fails closed to the module's whole default. A
+/// symbol whose head names no classified module is unknown: every category
+/// ([`unknown_call_effects`]).
 pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
-    let Some(rest) = symbol.strip_prefix("almide_rt_").or_else(|| symbol.strip_prefix("almide_")) else { return Vec::new() };
-    let module = STDLIB_MODULE_EFFECTS
-        .iter()
-        .map(|(m, _)| (*m, *m))
-        .chain(RUNTIME_PREFIX_ALIASES.iter().copied())
-        .filter(|(prefix, _)| rest.strip_prefix(prefix).is_some_and(|r| r.starts_with('_')))
-        .max_by_key(|(prefix, _)| prefix.len())
-        .map(|(_, m)| m);
-    let Some(row) = module.and_then(module_effects) else { return Vec::new() };
+    if let Some((m, d)) = intrinsic_declaration(symbol) {
+        return module_effects(m).map_or_else(unknown_call_effects, |row| decl_effects(row, d));
+    }
+    let Some(module) = runtime_symbol_module(symbol) else { return unknown_call_effects() };
+    let Some(row) = module_effects(module) else { return unknown_call_effects() };
     if row == ModuleEffects::Pure {
         return Vec::new();
     }
-    let module = module.unwrap_or_default();
     match module_fns(module).find(|d| intrinsic_symbol(d) == Some(symbol)) {
         Some(d) => decl_effects(row, d),
         None => match row {
@@ -352,6 +457,93 @@ pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
             ModuleEffects::Pure => Vec::new(),
         },
     }
+}
+
+/// The categories of a compiler-derived helper the IR calls by a bare name
+/// (`__err_at`, `__decode_option_string`, `__encode_list_int`: the derived
+/// Codec's), read off the bodies the self-host registry serves under that
+/// name: a body's own `@category`, else nothing when no body serving it
+/// reaches a floor host op or an output builtin, else every category.
+/// `None` when no registry row serves the name — not a derived helper.
+///
+/// Judged once per call per process, and only for the helpers the program
+/// calls: a program reaches the same helper from many sites.
+pub fn derived_helper_effect(call: &str) -> Option<Vec<Effect>> {
+    type Seen = std::sync::Mutex<HashMap<String, Option<Vec<Effect>>>>;
+    static SEEN: std::sync::OnceLock<Seen> = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(v) = seen.lock().unwrap_or_else(|p| p.into_inner()).get(call) {
+        return v.clone();
+    }
+    let v = derived_helper_effect_from_bodies(call);
+    seen.lock().unwrap_or_else(|p| p.into_inner()).insert(call.to_string(), v.clone());
+    v
+}
+
+fn derived_helper_effect_from_bodies(call: &str) -> Option<Vec<Effect>> {
+    let bodies = crate::host_reach::registry_bodies(call);
+    if bodies.is_empty() {
+        return None;
+    }
+    let mut out: Vec<Effect> = Vec::new();
+    for (prog, name) in bodies {
+        let Some(d) = prog.decls.iter().find(|d| matches!(d, almide_lang::ast::Decl::Fn { name: n, .. } if n.as_str() == name)) else { continue };
+        let cats = match declared_categories(d) {
+            Some(own) => own,
+            None if crate::host_reach::body_reaches_category(prog, &name) => unknown_call_effects(),
+            None => Vec::new(),
+        };
+        for c in cats {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The declared stdlib fns the classification charges nothing — a fn of a
+/// `Pure` module, a plain fn of an `EffectFns` module, an `@category()` —
+/// that a body serving them shows reaching a floor host op or an output
+/// builtin that does not abort, directly or through what it calls (decision
+/// rows purity.effect-classification, pure.e092-reach, #4827, #4951). A
+/// bodyless fn no self-host body serves is judged by its declaration (an
+/// explicit `@category(…)`, else its module's row). An `effect fn` declaring
+/// `@category()` whose only reach is a method it dispatches on a
+/// protocol-bounded param (`io.read[H: Read](h)`) is charged at the conformer
+/// instead: the handle is the capability (R-L0-44), the effect flow charges
+/// the dispatch with every conformer the program may pick, and no plain fn —
+/// so no `@pure` one — may call an `effect fn` (E006).
+///
+/// `extra` replaces one module's bundled source (a gate's control or novel
+/// test). Returns the offenders and how many fns were judged.
+pub fn uncharged_fns_reaching_a_category(extra: Option<(&str, &'static almide_lang::ast::Program)>) -> (Vec<String>, usize) {
+    let mut bad = Vec::new();
+    let mut judged = 0;
+    for (m, row) in STDLIB_MODULE_EFFECTS {
+        let Some(bundled) = almide_lang::stdlib_info::bundled_source(m).and_then(almide_lang::parse_cached) else { continue };
+        let replaced = extra.filter(|(em, _)| em == m).map(|(_, p)| p);
+        let prog = replaced.unwrap_or(bundled);
+        for d in prog.decls.iter().filter(|d| matches!(d, almide_lang::ast::Decl::Fn { .. })) {
+            if crate::host_reach::is_host_op(d) || !decl_effects(*row, d).is_empty() {
+                continue;
+            }
+            judged += 1;
+            let reaches = match replaced {
+                Some(p) => crate::host_reach::fn_reaches_category_in(p, m, fn_name(d)),
+                None => crate::host_reach::stdlib_fn_reaches_category(m, fn_name(d)),
+            };
+            let at_the_conformer = fn_is_effect(d)
+                && declared_categories(d).is_some_and(|c| c.is_empty())
+                && !crate::host_reach::stdlib_fn_reaches_category_but_dispatch(m, fn_name(d));
+            if reaches && !at_the_conformer {
+                bad.push(format!("{m}.{}", fn_name(d)));
+            }
+        }
+    }
+    bad.sort();
+    bad.dedup();
+    (bad, judged)
 }
 
 /// Is the stdlib function `module.func` declared `effect fn` (#4151)? Read
@@ -625,6 +817,37 @@ mod classification_gate {
         assert!(bad.is_empty(), "fns of a module classified Pure reach a host op: {bad:?} — classify the module or the fn");
     }
 
+    /// The general form of the gate above (decision rows
+    /// purity.effect-classification, pure.e092-reach, #4951): EVERY declared
+    /// stdlib fn the classification charges nothing reaches no host op and
+    /// no output builtin (an abort is ADR-0022's halt; a fn whose purpose is
+    /// the abort, a testing assertion, declares it: #4951). So "charged nothing" is never a missed
+    /// category, whatever the module's row says; a new fn of any module is
+    /// held to it, and `@pure` (E092), `[permissions]` and `--profile
+    /// critical`, which all read the declaration, see what the body does.
+    #[test]
+    fn a_fn_charged_no_category_reaches_no_category() {
+        let (bad, judged) = uncharged_fns_reaching_a_category(None);
+        assert!(bad.is_empty(), "stdlib fns charged no category reach a host op or an output builtin: {bad:?} — declare their @category");
+        assert!(judged > 1000, "only {judged} uncharged fns judged — the source scan found nothing");
+    }
+
+    /// The control of the gate above: a fresh plain fn added to a module whose
+    /// fns are charged nothing by default, writing stderr through a fresh
+    /// helper, is refused; the same fn declaring the leaf is not.
+    #[test]
+    fn a_fresh_uncharged_fn_reaching_an_output_is_refused() {
+        let real = almide_lang::stdlib_info::bundled_source("testing").expect("testing has a source");
+        let fresh = format!("{real}\nfn __fresh_helper_4951(s: String) -> Unit = eprintln(s)\nfn fresh_check_4951(r: Bool) -> Unit = if r then () else __fresh_helper_4951(\"no\")\n");
+        let prog = almide_lang::parse_cached(Box::leak(fresh.into_boxed_str())).expect("parses");
+        let (bad, _) = uncharged_fns_reaching_a_category(Some(("testing", prog)));
+        assert!(bad.contains(&"testing.fresh_check_4951".to_string()), "a fresh fn writing stderr is admitted: {bad:?}");
+        let declared = format!("{real}\nfn __fresh_helper_4951(s: String) -> Unit = eprintln(s)\n@category(\"Abort\", \"IO.stderr\")\nfn fresh_check_4951(r: Bool) -> Unit = if r then () else __fresh_helper_4951(\"no\")\n");
+        let prog = almide_lang::parse_cached(Box::leak(declared.into_boxed_str())).expect("parses");
+        let (bad, _) = uncharged_fns_reaching_a_category(Some(("testing", prog)));
+        assert!(!bad.contains(&"testing.fresh_check_4951".to_string()), "a declared fn is refused: {bad:?}");
+    }
+
     /// The gate's fixture and control: a plain fn added to a `Pure` module
     /// whose body writes a file through the floor is refused; the module's
     /// own source is not.
@@ -655,6 +878,26 @@ mod classification_gate {
         assert!(checked > 500, "only {checked} intrinsics checked — the source scan found nothing");
     }
 
+    /// The text scan that picks which modules to parse finds every
+    /// `@intrinsic` a full parse of every classified module finds, and the
+    /// same first declaring module.
+    #[test]
+    fn the_intrinsic_lookup_parses_only_where_the_text_names_the_symbol_and_misses_none() {
+        let mut first: HashMap<&str, &str> = HashMap::new();
+        for (m, _) in STDLIB_MODULE_EFFECTS {
+            for d in module_fns(m) {
+                if let Some(sym) = intrinsic_symbol(d) {
+                    first.entry(sym).or_insert(m);
+                }
+            }
+        }
+        assert!(first.len() > 500, "only {} intrinsics found", first.len());
+        for (sym, m) in &first {
+            assert_eq!(intrinsic_declaration(sym).map(|(dm, _)| dm), Some(*m), "`{sym}`");
+        }
+        assert!(intrinsic_declaration("almide_rt_no_such_symbol_zz").is_none());
+    }
+
     /// The rows #3246 fixed, in ADR-0026 D2's leaves.
     #[test]
     fn the_rows_3246_fixed() {
@@ -675,15 +918,20 @@ mod classification_gate {
         assert_eq!(stdlib_call_effect("http", "get"), vec![NetFetch]);
         assert!(stdlib_call_effect("http", "response").is_empty());
         assert!(stdlib_call_effect("list", "map").is_empty());
-        assert!(stdlib_call_effect("not_a_module", "f").is_empty());
-        // #2223: a user module named like a stdlib module, calling a fn the
-        // stdlib module does not declare, is not the stdlib module.
-        assert!(stdlib_call_effect("net", "f").is_empty());
-        assert!(stdlib_call_effect("random", "my_helper").is_empty());
+        // A call the classification cannot answer for is unknown, so every
+        // category — never the empty set (decision row
+        // purity.effect-classification). A user module named like a stdlib
+        // module (#2223) is resolved to its own body by every consumer before
+        // it would ask here.
+        assert_eq!(stdlib_call_effect("not_a_module", "f"), Effect::ALL.to_vec());
+        assert_eq!(stdlib_call_effect("net", "f"), Effect::ALL.to_vec());
+        assert_eq!(stdlib_call_effect("random", "my_helper"), Effect::ALL.to_vec());
         assert_eq!(stdlib_call_effect("fan", "map"), vec![Fan]);
         assert_eq!(runtime_symbol_effect("almide_http_get"), vec![NetFetch]);
         assert!(runtime_symbol_effect("almide_regex_find").is_empty());
-        assert!(runtime_symbol_effect("println").is_empty());
+        assert_eq!(runtime_symbol_effect("println"), Effect::ALL.to_vec());
+        assert_eq!(runtime_symbol_effect("almide_rt_no_such_module_f"), Effect::ALL.to_vec());
+        assert!(runtime_symbol_classified("almide_rt_list_map") && !runtime_symbol_classified("almide_rt___err_at"));
     }
 
     /// #4155: starting a process is `Proc`, never `Env`; the environment
@@ -743,7 +991,11 @@ mod classification_gate {
                 let almide_lang::ast::Decl::Fn { visibility, .. } = d else { continue };
                 if fn_is_effect(d) { continue; }
                 let declared = declared_categories(d);
-                assert!(declared.as_ref().is_none_or(|c| c.is_empty()),
+                // A plain fn may declare only what a plain fn may do: the
+                // leaves of the output and abort builtins (ADR-0022) — a
+                // testing assertion's `Abort` and `IO.stderr` (#4951).
+                let plain = plain_fn_leaves();
+                assert!(declared.as_ref().is_none_or(|c| c.iter().all(|e| plain.contains(e))),
                     "`{m}.{}` is a plain fn with a host category: make it `effect fn`", fn_name(d));
                 if matches!(row, ModuleEffects::All(_)) && *visibility == almide_lang::ast::Visibility::Public {
                     assert!(declared.is_some(),

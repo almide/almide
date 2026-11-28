@@ -646,15 +646,20 @@ pub fn cmd_check_effects(file: &str) {
         std::process::exit(1);
     }
 
-    // Run effect inference
+    // Run effect inference — over the WHOLE program when it has user
+    // modules: a call into one is judged by that module's body, and the
+    // entry's IR alone does not hold it (an unresolved call is unknown, so
+    // every category: decision row effect.flow-categories).
     use almide::codegen::pass_effect_inference::{EffectInferencePass, EffectMap};
     use almide::codegen::pass::NanoPass;
-    let result = EffectInferencePass.run(ir, almide::codegen::pass::Target::Rust);
+    let result = EffectInferencePass.run(whole.clone().unwrap_or(ir), almide::codegen::pass::Target::Rust);
     let ir = result.program;
 
-    // Display results
+    // Display results: the entry file's own functions, as before the whole
+    // program was inferred (the imported modules' are charged to them).
     err(&format!("{}:\n", file));
-    let mut entries: Vec<_> = ir.effect_map.functions.iter().collect();
+    let own: std::collections::HashSet<String> = ir.functions.iter().map(|f| f.name.to_string()).collect();
+    let mut entries: Vec<_> = ir.effect_map.functions.iter().filter(|(n, _)| own.contains(n.as_str())).collect();
     entries.sort_by_key(|(name, _)| (*name).clone());
 
     for (name, fe) in &entries {

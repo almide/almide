@@ -207,12 +207,13 @@ fn forget_root(
 type ScopePath = Vec<(usize, bool)>;
 
 /// A payload read below a tag test whose taken arm leaves the function by an early
-/// `Return` → the side the surviving path is on. The test's own scope must still be
+/// `Return`, or stops the process (`Die`: `main`'s `!` inside a branch, a
+/// `panic` arm) → the side the surviving path is on. The test's own scope must still be
 /// open at the read, and the carrier unchanged since the test. Empty for every
-/// function that holds no `Return`, so a function without one renders as before.
+/// function that holds no `Return` or `Die`, so a function without one renders as before.
 pub(super) fn exit_proven_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
     let mut proven = BTreeMap::new();
-    if !func.ops.iter().any(|op| matches!(op, Op::Return { .. })) { return proven; }
+    if !func.ops.iter().any(leaves) { return proven; }
     let mut consts: BTreeMap<ValueId, i64> = BTreeMap::new();
     let mut at: BTreeMap<ValueId, (ValueId, i64)> = BTreeMap::new();
     let mut tags: BTreeMap<ValueId, (ValueId, bool)> = BTreeMap::new();
@@ -246,7 +247,7 @@ pub(super) fn exit_proven_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
                 if let Some(f) = open.last_mut() { f.1 = true; }
                 if let Some(s) = scopes.last_mut() { s.0 = i; }
             }
-            Op::Return { .. } => {
+            op if leaves(op) => {
                 if let (Some(f), Some((_, false))) = (open.last_mut(), scopes.last()) { f.2 = true; }
             }
             Op::EndIf { .. } | Op::LoopEnd => {
@@ -263,4 +264,10 @@ pub(super) fn exit_proven_sides(func: &MirFunction) -> BTreeMap<ValueId, bool> {
         }
     }
     proven
+}
+
+/// An op past which the path does not go on: an early `Return`, or a `Die`
+/// (the controlled halt) — no op after it in the same arm runs.
+fn leaves(op: &Op) -> bool {
+    matches!(op, Op::Return { .. } | Op::Prim { kind: PrimKind::Die, .. })
 }

@@ -96,6 +96,9 @@ impl Emitter<'_> {
         tail: bool,
         ret_hint: Option<SliceTy>,
     ) -> ArmResult {
+        if let Some(out) = self.lower_novel_callback_arm(target, args, ret_hint)? {
+            return Ok(out);
+        }
         if let Some(out) = self.lower_string_ext(target, args)? {
             return Ok(out);
         }
@@ -476,5 +479,46 @@ impl Emitter<'_> {
     /// #2004): read by `rc_owned_result` through the node's identity.
     pub(crate) fn mark_owned_call(&mut self, target: &CallTarget) {
         self.owned_call_marks.mark_target(target);
+    }
+}
+
+/// The test-only NOVEL ARM (decision row witness.subset-gate): when a test
+/// names a `(module, func)`, its calls are lowered by an arm the witness gate
+/// has never seen — one that takes a literal callback with neither a loop
+/// activation nor a closure value (the callback is not lowered at all), every
+/// other argument an ordinary borrowed argument, and a scalar zero for its
+/// result. The module-call audit must refuse the frame
+/// (`module-arm:unaudited`), whatever the gate's arm table says. Process-wide;
+/// `tests/decision_novel_test.rs` is its one user.
+static NOVEL_CALLBACK_ARM: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+/// Test hook: lower `module.func` by the novel arm above (`None`: off).
+#[doc(hidden)]
+pub fn test_novel_callback_arm(arm: Option<(&str, &str)>) {
+    *NOVEL_CALLBACK_ARM.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = arm.map(|(m, f)| (m.to_string(), f.to_string()));
+}
+
+impl Emitter<'_> {
+    /// [`test_novel_callback_arm`]'s arm, for the call it names.
+    fn lower_novel_callback_arm(&mut self, target: &CallTarget, args: &[IrExpr], ret_hint: Option<SliceTy>) -> Result<Option<Option<Lowered>>, EmitError> {
+        let CallTarget::Module { module, func, .. } = target else { return Ok(None) };
+        let armed = NOVEL_CALLBACK_ARM.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref()
+            .is_some_and(|(m, f)| m == module.as_str() && f == func.as_str());
+        if !armed {
+            return Ok(None);
+        }
+        for a in args {
+            if !matches!(a.kind, almide_ir::IrExprKind::Lambda { .. }) {
+                self.lower_arg(a, None, ArgMode::Borrow)?;
+                self.f.instructions().drop();
+            }
+        }
+        let ty = ret_hint.unwrap_or(INT);
+        if ty == BOOL {
+            self.f.instructions().i32_const(0);
+        } else {
+            self.f.instructions().i64_const(0);
+        }
+        Ok(Some(Some(Lowered::scalar(ty))))
     }
 }

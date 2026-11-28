@@ -1,0 +1,14 @@
+# Negative control of verify.wasm-e081-availability (proofs/decision-sites.toml): the stock-p1 audit admits every emitted op again, so a fn no table row names that emits an op no stock runtime serves builds
+# control_test: tests/decision_e081_audit_novel_test.rs::novel_an_unserved_op_of_a_fn_no_row_names_is_refused_by_the_p1_audit
+diff --git a/src/wasm_route.rs b/src/wasm_route.rs
+--- a/src/wasm_route.rs
++++ b/src/wasm_route.rs
+@@ -31,7 +31,7 @@ use crate::ir::IrProgram;
+ /// ADR-0025: the artifact carries the private `almide:process/spawn` import
+ /// and builds with a note), as for a listed process fn.
+ pub fn stock_p1_unserved<'a>(host_ops: impl IntoIterator<Item = &'a i32>) -> Option<i32> {
+-    host_ops.into_iter().copied().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
++    host_ops.into_iter().copied().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op) && false)
+ }
+ pub use crate::wasm_leg::ModuleSource;
+ 

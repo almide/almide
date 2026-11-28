@@ -29,7 +29,11 @@ pub use almide_ir::effect::{Effect, FunctionEffects, EffectMap};
 /// in `almide_ir::effect::STDLIB_MODULE_EFFECTS` (#3246). With
 /// [`runtime_name_to_effect`], the only per-operation input of
 /// `crate::effect_flow`.
+///
+/// A monomorphised instance (`list.__almd_mono4_join__String`, on a route
+/// judged after mono) is classified as the generic it instantiates.
 pub(crate) fn module_to_effect(module: &str, func: &str) -> Vec<Effect> {
+    let func = almide_ir::mono_name::mono_instance_base(func).unwrap_or(func);
     almide_ir::effect::stdlib_call_effect(module, func)
 }
 
@@ -144,7 +148,9 @@ mod tests {
         assert_eq!(runtime_name_to_effect("almide_rt_datetime_now"), vec![Effect::Time]);
         assert_eq!(runtime_name_to_effect("almide_rt_random_float"), vec![Effect::Rand]);
         assert!(runtime_name_to_effect("almide_rt_list_map").is_empty());
-        assert!(runtime_name_to_effect("println").is_empty());
+        // Not a runtime symbol: unknown, every category (the scan asks only
+        // about the symbols it classifies, after the builtins).
+        assert_eq!(runtime_name_to_effect("println"), Effect::ALL.to_vec());
     }
 
     fn extern_fn(name: &str, is_effect: bool) -> IrFunction {

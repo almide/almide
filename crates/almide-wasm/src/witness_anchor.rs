@@ -35,6 +35,11 @@ struct State {
     /// conversion, tco.rs): its recorded end offsets, mapped to the end
     /// offsets of the instructions they became.
     remaps: HashMap<u64, HashMap<usize, usize>>,
+    /// The emission pass the bodies being sealed belong to.
+    pass: usize,
+    /// Per sealed body of a source function, its pass and the function's
+    /// witness name: the bundle's `coverage` record (witness_bundle.rs).
+    names: HashMap<u64, (usize, String)>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -57,6 +62,21 @@ pub(crate) fn begin_fn() -> u64 {
             s.serial
         }
         None => 0,
+    }
+}
+
+/// An emission pass begins (witness_frames.rs `mark_pass`).
+pub(crate) fn begin_pass(pass: usize) {
+    if let Some(s) = state().lock().expect("anchor sink").as_mut() {
+        s.pass = pass;
+    }
+}
+
+/// Body `k`, sealed, is source function `name` of the current pass.
+pub(crate) fn name(k: u64, name: &str) {
+    if let Some(s) = state().lock().expect("anchor sink").as_mut() {
+        let pass = s.pass;
+        s.names.insert(k, (pass, name.to_string()));
     }
 }
 
@@ -116,6 +136,12 @@ fn encoded(f: &wasm_encoder::Function) -> Vec<u8> {
     v.split_off(skip)
 }
 
+/// The offset of an encoded body's first instruction (after its locals).
+fn first_offset(raw: &[u8]) -> Option<usize> {
+    let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(raw, 0));
+    Some(body.get_operators_reader().ok()?.original_position() as usize)
+}
+
 /// The end offset of each instruction of an encoded body (locals skipped).
 fn ends(raw: &[u8]) -> Option<Vec<usize>> {
     let body = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(raw, 0));
@@ -144,6 +170,13 @@ pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Functio
     }
     let (Some(eo), Some(en)) = (ends(&ro), ends(&rn)) else { return };
     let mut map = HashMap::new();
+    // The body's first offset (after its locals) is no instruction's end,
+    // yet a window opened before the first instruction starts there (a
+    // `match list.get(..)` scrutinee's arm at the top of the body): it maps
+    // to the rewritten body's own start, the `loop` the rewrite put first.
+    if let (Some(so), Some(sn)) = (first_offset(&ro), first_offset(&rn)) {
+        map.insert(so, sn);
+    }
     for (n, &o) in origin.iter().enumerate() {
         if let (Some(&from), Some(&to)) = (eo.get(o as usize), en.get(n)) {
             map.insert(from, to);
@@ -156,18 +189,27 @@ pub(crate) fn retarget(old: &wasm_encoder::Function, new: &wasm_encoder::Functio
     }
 }
 
-/// The sealed bodies, `serial -> digest`, and the remapped offsets of the
-/// bodies rewritten after sealing.
-pub fn take_all() -> (HashMap<u64, u64>, HashMap<u64, HashMap<usize, usize>>) {
+/// What the sink recorded: the sealed bodies (`serial -> digest`), the
+/// remapped offsets of the bodies rewritten after sealing, and the source
+/// function each named body is (`serial -> (pass, name)`).
+#[derive(Default)]
+pub(crate) struct Sealed {
+    pub(crate) sealed: HashMap<u64, u64>,
+    pub(crate) remaps: HashMap<u64, HashMap<usize, usize>>,
+    pub(crate) names: HashMap<u64, (usize, String)>,
+}
+
+/// Drain the sink.
+pub(crate) fn take_all() -> Sealed {
     state()
         .lock()
         .expect("anchor sink")
         .take()
-        .map(|s| (s.sealed, s.remaps))
+        .map(|s| Sealed { sealed: s.sealed, remaps: s.remaps, names: s.names })
         .unwrap_or_default()
 }
 
 /// The sealed bodies, `serial -> digest`.
 pub fn take() -> HashMap<u64, u64> {
-    take_all().0
+    take_all().sealed
 }

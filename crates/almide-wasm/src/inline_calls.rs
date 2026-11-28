@@ -565,6 +565,21 @@ impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
 }
 
 /// The admitted callees of one var space.
+/// A function no call is inlined into: an effect, test, generic, scoped or
+/// entry function, a name declared more than once (`copies`), or one a local
+/// shadows.
+fn never_inlined(f: &IrFunction, copies: usize, shadowed: &HashSet<String>) -> bool {
+    let name = f.name.as_str();
+    f.is_effect
+        || f.is_test
+        || f.generics.as_ref().is_some_and(|g| !g.is_empty())
+        || name == "main"
+        || f.is_scoped_fn()
+        || f.is_scoped_block_entry()
+        || copies != 1
+        || shadowed.contains(name)
+}
+
 fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, module: Option<&str>) -> HashMap<String, Callee> {
     let mut count: HashMap<&str, usize> = HashMap::new();
     for f in fns {
@@ -575,15 +590,7 @@ fn callees_of(fns: &[IrFunction], shadowed: &HashSet<String>, vt: &VarTable, mod
     let mut out = HashMap::new();
     for f in fns {
         let name = f.name.as_str();
-        if f.is_effect
-            || f.is_test
-            || f.generics.as_ref().is_some_and(|g| !g.is_empty())
-            || name == "main"
-            || f.is_scoped_fn()
-            || f.is_scoped_block_entry()
-            || count[name] != 1
-            || shadowed.contains(name)
-        {
+        if never_inlined(f, count[name], shadowed) {
             continue;
         }
         if let Some(m) = module

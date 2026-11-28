@@ -20,6 +20,19 @@
 //! needs comes from [`RoutedWasm::stock_wasi`] (`almide_wasi::to_wasi`).
 
 use crate::ir::IrProgram;
+
+/// The stock-p1 audit (decision row `verify.wasm-e081-availability`): the
+/// first emitted host op the preview-1 shim does not serve
+/// (`almide_wasi::P1_SERVED_OPS`), which the build and check routes refuse
+/// as a wall. It reads the ops the module EMITS, so a stdlib fn the
+/// availability table has no row for is judged by what it does: an op no
+/// stock runtime can answer is refused here whatever the table says. The
+/// subprocess family is in the served set by design (host-capability,
+/// ADR-0025: the artifact carries the private `almide:process/spawn` import
+/// and builds with a note), as for a listed process fn.
+pub fn stock_p1_unserved<'a>(host_ops: impl IntoIterator<Item = &'a i32>) -> Option<i32> {
+    host_ops.into_iter().copied().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
+}
 pub use crate::wasm_leg::ModuleSource;
 
 /// The switches the route honours — the CLI fills them from the environment
@@ -205,7 +218,7 @@ pub fn route_wasm(
         && !opts.component_p3
         && !opts.serve_export
         && !sockets
-        && let Some(op) = host_ops.iter().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
+        && let Some(op) = stock_p1_unserved(&host_ops)
     {
         return Err(wall(
             format!("host op {op} has no stock-WASI service (the embedded host — `almide run --target wasm` — serves it)"),

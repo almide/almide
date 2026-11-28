@@ -725,8 +725,9 @@ strings and Bytes/Matrix handles. Neither proves properties of host code.
 Fallible mutable and nominal adapters, and every other foreign address,
 still refuse the v1 route.
 
-**A Region lent to an `@extern(rust)` call on native.** When a program
-passes an `ffi` Region to an `@extern(rust)` fn, the native v1 render keeps
+**A Region lent to an `@extern(rust)` or `@extern(c)` call, or by the C
+caller of an `@export(c)` fn, on native.** When a program
+passes an `ffi` Region to an `@extern(rust)` or `@extern(c)` fn, the native v1 render keeps
 the Region's memory in the runtime's `AlmideFfiBlock`: one fixed-size `Rc`
 allocation of `Cell<u8>` that every copy of the Region shares
 (`native_region.rs`; `runtime/rs/src/ffi.rs`). The call passes
@@ -737,10 +738,24 @@ foreign code may read and write `[ptr, ptr + len)`; the block is fixed-size,
 kept alive by the Region argument, and neither moved nor freed during the
 call; the host stays inside that range and keeps no pointer after it
 returns. Almide's own reads and writes of the block are bounds-checked safe
-code. The ownership witness sees the block as an ordinary counted value. A C
-binding, an export, a Region inside another value, a returned, written-back
-or callback Region, and a host call that takes the address itself are
-refused, so this is the one place a block's address leaves Almide. Target-priority tests use deliberately different fallback bodies so
+code. The ownership witness sees the block as an ordinary counted value. An
+`@export(c)` fn's Region parameter (ADR-0031 amendment A2, C-452) is the same
+block in the other direction: its crate-root adapter copies the C caller's
+`len` bytes at `ptr` into a fresh block (`almide_rt_ffi_block_lend`), lends
+the fn a Region over it, and after the call stops the process if a copy of
+the Region is still held, else copies a `@region(out = p)` parameter's bytes
+back to `ptr` (`almide_rt_ffi_block_lent_end`). Two things are TRUSTED there,
+and nothing checks either (owner ruling 2026-11-27):
+(1) the pointer and length the C caller passes describe memory that really
+exists and stays alive until the call returns — readable, and writable too
+for a `@region(out = p)` parameter; (2) the C caller does not read or change
+that memory while the Almide fn runs — the fn works on a copy taken when the
+call starts, and its writes reach the caller's memory only when it returns,
+so a caller that looked at the buffer mid-call (from a callback, another
+thread) would see the old bytes. A C Region return (`@region(len, release)`), a Region inside
+another value, a returned, written-back or callback Region, and a host call
+that takes the address itself are refused, so these are the places a block's
+address or bytes cross the boundary. Target-priority tests use deliberately different fallback bodies so
 an inliner cannot silently substitute them for the selected foreign call.
 
 **Native test harness.** Checked test bodies and their reachable helpers enter
@@ -1043,6 +1058,40 @@ TRUSTED: the runtime unix code itself (descriptor bookkeeping, `sendmsg` /
 `recvmsg` / `poll` / `fcntl` system calls), tested on both legs by the
 `spec/embedded_cross/net_unix_*.almd` and `net_huge_read_lengths.almd`
 fixtures, not proven.
+
+**Native row host calls.** (Decision row verify.native-calls-hosts, 2026-11-26.)
+Every other capability module's host ops (`process`, `http`, `net`, `env`,
+`io`, `datetime`, `random`, `testing`, `uuid`) are called by a program on the
+certified native render as the runtime functions their host-op rows name —
+the code the standard native build compiles, carried as ordinary floor
+bodies. NEWLY TRUSTED is nothing the project did not already trust: these
+are the same runtime bodies, and their capabilities are counted at the call
+as before. What changes is that each such call is now RECORDED: the set is
+DERIVED from the host-op table (`host_ops::native_row_host_calls`: per module
+of `CAP_MODULES` with no class above, in that order, each row's runtime
+symbol once), a call is recorded by its row's id after the fs and unix sets'
+ids, and `NativeCalls.hosts_ok` accepts an id below the length of
+`native_host_calls` (fs, unix, then this set). A host call no set names gets
+the out-of-range id and is refused. `tests/native_fs_host_calls_test.rs`
+holds `NativeCalls.native_row_host_calls` and almide-verify's copy to the
+derivation. TRUSTED: the runtime code of those modules (tested on both legs
+by the cross-target corpus, not proven).
+
+**Bundle coverage.** (Decision row verify.bundle-coverage, 2026-11-26.) A
+version-8 certificate bundle over a wasm module names, per defined body of
+the artifact, the source functions whose sealed body it is, or `*`; and the
+certified functions whose body was pruned. `almide-verify` (`coverage.rs`)
+counts the artifact's code-section entries itself and refuses a record of
+another length, a name no witness or `uncertified` record covers, and a
+certified function the record places nowhere, so a source function the
+producer dropped from the bundle while its body shipped under its name is
+refused, not left out of the verdict. NEWLY TRUSTED: that a `*` body is a
+runtime routine the emitter writes (an allocator, a release, a helper), not a
+source function, and that a function placed as unshipped was pruned. The
+producer reads both off the bodies it sealed (`witness_anchor.rs` names a
+body at its seal; the bundle finds it in the shipped module by the digest the
+seal took and the function map of `to_wasi_mapped`); the verifier, which links
+no wasm decoder, cannot check either.
 
 ## FFI: an `@extern`'s declared purity is the author's claim
 

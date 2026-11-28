@@ -539,7 +539,7 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
                         apply_content_change(text, change);
                     }
                     if trace {
-                        eprintln!("[lsp-trace] didChange applied, {} bytes now — analysis deferred to idle", text.len());
+                        crate::err(&format!("[lsp-trace] didChange applied, {} bytes now — analysis deferred to idle", text.len()));
                     }
                     dirty.insert(uri);
                 }
@@ -548,7 +548,7 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
                 // SILENTLY: an undeserializable didChange means the analyzed
                 // map silently stops updating (#1008's hang started life as
                 // an invisible drop like this).
-                Err(e) => eprintln!("[lsp] didChange params failed to parse — dropped: {e}"),
+                Err(e) => crate::err(&format!("[lsp] didChange params failed to parse — dropped: {e}")),
             }
         }
         "textDocument/didClose" => {
@@ -562,8 +562,46 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
     }
 }
 
+/// The server's stdio transport. `lsp_server::Connection::stdio` writes each
+/// message to stdout itself, past the output sink; this one serializes each
+/// message and writes it through `crate::out_lsp_frame`, which escapes every
+/// hidden character the body holds (decision row front.diagnostic-echo), so a
+/// handler that forgot to escape a text still cannot put a raw one on the wire.
+fn stdio_transport() -> (Connection, std::thread::JoinHandle<()>) {
+    let (writer_tx, writer_rx) = crossbeam_channel::bounded::<Message>(0);
+    let writer = std::thread::spawn(move || {
+        for msg in writer_rx {
+            let mut frame = Vec::new();
+            if msg.write(&mut frame).is_err() {
+                return;
+            }
+            // `Message::write` frames the body itself: write the body again
+            // through the sink, which takes its own length.
+            let text = String::from_utf8_lossy(&frame);
+            let body = text.split_once("\r\n\r\n").map_or(&*text, |(_, b)| b);
+            if crate::out_lsp_frame(body).is_err() {
+                return;
+            }
+        }
+    });
+    let (reader_tx, reader_rx) = crossbeam_channel::bounded::<Message>(0);
+    // The reader is never joined: it ends with stdin (or the `exit`
+    // notification), and the process may end first.
+    std::thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let mut stdin = stdin.lock();
+        while let Ok(Some(msg)) = Message::read(&mut stdin) {
+            let is_exit = matches!(&msg, Message::Notification(n) if n.method == "exit");
+            if reader_tx.send(msg).is_err() || is_exit {
+                break;
+            }
+        }
+    });
+    (Connection { sender: writer_tx, receiver: reader_rx }, writer)
+}
+
 pub fn run_lsp() {
-    let (connection, io_threads) = Connection::stdio();
+    let (connection, writer) = stdio_transport();
 
     let server_capabilities = match serde_json::to_value(lsp_server_capabilities()) {
         Ok(v) => v,
@@ -606,9 +644,9 @@ pub fn run_lsp() {
         };
         match msg {
             Message::Request(req) => {
-                if connection.handle_shutdown(&req).unwrap_or(false) { return; }
+                if connection.handle_shutdown(&req).unwrap_or(false) { break; }
                 if almide_base::env::flag("ALMIDE_LSP_TRACE") {
-                    eprintln!("[lsp-trace] request  {} id={:?}", req.method, req.id);
+                    crate::err(&format!("[lsp-trace] request  {} id={:?}", req.method, req.id));
                 }
                 flush_dirty(&connection, &documents, &mut analyzed, &mut dep_cache, &mut dirty);
                 let resp = handle_request(&req, &documents, &analyzed, &workspace_root);
@@ -620,24 +658,24 @@ pub fn run_lsp() {
                 // doc) is an honest empty result, and the drop is LOGGED so
                 // it can never be invisible again.
                 let r = resp.unwrap_or_else(|| {
-                    eprintln!(
-                        "[lsp] request {} id={:?} unanswerable (bad params or no analyzed doc) — replying null (#1008)",
-                        req.method, req.id
-                    );
+                    crate::err(&format!("[lsp] request {} id={:?} unanswerable (bad params or no analyzed doc) — replying null (#1008)",
+                        req.method, req.id));
                     Response::new_ok(req.id.clone(), serde_json::Value::Null)
                 });
                 connection.sender.send(Message::Response(r)).ok();
             }
             Message::Notification(notif) => {
                 if almide_base::env::flag("ALMIDE_LSP_TRACE") {
-                    eprintln!("[lsp-trace] notification {}", notif.method);
+                    crate::err(&format!("[lsp-trace] notification {}", notif.method));
                 }
                 handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache, &mut dirty)
             }
             Message::Response(_) => {}
         }
     }
-    io_threads.join().ok();
+    // Every reply handed to the writer is on the wire before the server ends.
+    drop(connection);
+    writer.join().ok();
 }
 
 /// Re-analyze every dirty document and publish its diagnostics — the single
@@ -670,7 +708,7 @@ fn apply_content_change(text: &mut String, change: TextDocumentContentChangeEven
     } else {
         // A malformed range must never corrupt the buffer. Loudly keep the
         // old text; the next full analysis will surface any drift.
-        eprintln!("[lsp] didChange range {:?} out of bounds ({} bytes) — edit dropped", range, text.len());
+        crate::err(&format!("[lsp] didChange range {:?} out of bounds ({} bytes) — edit dropped", range, text.len()));
     }
 }
 

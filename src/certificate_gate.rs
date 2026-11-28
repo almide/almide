@@ -50,6 +50,9 @@ pub fn judge(bundle_text: &[u8], shipped: &[u8], allow_incomplete: bool) -> Resu
     let pinned = bundle::artifact_matches(artifact, shipped);
     let (verdicts, outcome) = bundle::verify(&parsed);
     let outcome = if pinned { outcome } else { Outcome::Rejected };
+    // Every defined body of the module is a function the verdict names.
+    let uncovered = almide_verify::coverage::judge(&parsed, Some(shipped)).err();
+    let outcome = if uncovered.is_some() { Outcome::Rejected } else { outcome };
     match outcome {
         Outcome::Certified => Ok(Pass::Certified),
         Outcome::Incomplete if allow_incomplete => Ok(Pass::IncompleteAllowed(parsed.uncertified.clone())),
@@ -71,6 +74,9 @@ pub fn judge(bundle_text: &[u8], shipped: &[u8], allow_incomplete: bool) -> Resu
                     almide_verify::sha256::hex(shipped),
                     artifact.sha256
                 ));
+            }
+            if let Some(why) = &uncovered {
+                lines.push(format!("COVERAGE  {why}"));
             }
             if verdicts.is_empty() {
                 lines.push("no witness: a bundle that certifies nothing is not an accept".into());

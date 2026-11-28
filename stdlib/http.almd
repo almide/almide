@@ -450,14 +450,17 @@ fn __http_response_repr(resp: HttpResponse) -> String = _
 // means on the certified native render — the runtime struct's own equality.
 // Named after the runtime-backed row (`stdlib_info::runtime_backed_eq_surface`).
 // The wasm legs compare the self-hosted rep and never call these.
+@category
 @intrinsic("almide_http_req_eq")
 @borrow_ref(a, b)
 fn __http_request_eq(a: HttpRequest, b: HttpRequest) -> Bool = _
 
+@category
 @intrinsic("almide_http_call_eq")
 @borrow_ref(a, b)
 fn __http_call_eq(a: HttpCall, b: HttpCall) -> Bool = _
 
+@category
 @intrinsic("almide_http_resp_eq")
 @borrow_ref(a, b)
 fn __http_response_eq(a: HttpResponse, b: HttpResponse) -> Bool = _
