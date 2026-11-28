@@ -206,6 +206,10 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(r) => r,
         Err(()) => {
             if let Some((stage, detail)) = walled { wall(stage, detail); }
+            // #4959: the default lane sends an INCOMPLETE module to native.
+            if let Some(verdict) = super::verify::take_routed_incomplete() {
+                err(&super::verify::routed_incomplete_note(test_file, &verdict));
+            }
             return None;
         }
     };
@@ -917,7 +921,8 @@ fn run_one_program(batch: &[String], dep_paths: &[(project::PkgId, std::path::Pa
     let (bytes, host_ops) = super::verify::certified_test(&batch[0], || {
         almide_wasm::emit_program_with_ops(&ir).map(|(b, ops)| (b, ops.into_iter().collect())).map_err(|e| emit_err = format!("emit: {e:?}"))
     })
-    .map_err(|()| emit_err.clone())?;
+    // An INCOMPLETE batch splits; each file's own route says so (#4959).
+    .map_err(|()| super::verify::take_routed_incomplete().map_or_else(|| emit_err.clone(), |_| "an INCOMPLETE certificate".to_string()))?;
     wasmparser::validate(&bytes).map_err(|e| format!("validate: {e}"))?;
     t.lap("wasm emit");
     if let Some(op) = host_ops

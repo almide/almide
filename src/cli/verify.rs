@@ -210,6 +210,13 @@ fn certified_with(file: &str, runner: &[&str], make: impl FnOnce() -> Result<(Ve
         // cached as judged, so every run that reuses it warns again and a
         // run without the flag refuses it.
         Ok(Some(warning)) => err(&warning),
+        // #4959: on the default test lane an INCOMPLETE module is not run
+        // either (C-462), but the file goes to the native lane like any
+        // program the wasm leg cannot serve; the caller prints the note.
+        Err(e) if incomplete_routes_native() && is_incomplete(&e) => {
+            ROUTED_INCOMPLETE.with(|r| *r.borrow_mut() = Some(e));
+            return Err(());
+        }
         Err(e) => {
             err(&format!("{}\n  the module was not run", refusal(file, &e)));
             std::process::exit(1);
@@ -233,11 +240,55 @@ fn allow_incomplete() -> bool {
     ALLOW_INCOMPLETE.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// The default `almide test` lane (wasm first, native for what wasm cannot
+/// serve; #4959): an INCOMPLETE certificate without the flag sends the file
+/// to the native lane instead of stopping the run. An explicit `--target
+/// wasm` leaves this off and refuses, as `build`, `run` and `bench` do.
+static INCOMPLETE_ROUTES_NATIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set by the default test lane before its wasm phase.
+pub(crate) fn set_incomplete_routes_native(on: bool) {
+    INCOMPLETE_ROUTES_NATIVE.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn incomplete_routes_native() -> bool {
+    INCOMPLETE_ROUTES_NATIVE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+thread_local! {
+    /// The verdict of the INCOMPLETE module [`certified_with`] just sent to
+    /// the native lane on this thread (the module is made and judged on the
+    /// caller's thread).
+    static ROUTED_INCOMPLETE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Take the verdict a module sent to the native lane left on this thread
+/// (`None` when the last refusal was not an INCOMPLETE one).
+pub(super) fn take_routed_incomplete() -> Option<String> {
+    ROUTED_INCOMPLETE.with(|r| r.borrow_mut().take())
+}
+
+/// The note the default test lane prints for a file whose wasm certificate
+/// is INCOMPLETE (#4959): the module was not run and the file runs on the
+/// native lane. The verdict's UNCERTIFIED lines follow it.
+pub(super) fn routed_incomplete_note(file: &str, verdict: &str) -> String {
+    let uncertified: Vec<String> = verdict.lines().filter(|l| l.starts_with("UNCERTIFIED")).map(|l| format!("  {l}")).collect();
+    format!(
+        "note: {file}: its wasm certificate is INCOMPLETE, so the wasm module was not run; the file runs on the native lane (`--target wasm {}` runs it on wasm)\n{}",
+        almide::certificate_gate::ALLOW_INCOMPLETE_FLAG,
+        uncertified.join("\n")
+    )
+}
+
+fn is_incomplete(e: &str) -> bool {
+    e.contains("judged this build's certificate INCOMPLETE")
+}
+
 /// The error a refused certificate prints: an INCOMPLETE one is the
 /// compiler declining to certify (not a bug report), a REJECTED one is a
 /// certificate that does not hold.
 pub(super) fn refusal(file: &str, e: &str) -> String {
-    if e.contains("judged this build's certificate INCOMPLETE") {
+    if is_incomplete(e) {
         format!("error[certificate-incomplete]: {file}: {e}")
     } else {
         format!("error[certificate-rejected]: {file}: {e}\n  its own certificate does not hold, which is a compiler bug — please report it")
